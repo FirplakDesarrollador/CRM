@@ -1,0 +1,17 @@
+Número de artículo
+Descripción
+Lista Base 
+Distribuidor
+Descuento
+Distribuidor
+PVP incl. IVA
+Distribuidor 
+Zona 2
+PVP 
+Zona 2
+Mayorista
+PVP Sin.  IVA
+Lista Base 
+Exportaciones
+Lista Base
+Obras
