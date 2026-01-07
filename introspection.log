@@ -1,0 +1,16 @@
+--- START INTROSPECTION ---
+
+Checking tables...
+[CRM_Oportunidades] EXISTS!
+    (Empty table, cannot infer columns via SELECT)
+[CRM_Cuentas] MISSING (42P01)
+[CRM_Accounts] MISSING (42P01)
+[CRM_Opportunities] MISSING (42P01)
+[CRM_Clientes] MISSING (42P01)
+[CRM_Contactos] EXISTS!
+    (Empty table, cannot infer columns via SELECT)
+[CRM_Contacts] MISSING (42P01)
+[CRM_Actividades] MISSING (42P01)
+[CRM_Activities] MISSING (42P01)
+
+--- END INTROSPECTION ---
