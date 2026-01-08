@@ -31,6 +31,14 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         };
     }, [setOnline]);
 
+    // Trigger sync on app initialization (pull + push)
+    useEffect(() => {
+        if (!isLoginPage) {
+            console.log('[AppLayout] Triggering initial sync...');
+            syncEngine.triggerSync();
+        }
+    }, [isLoginPage]);
+
     if (isLoginPage) {
         return <>{children}</>;
     }

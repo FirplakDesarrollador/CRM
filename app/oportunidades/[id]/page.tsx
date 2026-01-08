@@ -4,7 +4,7 @@ import { useOpportunities, useQuotes, useQuoteItems } from "@/lib/hooks/useOppor
 import { DetailHeader } from "@/components/ui/DetailHeader";
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { FileText, Plus, AlertCircle, Check, Trash2, Loader2, Truck } from "lucide-react";
+import { FileText, Plus, AlertCircle, Check, Trash2, Loader2, Truck, Package } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/components/ui/utils";
 
@@ -88,15 +88,27 @@ function ProductsTab({ opportunityId }: { opportunityId: string }) {
     const opportunity = opportunities?.find(o => o.id === opportunityId);
     const { quotes } = useQuotes(opportunityId);
 
-    // Fallback to opportunity.items if no items are found in the active quote
-    const activeQuote = quotes?.find(q => q.status === 'WINNER') || quotes?.[0];
-    const { items: quoteItems } = useQuoteItems(activeQuote?.id);
+    // 1. Determine "Active" quote (Winner or Latest)
+    const sortedQuotes = [...(quotes || [])].sort((a, b) =>
+        new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime()
+    );
+    const defaultQuote = sortedQuotes.find(q => q.status === 'WINNER') || sortedQuotes[0];
+
+    // 2. State for User Selection
+    const [selectedQuoteId, setSelectedQuoteId] = useState<string | null>(null);
+
+    // Sync state with default if not yet selected
+    const effectiveQuote = selectedQuoteId
+        ? quotes?.find(q => q.id === selectedQuoteId)
+        : defaultQuote;
+
+    const { items: quoteItems } = useQuoteItems(effectiveQuote?.id);
 
     const itemsToShow = (quoteItems && quoteItems.length > 0)
         ? quoteItems
         : (opportunity?.items || []);
 
-    if (itemsToShow.length === 0) {
+    if (!effectiveQuote && itemsToShow.length === 0) {
         return (
             <div className="text-center py-12 bg-white rounded-xl border border-slate-200 text-slate-400">
                 No hay productos asociados. Agregue productos en el asistente o cree una cotización.
@@ -106,18 +118,43 @@ function ProductsTab({ opportunityId }: { opportunityId: string }) {
 
     return (
         <div className="space-y-4">
-            <div className="flex justify-between items-center">
-                <h3 className="font-bold text-slate-800">
-                    {activeQuote
-                        ? `Productos (${activeQuote.numero_cotizacion})`
-                        : 'Productos de la Oportunidad'}
-                </h3>
-                {activeQuote && (
+            <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                <div className="flex items-center gap-4">
+                    <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
+                        <Package className="w-5 h-5" />
+                    </div>
+                    <div>
+                        <h3 className="font-bold text-slate-800 leading-tight">
+                            Productos
+                        </h3>
+                        <div className="flex items-center gap-2 mt-1">
+                            <span className="text-xs text-slate-500">Viendo cotización:</span>
+                            {/* Quote Selector Dropdown */}
+                            {quotes && quotes.length > 0 ? (
+                                <select
+                                    className="text-xs font-bold text-blue-600 bg-blue-50 border-none rounded-md py-1 pl-2 pr-8 cursor-pointer focus:ring-2 focus:ring-blue-500"
+                                    value={effectiveQuote?.id || ''}
+                                    onChange={(e) => setSelectedQuoteId(e.target.value)}
+                                >
+                                    {sortedQuotes.map(q => (
+                                        <option key={q.id} value={q.id}>
+                                            {q.numero_cotizacion} {q.status === 'WINNER' ? '(Ganadora)' : ''} - {new Date(q.updated_at || 0).toLocaleDateString()}
+                                        </option>
+                                    ))}
+                                </select>
+                            ) : (
+                                <span className="text-xs text-slate-400 font-medium">Borrador Original</span>
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                {effectiveQuote && (
                     <Link
-                        href={`/oportunidades/${opportunityId}/cotizaciones/${activeQuote.id}`}
-                        className="text-sm text-blue-600 font-medium hover:underline"
+                        href={`/oportunidades/${opportunityId}/cotizaciones/${effectiveQuote.id}`}
+                        className="text-sm bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors"
                     >
-                        Editar Productos
+                        Editar en Cotizador
                     </Link>
                 )}
             </div>
@@ -135,8 +172,10 @@ function ProductsTab({ opportunityId }: { opportunityId: string }) {
                     <tbody className="divide-y divide-slate-100">
                         {itemsToShow.map((item: any) => (
                             <tr key={item.id || item.product_id}>
-                                <td className="px-4 py-3 font-medium text-slate-900">
-                                    {item.descripcion_linea || item.nombre}
+                                <td className="px-4 py-3 font-medium text-slate-900 min-w-[300px] max-w-sm">
+                                    <div className="line-clamp-2 leading-tight">
+                                        {item.descripcion_linea || item.nombre}
+                                    </div>
                                 </td>
                                 <td className="px-4 py-3 text-center text-slate-600">{item.cantidad}</td>
                                 <td className="px-4 py-3 text-right text-slate-600">
@@ -225,7 +264,7 @@ function QuotesTab({ opportunityId, currency }: { opportunityId: string, currenc
                 </div>
             ) : (
                 <div className="grid gap-4">
-                    {quotes.map(q => {
+                    {[...quotes].sort((a, b) => new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime()).map(q => {
                         const isReady = checkSapReady(q);
                         const isProcessing = processingId === q.id;
 

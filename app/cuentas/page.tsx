@@ -3,18 +3,23 @@
 import { useAccounts } from "@/lib/hooks/useAccounts";
 import { AccountForm } from "@/components/cuentas/AccountForm";
 import { useState } from "react";
-import { Plus, Search, Building, Users } from "lucide-react";
-import { Card } from "@/layout/Card"; // Using generic divs for now if Card not avail
+import { Plus, Search, Building, Users, Pencil } from "lucide-react";
 
 export default function AccountsPage() {
     const { accounts, isLoading } = useAccounts();
     const [showCreate, setShowCreate] = useState(false);
+    const [editingAccount, setEditingAccount] = useState<any>(null);
     const [search, setSearch] = useState("");
 
     const filtered = accounts.filter(a =>
         a.nombre.toLowerCase().includes(search.toLowerCase()) ||
         a.nit?.includes(search)
     );
+
+    const handleEdit = (acc: any) => {
+        setEditingAccount(acc);
+        setShowCreate(false);
+    };
 
     return (
         <div className="space-y-4">
@@ -32,7 +37,10 @@ export default function AccountsPage() {
                         />
                     </div>
                     <button
-                        onClick={() => setShowCreate(true)}
+                        onClick={() => {
+                            setShowCreate(true);
+                            setEditingAccount(null);
+                        }}
                         className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 whitespace-nowrap"
                     >
                         <Plus className="w-4 h-4" />
@@ -41,13 +49,28 @@ export default function AccountsPage() {
                 </div>
             </div>
 
-            {showCreate && (
+            {(showCreate || editingAccount) && (
                 <div className="mb-6 border border-blue-100 rounded-xl shadow-sm overflow-hidden animate-in slide-in-from-top-2">
                     <div className="bg-blue-50 px-4 py-3 border-b border-blue-100 flex justify-between items-center">
-                        <h3 className="font-semibold text-blue-900">Crear Nueva Cuenta</h3>
-                        <button onClick={() => setShowCreate(false)} className="text-blue-400 hover:text-blue-700">✕</button>
+                        <h3 className="font-semibold text-blue-900">
+                            {editingAccount ? `Editando: ${editingAccount.nombre}` : 'Crear Nueva Cuenta'}
+                        </h3>
+                        <button onClick={() => {
+                            setShowCreate(false);
+                            setEditingAccount(null);
+                        }} className="text-blue-400 hover:text-blue-700">✕</button>
                     </div>
-                    <AccountForm onSuccess={() => setShowCreate(false)} onCancel={() => setShowCreate(false)} />
+                    <AccountForm
+                        account={editingAccount}
+                        onSuccess={() => {
+                            setShowCreate(false);
+                            setEditingAccount(null);
+                        }}
+                        onCancel={() => {
+                            setShowCreate(false);
+                            setEditingAccount(null);
+                        }}
+                    />
                 </div>
             )}
 
@@ -63,28 +86,38 @@ export default function AccountsPage() {
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                     {filtered.map(acc => (
-                        <div key={acc.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 hover:border-blue-300 transition-colors group cursor-pointer relative">
+                        <div key={acc.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 hover:border-blue-300 transition-all group relative">
                             <div className="flex justify-between items-start mb-2">
                                 <div className={`p-2 rounded-lg ${acc.id_cuenta_principal ? 'bg-purple-50 text-purple-600' : 'bg-blue-50 text-blue-600'}`}>
                                     <Building className="w-5 h-5" />
                                 </div>
-                                {acc.id_cuenta_principal && (
-                                    <span className="text-[10px] font-bold uppercase bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">
-                                        Sucursal
-                                    </span>
-                                )}
+                                <div className="flex items-center gap-2">
+                                    {acc.id_cuenta_principal && (
+                                        <span className="text-[10px] font-bold uppercase bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">
+                                            Sucursal
+                                        </span>
+                                    )}
+                                    <button
+                                        onClick={() => handleEdit(acc)}
+                                        className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                                    >
+                                        <Pencil className="w-4 h-4" />
+                                    </button>
+                                </div>
                             </div>
 
-                            <h3 className="font-bold text-slate-800 truncate" title={acc.nombre}>{acc.nombre}</h3>
-                            <p className="text-sm font-mono text-slate-500 mb-3">{acc.nit || acc.nit_base}</p>
+                            <div onClick={() => handleEdit(acc)} className="cursor-pointer">
+                                <h3 className="font-bold text-slate-800 truncate" title={acc.nombre}>{acc.nombre}</h3>
+                                <p className="text-sm font-mono text-slate-500 mb-3">{acc.nit || acc.nit_base}</p>
 
-                            <div className="flex items-center text-xs text-slate-400 gap-3 border-t pt-3 mt-1">
-                                <span className="flex items-center gap-1">
-                                    <Users className="w-3 h-3" /> 0 Contactos
-                                </span>
-                                <span>
-                                    {acc.ciudad || "Sin ciudad"}
-                                </span>
+                                <div className="flex items-center text-xs text-slate-400 gap-3 border-t pt-3 mt-1">
+                                    <span className="flex items-center gap-1">
+                                        <Users className="w-3 h-3" /> 0 Contactos
+                                    </span>
+                                    <span>
+                                        {acc.ciudad || "Sin ciudad"}
+                                    </span>
+                                </div>
                             </div>
                         </div>
                     ))}
