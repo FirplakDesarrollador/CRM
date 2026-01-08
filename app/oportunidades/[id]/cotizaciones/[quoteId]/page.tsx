@@ -147,8 +147,8 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
                                         className="w-full text-left px-5 py-4 hover:bg-blue-50 flex items-center justify-between border-b border-slate-50 last:border-0 transition-colors"
                                     >
                                         <div className="max-w-[70%]">
-                                            <div className="font-semibold text-slate-900 truncate">{product.descripcion}</div>
-                                            <div className="text-xs text-slate-500">{product.numero_articulo}</div>
+                                            <div className="font-semibold text-slate-900 line-clamp-2 leading-tight">{product.descripcion}</div>
+                                            <div className="text-xs text-slate-500 mt-1">{product.numero_articulo}</div>
                                         </div>
                                         <div className="flex items-center gap-4">
                                             <div className="text-sm font-bold text-slate-900 whitespace-nowrap">
@@ -175,8 +175,8 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
                         items.map((item) => (
                             <div key={item.id} className="flex flex-col md:flex-row md:items-center gap-4 p-4 bg-white border border-slate-200 rounded-xl hover:shadow-md transition-all group">
                                 <div className="flex-1 min-w-0">
-                                    <h4 className="font-semibold text-slate-800 truncate">{item.descripcion_linea}</h4>
-                                    <p className="text-xs text-slate-500">
+                                    <h4 className="font-semibold text-slate-800 line-clamp-2 leading-tight">{item.descripcion_linea}</h4>
+                                    <p className="text-xs text-slate-500 mt-1">
                                         Precio unitario: ${new Intl.NumberFormat().format(item.precio_unitario)}
                                     </p>
                                 </div>

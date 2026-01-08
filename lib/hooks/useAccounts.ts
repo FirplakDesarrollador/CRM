@@ -73,9 +73,16 @@ export function useAccounts() {
         await syncEngine.queueMutation('CRM_Cuentas', id, data);
     };
 
+    const updateAccount = async (id: string, updates: Partial<LocalCuenta>) => {
+        const fullUpdates = { ...updates, updated_at: new Date().toISOString() };
+        await db.accounts.update(id, fullUpdates);
+        await syncEngine.queueMutation('CRM_Cuentas', id, updates);
+    };
+
     return {
         accounts: accounts || [],
         isLoading,
-        createAccount
+        createAccount,
+        updateAccount
     };
 }

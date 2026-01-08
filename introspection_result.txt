@@ -1,0 +1,18 @@
+--- START SYNC INSPECTION ---
+
+Checking Tables and Required Sync Columns...
+[CRM_Cuentas] EXISTS!
+    (Empty table, cannot check columns accurately via select *)
+[CRM_Oportunidades] EXISTS!
+    (Empty table, cannot check columns accurately via select *)
+[CRM_Cotizaciones] EXISTS!
+    (Empty table, cannot check columns accurately via select *)
+[CRM_CotizacionItems] EXISTS!
+    (Empty table, cannot check columns accurately via select *)
+[CRM_Actividades] EXISTS!
+    (Empty table, cannot check columns accurately via select *)
+
+Checking for process_field_updates RPC...
+[RPC] process_field_updates: EXISTS!
+
+--- END SYNC INSPECTION ---

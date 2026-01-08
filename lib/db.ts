@@ -21,8 +21,15 @@ export interface LocalCuenta {
     id: string;
     nombre: string;
     nit: string;
+    nit_base?: string;
+    id_cuenta_principal?: string | null;
+    telefono?: string;
+    direccion?: string;
+    ciudad?: string;
     // ... other fields optional for now in local definition, or use 'any' schema
     _sync_metadata?: any;
+    created_by?: string;
+    updated_by?: string;
     updated_at?: string;
 }
 
@@ -57,6 +64,8 @@ export interface LocalQuote {
     incoterm?: string;
     seguro?: number;
 
+    created_by?: string;
+    updated_by?: string;
     updated_at?: string;
 }
 
@@ -68,6 +77,23 @@ export interface LocalQuoteItem {
     precio_unitario: number;
     subtotal: number;
     descripcion_linea?: string;
+    created_by?: string;
+    updated_by?: string;
+    updated_at?: string;
+}
+
+// Types for Contacts
+export interface LocalContact {
+    id: string;
+    account_id: string;
+    nombre: string;
+    cargo?: string;
+    email?: string;
+    telefono?: string;
+    es_principal?: boolean;
+    created_by?: string;
+    updated_by?: string;
+    updated_at?: string;
 }
 
 export class CRMFirplakDB extends Dexie {
@@ -78,7 +104,7 @@ export class CRMFirplakDB extends Dexie {
     // Local Mirrors (Add more as needed)
     accounts!: Table<LocalCuenta, string>;
     opportunities!: Table<any, string>;
-    contacts!: Table<any, string>;
+    contacts!: Table<LocalContact, string>;
     quotes!: Table<LocalQuote, string>;
     quoteItems!: Table<LocalQuoteItem, string>;
     activities!: Table<any, string>;

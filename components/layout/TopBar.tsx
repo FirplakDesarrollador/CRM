@@ -1,11 +1,30 @@
-"use client";
-
-import { useSyncStore } from "@/lib/store/sync";
+import { useSyncStore } from "@/lib/stores/useSyncStore";
 import { cn } from "@/components/ui/utils";
 import { Bell, Search, RefreshCw, AlertCircle, CheckCircle2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabase";
 
 export function TopBar() {
-    const { isSyncing, pendingChanges, syncError } = useSyncStore();
+    const { isSyncing, pendingCount, error: syncError } = useSyncStore();
+    const [initials, setInitials] = useState("...");
+
+    useEffect(() => {
+        const fetchUser = async () => {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                const name = user.user_metadata?.full_name || user.email || "";
+                const parts = name.split(/[.\s@]/).filter(Boolean);
+                let userInitials = "";
+                if (parts.length >= 2) {
+                    userInitials = (parts[0][0] + parts[1][0]).toUpperCase();
+                } else if (parts.length === 1) {
+                    userInitials = parts[0].substring(0, 2).toUpperCase();
+                }
+                setInitials(userInitials || "??");
+            }
+        };
+        fetchUser();
+    }, []);
 
     return (
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 sticky top-0 z-30">
@@ -35,10 +54,10 @@ export function TopBar() {
                             <AlertCircle className="w-3 h-3" />
                             Error
                         </span>
-                    ) : pendingChanges > 0 ? (
+                    ) : pendingCount > 0 ? (
                         <span className="flex items-center text-orange-600 gap-1 bg-orange-50 px-2 py-1 rounded-full">
                             <AlertCircle className="w-3 h-3" />
-                            {pendingChanges} Pendientes
+                            {pendingCount} Pendientes
                         </span>
                     ) : (
                         <span className="hidden md:flex items-center text-green-600 gap-1 bg-green-50 px-2 py-1 rounded-full">
@@ -53,8 +72,8 @@ export function TopBar() {
                     <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border border-white"></span>
                 </button>
 
-                <div className="w-8 h-8 bg-slate-200 rounded-full flex items-center justify-center text-xs font-bold text-slate-600">
-                    JD
+                <div className="w-8 h-8 bg-linear-to-br from-blue-600 to-cyan-500 rounded-full flex items-center justify-center text-xs font-bold text-white shadow-sm">
+                    {initials}
                 </div>
             </div>
         </header>

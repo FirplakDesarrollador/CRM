@@ -10,7 +10,19 @@ export function useOpportunities() {
     const createOpportunity = async (data: any) => {
         const id = uuidv4();
         const { items, ...oppData } = data;
-        const newOpp = { ...oppData, items, id, updated_at: new Date().toISOString() };
+
+        // Fetch current user for ownership
+        const { data: { user } } = await syncEngine.getCurrentUser();
+
+        const newOpp = {
+            ...oppData,
+            items,
+            id,
+            owner_user_id: oppData.owner_user_id || user?.id,
+            created_by: user?.id,
+            updated_by: user?.id,
+            updated_at: new Date().toISOString()
+        };
 
         await db.opportunities.add(newOpp);
         await syncEngine.queueMutation('CRM_Oportunidades', id, newOpp);
@@ -25,6 +37,8 @@ export function useOpportunities() {
                 status: 'DRAFT',
                 total_amount: oppData.amount || 0,
                 currency_id: oppData.currency_id || 'COP',
+                created_by: user?.id,
+                updated_by: user?.id,
                 updated_at: new Date().toISOString()
             };
 
@@ -46,20 +60,24 @@ export function useOpportunities() {
             // Queuing bulk items might need server-side bulk support, 
             // for now simulation: queue each
             for (const qi of quoteItems) {
-                await syncEngine.queueMutation('CRM_CotizacionItems', qi.id, qi);
+                const { subtotal, ...qiData } = qi;
+                await syncEngine.queueMutation('CRM_CotizacionItems', qi.id, qiData);
             }
         }
     };
 
     const generateMockData = async () => {
+        const { data: { user } } = await syncEngine.getCurrentUser();
+        const userId = user?.id || uuidv4();
+
         const mocks = [
             {
                 id: uuidv4(),
                 nombre: "Reforma Oficinas Centrales",
                 amount: 45000000,
                 currency_id: "COP",
-                fase: "Negociación",
-                owner_user_id: "user-123", // Mine
+                fase_id: "NEG",
+                owner_user_id: userId,
                 status: "OPEN",
                 updated_at: new Date().toISOString()
             },
@@ -68,18 +86,8 @@ export function useOpportunities() {
                 nombre: "Dotación Baños CC",
                 amount: 12000,
                 currency_id: "USD",
-                fase: "Propuesta",
-                owner_user_id: "user-999", // Other
-                status: "OPEN",
-                updated_at: new Date().toISOString()
-            },
-            {
-                id: uuidv4(),
-                nombre: "Proyecto Residencial Altos",
-                amount: 85000000,
-                currency_id: "COP",
-                fase: "Prospecto",
-                owner_user_id: "user-999", // Other
+                fase_id: "PROP",
+                owner_user_id: userId,
                 status: "OPEN",
                 updated_at: new Date().toISOString()
             }
@@ -118,6 +126,8 @@ export function useQuotes(opportunityId?: string) {
             ? await db.quoteItems.where('cotizacion_id').equals(latestQuote.id).toArray()
             : (opportunity?.items || []);
 
+        const { data: { user } } = await syncEngine.getCurrentUser();
+
         const newQuote: LocalQuote = {
             id,
             opportunity_id: oppId,
@@ -125,6 +135,8 @@ export function useQuotes(opportunityId?: string) {
             status: 'DRAFT',
             total_amount: latestQuote?.total_amount || 0,
             currency_id: latestQuote?.currency_id || opportunity?.currency_id || 'COP',
+            created_by: user?.id,
+            updated_by: user?.id,
             updated_at: new Date().toISOString(),
             ...initialData
         };
@@ -153,7 +165,8 @@ export function useQuotes(opportunityId?: string) {
 
             await db.quoteItems.bulkAdd(newItems);
             for (const ni of newItems) {
-                await syncEngine.queueMutation('CRM_CotizacionItems', ni.id, ni);
+                const { subtotal, ...niData } = ni;
+                await syncEngine.queueMutation('CRM_CotizacionItems', ni.id, niData);
             }
         }
 
@@ -161,8 +174,9 @@ export function useQuotes(opportunityId?: string) {
     };
 
     const updateQuote = async (id: string, updates: Partial<LocalQuote>) => {
-        await db.quotes.update(id, updates);
-        await syncEngine.queueMutation('CRM_Cotizaciones', id, updates);
+        const fullUpdates = { ...updates, updated_at: new Date().toISOString() };
+        await db.quotes.update(id, fullUpdates);
+        await syncEngine.queueMutation('CRM_Cotizaciones', id, fullUpdates);
     };
 
     const updateQuoteTotal = async (quoteId: string) => {
@@ -223,7 +237,13 @@ export function useQuoteItems(quoteId?: string) {
             subtotal: item.cantidad * item.precio_unitario
         };
         await db.quoteItems.add(newItem);
-        await syncEngine.queueMutation('CRM_CotizacionItems', id, newItem);
+        const { subtotal, ...itemData } = newItem;
+        await syncEngine.queueMutation('CRM_CotizacionItems', id, itemData);
+
+        // Touch parent quote
+        const quoteUpdate = { updated_at: new Date().toISOString() };
+        await db.quotes.update(quoteId, quoteUpdate);
+        await syncEngine.queueMutation('CRM_Cotizaciones', quoteId, quoteUpdate);
     };
 
     const updateItem = async (itemId: string, updates: Partial<LocalQuoteItem>) => {
@@ -234,12 +254,26 @@ export function useQuoteItems(quoteId?: string) {
         updated.subtotal = updated.cantidad * updated.precio_unitario;
 
         await db.quoteItems.update(itemId, updated);
-        await syncEngine.queueMutation('CRM_CotizacionItems', itemId, updated);
+        const { subtotal, ...updateData } = updated;
+        await syncEngine.queueMutation('CRM_CotizacionItems', itemId, updateData);
+
+        // Touch parent quote
+        const quoteUpdate = { updated_at: new Date().toISOString() };
+        await db.quotes.update(current.cotizacion_id, quoteUpdate);
+        await syncEngine.queueMutation('CRM_Cotizaciones', current.cotizacion_id, quoteUpdate);
     };
 
     const removeItem = async (itemId: string) => {
+        const current = await db.quoteItems.get(itemId);
         await db.quoteItems.delete(itemId);
         await syncEngine.queueMutation('CRM_CotizacionItems', itemId, { is_deleted: true });
+
+        // Touch parent quote
+        if (current) {
+            const quoteUpdate = { updated_at: new Date().toISOString() };
+            await db.quotes.update(current.cotizacion_id, quoteUpdate);
+            await syncEngine.queueMutation('CRM_Cotizaciones', current.cotizacion_id, quoteUpdate);
+        }
     };
 
     return { items, addItem, updateItem, removeItem };
