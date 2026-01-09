@@ -38,7 +38,26 @@ DECLARE
     v_message TEXT;
     
     v_query TEXT;
+    v_has_owner_col BOOLEAN;
+    v_has_user_col BOOLEAN;
+    v_insert_cols TEXT[];
+    v_insert_placeholders TEXT[];
 BEGIN
+    -- 0. Check for common ownership columns so we can satisfy NOT NULL constraints on first insert
+    SELECT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema = 'public' 
+        AND table_name = p_table_name 
+        AND column_name = 'owner_user_id'
+    ) INTO v_has_owner_col;
+
+    SELECT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_schema = 'public' 
+        AND table_name = p_table_name 
+        AND column_name = 'user_id'
+    ) INTO v_has_user_col;
+
     -- Loop through updates
     FOR v_update IN SELECT * FROM jsonb_array_elements(p_updates)
     LOOP
@@ -57,27 +76,31 @@ BEGIN
 
         IF v_current_row IS NULL THEN
             -- UPSERT LOGIC: If row doesn't exist, create it with this first field
-            -- Note: For a real app, you might want to wait for a 'full' item or handle defaults.
-            -- But since we push all fields, the first one arrives and creates the stub.
-            
             v_current_metadata := jsonb_build_object(v_field, v_ts);
             
+            -- Construct dynamic INSERT columns and placeholders
+            v_insert_cols := ARRAY['id', v_field, '_sync_metadata', 'created_by', 'updated_by'];
+            v_insert_placeholders := ARRAY['$1', '($2#>>''{}'')::text', '$3', '$4', '$4'];
+
+            -- Auto-fill ownership if not the field being updated
+            IF v_has_owner_col AND v_field != 'owner_user_id' THEN
+                v_insert_cols := v_insert_cols || 'owner_user_id';
+                v_insert_placeholders := v_insert_placeholders || '$4';
+            END IF;
+
+            IF v_has_user_col AND v_field != 'user_id' THEN
+                v_insert_cols := v_insert_cols || 'user_id';
+                v_insert_placeholders := v_insert_placeholders || '$4';
+            END IF;
+
             v_query := format(
-                'INSERT INTO %I (id, %I, _sync_metadata, created_by, updated_by) VALUES ($1, ($2#>>''{}'')::text, $3, $4, $4)',
-                p_table_name, v_field
+                'INSERT INTO %I (%s) VALUES (%s)',
+                p_table_name,
+                array_to_string(v_insert_cols, ', '),
+                array_to_string(v_insert_placeholders, ', ')
             );
             
-            -- Dynamic casting is hard in pure SQL without knowing column type.
-            -- Using a trick: try to cast text from jsonb to the column type.
-            -- But for now, we'll try something simpler: cast value to text and let PG try to cast it to column.
-            
-            -- REFINED QUERY with manual casting attempt based on common types
-            -- We'll just use the text representation for now which PG is good at casting from.
-            
-            EXECUTE format(
-                'INSERT INTO %I (id, %I, _sync_metadata, created_by, updated_by) VALUES ($1, ($2#>>''{}'')::text, $3, $4, $4)',
-                p_table_name, v_field
-            ) USING v_id, v_value, v_current_metadata, p_user_id;
+            EXECUTE v_query USING v_id, v_value, v_current_metadata, p_user_id;
 
             v_success := TRUE;
             v_message := 'Created';

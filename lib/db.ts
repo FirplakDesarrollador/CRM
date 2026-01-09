@@ -21,8 +21,16 @@ export interface LocalCuenta {
     id: string;
     nombre: string;
     nit: string;
+    nit_base?: string;
+    id_cuenta_principal?: string | null;
+    canal_id: string; // Nuevo campo obligatorio
+    telefono?: string;
+    direccion?: string;
+    ciudad?: string;
     // ... other fields optional for now in local definition, or use 'any' schema
     _sync_metadata?: any;
+    created_by?: string;
+    updated_by?: string;
     updated_at?: string;
 }
 
@@ -35,6 +43,7 @@ export interface LocalQuote {
     currency_id: string;
     status: 'DRAFT' | 'SENT' | 'APPROVED' | 'REJECTED' | 'WINNER';
     is_winner?: boolean;
+    es_pedido?: boolean; // Nuevo campo para diferenciar pedidos
 
     // SAP Data
     fecha_minima_requerida?: string;
@@ -57,6 +66,8 @@ export interface LocalQuote {
     incoterm?: string;
     seguro?: number;
 
+    created_by?: string;
+    updated_by?: string;
     updated_at?: string;
 }
 
@@ -68,6 +79,31 @@ export interface LocalQuoteItem {
     precio_unitario: number;
     subtotal: number;
     descripcion_linea?: string;
+    created_by?: string;
+    updated_by?: string;
+    updated_at?: string;
+}
+
+// Types for Contacts
+export interface LocalContact {
+    id: string;
+    account_id: string;
+    nombre: string;
+    cargo?: string;
+    email?: string;
+    telefono?: string;
+    es_principal?: boolean;
+    created_by?: string;
+    updated_by?: string;
+    updated_at?: string;
+}
+
+export interface LocalFase {
+    id: number;
+    nombre: string;
+    orden: number;
+    is_active: boolean;
+    canal_id: string;
 }
 
 export class CRMFirplakDB extends Dexie {
@@ -78,22 +114,24 @@ export class CRMFirplakDB extends Dexie {
     // Local Mirrors (Add more as needed)
     accounts!: Table<LocalCuenta, string>;
     opportunities!: Table<any, string>;
-    contacts!: Table<any, string>;
+    contacts!: Table<LocalContact, string>;
     quotes!: Table<LocalQuote, string>;
     quoteItems!: Table<LocalQuoteItem, string>;
     activities!: Table<any, string>;
+    phases!: Table<LocalFase, number>; // Local table
 
     constructor() {
         super('CRMFirplakDB');
-        this.version(4).stores({
+        this.version(5).stores({ // Bumped version to 5
             outbox: 'id, entity_type, status, field_timestamp',
             fileQueue: 'id, status',
             accounts: 'id, nit, nombre',
             opportunities: 'id, account_id, owner_user_id, items',
             contacts: 'id, account_id, email',
-            quotes: 'id, opportunity_id, status',
+            quotes: 'id, opportunity_id, status, es_pedido', // Added es_pedido index
             quoteItems: 'id, cotizacion_id',
-            activities: 'id, opportunity_id, user_id, fecha_inicio'
+            activities: 'id, opportunity_id, user_id, fecha_inicio',
+            phases: 'id, canal_id, orden'
         });
     }
 }
