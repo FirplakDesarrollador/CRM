@@ -23,6 +23,7 @@ export interface LocalCuenta {
     nit: string;
     nit_base?: string;
     id_cuenta_principal?: string | null;
+    canal_id: string; // Nuevo campo obligatorio
     telefono?: string;
     direccion?: string;
     ciudad?: string;
@@ -42,6 +43,7 @@ export interface LocalQuote {
     currency_id: string;
     status: 'DRAFT' | 'SENT' | 'APPROVED' | 'REJECTED' | 'WINNER';
     is_winner?: boolean;
+    es_pedido?: boolean; // Nuevo campo para diferenciar pedidos
 
     // SAP Data
     fecha_minima_requerida?: string;
@@ -96,6 +98,14 @@ export interface LocalContact {
     updated_at?: string;
 }
 
+export interface LocalFase {
+    id: number;
+    nombre: string;
+    orden: number;
+    is_active: boolean;
+    canal_id: string;
+}
+
 export class CRMFirplakDB extends Dexie {
     // Sync Queues
     outbox!: Table<OutboxItem, string>;
@@ -108,18 +118,20 @@ export class CRMFirplakDB extends Dexie {
     quotes!: Table<LocalQuote, string>;
     quoteItems!: Table<LocalQuoteItem, string>;
     activities!: Table<any, string>;
+    phases!: Table<LocalFase, number>; // Local table
 
     constructor() {
         super('CRMFirplakDB');
-        this.version(4).stores({
+        this.version(5).stores({ // Bumped version to 5
             outbox: 'id, entity_type, status, field_timestamp',
             fileQueue: 'id, status',
             accounts: 'id, nit, nombre',
             opportunities: 'id, account_id, owner_user_id, items',
             contacts: 'id, account_id, email',
-            quotes: 'id, opportunity_id, status',
+            quotes: 'id, opportunity_id, status, es_pedido', // Added es_pedido index
             quoteItems: 'id, cotizacion_id',
-            activities: 'id, opportunity_id, user_id, fecha_inicio'
+            activities: 'id, opportunity_id, user_id, fecha_inicio',
+            phases: 'id, canal_id, orden'
         });
     }
 }

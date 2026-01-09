@@ -57,6 +57,18 @@ export default function ConfigPage() {
         }
     };
 
+    const resetLocalData = async () => {
+        if (confirm('PELIGRO: Esto borrará TODOS los datos locales y reiniciará la aplicación. Usar solo si hay errores persistentes que no se resuelven sincronizando.\n\n¿Desea continuar?')) {
+            try {
+                await db.delete();
+                alert('Base de datos eliminada. La aplicación se recargará para resincronizar datos limpios.');
+                window.location.href = '/';
+            } catch (e) {
+                alert('Error al borrar DB: ' + e);
+            }
+        }
+    };
+
     const forceSync = () => {
         syncEngine.triggerSync();
     };
@@ -143,12 +155,35 @@ export default function ConfigPage() {
                         <StatRow label="Actividades" value={stats?.activities || 0} icon={Info} />
                     </div>
 
+
+                    <div className="grid grid-cols-2 gap-4 mt-4">
+                        <button
+                            onClick={async () => {
+                                if (confirm("Esto forzará la recarga de la configuración (Fases, Canales) desde el servidor. ¿Continuar?")) {
+                                    await db.phases.clear();
+                                    await syncEngine.triggerSync();
+                                    alert("Sincronización forzada iniciada. Por favor espera a que termine.");
+                                }
+                            }}
+                            className="flex items-center justify-center gap-2 px-4 py-3 text-blue-600 hover:bg-blue-50 rounded-xl text-sm font-bold transition-colors border border-blue-100"
+                        >
+                            <RefreshCw className="w-4 h-4" /> Recargar Fases
+                        </button>
+
+                        <button
+                            onClick={clearOutbox}
+                            className="flex items-center justify-center gap-2 px-4 py-3 text-red-600 hover:bg-red-50 rounded-xl text-sm font-bold transition-colors border border-red-100"
+                        >
+                            <Trash2 className="w-4 h-4" /> Limpiar Cola
+                        </button>
+                    </div>
+
                     <button
-                        onClick={clearOutbox}
-                        className="w-full mt-4 flex items-center justify-center gap-2 px-4 py-3 text-red-600 hover:bg-red-50 rounded-xl text-sm font-bold transition-colors"
+                        onClick={resetLocalData}
+                        className="w-full mt-2 flex items-center justify-center gap-2 px-4 py-3 bg-red-50 text-red-700 hover:bg-red-100 hover:text-red-800 rounded-xl text-sm font-bold transition-colors border border-red-200"
                     >
-                        <Trash2 className="w-4 h-4" />
-                        Limpiar Outbox
+                        <AlertCircle className="w-4 h-4" />
+                        Resetear Datos Locales (Hard Reset)
                     </button>
                 </div>
             </div>

@@ -13,7 +13,8 @@ import {
     Files,
     Settings,
     Users,
-    LogOut
+    LogOut,
+    Truck
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -22,7 +23,7 @@ const NAV_ITEMS = [
     { label: "Cuentas", href: "/cuentas", icon: Building2 },
     { label: "Contactos", href: "/contactos", icon: Users },
     { label: "Actividades", href: "/actividades", icon: Calendar },
-    { label: "Cotizaciones", href: "/cotizaciones", icon: FileText },
+    { label: "Pedidos", href: "/pedidos", icon: Truck },
     { label: "Archivos", href: "/archivos", icon: Files },
     { label: "Configuración", href: "/configuracion", icon: Settings },
 ];

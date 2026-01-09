@@ -6,6 +6,8 @@ export interface PriceListProduct {
     numero_articulo: string;
     descripcion: string;
     lista_base_cop: number | null;
+    lista_base_exportaciones: number | null;
+    lista_base_obras: number | null; // Nuevo
     distribuidor_pvp_iva: number | null;
     pvp_sin_iva: number | null;
 }
@@ -27,7 +29,7 @@ export function useProductSearch(searchTerm: string) {
                 // We use ilike for partial matches in both
                 const { data, error } = await supabase
                     .from('CRM_ListaDePrecios')
-                    .select('id, numero_articulo, descripcion, lista_base_cop, distribuidor_pvp_iva, pvp_sin_iva')
+                    .select('id, numero_articulo, descripcion, lista_base_cop, lista_base_exportaciones, lista_base_obras, distribuidor_pvp_iva, pvp_sin_iva')
                     .or(`numero_articulo.ilike.%${searchTerm}%,descripcion.ilike.%${searchTerm}%`)
                     .order('numero_articulo', { ascending: true })
                     .limit(20);

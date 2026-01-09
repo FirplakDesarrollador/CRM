@@ -75,7 +75,7 @@ export default function ActivitiesPage() {
 
                         {/* Placeholder for Mini Cal */}
                         <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-bold text-slate-400 uppercase">
-                            {['D', 'L', 'M', 'M', 'J', 'V', 'S'].map(d => <div key={d}>{d}</div>)}
+                            {['D', 'L', 'M', 'M', 'J', 'V', 'S'].map((d, i) => <div key={`day-${i}`}>{d}</div>)}
                         </div>
                         <div className="grid grid-cols-7 gap-1">
                             {Array.from({ length: 31 }).map((_, i) => (

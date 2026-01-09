@@ -6,24 +6,40 @@ import { Plus, Search, Filter, Briefcase } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/components/ui/utils";
 import { useSyncStore } from "@/lib/store/sync";
-
-const CURRENT_USER_ID = "user-123"; // Mock
+import { syncEngine } from "@/lib/sync";
+import { db } from "@/lib/db";
+import { useLiveQuery } from "dexie-react-hooks";
+import { useEffect } from "react";
 
 export default function OpportunitiesPage() {
-    const { opportunities, generateMockData } = useOpportunities();
+    const { opportunities } = useOpportunities();
     const { userRole, setUserRole } = useSyncStore();
     const [tab, setTab] = useState<'mine' | 'collab' | 'team'>('mine');
+    const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
-    // Filter Logic
-    const filtered = (opportunities || []).filter(opp => {
-        if (tab === 'team') {
-            if (userRole === 'ADMIN') return true;
-            return false;
-        }
-        if (tab === 'collab') return false; // Mock
-        // 'mine'
-        return opp.owner_user_id === CURRENT_USER_ID || !opp.owner_user_id;
-    });
+    // Fetch real User ID
+    useEffect(() => {
+        syncEngine.getCurrentUser().then(({ data: { user } }) => {
+            if (user) setCurrentUserId(user.id);
+        });
+    }, []);
+
+    // Fetch phases for mapping names
+    const phases = useLiveQuery(() => db.phases.toArray());
+    const phaseMap = new Map(phases?.map(p => [p.id, p.nombre]));
+
+    // Filter & Sort Logic
+    const filtered = (opportunities || [])
+        .filter(opp => {
+            if (tab === 'team') {
+                if (userRole === 'ADMIN') return true;
+                return false;
+            }
+            if (tab === 'collab') return false; // Mock
+            // 'mine'
+            return opp.owner_user_id === currentUserId || !opp.owner_user_id;
+        })
+        .sort((a, b) => new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime());
 
     return (
         <div className="space-y-4">
@@ -98,7 +114,7 @@ export default function OpportunitiesPage() {
                                 <div>
                                     <h3 className="font-bold text-slate-800">{opp.nombre || "Sin nombre"}</h3>
                                     <p className="text-xs text-slate-500 mt-1">
-                                        {opp.fase || 'Prospecto'} • {opp.currency_id || 'COP'} {new Intl.NumberFormat().format(opp.amount || 0)}
+                                        {phaseMap.get(opp.fase_id) || opp.fase || 'Prospecto'} • {opp.currency_id || 'COP'} {new Intl.NumberFormat().format(opp.amount || 0)}
                                     </p>
                                 </div>
                             </div>

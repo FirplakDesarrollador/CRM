@@ -2,14 +2,22 @@
 
 import { useAccounts } from "@/lib/hooks/useAccounts";
 import { AccountForm } from "@/components/cuentas/AccountForm";
-import { useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
 import { Plus, Search, Building, Users, Pencil } from "lucide-react";
 
-export default function AccountsPage() {
+function AccountsContent() {
+    const searchParams = useSearchParams();
     const { accounts, isLoading } = useAccounts();
     const [showCreate, setShowCreate] = useState(false);
     const [editingAccount, setEditingAccount] = useState<any>(null);
     const [search, setSearch] = useState("");
+
+    // Initialize search from URL
+    useEffect(() => {
+        const query = searchParams.get('search');
+        if (query) setSearch(query);
+    }, [searchParams]);
 
     const filtered = accounts.filter(a =>
         a.nombre.toLowerCase().includes(search.toLowerCase()) ||
@@ -124,5 +132,13 @@ export default function AccountsPage() {
                 </div>
             )}
         </div>
+    );
+}
+
+export default function AccountsPage() {
+    return (
+        <Suspense fallback={<div className="p-8 text-center text-slate-400">Cargando aplicación...</div>}>
+            <AccountsContent />
+        </Suspense>
     );
 }
