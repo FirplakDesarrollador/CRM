@@ -6,9 +6,10 @@ import { useProductSearch, PriceListProduct } from "@/lib/hooks/useProducts";
 import { DetailHeader } from "@/components/ui/DetailHeader";
 import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
-import { LocalQuote } from "@/lib/db";
+import { db, LocalQuote } from "@/lib/db";
 import { Save, AlertTriangle, Truck, Receipt, Calendar, Search, Plus, Trash2, Loader2, Package } from "lucide-react";
 import { cn } from "@/components/ui/utils";
+import { useLiveQuery } from "dexie-react-hooks";
 
 export default function QuoteEditorPage() {
     const params = useParams();
@@ -67,7 +68,20 @@ export default function QuoteEditorPage() {
                     <SapDataEditor
                         quote={quote}
                         onSave={async (updates) => {
-                            await updateQuote(quoteId, updates);
+                            // Si se guardan datos SAP, asumimos que se convierte en Pedido
+                            const isComplete = Boolean(updates.fecha_facturacion && updates.tipo_facturacion);
+
+                            await updateQuote(quoteId, {
+                                ...updates,
+                                status: isComplete ? 'WINNER' : quote.status,
+                                es_pedido: isComplete ? true : quote.es_pedido,
+                                is_winner: isComplete ? true : quote.is_winner
+                            });
+
+                            // Si se convierte en pedido, podríamos forzar sincronización extra o notificar
+                            if (isComplete && !quote.es_pedido) {
+                                alert("¡Cotización convertida en Pedido!");
+                            }
                         }}
                     />
                 )}
@@ -82,13 +96,46 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
     const [searchTerm, setSearchTerm] = useState("");
     const { products: searchResults, isLoading: isSearching } = useProductSearch(searchTerm);
 
+    // Contexto de Canal y Oportunidad
+    const context = useLiveQuery(async () => {
+        const opp = await db.opportunities.get(quote.opportunity_id);
+        if (!opp) return null;
+        const acc = await db.accounts.get(opp.account_id);
+        return { channel: acc?.canal_id || 'DIST_NAC' };
+    });
+
     const handleAddProduct = async (product: PriceListProduct) => {
+        const channel = context?.channel || 'DIST_NAC';
+        let price = 0;
+
+        // Selección de precio según canal
+        switch (channel) {
+            case 'OBRAS_NAC':
+                price = product.lista_base_obras || 0;
+                break;
+            case 'OBRAS_INT':
+            case 'DIST_INT':
+                price = product.lista_base_exportaciones || 0;
+                break;
+            case 'DIST_NAC':
+                price = product.lista_base_cop || 0;
+                break;
+            case 'PROPIO':
+                price = product.distribuidor_pvp_iva || 0;
+                break;
+            default:
+                price = product.lista_base_cop || 0;
+        }
+
+        // Fallback robusto if 0
+        if (price === 0) price = product.lista_base_cop || 0;
+
         await addItem(quote.id, {
             producto_id: product.id,
             descripcion_linea: product.descripcion,
             cantidad: 1,
-            precio_unitario: product.lista_base_cop || product.pvp_sin_iva || 0,
-            subtotal: product.lista_base_cop || product.pvp_sin_iva || 0
+            precio_unitario: price,
+            subtotal: price
         });
         setSearchTerm("");
         onItemsChange();
@@ -109,10 +156,10 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                 <div className="flex items-center justify-between mb-6">
                     <h3 className="font-bold text-lg">Productos de la Cotización</h3>
-                    <div className="text-right">
-                        <span className="text-xs text-slate-500 uppercase font-bold tracking-wider">Total Cotización</span>
+                    <div className="flex flex-col items-end">
+                        <span className="text-xs text-slate-500 uppercase font-bold tracking-wider">Canal: {context?.channel}</span>
                         <div className="text-2xl font-black text-blue-600">
-                            {quote.currency_id} {new Intl.NumberFormat().format(quote.total_amount || 0)}
+                            {quote.currency_id} {new Intl.NumberFormat(quote.currency_id === 'USD' ? 'en-US' : 'es-CO', { style: 'currency', currency: quote.currency_id || 'COP' }).format(quote.total_amount || 0)}
                         </div>
                     </div>
                 </div>
@@ -140,26 +187,32 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
                             ) : searchResults.length === 0 ? (
                                 <div className="p-8 text-center text-slate-500">No se encontraron productos</div>
                             ) : (
-                                searchResults.map((product) => (
-                                    <button
-                                        key={product.id}
-                                        onClick={() => handleAddProduct(product)}
-                                        className="w-full text-left px-5 py-4 hover:bg-blue-50 flex items-center justify-between border-b border-slate-50 last:border-0 transition-colors"
-                                    >
-                                        <div className="max-w-[70%]">
-                                            <div className="font-semibold text-slate-900 line-clamp-2 leading-tight">{product.descripcion}</div>
-                                            <div className="text-xs text-slate-500 mt-1">{product.numero_articulo}</div>
-                                        </div>
-                                        <div className="flex items-center gap-4">
-                                            <div className="text-sm font-bold text-slate-900 whitespace-nowrap">
-                                                ${new Intl.NumberFormat().format(product.lista_base_cop || 0)}
+                                searchResults.map((product) => {
+                                    const displayPrice = quote.currency_id === 'USD'
+                                        ? product.lista_base_exportaciones
+                                        : (product.lista_base_cop || product.pvp_sin_iva);
+
+                                    return (
+                                        <button
+                                            key={product.id}
+                                            onClick={() => handleAddProduct(product)}
+                                            className="w-full text-left px-5 py-4 hover:bg-blue-50 flex items-center justify-between border-b border-slate-50 last:border-0 transition-colors"
+                                        >
+                                            <div className="max-w-[70%]">
+                                                <div className="font-semibold text-slate-900 line-clamp-2 leading-tight">{product.descripcion}</div>
+                                                <div className="text-xs text-slate-500 mt-1">{product.numero_articulo}</div>
                                             </div>
-                                            <div className="p-2 bg-blue-100 text-blue-700 rounded-full group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                                                <Plus className="w-4 h-4" />
+                                            <div className="flex items-center gap-4">
+                                                <div className="text-sm font-bold text-slate-900 whitespace-nowrap">
+                                                    {quote.currency_id} {new Intl.NumberFormat(quote.currency_id === 'USD' ? 'en-US' : 'es-CO', { style: 'currency', currency: quote.currency_id || 'COP' }).format(displayPrice || 0)}
+                                                </div>
+                                                <div className="p-2 bg-blue-100 text-blue-700 rounded-full group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                                                    <Plus className="w-4 h-4" />
+                                                </div>
                                             </div>
-                                        </div>
-                                    </button>
-                                ))
+                                        </button>
+                                    );
+                                })
                             )}
                         </div>
                     )}
@@ -184,14 +237,23 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
                                     <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg">
                                         <button
                                             onClick={() => handleUpdateQty(item.id, item.cantidad - 1)}
-                                            className="w-8 h-8 flex items-center justify-center bg-white rounded-md shadow-sm border border-slate-200 text-slate-600 hover:bg-slate-50"
+                                            className="w-8 h-8 flex items-center justify-center bg-white rounded-md shadow-sm border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
                                         >
                                             -
                                         </button>
-                                        <span className="w-10 text-center font-bold text-slate-800">{item.cantidad}</span>
+                                        <input
+                                            type="number"
+                                            value={item.cantidad}
+                                            onChange={(e) => handleUpdateQty(item.id, parseInt(e.target.value) || 0)}
+                                            onBlur={(e) => {
+                                                const val = parseInt(e.target.value);
+                                                if (isNaN(val) || val < 1) handleUpdateQty(item.id, 1);
+                                            }}
+                                            className="w-12 text-center font-bold text-slate-800 bg-transparent border-none focus:ring-0 p-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                        />
                                         <button
                                             onClick={() => handleUpdateQty(item.id, item.cantidad + 1)}
-                                            className="w-8 h-8 flex items-center justify-center bg-white rounded-md shadow-sm border border-slate-200 text-slate-600 hover:bg-slate-50"
+                                            className="w-8 h-8 flex items-center justify-center bg-white rounded-md shadow-sm border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
                                         >
                                             +
                                         </button>

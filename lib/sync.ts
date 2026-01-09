@@ -34,8 +34,9 @@ export class SyncEngine {
 
         try {
             console.log('[Sync] Starting...');
-            await this.pullChanges(); // Pull server data first
-            await this.pushChanges(); // Then push local changes
+            await this.resetStuckItems(); // Unlock items stuck in 'SYNCING'
+            await this.pushChanges(); // Push local changes FIRST to preserve UX
+            await this.pullChanges(); // Then pull server data (which typically includes our changes now)
             useSyncStore.getState().setLastSyncTime(new Date().toISOString());
             console.log('[Sync] Completed.');
         } catch (err: any) {
@@ -45,6 +46,17 @@ export class SyncEngine {
             this.isSyncing = false;
             useSyncStore.getState().setSyncing(false);
             this.updatePendingCount();
+        }
+    }
+
+    /**
+     * Resets items that were left in 'SYNCING' state (e.g. after a crash)
+     */
+    private async resetStuckItems() {
+        const stuckCount = await db.outbox.where('status').equals('SYNCING').count();
+        if (stuckCount > 0) {
+            console.log(`[Sync] Resetting ${stuckCount} stuck items to PENDING...`);
+            await db.outbox.where('status').equals('SYNCING').modify({ status: 'PENDING' });
         }
     }
 
@@ -84,9 +96,19 @@ export class SyncEngine {
         }
 
         // 3. Process batches
-        const { data: { user } } = await supabase.auth.getUser();
+        let user;
+        try {
+            const { data } = await supabase.auth.getUser();
+            user = data?.user;
+        } catch (e) {
+            console.warn("[Sync] Push skipped: Auth unreachable or network issue.");
+            const idsToReset = pending.map(i => i.id);
+            await db.outbox.where('id').anyOf(idsToReset).modify({ status: 'PENDING' });
+            return;
+        }
+
         if (!user) {
-            console.warn("[Sync] Skipped: No authenticated user.");
+            console.warn("[Sync] Push skipped: No authenticated user.");
             const idsToReset = pending.map(i => i.id);
             await db.outbox.where('id').anyOf(idsToReset).modify({ status: 'PENDING' });
             return;
@@ -126,7 +148,54 @@ export class SyncEngine {
             }
         }
 
-        // 3. Process batches by priority
+        // 3.2 Validate required FKs for child tables to prevent NOT NULL violations
+        const requiredFKs: Record<string, string[]> = {
+            'CRM_CotizacionItems': ['cotizacion_id'],
+            'CRM_Cotizaciones': ['opportunity_id']
+        };
+
+        for (const [table, requiredFields] of Object.entries(requiredFKs)) {
+            if (batches[table]) {
+                const idsInBatch = Array.from(new Set(batches[table].map(u => u.id)));
+                const invalidIds: string[] = [];
+
+                for (const id of idsInBatch) {
+                    for (const field of requiredFields) {
+                        const fieldEntry = batches[table].find(u => u.id === id && u.field === field);
+                        const val = fieldEntry?.value;
+                        const isValid = val !== null && val !== undefined && val !== '';
+
+                        if (!isValid) {
+                            console.warn(`[Sync] Skipping ${table} id=${id}: missing required field '${field}'`);
+                            invalidIds.push(id);
+                            break;
+                        }
+                    }
+                }
+
+                // Remove invalid entries from the batch
+                if (invalidIds.length > 0) {
+                    batches[table] = batches[table].filter(u => !invalidIds.includes(u.id));
+
+                    // Mark as FAILED in outbox
+                    const idsToFail = pending
+                        .filter(i => i.entity_type === table && invalidIds.includes(i.entity_id))
+                        .map(i => i.id);
+
+                    await db.outbox.where('id').anyOf(idsToFail).modify({
+                        status: 'FAILED',
+                        error: 'Missing required FK fields - record corrupted'
+                    });
+                }
+
+                // If batch is now empty, remove it
+                if (batches[table].length === 0) {
+                    delete batches[table];
+                }
+            }
+        }
+
+        // 3.3 Process batches by priority
         const sortedTables = Object.entries(batches).sort(([tableA], [tableB]) => {
             const priorityA = TABLE_PRIORITY[tableA] || 99;
             const priorityB = TABLE_PRIORITY[tableB] || 99;
@@ -185,7 +254,15 @@ export class SyncEngine {
      * Called on app initialization to ensure all browsers have the same data
      */
     private async pullChanges() {
-        const { data: { user } } = await supabase.auth.getUser();
+        let user;
+        try {
+            const { data } = await supabase.auth.getUser();
+            user = data?.user;
+        } catch (e) {
+            console.warn("[Sync] Pull skipped: Auth unreachable or network issue.");
+            return;
+        }
+
         if (!user) {
             console.warn("[Sync] Pull skipped: No authenticated user.");
             return;
@@ -210,6 +287,7 @@ export class SyncEngine {
                     nit: a.nit,
                     nit_base: a.nit_base,
                     id_cuenta_principal: a.id_cuenta_principal,
+                    canal_id: a.canal_id || 'DIST_NAC', // Default para robustez
                     telefono: a.telefono,
                     direccion: a.direccion,
                     ciudad: a.ciudad,
@@ -218,6 +296,26 @@ export class SyncEngine {
                     updated_at: a.updated_at
                 })));
                 console.log(`[Sync] Pulled ${accounts.length} accounts.`);
+            }
+
+            // Pull Phases (CRM_FasesOportunidad)
+            const { data: phases, error: phasesError } = await supabase
+                .from('CRM_FasesOportunidad')
+                .select('*')
+                .eq('is_active', true);
+
+            if (phasesError) throw phasesError;
+
+            if (phases && phases.length > 0) {
+                await db.phases.clear();
+                await db.phases.bulkPut(phases.map((f: any) => ({
+                    id: f.id,
+                    nombre: f.nombre,
+                    orden: f.orden,
+                    is_active: f.is_active,
+                    canal_id: f.canal_id
+                })));
+                console.log(`[Sync] Pulled ${phases.length} phases.`);
             }
 
             // Pull Contacts (CRM_Contactos)

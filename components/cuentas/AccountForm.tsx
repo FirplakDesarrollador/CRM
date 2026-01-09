@@ -5,10 +5,9 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useState, useEffect } from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, User, Building2 } from "lucide-react";
 import { LocalCuenta } from "@/lib/db";
 import AccountContactsTab from "./AccountContactsTab";
-import { User, Building2 } from "lucide-react";
 
 // Schema
 const accountSchema = z.object({
@@ -16,6 +15,7 @@ const accountSchema = z.object({
     nit_base: z.string().min(5, "NIT requerido"),
     is_child: z.boolean().default(false),
     id_cuenta_principal: z.string().nullable().optional(),
+    canal_id: z.string().min(1, "Canal de venta requerido"),
     telefono: z.string().nullable().optional(),
     direccion: z.string().nullable().optional(),
     ciudad: z.string().nullable().optional(),
@@ -43,13 +43,14 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
         setValue,
         reset,
         formState: { errors },
-    } = useForm<any>({
+    } = useForm<AccountFormData>({
         resolver: zodResolver(accountSchema),
         defaultValues: {
             nombre: account?.nombre || "",
             nit_base: account?.nit_base || "",
             is_child: !!account?.id_cuenta_principal,
             id_cuenta_principal: account?.id_cuenta_principal || "",
+            canal_id: account?.canal_id || "DIST_NAC",
             telefono: account?.telefono || "",
             direccion: account?.direccion || "",
             ciudad: account?.ciudad || ""
@@ -64,6 +65,7 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                 nit_base: account.nit_base || "",
                 is_child: !!account.id_cuenta_principal,
                 id_cuenta_principal: account.id_cuenta_principal || "",
+                canal_id: account.canal_id || "DIST_NAC",
                 telefono: account.telefono || "",
                 direccion: account.direccion || "",
                 ciudad: account.ciudad || ""
@@ -85,10 +87,10 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
         }
     };
 
-    const onSubmit = async (data: any) => {
+    const onSubmit = async (data: AccountFormData) => {
         setIsSubmitting(true);
         try {
-            const formData = data as AccountFormData;
+            const formData = data;
             if (formData.is_child && formData.id_cuenta_principal) {
                 const parent = accounts.find(a => a.id === formData.id_cuenta_principal);
                 if (parent) formData.nit_base = parent.nit_base || "";
@@ -98,6 +100,7 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                 nombre: formData.nombre,
                 nit_base: formData.nit_base,
                 id_cuenta_principal: formData.is_child ? formData.id_cuenta_principal : null,
+                canal_id: formData.canal_id,
                 telefono: formData.telefono || null,
                 direccion: formData.direccion || null,
                 ciudad: formData.ciudad || null
@@ -157,7 +160,7 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                         <div className="space-y-1">
                             <label className="text-sm font-medium">Nombre de Cuenta</label>
                             <input {...register("nombre")} className="w-full border p-2 rounded" placeholder="Ej. Constructora XYZ" />
-                            {errors.nombre && <span className="text-red-500 text-xs">{(errors.nombre as any).message}</span>}
+                            {errors.nombre && <span className="text-red-500 text-xs">{errors.nombre.message}</span>}
                         </div>
 
                         {/* Hierarchy Switch */}
@@ -172,6 +175,25 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                                 Es cuenta hija / sucursal
                             </label>
                         </div>
+                    </div>
+
+                    {/* Sales Channel Selector (NEW) */}
+                    <div className="space-y-1 bg-slate-50 p-4 rounded border border-slate-200">
+                        <label className="text-sm font-bold text-slate-700 flex items-center gap-1">
+                            Canal de Venta <span className="text-red-500">*</span>
+                        </label>
+                        <p className="text-xs text-slate-500 mb-2">Define las listas de precios y fases de oportunidad disponibles.</p>
+                        <select
+                            {...register("canal_id")}
+                            className="w-full border p-2 rounded bg-white font-medium text-slate-900 border-slate-300 focus:ring-2 focus:ring-blue-500"
+                        >
+                            <option value="OBRAS_NAC">Obras Nacional</option>
+                            <option value="OBRAS_INT">Obras Internacional</option>
+                            <option value="DIST_NAC">Distribución Nacional (Default)</option>
+                            <option value="DIST_INT">Distribución Internacional</option>
+                            <option value="PROPIO">Canal Propio</option>
+                        </select>
+                        {errors.canal_id && <span className="text-red-500 text-xs">{errors.canal_id.message}</span>}
                     </div>
 
                     {isChild ? (
@@ -197,7 +219,7 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                         <div className="space-y-1">
                             <label className="text-sm font-medium">NIT (Sin dígito de verificación)</label>
                             <input {...register("nit_base")} className="w-full border p-2 rounded" placeholder="Ej. 890900123" />
-                            {errors.nit_base && <span className="text-red-500 text-xs">{(errors.nit_base as any).message}</span>}
+                            {errors.nit_base && <span className="text-red-500 text-xs">{errors.nit_base.message}</span>}
                         </div>
                     )}
 

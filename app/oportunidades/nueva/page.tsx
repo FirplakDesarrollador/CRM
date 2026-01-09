@@ -11,15 +11,18 @@ import { ChevronRight, Check } from "lucide-react";
 import { AccountForm } from "@/components/cuentas/AccountForm";
 import { useProductSearch, PriceListProduct } from "@/lib/hooks/useProducts";
 import { Trash2, PlusCircle, Search, Loader2 } from "lucide-react";
+import { db } from "@/lib/db";
+import { useLiveQuery } from "dexie-react-hooks";
 
 const STEP_LABELS = ["Cuenta", "Datos del Negocio", "Productos", "Equipo"];
 
 const schema = z.object({
     account_id: z.string().min(1, "Debe seleccionar una cuenta"),
-    nombre: z.string().min(3, "Nombre requerido"),
+    nombre: z.string().min(3, "Nombre requerido (mín. 3 caracteres)"),
     amount: z.coerce.number().min(0),
     currency_id: z.enum(["COP", "USD"]),
-    fase: z.string(),
+    estado_id: z.coerce.number().default(1), // 1 = Abierta
+    fase_id: z.coerce.number().min(1, "Fase requerida").default(1),
     items: z.array(z.object({
         product_id: z.string(),
         cantidad: z.number().min(1),
@@ -42,12 +45,16 @@ export default function CreateOpportunityWizard() {
         handleSubmit,
         formState: { errors },
         setValue,
-        watch
+        watch,
+        trigger
     } = useForm({
         resolver: zodResolver(schema),
         defaultValues: {
-            currency_id: 'COP',
-            fase: 'Prospect',
+            account_id: '',
+            nombre: '',
+            currency_id: 'COP' as 'COP' | 'USD',
+            estado_id: 1,
+            fase_id: 1,
             amount: 0,
             items: []
         }
@@ -55,7 +62,30 @@ export default function CreateOpportunityWizard() {
 
     const { products: searchResults, isLoading: isSearching } = useProductSearch(searchTerm);
 
-    const items = watch("items") || [];
+    // Obtener fases según canal de la cuenta
+    const selectedAccountId = watch("account_id");
+
+    const filteredPhases = useLiveQuery(async () => {
+        if (!selectedAccountId) return [];
+        const acc = await db.accounts.get(selectedAccountId);
+        if (!acc) return [];
+        const channelId = acc.canal_id || 'DIST_NAC';
+        return await db.phases.where('canal_id').equals(channelId).sortBy('orden');
+    }, [selectedAccountId]);
+
+    // Auto-seleccionar primera fase
+    useEffect(() => {
+        if (filteredPhases && filteredPhases.length > 0) {
+            const currentFase = Number(watch("fase_id"));
+            const isValid = filteredPhases.some(f => f.id === currentFase);
+            // Si el valor actual no está en la lista (o es el default 1 que tal vez no existe), ponemos el primero
+            if (!isValid) {
+                setValue("fase_id", filteredPhases[0].id);
+            }
+        }
+    }, [filteredPhases, setValue, watch]);
+
+    const items: any[] = watch("items") || [];
     const amount = watch("amount") || 0;
 
     const addProduct = (product: PriceListProduct) => {
@@ -99,9 +129,23 @@ export default function CreateOpportunityWizard() {
         }
     };
 
-    const nextStep = (e: any) => {
+    const nextStep = async (e: any) => {
         e.preventDefault();
-        setStep(s => Math.min(s + 1, 3));
+
+        // Validate current step fields before proceeding
+        let isValid = false;
+        if (step === 0) {
+            isValid = await trigger('account_id');
+        } else if (step === 1) {
+            isValid = await trigger(['nombre', 'currency_id', 'amount', 'fase_id']);
+        } else {
+            // Steps 2 and 3 have no required fields
+            isValid = true;
+        }
+
+        if (isValid) {
+            setStep(s => Math.min(s + 1, 3));
+        }
     };
 
     return (
@@ -172,11 +216,25 @@ export default function CreateOpportunityWizard() {
                                     <option value="USD">USD (Dólares)</option>
                                 </select>
                             </div>
+
+                            {/* Phase Selector (Dynamic) */}
                             <div>
-                                <label className="text-sm font-medium">Valor Estimado</label>
-                                <input type="number" {...register("amount")} className="w-full p-2 border rounded-lg" />
-                                {items.length > 0 && <p className="text-[10px] text-blue-600 mt-1">Calculado automáticamente por productos</p>}
+                                <label className="text-sm font-medium">Fase Inicial</label>
+                                <select {...register("fase_id")} className="w-full p-2 border rounded-lg">
+                                    {filteredPhases?.map(phase => (
+                                        <option key={phase.id} value={phase.id}>
+                                            {phase.nombre}
+                                        </option>
+                                    ))}
+                                    {(!filteredPhases || filteredPhases.length === 0) && <option value="1">Cargando fases...</option>}
+                                </select>
                             </div>
+                        </div>
+
+                        <div>
+                            <label className="text-sm font-medium">Valor Estimado</label>
+                            <input type="number" {...register("amount")} className="w-full p-2 border rounded-lg" />
+                            {items.length > 0 && <p className="text-[10px] text-blue-600 mt-1">Calculado automáticamente por productos</p>}
                         </div>
                     </div>
                 )}
@@ -240,7 +298,7 @@ export default function CreateOpportunityWizard() {
                                     <div className="text-xs text-slate-400">Usa la búsqueda para agregar productos desde la primera fase.</div>
                                 </div>
                             ) : (
-                                items.map((item, idx) => (
+                                items.map((item: any, idx: number) => (
                                     <div key={item.product_id} className="flex items-center gap-4 p-3 bg-white border border-slate-200 rounded-xl shadow-sm">
                                         <div className="flex-1">
                                             <div className="font-medium text-sm text-slate-800">{item.nombre}</div>
@@ -280,37 +338,49 @@ export default function CreateOpportunityWizard() {
                     </div>
                 )}
 
-                {/* ACTIONS */}
-                <div className="flex justify-between mt-8 pt-4 border-t">
-                    {step > 0 ? (
-                        <button type="button" onClick={() => setStep(s => s - 1)} className="px-4 py-2 text-slate-600">Atrás</button>
-                    ) : <div />}
+                {/* NAVIGATION */}
+                <div className="flex justify-between pt-6 border-t mt-6">
+                    <button
+                        type="button"
+                        onClick={() => setStep(s => Math.max(0, s - 1))}
+                        disabled={step === 0}
+                        className={`px-4 py-2 rounded-lg text-sm font-medium ${step === 0 ? 'text-slate-300 cursor-not-allowed' : 'text-slate-600 hover:bg-slate-100'}`}
+                    >
+                        Atrás
+                    </button>
 
                     {step < 3 ? (
-                        <button type="button" onClick={nextStep} className="bg-blue-600 text-white px-6 py-2 rounded-lg flex items-center">
-                            Siguiente <ChevronRight className="w-4 h-4 ml-2" />
+                        <button
+                            type="button"
+                            onClick={nextStep}
+                            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg text-sm font-medium flex items-center gap-2"
+                        >
+                            Siguiente Paso <ChevronRight className="w-4 h-4" />
                         </button>
                     ) : (
-                        <button type="submit" className="bg-green-600 text-white px-6 py-2 rounded-lg flex items-center font-bold">
-                            Crear Oportunidad <Check className="w-4 h-4 ml-2" />
+                        <button
+                            type="submit"
+                            className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg text-sm font-medium flex items-center gap-2 shadow-lg shadow-green-200"
+                        >
+                            Crear Oportunidad <Check className="w-4 h-4" />
                         </button>
                     )}
                 </div>
-
             </form>
 
-            {/* Fast Account Modal */}
+            {/* Modal de Crear Cuenta (Simplificado) */}
             {showAccountModal && (
                 <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-                    <div className="bg-white rounded-xl w-full max-w-lg p-6">
-                        <h3 className="text-lg font-bold mb-4">Nueva Cuenta Rápida</h3>
-                        <AccountForm
-                            onSuccess={() => {
-                                // Ideally capture ID of created account and set it
-                                setShowAccountModal(false);
-                            }}
-                            onCancel={() => setShowAccountModal(false)}
-                        />
+                    <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+                        <div className="bg-blue-50 px-6 py-4 border-b border-blue-100 flex justify-between items-center sticky top-0">
+                            <h3 className="font-semibold text-blue-900">Crear Nueva Cuenta</h3>
+                        </div>
+                        <div className="p-6">
+                            <AccountForm
+                                onSuccess={() => setShowAccountModal(false)}
+                                onCancel={() => setShowAccountModal(false)}
+                            />
+                        </div>
                     </div>
                 </div>
             )}

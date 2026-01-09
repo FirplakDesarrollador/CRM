@@ -19,6 +19,9 @@ export function useOpportunities() {
             items,
             id,
             owner_user_id: oppData.owner_user_id || user?.id,
+            account_id: oppData.account_id,
+            estado_id: oppData.estado_id || 1,
+            fase_id: oppData.fase_id || 1,
             created_by: user?.id,
             updated_by: user?.id,
             updated_at: new Date().toISOString()
@@ -57,8 +60,6 @@ export function useOpportunities() {
             }));
 
             await db.quoteItems.bulkAdd(quoteItems);
-            // Queuing bulk items might need server-side bulk support, 
-            // for now simulation: queue each
             for (const qi of quoteItems) {
                 const { subtotal, ...qiData } = qi;
                 await syncEngine.queueMutation('CRM_CotizacionItems', qi.id, qiData);
@@ -96,11 +97,30 @@ export function useOpportunities() {
     };
 
     const deleteOpportunity = async (id: string) => {
+        const current = await db.opportunities.get(id);
+        if (!current) return;
+
         await db.opportunities.delete(id);
-        await syncEngine.queueMutation('CRM_Oportunidades', id, { is_deleted: true });
+
+        // Include full row data to satisfy NOT NULL constraints on server if it's an upsert-style sync
+        await syncEngine.queueMutation('CRM_Oportunidades', id, {
+            ...current,
+            is_deleted: true
+        });
     };
 
-    return { opportunities, createOpportunity, generateMockData, deleteOpportunity };
+    const updateOpportunity = async (id: string, updates: any) => {
+        const current = await db.opportunities.get(id);
+        if (!current) return;
+
+        const updated = { ...current, ...updates, updated_at: new Date().toISOString() };
+        await db.opportunities.update(id, updated);
+
+        // Send full opportunity data to satisfy NOT NULL constraints on server
+        await syncEngine.queueMutation('CRM_Oportunidades', id, updated);
+    };
+
+    return { opportunities, createOpportunity, generateMockData, deleteOpportunity, updateOpportunity };
 }
 
 export function useQuotes(opportunityId?: string) {
@@ -174,9 +194,22 @@ export function useQuotes(opportunityId?: string) {
     };
 
     const updateQuote = async (id: string, updates: Partial<LocalQuote>) => {
+        // Get the current quote to ensure we have the opportunity_id
+        const currentQuote = await db.quotes.get(id);
+        if (!currentQuote) {
+            console.warn('[updateQuote] Quote not found:', id);
+            return;
+        }
+
         const fullUpdates = { ...updates, updated_at: new Date().toISOString() };
         await db.quotes.update(id, fullUpdates);
-        await syncEngine.queueMutation('CRM_Cotizaciones', id, fullUpdates);
+
+        // Include opportunity_id in the sync payload to avoid constraint violations
+        const syncPayload = {
+            ...fullUpdates,
+            opportunity_id: currentQuote.opportunity_id,
+        };
+        await syncEngine.queueMutation('CRM_Cotizaciones', id, syncPayload);
     };
 
     const updateQuoteTotal = async (quoteId: string) => {
@@ -240,10 +273,16 @@ export function useQuoteItems(quoteId?: string) {
         const { subtotal, ...itemData } = newItem;
         await syncEngine.queueMutation('CRM_CotizacionItems', id, itemData);
 
-        // Touch parent quote
-        const quoteUpdate = { updated_at: new Date().toISOString() };
-        await db.quotes.update(quoteId, quoteUpdate);
-        await syncEngine.queueMutation('CRM_Cotizaciones', quoteId, quoteUpdate);
+        // Touch parent quote with opportunity_id
+        const parentQuote = await db.quotes.get(quoteId);
+        if (parentQuote) {
+            const quoteUpdate = { updated_at: new Date().toISOString() };
+            await db.quotes.update(quoteId, quoteUpdate);
+            await syncEngine.queueMutation('CRM_Cotizaciones', quoteId, {
+                ...quoteUpdate,
+                opportunity_id: parentQuote.opportunity_id
+            });
+        }
     };
 
     const updateItem = async (itemId: string, updates: Partial<LocalQuoteItem>) => {
@@ -257,22 +296,42 @@ export function useQuoteItems(quoteId?: string) {
         const { subtotal, ...updateData } = updated;
         await syncEngine.queueMutation('CRM_CotizacionItems', itemId, updateData);
 
-        // Touch parent quote
-        const quoteUpdate = { updated_at: new Date().toISOString() };
-        await db.quotes.update(current.cotizacion_id, quoteUpdate);
-        await syncEngine.queueMutation('CRM_Cotizaciones', current.cotizacion_id, quoteUpdate);
+        // Touch parent quote with opportunity_id
+        const parentQuote = await db.quotes.get(current.cotizacion_id);
+        if (parentQuote) {
+            const quoteUpdate = { updated_at: new Date().toISOString() };
+            await db.quotes.update(current.cotizacion_id, quoteUpdate);
+            await syncEngine.queueMutation('CRM_Cotizaciones', current.cotizacion_id, {
+                ...quoteUpdate,
+                opportunity_id: parentQuote.opportunity_id
+            });
+        }
     };
 
     const removeItem = async (itemId: string) => {
         const current = await db.quoteItems.get(itemId);
-        await db.quoteItems.delete(itemId);
-        await syncEngine.queueMutation('CRM_CotizacionItems', itemId, { is_deleted: true });
+        if (!current) return;
 
-        // Touch parent quote
+        await db.quoteItems.delete(itemId);
+
+        // Include ALL item data + is_deleted to match DB constraints during sync (upsert)
+        const { subtotal, ...itemData } = current;
+        await syncEngine.queueMutation('CRM_CotizacionItems', itemId, {
+            ...itemData,
+            is_deleted: true
+        });
+
+        // Touch parent quote with opportunity_id
         if (current) {
-            const quoteUpdate = { updated_at: new Date().toISOString() };
-            await db.quotes.update(current.cotizacion_id, quoteUpdate);
-            await syncEngine.queueMutation('CRM_Cotizaciones', current.cotizacion_id, quoteUpdate);
+            const parentQuote = await db.quotes.get(current.cotizacion_id);
+            if (parentQuote) {
+                const quoteUpdate = { updated_at: new Date().toISOString() };
+                await db.quotes.update(current.cotizacion_id, quoteUpdate);
+                await syncEngine.queueMutation('CRM_Cotizaciones', current.cotizacion_id, {
+                    ...quoteUpdate,
+                    opportunity_id: parentQuote.opportunity_id
+                });
+            }
         }
     };
 
