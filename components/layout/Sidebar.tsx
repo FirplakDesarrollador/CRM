@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/components/ui/utils";
+import { FirplakLogo } from "./FirplakLogo";
 import { SyncStatus } from "./SyncStatus";
 import {
     Home,
@@ -33,11 +34,11 @@ export function Sidebar() {
 
     return (
         <aside className="hidden md:flex flex-col w-64 bg-white text-slate-900 h-screen fixed left-0 top-0 border-r border-gray-200 shadow-sm">
-            <div className="p-6 border-b border-gray-200">
-                <h1 className="text-xl font-bold text-blue-600">
-                    CRM FIRPLAK
-                </h1>
-                <p className="text-xs text-slate-500 mt-1">Version 1.0.0</p>
+            <div className="p-6 border-b border-gray-200 flex flex-col items-center justify-center">
+                <div className="w-full flex justify-center mb-1">
+                    <FirplakLogo className="h-8 w-auto text-blue-600" />
+                </div>
+                <p className="text-xs text-slate-500 mt-2 font-medium text-center">Version 1.0.0</p>
             </div>
 
             <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
