@@ -151,7 +151,8 @@ export class SyncEngine {
         // 3.2 Validate required FKs for child tables to prevent NOT NULL violations
         const requiredFKs: Record<string, string[]> = {
             'CRM_CotizacionItems': ['cotizacion_id'],
-            'CRM_Cotizaciones': ['opportunity_id']
+            'CRM_Cotizaciones': ['opportunity_id'],
+            'CRM_Oportunidades': ['nombre']
         };
 
         for (const [table, requiredFields] of Object.entries(requiredFKs)) {

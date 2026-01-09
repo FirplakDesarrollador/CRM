@@ -16,7 +16,7 @@ export function useOpportunities() {
 
         const newOpp = {
             ...oppData,
-            items,
+            // items removed to avoid syncing them to CRM_Oportunidades
             id,
             owner_user_id: oppData.owner_user_id || user?.id,
             account_id: oppData.account_id,

@@ -39,6 +39,9 @@ export default function CreateOpportunityWizard() {
     const [step, setStep] = useState(0);
     const [showAccountModal, setShowAccountModal] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
+    const [accountSearchTerm, setAccountSearchTerm] = useState("");
+    const [showAccountDropdown, setShowAccountDropdown] = useState(false);
+    const [selectedAccount, setSelectedAccount] = useState<any>(null);
 
     const {
         register,
@@ -61,6 +64,19 @@ export default function CreateOpportunityWizard() {
     });
 
     const { products: searchResults, isLoading: isSearching } = useProductSearch(searchTerm);
+
+    // Filtrar cuentas para el buscador
+    const filteredAccounts = (accounts || []).filter(acc =>
+        acc.nombre.toLowerCase().includes(accountSearchTerm.toLowerCase()) ||
+        (acc.nit || '').includes(accountSearchTerm)
+    );
+
+    const handleSelectAccount = (acc: any) => {
+        setValue("account_id", acc.id);
+        setSelectedAccount(acc);
+        setAccountSearchTerm(acc.nombre);
+        setShowAccountDropdown(false);
+    };
 
     // Obtener fases según canal de la cuenta
     const selectedAccountId = watch("account_id");
@@ -173,18 +189,68 @@ export default function CreateOpportunityWizard() {
                     <div className="space-y-4">
                         <h2 className="text-lg font-semibold">Seleccionar Cuenta</h2>
 
-                        <div className="space-y-2">
-                            <label className="text-sm font-medium">Cliente</label>
-                            <select
-                                {...register("account_id")}
-                                className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
-                            >
-                                <option value="">Buscar cuenta...</option>
-                                {accounts?.map(acc => (
-                                    <option key={acc.id} value={acc.id}>{acc.nombre} ({acc.nit || 'Sin NIT'})</option>
-                                ))}
-                            </select>
-                            {errors.account_id && <p className="text-red-500 text-xs">{(errors.account_id as any).message}</p>}
+                        <div className="space-y-2 relative">
+                            <label className="text-sm font-medium text-slate-700">Cliente / Cuenta</label>
+                            <div className="relative">
+                                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                    <Search className="w-4 h-4 text-slate-400" />
+                                </div>
+                                <input
+                                    type="text"
+                                    className="block w-full pl-10 pr-3 py-2 border border-slate-200 rounded-lg leading-5 bg-slate-50 placeholder-slate-400 focus:outline-none focus:bg-white focus:ring-2 focus:ring-blue-500 sm:text-sm"
+                                    placeholder="Buscar por nombre o NIT..."
+                                    value={accountSearchTerm}
+                                    onChange={(e) => {
+                                        setAccountSearchTerm(e.target.value);
+                                        setShowAccountDropdown(true);
+                                        if (selectedAccount && e.target.value !== selectedAccount.nombre) {
+                                            setSelectedAccount(null);
+                                            setValue("account_id", "");
+                                        }
+                                    }}
+                                    onFocus={() => setShowAccountDropdown(true)}
+                                />
+                                {selectedAccount && (
+                                    <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
+                                        <Check className="h-4 w-4 text-green-500" />
+                                    </div>
+                                )}
+                            </div>
+
+                            {showAccountDropdown && accountSearchTerm.length > 0 && !selectedAccount && (
+                                <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-xl max-h-60 overflow-y-auto border-t-0 rounded-t-none">
+                                    {filteredAccounts.length === 0 ? (
+                                        <div className="p-4 text-center text-slate-500 text-sm">No se encontraron cuentas</div>
+                                    ) : (
+                                        filteredAccounts.map(acc => (
+                                            <button
+                                                key={acc.id}
+                                                type="button"
+                                                onClick={() => handleSelectAccount(acc)}
+                                                className="w-full text-left px-4 py-2 hover:bg-blue-50 flex items-center justify-between border-b border-slate-50 last:border-0"
+                                            >
+                                                <div>
+                                                    <div className="font-medium text-slate-900 text-sm">{acc.nombre}</div>
+                                                    <div className="text-xs text-slate-500">{acc.nit || 'Sin NIT'}</div>
+                                                </div>
+                                                <div className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-bold uppercase tracking-wider">
+                                                    {acc.canal_id}
+                                                </div>
+                                            </button>
+                                        ))
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Back-click overlay to close dropdown */}
+                            {showAccountDropdown && !selectedAccount && (
+                                <div
+                                    className="fixed inset-0 z-40 bg-transparent"
+                                    onClick={() => setShowAccountDropdown(false)}
+                                />
+                            )}
+
+                            {errors.account_id && <p className="text-red-500 text-xs">{errors.account_id.message as string}</p>}
                         </div>
 
                         <button
