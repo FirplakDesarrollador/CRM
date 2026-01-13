@@ -385,7 +385,7 @@ function ProductsTab({ opportunityId }: { opportunityId: string }) {
 }
 
 function QuotesTab({ opportunityId, currency }: { opportunityId: string, currency: string }) {
-    const { quotes, createQuote, markAsWinner } = useQuotes(opportunityId);
+    const { quotes, createQuote, markAsWinner, deleteQuote } = useQuotes(opportunityId);
     const [isCreating, setIsCreating] = useState(false);
     const [processingId, setProcessingId] = useState<string | null>(null);
 
@@ -412,6 +412,17 @@ function QuotesTab({ opportunityId, currency }: { opportunityId: string, currenc
             alert("Error al generar pedido");
         } finally {
             setProcessingId(null);
+        }
+    };
+
+    const handleDelete = async (quote: any) => {
+        if (!confirm(`¿Confirmas que deseas eliminar la cotización ${quote.numero_cotizacion}? Esta acción no se puede deshacer.`)) return;
+
+        try {
+            await deleteQuote(quote.id);
+        } catch (e) {
+            console.error(e);
+            alert("Error al eliminar cotización");
         }
     };
 
@@ -448,7 +459,18 @@ function QuotesTab({ opportunityId, currency }: { opportunityId: string, currenc
                         const isProcessing = processingId === q.id;
 
                         return (
-                            <div key={q.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:border-blue-400 flex justify-between group">
+                            <div key={q.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:border-blue-400 flex justify-between group relative overflow-hidden">
+                                <button
+                                    onClick={(e) => {
+                                        e.preventDefault();
+                                        handleDelete(q);
+                                    }}
+                                    className="absolute top-2 right-2 p-1.5 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all z-10 opacitiy-0 group-hover:opacity-100"
+                                    title="Eliminar Cotización"
+                                >
+                                    <Trash2 className="w-4 h-4" />
+                                </button>
+
                                 <Link href={`/oportunidades/${opportunityId}/cotizaciones/${q.id}`} className="flex-1">
                                     <div className="flex items-center gap-3">
                                         <h4 className="font-bold text-slate-800 hover:text-blue-600 transition-colors">{q.numero_cotizacion}</h4>
@@ -467,7 +489,7 @@ function QuotesTab({ opportunityId, currency }: { opportunityId: string, currenc
                                     </p>
                                 </Link>
 
-                                <div className="text-right flex flex-col items-end gap-2">
+                                <div className="text-right flex flex-col items-end gap-2 pr-6">
                                     <p className="font-bold text-slate-900 text-lg">
                                         {q.currency_id} {new Intl.NumberFormat().format(q.total_amount || 0)}
                                     </p>

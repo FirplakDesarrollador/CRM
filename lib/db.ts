@@ -24,6 +24,7 @@ export interface LocalCuenta {
     nit_base?: string;
     id_cuenta_principal?: string | null;
     canal_id: string; // Nuevo campo obligatorio
+    es_premium?: boolean;
     telefono?: string;
     direccion?: string;
     ciudad?: string;
@@ -78,6 +79,9 @@ export interface LocalQuoteItem {
     cantidad: number;
     precio_unitario: number;
     subtotal: number;
+    discount_pct?: number;
+    max_discount_pct?: number;
+    final_unit_price?: number;
     descripcion_linea?: string;
     created_by?: string;
     updated_by?: string;

@@ -121,7 +121,8 @@ export default function CreateOpportunityWizard() {
     };
 
     const updateQuantity = (productId: string, qty: number) => {
-        setValue("items", items.map((i: any) => i.product_id === productId ? { ...i, cantidad: Math.max(1, qty) } : i));
+        const validQty = isNaN(qty) ? 1 : Math.max(1, qty);
+        setValue("items", items.map((i: any) => i.product_id === productId ? { ...i, cantidad: validQty } : i));
     };
 
     const removeProduct = (productId: string) => {
@@ -131,7 +132,7 @@ export default function CreateOpportunityWizard() {
     // Calculate total from items
     useEffect(() => {
         if (items.length > 0) {
-            const total = items.reduce((acc: number, curr: any) => acc + (curr.precio * curr.cantidad), 0);
+            const total = items.reduce((acc: number, curr: any) => acc + ((curr.precio || 0) * (curr.cantidad || 1)), 0);
             setValue("amount", total);
         }
     }, [items, setValue]);
@@ -310,7 +311,7 @@ export default function CreateOpportunityWizard() {
                     <div className="space-y-6">
                         <div className="flex justify-between items-center">
                             <h2 className="text-lg font-semibold">Productos del Negocio</h2>
-                            <span className="text-sm font-bold text-blue-600">Total: {watch("currency_id")} {new Intl.NumberFormat().format(amount as number)}</span>
+                            <span className="text-sm font-bold text-blue-600">Total: {watch("currency_id")} {new Intl.NumberFormat().format((amount as number) || 0)}</span>
                         </div>
 
                         {/* Product Search */}
@@ -347,7 +348,7 @@ export default function CreateOpportunityWizard() {
                                                     <div className="text-xs text-slate-500">{product.numero_articulo}</div>
                                                 </div>
                                                 <div className="text-sm font-bold text-blue-600">
-                                                    ${new Intl.NumberFormat().format(product.lista_base_cop || 0)}
+                                                    ${new Intl.NumberFormat().format(product.lista_base_cop || product.pvp_sin_iva || 0)}
                                                 </div>
                                             </button>
                                         ))
@@ -368,13 +369,13 @@ export default function CreateOpportunityWizard() {
                                     <div key={item.product_id} className="flex items-center gap-4 p-3 bg-white border border-slate-200 rounded-xl shadow-sm">
                                         <div className="flex-1">
                                             <div className="font-medium text-sm text-slate-800">{item.nombre}</div>
-                                            <div className="text-xs text-slate-500">${new Intl.NumberFormat().format(item.precio)} c/u</div>
+                                            <div className="text-xs text-slate-500">${new Intl.NumberFormat().format(item.precio || 0)} c/u</div>
                                         </div>
                                         <div className="flex items-center gap-2">
                                             <input
                                                 type="number"
                                                 className="w-16 p-1 border rounded text-center text-sm"
-                                                value={item.cantidad}
+                                                value={isNaN(item.cantidad) ? "" : item.cantidad}
                                                 onChange={(e) => updateQuantity(item.product_id, parseInt(e.target.value))}
                                             />
                                             <button
