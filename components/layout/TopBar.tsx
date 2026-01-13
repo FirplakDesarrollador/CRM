@@ -10,17 +10,24 @@ export function TopBar() {
 
     useEffect(() => {
         const fetchUser = async () => {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (user) {
-                const name = user.user_metadata?.full_name || user.email || "";
-                const parts = name.split(/[.\s@]/).filter(Boolean);
-                let userInitials = "";
-                if (parts.length >= 2) {
-                    userInitials = (parts[0][0] + parts[1][0]).toUpperCase();
-                } else if (parts.length === 1) {
-                    userInitials = parts[0].substring(0, 2).toUpperCase();
+            try {
+                const { data: { user } } = await supabase.auth.getUser();
+                if (user) {
+                    const name = user.user_metadata?.full_name || user.email || "";
+                    const parts = name.split(/[.\s@]/).filter(Boolean);
+                    let userInitials = "";
+                    if (parts.length >= 2) {
+                        userInitials = (parts[0][0] + parts[1][0]).toUpperCase();
+                    } else if (parts.length === 1) {
+                        userInitials = parts[0].substring(0, 2).toUpperCase();
+                    }
+                    setInitials(userInitials || "??");
                 }
-                setInitials(userInitials || "??");
+            } catch (err: any) {
+                // Silently ignore network errors (offline mode)
+                if (!err.message?.includes('Failed to fetch')) {
+                    console.error('TopBar: Error getting user:', err);
+                }
             }
         };
         fetchUser();

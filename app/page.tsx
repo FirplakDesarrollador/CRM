@@ -19,7 +19,14 @@ export default function Home() {
   });
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setUser(data.user));
+    supabase.auth.getUser()
+      .then(({ data }) => setUser(data.user))
+      .catch((err) => {
+        // Silently ignore network errors (offline mode)
+        if (!err.message?.includes('Failed to fetch')) {
+          console.error('Error getting user:', err);
+        }
+      });
   }, []);
 
   useEffect(() => {

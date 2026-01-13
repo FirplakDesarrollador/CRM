@@ -10,6 +10,7 @@ import { db, LocalQuote } from "@/lib/db";
 import { Save, AlertTriangle, Truck, Receipt, Calendar, Search, Plus, Trash2, Loader2, Package } from "lucide-react";
 import { cn } from "@/components/ui/utils";
 import { useLiveQuery } from "dexie-react-hooks";
+import { useConfig } from "@/lib/hooks/useConfig";
 
 export default function QuoteEditorPage() {
     const params = useParams();
@@ -53,9 +54,13 @@ export default function QuoteEditorPage() {
                             activeSection === 'sap' ? "bg-blue-50 text-blue-700" : "text-slate-500 hover:text-slate-800"
                         )}
                     >
-                        Datos SAP <Truck className="w-4 h-4" />
+                        Pedido <Truck className="w-4 h-4" />
                     </button>
                 </div>
+
+                {/* Shared Validation Banner */}
+                <QuoteValidationBanner quote={quote} />
+
 
                 {activeSection === 'items' && (
                     <QuoteItemsEditor
@@ -104,6 +109,55 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
         return { channel: acc?.canal_id || 'DIST_NAC' };
     });
 
+    // Auto-fetch max_discount_pct for items that are missing it (legacy or failed RPC)
+    useEffect(() => {
+        if (!items || !context?.channel) return;
+
+        const fetchMissingPricing = async () => {
+            for (const item of items) {
+                if (!item.max_discount_pct) {
+                    try {
+                        // Import supabase dynamically to avoid circular deps
+                        const { supabase } = await import('@/lib/supabase');
+
+                        console.log('[Pricing] Fetching for item:', item.id, 'producto_id:', item.producto_id);
+
+                        // Get numero_articulo from product id
+                        const { data: prodData, error: prodError } = await supabase
+                            .from('CRM_ListaDePrecios')
+                            .select('numero_articulo')
+                            .eq('id', item.producto_id)
+                            .single();
+
+                        console.log('[Pricing] Product lookup result:', prodData, 'error:', prodError);
+
+                        if (prodData) {
+                            const { data: pricing, error: pricingError } = await supabase.rpc('get_recommended_pricing', {
+                                p_numero_articulo: prodData.numero_articulo,
+                                p_canal_id: context.channel,
+                                p_qty: item.cantidad
+                            });
+
+                            console.log('[Pricing] RPC result:', pricing, 'error:', pricingError);
+
+                            if (pricing && pricing.discount_pct !== undefined) {
+                                // Update local DB only (no sync needed for this auto-fill)
+                                await db.quoteItems.update(item.id, {
+                                    max_discount_pct: pricing.discount_pct
+                                });
+                                console.log('[Pricing] Updated max_discount_pct to:', pricing.discount_pct);
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('Could not fetch pricing for item:', item.id, e);
+                    }
+                }
+            }
+        };
+
+        fetchMissingPricing();
+    }, [items, context?.channel]);
+
     const handleAddProduct = async (product: PriceListProduct) => {
         const channel = context?.channel || 'DIST_NAC';
         let price = 0;
@@ -151,11 +205,43 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
         onItemsChange();
     };
 
+    const handleUpdateDiscount = async (itemId: string, pct: number) => {
+        const item = items?.find(i => i.id === itemId);
+        if (!item) return;
+
+        let validPct = Math.max(0, Math.min(100, pct));
+        if (item.max_discount_pct && validPct > item.max_discount_pct) {
+            validPct = item.max_discount_pct;
+            alert(`El descuento máximo permitido para esta cantidad es ${item.max_discount_pct}%`);
+        }
+
+        const finalPrice = item.precio_unitario * (1 - validPct / 100);
+
+        await updateItem(itemId, {
+            discount_pct: validPct,
+            final_unit_price: finalPrice
+        });
+        onItemsChange();
+    };
+
     return (
         <div className="space-y-6">
             <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                 <div className="flex items-center justify-between mb-6">
-                    <h3 className="font-bold text-lg">Productos de la Cotización</h3>
+                    <div>
+                        <h3 className="font-bold text-lg">Productos de la Cotización</h3>
+                        <p className="text-xs text-slate-500 italic mt-0.5">
+                            Lista de Precios: {
+                                {
+                                    'OBRAS_NAC': 'Obras Nacional',
+                                    'OBRAS_INT': 'Obras Internacional',
+                                    'DIST_NAC': 'Distribución Nacional',
+                                    'DIST_INT': 'Distribución Internacional',
+                                    'PROPIO': 'Canal Propio'
+                                }[context?.channel || ''] || 'Distribución Nacional'
+                            }
+                        </p>
+                    </div>
                     <div className="flex flex-col items-end">
                         <span className="text-xs text-slate-500 uppercase font-bold tracking-wider">Canal: {context?.channel}</span>
                         <div className="text-2xl font-black text-blue-600">
@@ -243,11 +329,16 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
                                         </button>
                                         <input
                                             type="number"
-                                            value={item.cantidad}
-                                            onChange={(e) => handleUpdateQty(item.id, parseInt(e.target.value) || 0)}
+                                            defaultValue={item.cantidad}
+                                            key={`${item.id}-${item.cantidad}`}
                                             onBlur={(e) => {
                                                 const val = parseInt(e.target.value);
-                                                if (isNaN(val) || val < 1) handleUpdateQty(item.id, 1);
+                                                if (!isNaN(val) && val >= 1) {
+                                                    handleUpdateQty(item.id, val);
+                                                } else {
+                                                    // Reset UI if invalid
+                                                    e.target.value = item.cantidad.toString();
+                                                }
                                             }}
                                             className="w-12 text-center font-bold text-slate-800 bg-transparent border-none focus:ring-0 p-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                         />
@@ -258,6 +349,29 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
                                             +
                                         </button>
                                     </div>
+
+                                    {/* Discount Input */}
+                                    <div className="flex flex-col items-end">
+                                        <div className="text-xs text-slate-400 font-bold text-[9px] mb-1">
+                                            {item.max_discount_pct ? `Descuento max. ${item.max_discount_pct}%` : 'Descuento (sin escala)'}
+                                        </div>
+                                        <div className="flex items-center gap-1">
+                                            <input
+                                                type="number"
+                                                min="0"
+                                                max={item.max_discount_pct || 100}
+                                                defaultValue={item.discount_pct || 0}
+                                                key={`${item.id}-${item.discount_pct}`}
+                                                onBlur={(e) => handleUpdateDiscount(item.id, parseFloat(e.target.value) || 0)}
+                                                className={cn(
+                                                    "w-16 text-right font-medium text-slate-800 border rounded-md py-1 px-2 text-sm focus:ring-2 focus:ring-blue-500",
+                                                    (item.discount_pct || 0) > (item.max_discount_pct || 0) && item.max_discount_pct ? "border-red-500 text-red-600 bg-red-50" : "border-slate-200"
+                                                )}
+                                            />
+                                            <span className="text-slate-500 text-sm">%</span>
+                                        </div>
+                                    </div>
+
                                     <div className="min-w-[120px] text-right">
                                         <div className="text-xs text-slate-400 uppercase font-bold text-[9px]">Subtotal</div>
                                         <div className="font-bold text-slate-900">
@@ -293,12 +407,18 @@ function SapDataEditor({ quote, onSave }: { quote: LocalQuote, onSave: (d: Parti
         }
     });
 
+
+    const validation = usePremiumValidation(quote);
+
     return (
         <form onSubmit={handleSubmit(onSave)} className="space-y-6 bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-            <div className="flex items-center gap-3 mb-4 p-3 bg-orange-50 text-orange-800 rounded-lg text-sm">
-                <AlertTriangle className="w-5 h-5 shrink-0" />
-                <p>Estos datos son obligatorios para marcar la cotización como ganadora y generar el pedido en SAP.</p>
-            </div>
+            {!validation.isPremium && (
+                <div className="flex items-center gap-3 mb-4 p-3 bg-orange-50 text-orange-800 rounded-lg text-sm">
+                    <AlertTriangle className="w-5 h-5 shrink-0" />
+                    <p>Estos datos son obligatorios para marcar la cotización como ganadora y generar el pedido en SAP.</p>
+                </div>
+            )}
+
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
@@ -331,7 +451,11 @@ function SapDataEditor({ quote, onSave }: { quote: LocalQuote, onSave: (d: Parti
             </div>
 
             <div className="pt-4 border-t flex justify-end">
-                <button type="submit" className="bg-blue-600 text-white px-6 py-2 rounded-lg font-medium flex items-center gap-2 hover:bg-blue-700">
+                <button
+                    type="submit"
+                    disabled={validation.isRestricted}
+                    className="bg-blue-600 text-white px-6 py-2 rounded-lg font-medium flex items-center gap-2 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
                     <Save className="w-4 h-4" />
                     Guardar Datos SAP
                 </button>
@@ -339,3 +463,48 @@ function SapDataEditor({ quote, onSave }: { quote: LocalQuote, onSave: (d: Parti
         </form>
     );
 }
+
+function usePremiumValidation(quote: LocalQuote) {
+    const { config } = useConfig();
+
+    return useLiveQuery(async () => {
+        const opp = await db.opportunities.get(quote.opportunity_id);
+        if (!opp) return { isPremium: false, isRestricted: false, minVal: 5000000 };
+
+        const acc = await db.accounts.get(opp.account_id);
+        const isPremium = acc?.es_premium || false;
+        const minVal = Number(config.min_premium_order_value) || 5000000;
+        const currentTotal = quote.total_amount || 0;
+
+        const isRestricted = isPremium && currentTotal < minVal;
+
+        console.log('[PremiumCheck]', {
+            quoteId: quote.numero_cotizacion,
+            account: acc?.nombre,
+            isPremium,
+            minVal,
+            currentTotal,
+            isRestricted
+        });
+
+        return { isPremium, isRestricted, minVal };
+    }, [quote.id, quote.total_amount, config.min_premium_order_value]) || { isPremium: false, isRestricted: false, minVal: 5000000 };
+}
+
+function QuoteValidationBanner({ quote }: { quote: LocalQuote }) {
+    const validation = usePremiumValidation(quote);
+
+    if (!validation.isRestricted) return null;
+
+    return (
+        <div className="flex items-center gap-3 p-4 bg-red-50 text-red-800 rounded-xl border border-red-200 animate-in fade-in slide-in-from-top-4 duration-300">
+            <AlertTriangle className="w-8 h-8 shrink-0 text-red-600" />
+            <div>
+                <p className="font-bold">Cliente Premium: Pedido mínimo no alcanzado</p>
+                <p className="text-sm">El valor de esta cotización (<span className="font-bold">${new Intl.NumberFormat().format(quote.total_amount || 0)}</span>) es inferior al mínimo configurado de <span className="font-bold">${new Intl.NumberFormat().format(validation.minVal)}</span>.</p>
+                <p className="mt-1 text-xs text-red-600 font-medium">No se podrá generar el pedido en SAP hasta alcanzar el monto mínimo.</p>
+            </div>
+        </div>
+    );
+}
+
