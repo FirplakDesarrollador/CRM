@@ -70,7 +70,7 @@ export function Sidebar({ isCollapsed, toggleSidebar }: SidebarProps) {
                     )}
                 </div>
                 {!isCollapsed && (
-                    <p className="text-xs text-slate-500 mt-2 font-medium text-center fade-in">Version 1.0.0</p>
+                    <p className="text-xs text-slate-500 mt-2 font-medium text-center fade-in">Version 1.0.1</p>
                 )}
 
                 <button
