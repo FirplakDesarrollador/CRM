@@ -2,15 +2,15 @@
 
 Checking Tables and Required Sync Columns...
 [CRM_Cuentas] EXISTS!
-    (Empty table, cannot check columns accurately via select *)
+    Columns OK: id, id_cuenta_principal, nit_base, nit_sufijo, nit, nombre, telefono, direccion, ciudad, email, created_at, updated_at, created_by, updated_by, is_deleted, _sync_metadata, canal_id, es_premium, tipo_id
 [CRM_Oportunidades] EXISTS!
-    (Empty table, cannot check columns accurately via select *)
+    Columns OK: id, account_id, owner_user_id, nombre, amount, currency_id, estado_id, fase_id, fecha_cierre_estimada, probabilidad, sap_doc_entry, sap_order_id, created_at, updated_at, created_by, updated_by, is_deleted, _sync_metadata, items
 [CRM_Cotizaciones] EXISTS!
-    (Empty table, cannot check columns accurately via select *)
+    Columns OK: id, opportunity_id, numero_cotizacion, total_amount, currency_id, status, sap_doc_entry, created_at, updated_at, created_by, updated_by, _sync_metadata, is_deleted
 [CRM_CotizacionItems] EXISTS!
-    (Empty table, cannot check columns accurately via select *)
+    Columns OK: id, cotizacion_id, producto_id, cantidad, precio_unitario, subtotal, descripcion_linea, _sync_metadata, updated_at, created_by, updated_by, is_deleted, discount_pct, max_discount_pct, final_unit_price
 [CRM_Actividades] EXISTS!
-    (Empty table, cannot check columns accurately via select *)
+    Columns OK: id, opportunity_id, user_id, tipo_actividad_id, asunto, descripcion, fecha_inicio, fecha_fin, ms_planner_id, ms_event_id, created_at, updated_at, is_completed, _sync_metadata, created_by, updated_by, is_deleted, tipo_actividad
 
 Checking for process_field_updates RPC...
 [RPC] process_field_updates: EXISTS!
