@@ -58,15 +58,26 @@ export async function middleware(request: NextRequest) {
     // Refresh user session if needed
     const { data: { user }, error: userError } = await supabase.auth.getUser()
 
+    // Handle network errors gracefully (offline mode)
     if (userError) {
         console.log("Middleware: getUser error:", userError.message);
+
+        // If it's a network error (offline), allow the request to proceed
+        // The app will work in offline mode with cached data
+        if (userError.message.includes('Failed to fetch') ||
+            userError.message.includes('NetworkError') ||
+            userError.name === 'AuthRetryableFetchError') {
+            console.log("Middleware: Network error detected, allowing offline access.");
+            return response;
+        }
     }
 
     console.log("Middleware Path:", request.nextUrl.pathname, "User:", user?.email || "No User");
 
     // Protect routes logic
     // If user is NOT logged in and trying to access restricted pages (root, dashboard, etc.)
-    if (!user && !request.nextUrl.pathname.startsWith('/login') && !request.nextUrl.pathname.startsWith('/auth')) {
+    // Only redirect if we're sure there's no user (not just a network error)
+    if (!user && !userError && !request.nextUrl.pathname.startsWith('/login') && !request.nextUrl.pathname.startsWith('/auth')) {
         console.log("Middleware: Redirecting to /login (no user)");
         const url = request.nextUrl.clone()
         url.pathname = '/login'

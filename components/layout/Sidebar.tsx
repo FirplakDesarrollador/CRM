@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/components/ui/utils";
+import { FirplakLogo } from "./FirplakLogo";
 import { SyncStatus } from "./SyncStatus";
+import { supabase } from "@/lib/supabase";
 import {
     Home,
     Briefcase,
@@ -32,12 +34,21 @@ export function Sidebar() {
     const pathname = usePathname();
 
     return (
+<<<<<<< Updated upstream
+        <aside className="hidden md:flex flex-col w-64 bg-white text-slate-900 h-screen fixed left-0 top-0 border-r border-gray-200 shadow-sm">
+            <div className="p-6 border-b border-gray-200 flex flex-col items-center justify-center">
+                <div className="w-full flex justify-center mb-1">
+                    <FirplakLogo className="h-8 w-auto text-blue-600" />
+                </div>
+                <p className="text-xs text-slate-500 mt-2 font-medium text-center">Version 1.0.0</p>
+=======
         <aside className="hidden md:flex flex-col w-64 bg-slate-900 text-white h-screen fixed left-0 top-0 border-r border-slate-800">
             <div className="p-6 border-b border-slate-800">
                 <h1 className="text-xl font-bold bg-linear-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent">
                     CRM FIRPLAK
                 </h1>
-                <p className="text-xs text-slate-400 mt-1">PWA Offline-First</p>
+                <p className="text-xs text-slate-400 mt-1">Version 1.0.0</p>
+>>>>>>> Stashed changes
             </div>
 
             <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
@@ -66,7 +77,13 @@ export function Sidebar() {
             </div>
 
             <div className="p-4 border-t border-slate-800">
-                <button className="flex items-center gap-3 px-3 py-2 text-sm font-medium text-slate-400 hover:text-red-400 w-full transition-colors">
+                <button
+                    onClick={async () => {
+                        await supabase.auth.signOut();
+                        window.location.href = '/login';
+                    }}
+                    className="flex items-center gap-3 px-3 py-2 text-sm font-medium text-slate-400 hover:text-red-400 w-full transition-colors"
+                >
                     <LogOut className="w-5 h-5" />
                     Cerrar Sesión
                 </button>

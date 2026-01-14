@@ -8,6 +8,8 @@ import { useState, useEffect } from "react";
 import { Loader2, User, Building2 } from "lucide-react";
 import { LocalCuenta } from "@/lib/db";
 import AccountContactsTab from "./AccountContactsTab";
+import AccountOpportunitiesTab from "./AccountOpportunitiesTab";
+import { Briefcase } from "lucide-react";
 
 // Schema
 const accountSchema = z.object({
@@ -19,6 +21,7 @@ const accountSchema = z.object({
     telefono: z.string().nullable().optional(),
     direccion: z.string().nullable().optional(),
     ciudad: z.string().nullable().optional(),
+    es_premium: z.boolean().default(false).optional(),
 });
 
 type AccountFormData = z.infer<typeof accountSchema>;
@@ -34,7 +37,7 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     // Tab State
-    const [activeTab, setActiveTab] = useState<'info' | 'contacts'>('info');
+    const [activeTab, setActiveTab] = useState<'info' | 'contacts' | 'opportunities'>('info');
 
     const {
         register,
@@ -53,7 +56,8 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             canal_id: account?.canal_id || "DIST_NAC",
             telefono: account?.telefono || "",
             direccion: account?.direccion || "",
-            ciudad: account?.ciudad || ""
+            ciudad: account?.ciudad || "",
+            es_premium: account?.es_premium || false
         }
     });
 
@@ -68,7 +72,8 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                 canal_id: account.canal_id || "DIST_NAC",
                 telefono: account.telefono || "",
                 direccion: account.direccion || "",
-                ciudad: account.ciudad || ""
+                ciudad: account.ciudad || "",
+                es_premium: account.es_premium || false
             });
         }
     }, [account, reset]);
@@ -103,7 +108,8 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                 canal_id: formData.canal_id,
                 telefono: formData.telefono || null,
                 direccion: formData.direccion || null,
-                ciudad: formData.ciudad || null
+                ciudad: formData.ciudad || null,
+                es_premium: formData.es_premium || false
             };
 
             if (account?.id) {
@@ -150,6 +156,20 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                         Contactos
                     </button>
                 )}
+
+                {account?.id && (
+                    <button
+                        type="button"
+                        onClick={() => setActiveTab('opportunities')}
+                        className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'opportunities'
+                            ? "border-blue-600 text-blue-600"
+                            : "border-transparent text-gray-500 hover:text-gray-700"
+                            }`}
+                    >
+                        <Briefcase size={16} />
+                        Oportunidades
+                    </button>
+                )}
             </div>
 
             {activeTab === 'info' ? (
@@ -173,6 +193,19 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                             />
                             <label htmlFor="is_child" className="text-sm cursor-pointer select-none">
                                 Es cuenta hija / sucursal
+                            </label>
+                        </div>
+
+                        {/* Premium Switch */}
+                        <div className="flex items-center space-x-2 pt-6">
+                            <input
+                                type="checkbox"
+                                id="es_premium"
+                                {...register("es_premium")}
+                                className="w-4 h-4"
+                            />
+                            <label htmlFor="es_premium" className="text-sm font-bold text-amber-600 cursor-pointer select-none flex items-center gap-1">
+                                Cliente Premium
                             </label>
                         </div>
                     </div>
@@ -253,9 +286,18 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                     </div>
 
                 </form>
-            ) : (
+            ) : activeTab === 'contacts' ? (
                 <div className="p-4">
                     {account?.id && <AccountContactsTab accountId={account.id} />}
+                    <div className="flex justify-end pt-4 border-t mt-4">
+                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">
+                            Cerrar
+                        </button>
+                    </div>
+                </div>
+            ) : (
+                <div className="p-4">
+                    {account?.id && <AccountOpportunitiesTab accountId={account.id} />}
                     <div className="flex justify-end pt-4 border-t mt-4">
                         <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">
                             Cerrar
