@@ -62,15 +62,17 @@ export function Sidebar({ isCollapsed, toggleSidebar }: SidebarProps) {
             )}>
                 <div className="w-full flex justify-center mb-1">
                     {isCollapsed ? (
-                        <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-xl">
-                            F
-                        </div>
+                        <img
+                            src="/Isotipo FIRPLAK CRM.svg"
+                            alt="Logo"
+                            className="h-10 w-auto"
+                        />
                     ) : (
                         <FirplakLogo className="h-8 w-auto text-blue-600" />
                     )}
                 </div>
                 {!isCollapsed && (
-                    <p className="text-xs text-slate-500 mt-2 font-medium text-center fade-in">Version 1.0.2</p>
+                    <p className="text-xs text-slate-500 mt-2 font-medium text-center fade-in">Version 1.0.3</p>
                 )}
 
                 <button
