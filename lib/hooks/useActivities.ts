@@ -26,13 +26,23 @@ export function useActivities(opportunityId?: string) {
     );
 
     const createActivity = async (data: Partial<LocalActivity>) => {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) throw new Error("No authenticated user");
+        let userId: string | null = null;
+
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            userId = user?.id || null;
+        } catch {
+            // Offline - try to get cached user ID from localStorage
+            const cachedUser = localStorage.getItem('cachedUserId');
+            if (cachedUser) userId = cachedUser;
+        }
+
+        if (!userId) throw new Error("No authenticated user (even offline)");
 
         const id = uuidv4();
         const newActivity: LocalActivity = {
             id,
-            user_id: user.id,
+            user_id: userId,
             tipo_actividad_id: 1, // Default to a type
             asunto: '',
             fecha_inicio: new Date().toISOString(),

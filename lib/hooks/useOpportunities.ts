@@ -2,7 +2,45 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, LocalQuote, LocalQuoteItem } from "@/lib/db";
 import { syncEngine } from "@/lib/sync";
 import { useState } from "react";
+import { supabase } from "@/lib/supabase";
 import { v4 as uuidv4 } from 'uuid';
+
+// Helper to fetch pricing from server
+async function fetchPricing(productId: string, channelId: string, qty: number) {
+    try {
+        if (!navigator.onLine) return null;
+
+        // 1. Get numero_articulo from ID
+        // Note: Ideally we should have this locally or passed in. 
+        // For now we fetch it to be safe.
+        const { data: prodData } = await supabase
+            .from('CRM_ListaDePrecios')
+            .select('numero_articulo')
+            .eq('id', productId)
+            .single();
+
+        if (!prodData) return null;
+
+        // 2. Call RPC
+        // Returns { base_price, discount_pct, final_unit_price }
+        // "discount_pct" here acts as the VOLUME LIMIT (Max allowed discount)
+        const { data, error } = await supabase.rpc('get_recommended_pricing', {
+            p_numero_articulo: prodData.numero_articulo,
+            p_canal_id: channelId,
+            p_qty: qty
+        });
+
+        if (error) {
+            console.error("Error fetching pricing:", error);
+            return null;
+        }
+
+        return data; // { base_price, discount_pct, final_unit_price }
+    } catch (err) {
+        console.error(err);
+        return null; // Fallback to provided price
+    }
+}
 
 export function useOpportunities() {
     const opportunities = useLiveQuery(() => db.opportunities.toArray());
@@ -16,7 +54,7 @@ export function useOpportunities() {
 
         const newOpp = {
             ...oppData,
-            items,
+            // items removed to avoid syncing them to CRM_Oportunidades
             id,
             owner_user_id: oppData.owner_user_id || user?.id,
             account_id: oppData.account_id,
@@ -49,14 +87,35 @@ export function useOpportunities() {
             await syncEngine.queueMutation('CRM_Cotizaciones', quoteId, newQuote);
 
             // Add items
-            const quoteItems: LocalQuoteItem[] = items.map((item: any) => ({
-                id: uuidv4(),
-                cotizacion_id: quoteId,
-                producto_id: item.product_id,
-                cantidad: item.cantidad,
-                precio_unitario: item.precio,
-                subtotal: item.cantidad * item.precio,
-                descripcion_linea: item.nombre
+            // Add items with calculated pricing
+            const account = await db.accounts.get(oppData.account_id);
+            const channelId = account?.canal_id || 'DIST_NAC';
+
+            const quoteItems: LocalQuoteItem[] = await Promise.all(items.map(async (item: any) => {
+                const pricing = await fetchPricing(item.product_id, channelId, item.cantidad);
+
+                // Pricing Logic:
+                // base_price = List Price
+                // discount_pct from RPC = MAX VOLUME DISCOUNT LIMIT
+                // Actual discount starts at 0 (manual input)
+
+                const unitPrice = pricing ? pricing.base_price : item.precio;
+                const maxDiscount = pricing ? pricing.discount_pct : 0;
+                const discount = 0; // Default to 0 manual discount
+                const finalPrice = unitPrice * (1 - discount / 100);
+
+                return {
+                    id: uuidv4(),
+                    cotizacion_id: quoteId,
+                    producto_id: item.product_id,
+                    cantidad: item.cantidad,
+                    precio_unitario: unitPrice,
+                    discount_pct: discount,
+                    max_discount_pct: maxDiscount,
+                    final_unit_price: finalPrice,
+                    subtotal: item.cantidad * finalPrice,
+                    descripcion_linea: item.nombre
+                };
             }));
 
             await db.quoteItems.bulkAdd(quoteItems);
@@ -179,7 +238,9 @@ export function useQuotes(opportunityId?: string) {
                 producto_id: item.product_id || item.producto_id,
                 cantidad: item.cantidad,
                 precio_unitario: item.precio_unitario || item.precio || 0,
-                subtotal: (item.cantidad * (item.precio_unitario || item.precio || 0)),
+                discount_pct: item.discount_pct || 0,
+                final_unit_price: item.final_unit_price || item.precio_unitario || 0,
+                subtotal: (item.cantidad * (item.final_unit_price || item.precio_unitario || item.precio || 0)),
                 descripcion_linea: item.descripcion_linea || item.nombre
             }));
 
@@ -214,7 +275,7 @@ export function useQuotes(opportunityId?: string) {
 
     const updateQuoteTotal = async (quoteId: string) => {
         const items = await db.quoteItems.where('cotizacion_id').equals(quoteId).toArray();
-        const total = items.reduce((acc, curr) => acc + (curr.precio_unitario * curr.cantidad), 0);
+        const total = items.reduce((acc, curr) => acc + ((curr.final_unit_price || curr.precio_unitario) * curr.cantidad), 0);
         await updateQuote(quoteId, { total_amount: total });
     };
 
@@ -250,7 +311,30 @@ export function useQuotes(opportunityId?: string) {
         await syncEngine.queueMutation('CRM_SapIntegrationQueue', sapQueueId, sapEntry);
     };
 
-    return { quotes, createQuote, updateQuote, updateQuoteTotal, markAsWinner };
+    const deleteQuote = async (id: string) => {
+        const quote = await db.quotes.get(id);
+        if (!quote) return;
+
+        // 1. Delete Items
+        const items = await db.quoteItems.where('cotizacion_id').equals(id).toArray();
+        for (const item of items) {
+            await db.quoteItems.delete(item.id);
+            const { subtotal, ...itemData } = item;
+            await syncEngine.queueMutation('CRM_CotizacionItems', item.id, {
+                ...itemData,
+                is_deleted: true
+            });
+        }
+
+        // 2. Delete Quote
+        await db.quotes.delete(id);
+        await syncEngine.queueMutation('CRM_Cotizaciones', id, {
+            ...quote,
+            is_deleted: true
+        });
+    };
+
+    return { quotes, createQuote, updateQuote, updateQuoteTotal, markAsWinner, deleteQuote };
 }
 
 export function useQuoteItems(quoteId?: string) {
@@ -263,11 +347,35 @@ export function useQuoteItems(quoteId?: string) {
 
     const addItem = async (quoteId: string, item: Omit<LocalQuoteItem, 'id' | 'cotizacion_id'>) => {
         const id = uuidv4();
+        // Fetch Pricing
+        let pricing = null;
+        try {
+            const parentQuote = await db.quotes.get(quoteId);
+            if (parentQuote) {
+                const opp = await db.opportunities.get(parentQuote.opportunity_id);
+                if (opp && opp.account_id) {
+                    const acc = await db.accounts.get(opp.account_id);
+                    if (acc) {
+                        pricing = await fetchPricing(item.producto_id, acc.canal_id, item.cantidad);
+                    }
+                }
+            }
+        } catch (e) { console.error("Pricing calc error", e); }
+
+        const unitPrice = pricing ? pricing.base_price : item.precio_unitario;
+        const maxDiscount = pricing ? pricing.discount_pct : 0;
+        const discount = 0;
+        const finalPrice = unitPrice * (1 - discount / 100);
+
         const newItem: LocalQuoteItem = {
             ...item,
             id,
             cotizacion_id: quoteId,
-            subtotal: item.cantidad * item.precio_unitario
+            precio_unitario: unitPrice,
+            discount_pct: discount,
+            max_discount_pct: maxDiscount,
+            final_unit_price: finalPrice,
+            subtotal: item.cantidad * finalPrice
         };
         await db.quoteItems.add(newItem);
         const { subtotal, ...itemData } = newItem;
@@ -290,7 +398,51 @@ export function useQuoteItems(quoteId?: string) {
         if (!current) return;
 
         const updated = { ...current, ...updates };
-        updated.subtotal = updated.cantidad * updated.precio_unitario;
+
+        // If quantity changed, re-calculate pricing? 
+        // Plan says: "no recalcular automáticamente líneas existentes si luego cambian descuentos/listas"
+        // But usually if I change QTY, volume discount SHOULD update.
+        // Let's implement Recalc on Quantity change for best UX
+        if (updates.cantidad && updates.cantidad !== current.cantidad) {
+            let pricing = null;
+            try {
+                const parentQuote = await db.quotes.get(current.cotizacion_id);
+                if (parentQuote) {
+                    const opp = await db.opportunities.get(parentQuote.opportunity_id);
+                    if (opp && opp.account_id) {
+                        const acc = await db.accounts.get(opp.account_id);
+                        if (acc) {
+                            pricing = await fetchPricing(current.producto_id, acc.canal_id, updated.cantidad);
+                        }
+                    }
+                }
+            } catch (e) { }
+
+            if (pricing) {
+                updated.precio_unitario = pricing.base_price;
+                updated.max_discount_pct = pricing.discount_pct;
+
+                // Cap Discount if needed
+                if ((updated.discount_pct || 0) > pricing.discount_pct) {
+                    updated.discount_pct = pricing.discount_pct;
+                }
+
+                // Recalc Final Price
+                const currentDiscount = updated.discount_pct !== undefined ? updated.discount_pct : (current.discount_pct || 0);
+                updated.final_unit_price = updated.precio_unitario * (1 - currentDiscount / 100);
+            }
+        }
+
+        // Recalc subtotal if anything changed
+        // Ensure we rely on updated fields or fallbacks
+        const currentPrice = updated.precio_unitario !== undefined ? updated.precio_unitario : current.precio_unitario;
+        const currentDiscount = updated.discount_pct !== undefined ? updated.discount_pct : (current.discount_pct || 0);
+
+        // Always recalc final unit price just in case
+        if (!updated.final_unit_price) {
+            updated.final_unit_price = currentPrice * (1 - currentDiscount / 100);
+        }
+        updated.subtotal = updated.cantidad * updated.final_unit_price;
 
         await db.quoteItems.update(itemId, updated);
         const { subtotal, ...updateData } = updated;

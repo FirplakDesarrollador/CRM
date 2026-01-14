@@ -45,7 +45,14 @@ export class SyncEngine {
         } finally {
             this.isSyncing = false;
             useSyncStore.getState().setSyncing(false);
-            this.updatePendingCount();
+            await this.updatePendingCount();
+
+            // Check if more items arrived during sync and retry
+            const remainingCount = await db.outbox.where('status').anyOf(['PENDING', 'FAILED']).count();
+            if (remainingCount > 0 && navigator.onLine) {
+                console.log(`[Sync] ${remainingCount} items still pending, scheduling retry...`);
+                setTimeout(() => this.triggerSync(), 1000);
+            }
         }
     }
 
@@ -148,52 +155,6 @@ export class SyncEngine {
             }
         }
 
-        // 3.2 Validate required FKs for child tables to prevent NOT NULL violations
-        const requiredFKs: Record<string, string[]> = {
-            'CRM_CotizacionItems': ['cotizacion_id'],
-            'CRM_Cotizaciones': ['opportunity_id']
-        };
-
-        for (const [table, requiredFields] of Object.entries(requiredFKs)) {
-            if (batches[table]) {
-                const idsInBatch = Array.from(new Set(batches[table].map(u => u.id)));
-                const invalidIds: string[] = [];
-
-                for (const id of idsInBatch) {
-                    for (const field of requiredFields) {
-                        const fieldEntry = batches[table].find(u => u.id === id && u.field === field);
-                        const val = fieldEntry?.value;
-                        const isValid = val !== null && val !== undefined && val !== '';
-
-                        if (!isValid) {
-                            console.warn(`[Sync] Skipping ${table} id=${id}: missing required field '${field}'`);
-                            invalidIds.push(id);
-                            break;
-                        }
-                    }
-                }
-
-                // Remove invalid entries from the batch
-                if (invalidIds.length > 0) {
-                    batches[table] = batches[table].filter(u => !invalidIds.includes(u.id));
-
-                    // Mark as FAILED in outbox
-                    const idsToFail = pending
-                        .filter(i => i.entity_type === table && invalidIds.includes(i.entity_id))
-                        .map(i => i.id);
-
-                    await db.outbox.where('id').anyOf(idsToFail).modify({
-                        status: 'FAILED',
-                        error: 'Missing required FK fields - record corrupted'
-                    });
-                }
-
-                // If batch is now empty, remove it
-                if (batches[table].length === 0) {
-                    delete batches[table];
-                }
-            }
-        }
 
         // 3.3 Process batches by priority
         const sortedTables = Object.entries(batches).sort(([tableA], [tableB]) => {
@@ -280,22 +241,42 @@ export class SyncEngine {
             if (accountsError) throw accountsError;
 
             if (accounts && accounts.length > 0) {
-                await db.accounts.clear();
-                await db.accounts.bulkPut(accounts.map((a: any) => ({
-                    id: a.id,
-                    nombre: a.nombre,
-                    nit: a.nit,
-                    nit_base: a.nit_base,
-                    id_cuenta_principal: a.id_cuenta_principal,
-                    canal_id: a.canal_id || 'DIST_NAC', // Default para robustez
-                    telefono: a.telefono,
-                    direccion: a.direccion,
-                    ciudad: a.ciudad,
-                    created_by: a.created_by,
-                    updated_by: a.updated_by,
-                    updated_at: a.updated_at
-                })));
-                console.log(`[Sync] Pulled ${accounts.length} accounts.`);
+                // Get all pending entity IDs for this table
+                const pendingAccountIds = new Set(
+                    (await db.outbox
+                        .where('entity_type').equals('CRM_Cuentas')
+                        .and(item => item.status === 'PENDING' || item.status === 'SYNCING')
+                        .toArray()
+                    ).map(item => item.entity_id)
+                );
+
+                let mergedCount = 0;
+                let skippedCount = 0;
+
+                for (const a of accounts) {
+                    if (pendingAccountIds.has(a.id)) {
+                        skippedCount++;
+                        continue;
+                    }
+
+                    await db.accounts.put({
+                        id: a.id,
+                        nombre: a.nombre,
+                        nit: a.nit,
+                        nit_base: a.nit_base,
+                        id_cuenta_principal: a.id_cuenta_principal,
+                        canal_id: a.canal_id || 'DIST_NAC',
+                        es_premium: a.es_premium ?? false,
+                        telefono: a.telefono,
+                        direccion: a.direccion,
+                        ciudad: a.ciudad,
+                        created_by: a.created_by,
+                        updated_by: a.updated_by,
+                        updated_at: a.updated_at
+                    });
+                    mergedCount++;
+                }
+                console.log(`[Sync] Merged ${mergedCount} accounts (${skippedCount} with pending changes skipped).`);
             }
 
             // Pull Phases (CRM_FasesOportunidad)
@@ -343,7 +324,7 @@ export class SyncEngine {
                 console.log(`[Sync] Pulled ${contacts.length} contacts.`);
             }
 
-            // Pull Opportunities (CRM_Oportunidades)
+            // Pull Opportunities (CRM_Oportunidades) - SMART MERGE
             const { data: opportunities, error: oppsError } = await supabase
                 .from('CRM_Oportunidades')
                 .select('*')
@@ -352,12 +333,29 @@ export class SyncEngine {
             if (oppsError) throw oppsError;
 
             if (opportunities && opportunities.length > 0) {
-                await db.opportunities.clear();
-                await db.opportunities.bulkPut(opportunities);
-                console.log(`[Sync] Pulled ${opportunities.length} opportunities.`);
+                const pendingOppIds = new Set(
+                    (await db.outbox
+                        .where('entity_type').equals('CRM_Oportunidades')
+                        .and(item => item.status === 'PENDING' || item.status === 'SYNCING')
+                        .toArray()
+                    ).map(item => item.entity_id)
+                );
+
+                let mergedCount = 0;
+                let skippedCount = 0;
+
+                for (const opp of opportunities) {
+                    if (pendingOppIds.has(opp.id)) {
+                        skippedCount++;
+                        continue;
+                    }
+                    await db.opportunities.put(opp);
+                    mergedCount++;
+                }
+                console.log(`[Sync] Merged ${mergedCount} opportunities (${skippedCount} with pending changes skipped).`);
             }
 
-            // Pull Quotes (CRM_Cotizaciones)
+            // Pull Quotes (CRM_Cotizaciones) - SMART MERGE
             const { data: quotes, error: quotesError } = await supabase
                 .from('CRM_Cotizaciones')
                 .select('*')
@@ -366,29 +364,51 @@ export class SyncEngine {
             if (quotesError) throw quotesError;
 
             if (quotes && quotes.length > 0) {
-                await db.quotes.clear();
-                await db.quotes.bulkPut(quotes.map((q: any) => ({
-                    id: q.id,
-                    opportunity_id: q.opportunity_id,
-                    numero_cotizacion: q.numero_cotizacion,
-                    total_amount: q.total_amount,
-                    currency_id: q.currency_id,
-                    status: q.status,
-                    is_winner: q.is_winner,
-                    fecha_minima_requerida: q.fecha_minima_requerida,
-                    fecha_facturacion: q.fecha_facturacion,
-                    tipo_facturacion: q.tipo_facturacion,
-                    notas_sap: q.notas_sap,
-                    formas_pago: q.formas_pago,
-                    facturacion_electronica: q.facturacion_electronica,
-                    created_by: q.created_by,
-                    updated_by: q.updated_by,
-                    updated_at: q.updated_at
-                })));
-                console.log(`[Sync] Pulled ${quotes.length} quotes.`);
+                // Get all pending entity IDs for this table
+                const pendingQuoteIds = new Set(
+                    (await db.outbox
+                        .where('entity_type').equals('CRM_Cotizaciones')
+                        .and(item => item.status === 'PENDING' || item.status === 'SYNCING')
+                        .toArray()
+                    ).map(item => item.entity_id)
+                );
+
+                let mergedCount = 0;
+                let skippedCount = 0;
+
+                for (const q of quotes) {
+                    if (pendingQuoteIds.has(q.id)) {
+                        skippedCount++;
+                        continue; // Skip - local has pending changes
+                    }
+
+                    await db.quotes.put({
+                        id: q.id,
+                        opportunity_id: q.opportunity_id,
+                        numero_cotizacion: q.numero_cotizacion,
+                        total_amount: q.total_amount,
+                        currency_id: q.currency_id,
+                        status: q.status,
+                        is_winner: q.is_winner,
+                        es_pedido: q.es_pedido,
+                        fecha_minima_requerida: q.fecha_minima_requerida,
+                        fecha_facturacion: q.fecha_facturacion,
+                        tipo_facturacion: q.tipo_facturacion,
+                        notas_sap: q.notas_sap,
+                        formas_pago: q.formas_pago,
+                        facturacion_electronica: q.facturacion_electronica,
+                        orden_compra: q.orden_compra,
+                        incoterm: q.incoterm,
+                        created_by: q.created_by,
+                        updated_by: q.updated_by,
+                        updated_at: q.updated_at
+                    });
+                    mergedCount++;
+                }
+                console.log(`[Sync] Merged ${mergedCount} quotes (${skippedCount} with pending changes skipped).`);
             }
 
-            // Pull Quote Items (CRM_CotizacionItems)
+            // Pull Quote Items (CRM_CotizacionItems) - SMART MERGE
             const { data: quoteItems, error: itemsError } = await supabase
                 .from('CRM_CotizacionItems')
                 .select('*')
@@ -397,20 +417,42 @@ export class SyncEngine {
             if (itemsError) throw itemsError;
 
             if (quoteItems && quoteItems.length > 0) {
-                await db.quoteItems.clear();
-                await db.quoteItems.bulkPut(quoteItems.map((i: any) => ({
-                    id: i.id,
-                    cotizacion_id: i.cotizacion_id,
-                    producto_id: i.producto_id,
-                    cantidad: i.cantidad,
-                    precio_unitario: i.precio_unitario,
-                    subtotal: i.subtotal,
-                    descripcion_linea: i.descripcion_linea,
-                    created_by: i.created_by,
-                    updated_by: i.updated_by,
-                    updated_at: i.updated_at
-                })));
-                console.log(`[Sync] Pulled ${quoteItems.length} quote items.`);
+                // Get all pending entity IDs for this table
+                const pendingItemIds = new Set(
+                    (await db.outbox
+                        .where('entity_type').equals('CRM_CotizacionItems')
+                        .and(item => item.status === 'PENDING' || item.status === 'SYNCING')
+                        .toArray()
+                    ).map(item => item.entity_id)
+                );
+
+                let mergedCount = 0;
+                let skippedCount = 0;
+
+                for (const i of quoteItems) {
+                    if (pendingItemIds.has(i.id)) {
+                        skippedCount++;
+                        continue; // Skip - local has pending changes
+                    }
+
+                    await db.quoteItems.put({
+                        id: i.id,
+                        cotizacion_id: i.cotizacion_id,
+                        producto_id: i.producto_id,
+                        cantidad: i.cantidad,
+                        precio_unitario: i.precio_unitario,
+                        discount_pct: i.discount_pct,
+                        max_discount_pct: i.max_discount_pct,
+                        final_unit_price: i.final_unit_price,
+                        subtotal: i.subtotal,
+                        descripcion_linea: i.descripcion_linea,
+                        created_by: i.created_by,
+                        updated_by: i.updated_by,
+                        updated_at: i.updated_at
+                    });
+                    mergedCount++;
+                }
+                console.log(`[Sync] Merged ${mergedCount} quote items (${skippedCount} with pending changes skipped).`);
             }
 
             // Pull Activities (CRM_Actividades)

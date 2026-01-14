@@ -83,6 +83,12 @@ export default function LoginPage() {
             }
 
             console.log("Login: Success! Session created for:", authData.user?.email);
+
+            // Cache user ID for offline mode
+            if (authData.user?.id) {
+                localStorage.setItem('cachedUserId', authData.user.id);
+            }
+
             router.push("/");
         } catch (err: any) {
             console.error("Login: Exception:", err);
