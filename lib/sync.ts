@@ -319,7 +319,7 @@ export class SyncEngine {
                 console.log(`[Sync] Pulled ${phases.length} phases.`);
             }
 
-            // Pull Contacts (CRM_Contactos)
+            // Pull Contacts (CRM_Contactos) - SMART MERGE
             const { data: contacts, error: contactsError } = await supabase
                 .from('CRM_Contactos')
                 .select('*')
@@ -328,20 +328,38 @@ export class SyncEngine {
             if (contactsError) throw contactsError;
 
             if (contacts && contacts.length > 0) {
-                await db.contacts.clear();
-                await db.contacts.bulkPut(contacts.map((c: any) => ({
-                    id: c.id,
-                    account_id: c.account_id,
-                    nombre: c.nombre,
-                    cargo: c.cargo,
-                    email: c.email,
-                    telefono: c.telefono,
-                    es_principal: c.es_principal,
-                    created_by: c.created_by,
-                    updated_by: c.updated_by,
-                    updated_at: c.updated_at
-                })));
-                console.log(`[Sync] Pulled ${contacts.length} contacts.`);
+                // Smart merge: Skip records with pending changes
+                const pendingContactIds = new Set(
+                    (await db.outbox
+                        .where('entity_type').equals('CRM_Contactos')
+                        .and(item => item.status === 'PENDING' || item.status === 'SYNCING')
+                        .toArray()
+                    ).map(item => item.entity_id)
+                );
+
+                let mergedCount = 0;
+                let skippedCount = 0;
+
+                for (const c of contacts) {
+                    if (pendingContactIds.has(c.id)) {
+                        skippedCount++;
+                        continue;
+                    }
+                    await db.contacts.put({
+                        id: c.id,
+                        account_id: c.account_id,
+                        nombre: c.nombre,
+                        cargo: c.cargo,
+                        email: c.email,
+                        telefono: c.telefono,
+                        es_principal: c.es_principal,
+                        created_by: c.created_by,
+                        updated_by: c.updated_by,
+                        updated_at: c.updated_at
+                    });
+                    mergedCount++;
+                }
+                console.log(`[Sync] Merged ${mergedCount} contacts (${skippedCount} with pending changes skipped).`);
             }
 
             // Pull Opportunities (CRM_Oportunidades) - SMART MERGE
@@ -475,7 +493,7 @@ export class SyncEngine {
                 console.log(`[Sync] Merged ${mergedCount} quote items (${skippedCount} with pending changes skipped).`);
             }
 
-            // Pull Activities (CRM_Actividades)
+            // Pull Activities (CRM_Actividades) - SMART MERGE
             const { data: activities, error: activitiesError } = await supabase
                 .from('CRM_Actividades')
                 .select('*')
@@ -484,9 +502,27 @@ export class SyncEngine {
             if (activitiesError) throw activitiesError;
 
             if (activities && activities.length > 0) {
-                await db.activities.clear();
-                await db.activities.bulkPut(activities);
-                console.log(`[Sync] Pulled ${activities.length} activities.`);
+                // Smart merge: Skip records with pending changes
+                const pendingActivityIds = new Set(
+                    (await db.outbox
+                        .where('entity_type').equals('CRM_Actividades')
+                        .and(item => item.status === 'PENDING' || item.status === 'SYNCING')
+                        .toArray()
+                    ).map(item => item.entity_id)
+                );
+
+                let mergedCount = 0;
+                let skippedCount = 0;
+
+                for (const a of activities) {
+                    if (pendingActivityIds.has(a.id)) {
+                        skippedCount++;
+                        continue;
+                    }
+                    await db.activities.put(a);
+                    mergedCount++;
+                }
+                console.log(`[Sync] Merged ${mergedCount} activities (${skippedCount} with pending changes skipped).`);
             }
 
             console.log('[Sync] Pull completed successfully.');
