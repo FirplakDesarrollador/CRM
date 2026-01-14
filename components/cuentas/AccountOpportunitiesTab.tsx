@@ -18,7 +18,15 @@ export default function AccountOpportunitiesTab({ accountId }: { accountId: stri
 
     return (
         <div className="pt-4 space-y-3">
-            <h3 className="text-sm font-bold text-slate-900 mb-4 px-1">Oportunidades Vinculadas</h3>
+            <div className="flex justify-between items-center mb-4 px-1">
+                <h3 className="text-sm font-bold text-slate-900">Oportunidades Vinculadas</h3>
+                <Link href={`/oportunidades/nueva?account_id=${accountId}`}>
+                    <button className="flex items-center gap-1.5 text-xs font-bold text-blue-600 hover:text-blue-700 bg-blue-50 px-2.5 py-1.5 rounded-lg transition-colors border border-blue-100">
+                        <Briefcase className="w-3.5 h-3.5" />
+                        Nueva Oportunidad
+                    </button>
+                </Link>
+            </div>
 
             {opportunities.length === 0 ? (
                 <div className="p-8 text-center border-2 border-dashed border-slate-200 rounded-xl bg-slate-50">
