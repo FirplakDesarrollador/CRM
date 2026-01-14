@@ -339,11 +339,17 @@ function StatRow({ label, value, icon: Icon }: StatRowProps) {
 function AdminSettings() {
     const { config, isAdmin, updateConfig, isLoading } = useConfig();
     const [minValue, setMinValue] = useState("");
+    const [minInactiveDays, setMinInactiveDays] = useState("");
     const [isSaving, setIsSaving] = useState(false);
 
     useEffect(() => {
         if (config.min_premium_order_value) {
             setMinValue(config.min_premium_order_value);
+        }
+        if (config.inactive_account_days) {
+            setMinInactiveDays(config.inactive_account_days);
+        } else {
+            setMinInactiveDays('90'); // default
         }
     }, [config]);
 
@@ -352,8 +358,10 @@ function AdminSettings() {
 
     const handleSave = async () => {
         setIsSaving(true);
-        const success = await updateConfig('min_premium_order_value', minValue);
-        if (success) alert('Configuración guardada correctamente');
+        const p1 = updateConfig('min_premium_order_value', minValue);
+        const p2 = updateConfig('inactive_account_days', minInactiveDays);
+        await Promise.all([p1, p2]);
+        alert('Configuración guardada correctamente');
         setIsSaving(false);
     };
 
@@ -370,6 +378,7 @@ function AdminSettings() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Min Premium Order */}
                 <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
                     <label className="block text-sm font-bold text-slate-700 mb-2">
                         Pedido Mínimo Cliente Premium (COP)
@@ -377,22 +386,46 @@ function AdminSettings() {
                     <p className="text-xs text-slate-500 mb-3">
                         Valor mínimo requerido en cotizaciones para clientes marcados como Premium. Si no se cumple, no podrán generar pedido.
                     </p>
-                    <div className="flex gap-2">
-                        <input
-                            type="number"
-                            className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-slate-900"
-                            value={minValue}
-                            onChange={(e) => setMinValue(e.target.value)}
-                        />
-                        <button
-                            onClick={handleSave}
-                            disabled={isSaving}
-                            className="bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-purple-700 disabled:opacity-50"
-                        >
-                            {isSaving ? "Guardando..." : "Guardar"}
-                        </button>
-                    </div>
+                    <input
+                        type="number"
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-slate-900 mb-2"
+                        value={minValue}
+                        onChange={(e) => setMinValue(e.target.value)}
+                    />
                 </div>
+
+                {/* Inactive Client Alert */}
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                    <label className="block text-sm font-bold text-slate-700 mb-2">
+                        Alerta Inactividad Cliente (Días)
+                    </label>
+                    <p className="text-xs text-slate-500 mb-3">
+                        Días sin interacción (actividades u oportunidades) para considerar un cliente como inactivo y generar alerta.
+                    </p>
+                    <input
+                        type="number"
+                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-slate-900 mb-2"
+                        value={minInactiveDays}
+                        onChange={(e) => setMinInactiveDays(e.target.value)}
+                    />
+                </div>
+            </div>
+
+            <div className="flex justify-end">
+                <button
+                    onClick={handleSave}
+                    disabled={isSaving}
+                    className="bg-purple-600 text-white px-6 py-2 rounded-xl text-sm font-bold hover:bg-purple-700 disabled:opacity-50 shadow-md shadow-purple-200 flex items-center gap-2"
+                >
+                    {isSaving ? (
+                        <>Guardando...</>
+                    ) : (
+                        <>
+                            <CheckCircle2 className="w-4 h-4" />
+                            Guardar Cambios
+                        </>
+                    )}
+                </button>
             </div>
         </div>
     );
