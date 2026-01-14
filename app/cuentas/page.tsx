@@ -13,11 +13,20 @@ function AccountsContent() {
     const [editingAccount, setEditingAccount] = useState<any>(null);
     const [search, setSearch] = useState("");
 
-    // Initialize search from URL
+    // Initialize search from URL and handle deep linking
     useEffect(() => {
         const query = searchParams.get('search');
         if (query) setSearch(query);
-    }, [searchParams]);
+
+        const id = searchParams.get('id');
+        if (id && accounts.length > 0) {
+            const acc = accounts.find(a => a.id === id);
+            if (acc) {
+                setEditingAccount(acc);
+                setShowCreate(false);
+            }
+        }
+    }, [searchParams, accounts]);
 
     const filtered = accounts.filter(a =>
         a.nombre.toLowerCase().includes(search.toLowerCase()) ||
