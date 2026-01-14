@@ -12,10 +12,13 @@ import {
     Info,
     AlertCircle,
     CheckCircle2,
-    HardDrive
+    HardDrive,
+    LogOut
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { cn } from '@/components/ui/utils';
+import { supabase } from '@/lib/supabase';
 import { useConfig } from '@/lib/hooks/useConfig';
 
 interface Stats {
@@ -27,9 +30,18 @@ interface Stats {
 }
 
 export default function ConfigPage() {
+    const router = useRouter();
     const { isSyncing, pendingCount, lastSyncTime, error, isPaused, setPaused } = useSyncStore();
     const [outboxItems, setOutboxItems] = useState<OutboxItem[]>([]);
     const [stats, setStats] = useState<Stats | null>(null);
+
+    const handleLogout = async () => {
+        if (confirm('¿Estás seguro de que deseas cerrar sesión?')) {
+            await supabase.auth.signOut();
+            localStorage.removeItem('cachedUserId');
+            router.push('/login');
+        }
+    };
 
     const fetchDebugInfo = async () => {
         const items = await db.outbox.toArray();
@@ -227,6 +239,22 @@ export default function ConfigPage() {
                     >
                         <AlertCircle className="w-4 h-4" />
                         Resetear Datos Locales (Hard Reset)
+                    </button>
+                </div>
+
+                {/* Session Card */}
+                <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-6">
+                    <div className="flex items-center gap-2">
+                        <LogOut className="w-5 h-5 text-slate-600" />
+                        <h3 className="font-bold text-slate-900">Sesión</h3>
+                    </div>
+                    <p className="text-sm text-slate-500">Administra tu acceso a la aplicación.</p>
+                    <button
+                        onClick={handleLogout}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-xl text-sm font-bold transition-colors border border-slate-200"
+                    >
+                        <LogOut className="w-4 h-4" />
+                        Cerrar Sesión
                     </button>
                 </div>
             </div>
