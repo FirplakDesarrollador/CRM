@@ -26,7 +26,8 @@ export class SyncEngine {
      * Main Sync Loop
      */
     async triggerSync() {
-        if (this.isSyncing || !navigator.onLine) return;
+        const { isPaused } = useSyncStore.getState();
+        if (this.isSyncing || !navigator.onLine || isPaused) return;
 
         this.isSyncing = true;
         useSyncStore.getState().setSyncing(true);
@@ -80,7 +81,7 @@ export class SyncEngine {
         const pending = await db.outbox
             .orderBy('field_timestamp')
             .filter(i => i.status === 'PENDING' || i.status === 'FAILED')
-            .limit(50)
+            .limit(500)
             .toArray();
 
         if (pending.length === 0) return;
@@ -135,6 +136,7 @@ export class SyncEngine {
                 const idsInBatch = Array.from(new Set(batches[table].map(u => u.id)));
 
                 for (const id of idsInBatch) {
+                    // 1. Fix Ownership
                     const ownerEntry = batches[table].find(u => u.id === id && u.field === ownerField);
                     const currentVal = ownerEntry?.value;
                     const isValid = typeof currentVal === 'string' && UUID_REGEX.test(currentVal);
@@ -149,6 +151,23 @@ export class SyncEngine {
                                 value: user.id,
                                 ts: now
                             });
+                        }
+                    }
+
+                    // 2. Fix Mandatory Fields for Activities (asunto)
+                    if (table === 'CRM_Actividades') {
+                        const asuntoEntry = batches[table].find(u => u.id === id && u.field === 'asunto');
+                        if (!asuntoEntry || !asuntoEntry.value) {
+                            if (asuntoEntry) {
+                                asuntoEntry.value = 'Nueva Actividad (Sync Repair)';
+                            } else {
+                                batches[table].push({
+                                    id: id,
+                                    field: 'asunto',
+                                    value: 'Nueva Actividad (Sync Repair)',
+                                    ts: now
+                                });
+                            }
                         }
                     }
                 }
@@ -190,7 +209,8 @@ export class SyncEngine {
                     message: err?.message || err,
                     details: err?.details,
                     hint: err?.hint,
-                    code: err?.code
+                    code: err?.code,
+                    updates_sample: updates.slice(0, 2)
                 });
                 // Revert status to FAILED
                 const idsToFail = pending
@@ -488,6 +508,8 @@ export class SyncEngine {
         const items: OutboxItem[] = [];
 
         for (const [field, value] of Object.entries(changes)) {
+            if (value === undefined) continue; // Skip undefined fields to avoid accidental nulls on server
+
             items.push({
                 id: uuidv4(),
                 entity_type: entityTable,

@@ -5,9 +5,10 @@ import { MobileNav } from "./MobileNav";
 import { TopBar } from "./TopBar";
 import { OfflineBanner } from "./OfflineBanner";
 import { useSyncStore } from "@/lib/store/sync";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { syncEngine } from "@/lib/sync";
 import { usePathname } from "next/navigation";
+import { cn } from "@/components/ui/utils";
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
     const setOnline = useSyncStore((state) => state.setOnline);
@@ -39,6 +40,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         }
     }, [isLoginPage]);
 
+    const [isCollapsed, setIsCollapsed] = useState(false);
+
     if (isLoginPage) {
         return <>{children}</>;
     }
@@ -46,10 +49,10 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     return (
         <div className="flex h-screen bg-slate-50 overflow-hidden">
             {/* Sidebar (Desktop) */}
-            <Sidebar />
+            <Sidebar isCollapsed={isCollapsed} toggleSidebar={() => setIsCollapsed(!isCollapsed)} />
 
             {/* Main Content Area */}
-            <div className="flex-1 flex flex-col md:ml-64 relative h-full overflow-hidden">
+            <div className="flex-1 flex flex-col relative h-full overflow-hidden">
                 <OfflineBanner />
                 <TopBar />
 
