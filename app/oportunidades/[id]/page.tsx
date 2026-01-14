@@ -9,6 +9,15 @@ import Link from "next/link";
 import { cn } from "@/components/ui/utils";
 import { db } from "@/lib/db";
 import { useLiveQuery } from "dexie-react-hooks";
+import {
+    Calendar as CalendarIcon,
+    CheckCircle2,
+    Circle,
+    Clock,
+    ListTodo
+} from "lucide-react";
+import { useActivities, LocalActivity } from "@/lib/hooks/useActivities";
+import { CreateActivityModal } from "@/components/activities/CreateActivityModal";
 
 export default function OpportunityDetailPage() {
     const params = useParams();
@@ -80,6 +89,10 @@ export default function OpportunityDetailPage() {
 
                 {activeTab === 'resumen' && (
                     <SummaryTab opportunity={opportunity} />
+                )}
+
+                {activeTab === 'actividades' && (
+                    <ActivitiesTab opportunityId={id} />
                 )}
             </div>
         </div>
@@ -521,6 +534,125 @@ function QuotesTab({ opportunityId, currency }: { opportunityId: string, currenc
                         );
                     })}
                 </div>
+            )}
+        </div>
+    );
+}
+
+function ActivitiesTab({ opportunityId }: { opportunityId: string }) {
+    const { activities, createActivity, updateActivity, toggleComplete } = useActivities(opportunityId);
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [selectedActivity, setSelectedActivity] = useState<LocalActivity | null>(null);
+    const { opportunities } = useOpportunities();
+
+    const sortedActivities = activities?.sort((a, b) => new Date(b.fecha_inicio).getTime() - new Date(a.fecha_inicio).getTime());
+
+    return (
+        <div className="space-y-4">
+            <div className="flex justify-between items-center bg-blue-50 p-4 rounded-lg border border-blue-100">
+                <div>
+                    <h3 className="font-bold text-blue-900">Actividades</h3>
+                    <p className="text-sm text-blue-700">Gestiona tareas y eventos para esta oportunidad.</p>
+                </div>
+                <button
+                    onClick={() => setIsModalOpen(true)}
+                    className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2"
+                >
+                    <Plus className="w-4 h-4" />
+                    Nueva Actividad
+                </button>
+            </div>
+
+            {(!sortedActivities || sortedActivities.length === 0) ? (
+                <div className="text-center py-12 bg-white rounded-xl border border-slate-200 text-slate-400">
+                    <div className="flex justify-center mb-3">
+                        <CalendarIcon className="w-10 h-10 text-slate-200" />
+                    </div>
+                    No hay actividades programadas. <br />
+                    Crea una tarea o evento para dar seguimiento.
+                </div>
+            ) : (
+                <div className="grid gap-4">
+                    {sortedActivities.map((act) => (
+                        <div
+                            key={act.id}
+                            className={cn(
+                                "group p-4 bg-white rounded-2xl border transition-all hover:shadow-md cursor-pointer",
+                                act.is_completed
+                                    ? "border-slate-100 opacity-75"
+                                    : act.tipo_actividad === 'TAREA'
+                                        ? "border-emerald-200 hover:border-emerald-300 hover:shadow-emerald-100"
+                                        : "border-blue-200 hover:border-blue-300 hover:shadow-blue-100"
+                            )}
+                            onClick={() => {
+                                setSelectedActivity(act);
+                                setIsModalOpen(true);
+                            }}
+                        >
+                            <div className="flex items-start gap-4">
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        toggleComplete(act.id, !act.is_completed);
+                                    }}
+                                    className="mt-1 transition-colors"
+                                >
+                                    {act.is_completed ? (
+                                        <CheckCircle2 className="w-6 h-6 text-emerald-500" />
+                                    ) : (
+                                        <Circle className="w-6 h-6 text-slate-300 hover:text-blue-400" />
+                                    )}
+                                </button>
+                                <div className="flex-1 min-w-0">
+                                    <div className="flex justify-between items-start">
+                                        <h4 className={cn(
+                                            "font-bold text-lg",
+                                            act.is_completed ? "text-slate-500 line-through" : "text-slate-900"
+                                        )}>
+                                            {act.asunto}
+                                        </h4>
+                                        {act.tipo_actividad === 'EVENTO' ? (
+                                            <div className="flex items-center gap-2 text-xs font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded-lg">
+                                                <Clock className="w-3.5 h-3.5" />
+                                                {new Date(act.fecha_inicio).toLocaleDateString()} {new Date(act.fecha_inicio).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                            </div>
+                                        ) : (
+                                            <div className="flex items-center gap-2 text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-1 rounded-lg">
+                                                <ListTodo className="w-3.5 h-3.5" />
+                                                Tarea {act.fecha_inicio && `- ${new Date(act.fecha_inicio).toLocaleDateString()}`}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {act.descripcion && (
+                                        <p className="text-sm text-slate-500 mt-1 line-clamp-2">{act.descripcion}</p>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {isModalOpen && (
+                <CreateActivityModal
+                    onClose={() => {
+                        setIsModalOpen(false);
+                        setSelectedActivity(null);
+                    }}
+                    onSubmit={(data: any) => {
+                        if (selectedActivity) {
+                            updateActivity(selectedActivity.id, data);
+                        } else {
+                            createActivity(data);
+                        }
+                        setIsModalOpen(false);
+                        setSelectedActivity(null);
+                    }}
+                    opportunities={opportunities}
+                    initialOpportunityId={opportunityId}
+                    initialData={selectedActivity}
+                />
             )}
         </div>
     );

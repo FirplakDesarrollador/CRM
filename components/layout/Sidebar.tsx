@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/components/ui/utils";
 import { FirplakLogo } from "./FirplakLogo";
 import { SyncStatus } from "./SyncStatus";
@@ -16,7 +16,9 @@ import {
     Settings,
     Users,
     LogOut,
-    Truck
+    Truck,
+    ChevronLeft,
+    ChevronRight
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -30,53 +32,102 @@ const NAV_ITEMS = [
     { label: "Configuración", href: "/configuracion", icon: Settings },
 ];
 
-export function Sidebar() {
+export interface SidebarProps {
+    isCollapsed: boolean;
+    toggleSidebar: () => void;
+}
+
+export function Sidebar({ isCollapsed, toggleSidebar }: SidebarProps) {
     const pathname = usePathname();
+    const router = useRouter();
+
+    const handleLogout = async () => {
+        if (confirm('¿Estás seguro de que deseas cerrar sesión?')) {
+            await supabase.auth.signOut();
+            localStorage.removeItem('cachedUserId');
+            router.push('/login');
+        }
+    };
 
     return (
-        <aside className="hidden md:flex flex-col w-64 bg-slate-900 text-white h-screen fixed left-0 top-0 border-r border-slate-800">
-            <div className="p-6 border-b border-slate-800">
-                <h1 className="text-xl font-bold bg-linear-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent">
-                    CRM FIRPLAK
-                </h1>
-                <p className="text-xs text-slate-400 mt-1">Version 1.0.0</p>
+        <aside
+            className={cn(
+                "hidden md:flex flex-col bg-white text-slate-900 h-screen border-r border-gray-200 shadow-sm transition-all duration-300 z-40 shrink-0",
+                isCollapsed ? "w-20" : "w-64"
+            )}
+        >
+            <div className={cn(
+                "border-b border-gray-200 flex flex-col items-center justify-center transition-all",
+                isCollapsed ? "p-4" : "p-6"
+            )}>
+                <div className="w-full flex justify-center mb-1">
+                    {isCollapsed ? (
+                        <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-xl">
+                            F
+                        </div>
+                    ) : (
+                        <FirplakLogo className="h-8 w-auto text-blue-600" />
+                    )}
+                </div>
+                {!isCollapsed && (
+                    <p className="text-xs text-slate-500 mt-2 font-medium text-center fade-in">Version 1.0.0</p>
+                )}
+
+                <button
+                    onClick={toggleSidebar}
+                    className={cn(
+                        "mt-4 flex items-center justify-center p-2 rounded-lg bg-slate-50 text-slate-500 hover:bg-slate-100 hover:text-blue-600 transition-colors border border-slate-200",
+                        isCollapsed ? "w-10 h-10" : "w-full gap-2"
+                    )}
+                    title={isCollapsed ? "Expandir" : "Colapsar"}
+                >
+                    {isCollapsed ? <ChevronRight className="w-5 h-5" /> : (
+                        <>
+                            <ChevronLeft className="w-4 h-4" />
+                            <span className="text-xs font-bold uppercase tracking-wider">Colapsar</span>
+                        </>
+                    )}
+                </button>
             </div>
 
-            <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
+            <nav className="flex-1 p-3 space-y-2 overflow-y-auto overflow-x-hidden">
                 {NAV_ITEMS.map((item) => {
                     const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
                     return (
                         <Link
                             key={item.href}
                             href={item.href}
+                            title={isCollapsed ? item.label : undefined}
                             className={cn(
                                 "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-sm font-medium",
                                 isActive
                                     ? "bg-blue-600 text-white shadow-md"
-                                    : "text-slate-400 hover:bg-slate-800 hover:text-white"
+                                    : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
+                                isCollapsed && "justify-center px-0 w-12 mx-auto"
                             )}
                         >
-                            <item.icon className="w-5 h-5" />
-                            {item.label}
+                            <item.icon className="w-5 h-5 shrink-0" />
+                            {!isCollapsed && <span className="whitespace-nowrap fade-in">{item.label}</span>}
                         </Link>
                     );
                 })}
             </nav>
 
-            <div className="px-4 border-t border-slate-800">
-                <SyncStatus />
+            <div className={cn("border-t border-gray-200", isCollapsed ? "p-2" : "px-4")}>
+                <SyncStatus isCollapsed={isCollapsed} />
             </div>
 
-            <div className="p-4 border-t border-slate-800">
+            <div className="p-4 border-t border-gray-200 flex flex-col gap-2">
                 <button
-                    onClick={async () => {
-                        await supabase.auth.signOut();
-                        window.location.href = '/login';
-                    }}
-                    className="flex items-center gap-3 px-3 py-2 text-sm font-medium text-slate-400 hover:text-red-400 w-full transition-colors"
+                    onClick={handleLogout}
+                    className={cn(
+                        "flex items-center gap-3 px-3 py-2 text-sm font-medium text-slate-600 hover:text-red-600 w-full transition-colors",
+                        isCollapsed && "justify-center px-0"
+                    )}
+                    title={isCollapsed ? "Cerrar Sesión" : undefined}
                 >
-                    <LogOut className="w-5 h-5" />
-                    Cerrar Sesión
+                    <LogOut className="w-5 h-5 shrink-0" />
+                    {!isCollapsed && <span className="whitespace-nowrap fade-in">Cerrar Sesión</span>}
                 </button>
             </div>
         </aside>
