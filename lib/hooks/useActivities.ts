@@ -1,21 +1,10 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '../db';
+import { db, LocalActivity } from '../db';
 import { syncEngine } from '../sync';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../supabase';
 
-export interface LocalActivity {
-    id: string;
-    opportunity_id?: string;
-    user_id: string;
-    tipo_actividad_id: number;
-    asunto: string;
-    descripcion?: string;
-    fecha_inicio: string;
-    fecha_fin: string;
-    is_completed: boolean;
-    updated_at: string;
-}
+export { type LocalActivity };
 
 export function useActivities(opportunityId?: string) {
     const activities = useLiveQuery(
@@ -38,23 +27,35 @@ export function useActivities(opportunityId?: string) {
         }
 
         if (!userId) throw new Error("No authenticated user (even offline)");
-
         const id = uuidv4();
         const newActivity: LocalActivity = {
             id,
             user_id: userId,
-            tipo_actividad_id: 1, // Default to a type
-            asunto: '',
-            fecha_inicio: new Date().toISOString(),
-            fecha_fin: new Date(Date.now() + 3600000).toISOString(),
-            is_completed: false,
-            updated_at: new Date().toISOString(),
-            ...data
+            tipo_actividad: data.tipo_actividad || 'EVENTO',
+            asunto: (data.asunto || 'Nueva Actividad').trim(),
+            fecha_inicio: data.fecha_inicio || new Date().toISOString(),
+            fecha_fin: data.fecha_fin || undefined,
+            is_completed: !!data.is_completed,
+            opportunity_id: data.opportunity_id || undefined,
+            updated_at: new Date().toISOString()
         };
 
-        await db.activities.add(newActivity);
-        await syncEngine.queueMutation('CRM_Actividades', id, newActivity);
+        // Ensure we don't have undefined fields that become null in JSON
+        const cleanActivity = Object.fromEntries(
+            Object.entries(newActivity).filter(([_, v]) => v !== undefined)
+        );
+
+        await db.activities.add(cleanActivity as LocalActivity);
+        await syncEngine.queueMutation('CRM_Actividades', id, cleanActivity);
         return id;
+    };
+
+    const updateActivity = async (id: string, data: Partial<LocalActivity>) => {
+        const updated_at = new Date().toISOString();
+        const changes = { ...data, updated_at };
+
+        await db.activities.update(id, changes);
+        await syncEngine.queueMutation('CRM_Actividades', id, changes);
     };
 
     const toggleComplete = async (id: string, isCompleted: boolean) => {
@@ -66,6 +67,7 @@ export function useActivities(opportunityId?: string) {
     return {
         activities,
         createActivity,
+        updateActivity,
         toggleComplete
     };
 }

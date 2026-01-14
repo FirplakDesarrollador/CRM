@@ -30,6 +30,7 @@ export interface LocalCuenta {
     ciudad?: string;
     // ... other fields optional for now in local definition, or use 'any' schema
     _sync_metadata?: any;
+    created_at?: string;
     created_by?: string;
     updated_by?: string;
     updated_at?: string;
@@ -121,7 +122,7 @@ export class CRMFirplakDB extends Dexie {
     contacts!: Table<LocalContact, string>;
     quotes!: Table<LocalQuote, string>;
     quoteItems!: Table<LocalQuoteItem, string>;
-    activities!: Table<any, string>;
+    activities!: Table<any, string>; // We will stricter type this below
     phases!: Table<LocalFase, number>; // Local table
 
     constructor() {
@@ -134,10 +135,24 @@ export class CRMFirplakDB extends Dexie {
             contacts: 'id, account_id, email',
             quotes: 'id, opportunity_id, status, es_pedido', // Added es_pedido index
             quoteItems: 'id, cotizacion_id',
-            activities: 'id, opportunity_id, user_id, fecha_inicio',
+            activities: 'id, opportunity_id, user_id, fecha_inicio, tipo_actividad', // Added index
             phases: 'id, canal_id, orden'
         });
     }
+}
+
+export interface LocalActivity {
+    id: string;
+    asunto: string;
+    descripcion?: string;
+    fecha_inicio: string;
+    fecha_fin?: string;
+    tipo_actividad: 'TAREA' | 'EVENTO';
+    is_completed: boolean;
+    opportunity_id?: string;
+    user_id?: string;
+    created_at?: string;
+    updated_at?: string;
 }
 
 export const db = new CRMFirplakDB();

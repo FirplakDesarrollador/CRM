@@ -6,7 +6,7 @@ import * as z from "zod";
 import { useOpportunities } from "@/lib/hooks/useOpportunities";
 import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronRight, Check } from "lucide-react";
 import { AccountForm } from "@/components/cuentas/AccountForm";
 import { useProductSearch, PriceListProduct } from "@/lib/hooks/useProducts";
@@ -62,6 +62,22 @@ export default function CreateOpportunityWizard() {
             items: []
         }
     });
+
+    const searchParams = useSearchParams();
+
+    // Auto-select account from URL param and jump to step 1
+    useEffect(() => {
+        const accountId = searchParams.get('account_id');
+        if (accountId && accounts.length > 0) {
+            const acc = accounts.find(a => a.id === accountId);
+            if (acc) {
+                setValue("account_id", acc.id);
+                setSelectedAccount(acc);
+                setAccountSearchTerm(acc.nombre);
+                setStep(1); // Advance to "Datos del Negocio"
+            }
+        }
+    }, [searchParams, accounts, setValue]);
 
     const { products: searchResults, isLoading: isSearching } = useProductSearch(searchTerm);
 

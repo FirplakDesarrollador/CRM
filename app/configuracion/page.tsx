@@ -27,7 +27,7 @@ interface Stats {
 }
 
 export default function ConfigPage() {
-    const { isSyncing, pendingCount, lastSyncTime, error } = useSyncStore();
+    const { isSyncing, pendingCount, lastSyncTime, error, isPaused, setPaused } = useSyncStore();
     const [outboxItems, setOutboxItems] = useState<OutboxItem[]>([]);
     const [stats, setStats] = useState<Stats | null>(null);
 
@@ -71,7 +71,20 @@ export default function ConfigPage() {
     };
 
     const forceSync = () => {
+        if (isPaused) {
+            alert('La sincronización está pausada. Reanúdala para sincronizar.');
+            return;
+        }
         syncEngine.triggerSync();
+    };
+
+    const togglePause = () => {
+        const newState = !isPaused;
+        setPaused(newState);
+        if (!newState) {
+            // If resuming, trigger a sync
+            setTimeout(() => syncEngine.triggerSync(), 500);
+        }
     };
 
     return (
@@ -95,13 +108,30 @@ export default function ConfigPage() {
                             <RefreshCw className={cn("w-5 h-5 text-blue-600", isSyncing && "animate-spin")} />
                             <h3 className="font-bold text-slate-900 text-lg">Sincronización</h3>
                         </div>
-                        <button
-                            onClick={forceSync}
-                            disabled={isSyncing}
-                            className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-md shadow-blue-100 transition-all flex items-center gap-2"
-                        >
-                            {isSyncing ? "Sincronizando..." : "Sincronizar Ahora"}
-                        </button>
+                        <div className="flex items-center gap-3">
+                            <button
+                                onClick={togglePause}
+                                className={cn(
+                                    "px-4 py-2 rounded-xl text-sm font-bold transition-all flex items-center gap-2 border",
+                                    isPaused
+                                        ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
+                                        : "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100"
+                                )}
+                            >
+                                {isPaused ? (
+                                    <> <RefreshCw className="w-4 h-4" /> Reanudar </>
+                                ) : (
+                                    <> <RefreshCw className="w-4 h-4" /> Pausar </>
+                                )}
+                            </button>
+                            <button
+                                onClick={forceSync}
+                                disabled={isSyncing || isPaused}
+                                className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-md shadow-blue-100 transition-all flex items-center gap-2"
+                            >
+                                {isSyncing ? "Sincronizando..." : "Sincronizar Ahora"}
+                            </button>
+                        </div>
                     </div>
 
                     <div className="p-6 space-y-6">
@@ -113,15 +143,27 @@ export default function ConfigPage() {
                                 </p>
                             </div>
                             <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Pendientes de Envío</p>
+                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Estado</p>
                                 <p className={cn(
                                     "text-lg font-bold",
-                                    pendingCount > 0 ? "text-blue-600" : "text-emerald-600"
+                                    isPaused ? "text-amber-600" : "text-emerald-600"
                                 )}>
-                                    {pendingCount} registros
+                                    {isPaused ? 'Pausado' : 'Activo'}
                                 </p>
                             </div>
                         </div>
+
+                        {isPaused && (
+                            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-start gap-3">
+                                <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                                <div className="space-y-1">
+                                    <p className="text-sm font-bold text-amber-900">Sincronización Pausada</p>
+                                    <p className="text-xs text-amber-700 leading-relaxed">
+                                        Los cambios locales se guardarán pero no se enviarán a la nube hasta que reanudes la sincronización.
+                                    </p>
+                                </div>
+                            </div>
+                        )}
 
                         {error && (
                             <div className="bg-red-50 border border-red-200 rounded-2xl p-4 flex items-start gap-3">
