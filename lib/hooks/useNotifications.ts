@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useActivities } from './useActivities';
 import { useOpportunities } from './useOpportunities';
 import { useAccounts } from './useAccounts';
+import { useConfig } from './useConfig';
 
 export type NotificationType =
     | 'ACTIVITY_OVERDUE'
@@ -24,13 +25,17 @@ export function useNotifications() {
     const { activities } = useActivities();
     const { opportunities } = useOpportunities();
     const { accounts } = useAccounts();
+    const { config } = useConfig();
 
     const notifications = useMemo(() => {
         const items: NotificationItem[] = [];
         const now = new Date();
         const todayStr = now.toISOString().split('T')[0];
-        const threeMonthsAgo = new Date();
-        threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+
+        // Get configured days or default to 90 (3 months)
+        const inactiveDaysDetails = parseInt(config.inactive_account_days || '90');
+        const inactiveThresholdDate = new Date();
+        inactiveThresholdDate.setDate(inactiveThresholdDate.getDate() - inactiveDaysDetails);
 
         // 1. Activities
         if (activities) {
@@ -103,7 +108,7 @@ export function useNotifications() {
             });
         }
 
-        // 3. Inactive Clients (> 3 months without activity/opportunity update)
+        // 3. Inactive Clients (Dynamic threshold)
         if (accounts && activities && opportunities) {
             accounts.forEach(acc => {
                 // Find latest interaction date
@@ -119,11 +124,6 @@ export function useNotifications() {
                     if (oppDate > lastInteraction) lastInteraction = oppDate;
                 });
 
-                // Ideally we check activities linked to those opps too
-                // For simplicity, we can assume if an opp is updated, that's an interaction.
-                // But let's also check if any activity is directly linked to this account (if model supports it)
-                // or via its opportunities.
-
                 const accountOppIds = accountOpps.map(o => o.id);
                 const accountActivities = activities.filter(a => a.opportunity_id && accountOppIds.includes(a.opportunity_id));
 
@@ -132,12 +132,12 @@ export function useNotifications() {
                     if (actDate > lastInteraction) lastInteraction = actDate;
                 });
 
-                if (lastInteraction < threeMonthsAgo) {
+                if (lastInteraction < inactiveThresholdDate) {
                     items.push({
                         id: `acc-inactive-${acc.id}`,
                         type: 'CLIENT_INACTIVE',
                         title: 'Cliente Inactivo',
-                        subtitle: `${acc.nombre} (Sin actividad > 3 meses)`,
+                        subtitle: `${acc.nombre} (Sin actividad > ${inactiveDaysDetails} días)`,
                         date: lastInteraction.toISOString(),
                         entityId: acc.id,
                         link: `/cuentas?id=${acc.id}` // Or specific account detail if available
@@ -156,7 +156,7 @@ export function useNotifications() {
             return 0;
         });
 
-    }, [activities, opportunities, accounts]);
+    }, [activities, opportunities, accounts, config]);
 
     return { notifications, count: notifications.length };
 }

@@ -508,7 +508,8 @@ export class SyncEngine {
         const items: OutboxItem[] = [];
 
         for (const [field, value] of Object.entries(changes)) {
-            if (value === undefined) continue; // Skip undefined fields to avoid accidental nulls on server
+            if (value === undefined) continue; // Skip undefined fields
+            if (field === '_sync_metadata') continue; // Skip sync metadata
 
             items.push({
                 id: uuidv4(),
