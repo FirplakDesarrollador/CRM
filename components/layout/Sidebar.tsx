@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/components/ui/utils";
 import { FirplakLogo } from "./FirplakLogo";
 import { SyncStatus } from "./SyncStatus";
+import { supabase } from "@/lib/supabase";
 import {
     Home,
     Briefcase,
@@ -38,6 +39,15 @@ export interface SidebarProps {
 
 export function Sidebar({ isCollapsed, toggleSidebar }: SidebarProps) {
     const pathname = usePathname();
+    const router = useRouter();
+
+    const handleLogout = async () => {
+        if (confirm('¿Estás seguro de que deseas cerrar sesión?')) {
+            await supabase.auth.signOut();
+            localStorage.removeItem('cachedUserId');
+            router.push('/login');
+        }
+    };
 
     return (
         <aside
@@ -109,6 +119,7 @@ export function Sidebar({ isCollapsed, toggleSidebar }: SidebarProps) {
 
             <div className="p-4 border-t border-gray-200 flex flex-col gap-2">
                 <button
+                    onClick={handleLogout}
                     className={cn(
                         "flex items-center gap-3 px-3 py-2 text-sm font-medium text-slate-600 hover:text-red-600 w-full transition-colors",
                         isCollapsed && "justify-center px-0"
