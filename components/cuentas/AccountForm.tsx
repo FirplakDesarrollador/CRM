@@ -7,6 +7,7 @@ import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useState, useEffect } from "react";
 import { Loader2, User, Building2 } from "lucide-react";
 import { LocalCuenta } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 import AccountContactsTab from "./AccountContactsTab";
 import AccountOpportunitiesTab from "./AccountOpportunitiesTab";
 import { Briefcase } from "lucide-react";
@@ -33,8 +34,22 @@ interface AccountFormProps {
 }
 
 export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) {
-    const { createAccount, updateAccount, accounts } = useAccounts();
+    const { createAccount, updateAccount } = useAccounts();
+    const [parents, setParents] = useState<any[]>([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
+
+    // Fetch potential parents (server-side lite fetch)
+    useEffect(() => {
+        supabase
+            .from('CRM_Cuentas')
+            .select('id, nombre, nit_base')
+            .is('id_cuenta_principal', null) // Only parents
+            .order('nombre')
+            .limit(100)
+            .then(({ data }) => {
+                if (data) setParents(data);
+            });
+    }, []);
 
     // Tab State
     const [activeTab, setActiveTab] = useState<'info' | 'contacts' | 'opportunities'>('info');
@@ -81,12 +96,14 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
     const isChild = watch("is_child");
     const selectedParentId = watch("id_cuenta_principal");
 
-    // Filter possible parents
-    const potentialParents = accounts.filter(a => !a.id_cuenta_principal && a.id !== account?.id);
+
+
+    // Filter possible parents (exclude self)
+    const potentialParents = parents.filter(p => p.id !== account?.id);
 
     const handleParentChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
         const parentId = e.target.value;
-        const parent = accounts.find(a => a.id === parentId);
+        const parent = parents.find(a => a.id === parentId);
         if (parent) {
             setValue("nit_base", parent.nit_base || "");
         }
@@ -97,7 +114,7 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
         try {
             const formData = data;
             if (formData.is_child && formData.id_cuenta_principal) {
-                const parent = accounts.find(a => a.id === formData.id_cuenta_principal);
+                const parent = parents.find(a => a.id === formData.id_cuenta_principal);
                 if (parent) formData.nit_base = parent.nit_base || "";
             }
 
@@ -245,7 +262,7 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                                 ))}
                             </select>
                             <p className="text-xs text-slate-500">
-                                Heredará el NIT base: {selectedParentId ? accounts.find(a => a.id === selectedParentId)?.nit_base : "..."}
+                                Heredará el NIT base: {selectedParentId ? parents.find(a => a.id === selectedParentId)?.nit_base : "..."}
                             </p>
                         </div>
                     ) : (

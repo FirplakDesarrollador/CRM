@@ -253,6 +253,8 @@ export class SyncEngine {
 
         try {
             // Pull Accounts (CRM_Cuentas)
+            // PERF OPTIMIZATION: Disable full sync.
+            /*
             const { data: accounts, error: accountsError } = await supabase
                 .from('CRM_Cuentas')
                 .select('*')
@@ -298,6 +300,7 @@ export class SyncEngine {
                 }
                 console.log(`[Sync] Merged ${mergedCount} accounts (${skippedCount} with pending changes skipped).`);
             }
+            */
 
             // Pull Phases (CRM_FasesOportunidad)
             const { data: phases, error: phasesError } = await supabase
@@ -320,6 +323,8 @@ export class SyncEngine {
             }
 
             // Pull Contacts (CRM_Contactos) - SMART MERGE
+            // PERF OPTIMIZATION: Disable full sync. Only sync by demand or recents in future.
+            /*
             const { data: contacts, error: contactsError } = await supabase
                 .from('CRM_Contactos')
                 .select('*')
@@ -361,8 +366,11 @@ export class SyncEngine {
                 }
                 console.log(`[Sync] Merged ${mergedCount} contacts (${skippedCount} with pending changes skipped).`);
             }
+            */
 
             // Pull Opportunities (CRM_Oportunidades) - SMART MERGE
+            // PERF OPTIMIZATION: Disable full sync.
+            /*
             const { data: opportunities, error: oppsError } = await supabase
                 .from('CRM_Oportunidades')
                 .select('*')
@@ -392,8 +400,11 @@ export class SyncEngine {
                 }
                 console.log(`[Sync] Merged ${mergedCount} opportunities (${skippedCount} with pending changes skipped).`);
             }
+            */
 
             // Pull Quotes (CRM_Cotizaciones) - SMART MERGE
+            // PERF OPTIMIZATION: Disable full sync.
+            /*
             const { data: quotes, error: quotesError } = await supabase
                 .from('CRM_Cotizaciones')
                 .select('*')
@@ -445,6 +456,7 @@ export class SyncEngine {
                 }
                 console.log(`[Sync] Merged ${mergedCount} quotes (${skippedCount} with pending changes skipped).`);
             }
+            */
 
             // Pull Quote Items (CRM_CotizacionItems) - SMART MERGE
             const { data: quoteItems, error: itemsError } = await supabase

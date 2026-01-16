@@ -1,6 +1,7 @@
 "use client";
 
 import { useForm } from "react-hook-form";
+import { useEffect } from "react";
 import { CalendarClock, ListTodo } from "lucide-react";
 import { cn } from "@/components/ui/utils";
 
@@ -12,6 +13,19 @@ interface CreateActivityModalProps {
     initialData?: any;
 }
 
+// Helper to format date for datetime-local input (YYYY-MM-DDTHH:mm) in LOCAL time
+function toLocalISO(dateSource: Date | string | undefined) {
+    if (!dateSource) return "";
+    const d = typeof dateSource === 'string' ? new Date(dateSource) : dateSource;
+    if (isNaN(d.getTime())) return "";
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
 export function CreateActivityModal({ onClose, onSubmit, opportunities, initialOpportunityId, initialData }: CreateActivityModalProps) {
     const isEditing = !!initialData;
 
@@ -21,17 +35,42 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
             descripcion: initialData?.descripcion || '',
             tipo_actividad: (initialData?.tipo_actividad || 'EVENTO') as 'TAREA' | 'EVENTO',
             fecha_inicio: initialData?.fecha_inicio
-                ? (initialData.tipo_actividad === 'TAREA' ? initialData.fecha_inicio.slice(0, 10) : initialData.fecha_inicio.slice(0, 16))
-                : (initialData?.tipo_actividad === 'TAREA' ? new Date().toISOString().slice(0, 10) : new Date().toISOString().slice(0, 16)),
+                ? (initialData.tipo_actividad === 'TAREA' ? toLocalISO(initialData.fecha_inicio).slice(0, 10) : toLocalISO(initialData.fecha_inicio))
+                : (initialData?.tipo_actividad === 'TAREA' ? toLocalISO(new Date()).slice(0, 10) : toLocalISO(new Date())),
             fecha_fin: initialData?.fecha_fin
-                ? initialData.fecha_fin.slice(0, 16)
-                : new Date(Date.now() + 3600000).toISOString().slice(0, 16),
+                ? toLocalISO(initialData.fecha_fin)
+                : toLocalISO(new Date(Date.now() + 3600000)),
             opportunity_id: initialData?.opportunity_id || initialOpportunityId || '',
             is_completed: !!initialData?.is_completed
         }
     });
 
     const tipo = watch('tipo_actividad');
+    const fechaInicio = watch('fecha_inicio');
+
+    // Auto-set fecha_fin as 1 hour after fecha_inicio for EVENTO
+    useEffect(() => {
+        if (tipo === 'EVENTO' && fechaInicio) {
+            try {
+                const start = new Date(fechaInicio);
+                if (!isNaN(start.getTime())) {
+                    const end = new Date(start.getTime() + 3600000); // +1 hour
+
+                    // Format correctly as YYYY-MM-DDTHH:mm using LOCAL time
+                    const year = end.getFullYear();
+                    const month = String(end.getMonth() + 1).padStart(2, '0');
+                    const day = String(end.getDate()).padStart(2, '0');
+                    const hours = String(end.getHours()).padStart(2, '0');
+                    const minutes = String(end.getMinutes()).padStart(2, '0');
+
+                    const formattedEnd = `${year}-${month}-${day}T${hours}:${minutes}`;
+                    setValue('fecha_fin', formattedEnd, { shouldDirty: true });
+                }
+            } catch (e) {
+                console.error("Error setting end date", e);
+            }
+        }
+    }, [fechaInicio, tipo, setValue]);
 
     return (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -149,7 +188,18 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                             Cancelar
                         </button>
                         <button
-                            type="submit"
+                            type="button"
+                            onClick={handleSubmit((data) => {
+                                // Ensure dates are unambiguous ISO with Z (UTC) for storage
+                                const processed = { ...data };
+                                if (data.fecha_inicio) {
+                                    processed.fecha_inicio = new Date(data.fecha_inicio).toISOString();
+                                }
+                                if (data.fecha_fin) {
+                                    processed.fecha_fin = new Date(data.fecha_fin).toISOString();
+                                }
+                                onSubmit(processed);
+                            })}
                             className={cn(
                                 "flex-1 text-white px-4 py-3 rounded-xl font-bold shadow-lg transition-colors",
                                 tipo === 'TAREA' ? "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200" : "bg-blue-600 hover:bg-blue-700 shadow-blue-200"
