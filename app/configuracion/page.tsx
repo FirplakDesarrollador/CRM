@@ -20,6 +20,9 @@ import { useRouter } from 'next/navigation';
 import { cn } from '@/components/ui/utils';
 import { supabase } from '@/lib/supabase';
 import { useConfig } from '@/lib/hooks/useConfig';
+import packageJson from '../../package.json';
+
+const CRM_VERSION = packageJson.version;
 
 interface Stats {
     opportunities: number;
@@ -107,7 +110,12 @@ export default function ConfigPage() {
                     <Settings className="w-8 h-8" />
                 </div>
                 <div>
-                    <h1 className="text-3xl font-bold text-slate-900">Configuración</h1>
+                    <div className="flex items-center gap-3">
+                        <h1 className="text-3xl font-bold text-slate-900">Configuración</h1>
+                        <span className="px-2.5 py-1 text-xs font-bold bg-slate-100 text-slate-600 rounded-full border border-slate-200">
+                            v{CRM_VERSION}
+                        </span>
+                    </div>
                     <p className="text-slate-500 font-medium">Estado del sistema y herrmientas de diagnóstico</p>
                 </div>
             </div>
