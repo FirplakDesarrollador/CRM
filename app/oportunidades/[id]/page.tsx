@@ -2,9 +2,9 @@
 
 import { useOpportunities, useQuotes, useQuoteItems } from "@/lib/hooks/useOpportunities";
 import { DetailHeader } from "@/components/ui/DetailHeader";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { FileText, Plus, AlertCircle, Check, Trash2, Loader2, Truck, Package, Building, ChevronRight } from "lucide-react";
+import { FileText, Plus, AlertCircle, Check, Trash2, Loader2, Truck, Package, Building, ChevronRight, TrendingUp } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/components/ui/utils";
 import { db } from "@/lib/db";
@@ -101,6 +101,10 @@ export default function OpportunityDetailPage() {
 
 function SummaryTab({ opportunity }: { opportunity: any }) {
     const { updateOpportunity } = useOpportunities();
+    const { quotes } = useQuotes(opportunity.id);
+    const [localAmount, setLocalAmount] = useState(opportunity.amount || 0);
+    const [isSaving, setIsSaving] = useState(false);
+
 
     // Fetch Account
     const account = useLiveQuery(
@@ -217,6 +221,85 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Business Info Card */}
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-blue-300 transition-all flex flex-col">
+                    <div className="flex items-center gap-3 mb-6">
+                        <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg">
+                            <TrendingUp className="w-6 h-6" />
+                        </div>
+                        <div>
+                            <h3 className="font-bold text-slate-900 text-lg">Información de Negocio</h3>
+                            <p className="text-xs text-slate-500">Valor y métricas financieras</p>
+                        </div>
+                    </div>
+
+                    <div className="space-y-4 flex-1">
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                                Valor de la Oportunidad (Importe)
+                            </label>
+                            {(!quotes || quotes.length === 0) ? (
+                                <div className="space-y-2">
+                                    <div className="relative group">
+                                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">$</span>
+                                        <input
+                                            type="number"
+                                            value={localAmount}
+                                            onChange={(e) => setLocalAmount(Number(e.target.value))}
+                                            onBlur={async () => {
+                                                if (localAmount !== opportunity.amount) {
+                                                    setIsSaving(true);
+                                                    await updateOpportunity(opportunity.id, { amount: localAmount });
+                                                    setIsSaving(false);
+                                                }
+                                            }}
+                                            className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-bold focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none"
+                                            placeholder="Ingrese el valor estimado"
+                                        />
+                                        {isSaving && (
+                                            <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                                <Loader2 className="w-4 h-4 text-blue-600 animate-spin" />
+                                            </div>
+                                        )}
+                                    </div>
+                                    <p className="text-[10px] text-slate-400">
+                                        No hay cotizaciones activas. Puede editar este valor manualmente.
+                                    </p>
+                                </div>
+                            ) : (
+                                <div className="space-y-2">
+                                    <div className="p-3 bg-blue-50 border border-blue-100 rounded-xl">
+                                        <div className="text-xl font-bold text-blue-700 flex items-center gap-1.5">
+                                            <span className="text-blue-500 font-medium">$</span>
+                                            {new Intl.NumberFormat().format(opportunity.amount || 0)}
+                                            <span className="ml-1 text-xs font-medium text-blue-500">{opportunity.currency_id}</span>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-1.5 text-[10px] font-bold text-blue-600 uppercase tracking-tight">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-blue-600" />
+                                        Valor vinculado a cotización activa
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="pt-4 border-t border-slate-100 grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Moneda</label>
+                                <div className="px-3 py-1.5 bg-slate-50 rounded-lg text-slate-700 font-bold text-sm">
+                                    {opportunity.currency_id}
+                                </div>
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Estado</label>
+                                <div className="px-3 py-1.5 bg-slate-50 rounded-lg text-slate-700 font-bold text-sm">
+                                    {opportunity.status}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 {/* Account Card */}
                 <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-blue-300 transition-all flex flex-col justify-between">
                     <div>
@@ -262,14 +345,6 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                     </Link>
                 </div>
 
-                {/* Placeholder for other Summary info */}
-                <div className="bg-slate-50 border-2 border-dashed border-slate-200 rounded-2xl p-8 flex flex-col items-center justify-center text-center">
-                    <div className="p-3 bg-white rounded-full shadow-sm mb-3">
-                        <AlertCircle className="w-6 h-6 text-slate-300" />
-                    </div>
-                    <p className="text-sm font-medium text-slate-500">Timeline y KPIs</p>
-                    <p className="text-xs text-slate-400 max-w-[200px] mt-1">Próximamente visualización de historia y métricas de esta negociación.</p>
-                </div>
             </div>
         </div>
     );
@@ -295,10 +370,18 @@ function ProductsTab({ opportunityId }: { opportunityId: string }) {
         : defaultQuote;
 
     const { items: quoteItems } = useQuoteItems(effectiveQuote?.id);
+    const { updateOpportunity } = useOpportunities();
 
     const itemsToShow = (quoteItems && quoteItems.length > 0)
         ? quoteItems
         : (opportunity?.items || []);
+
+    // Effect: Synchronize opportunity amount with effective quote whenever quote changes
+    useEffect(() => {
+        if (effectiveQuote && opportunity && effectiveQuote.total_amount !== opportunity.amount) {
+            updateOpportunity(opportunityId, { amount: effectiveQuote.total_amount });
+        }
+    }, [effectiveQuote?.id, effectiveQuote?.total_amount, opportunity?.id, opportunity?.amount]);
 
     if (!effectiveQuote && itemsToShow.length === 0) {
         return (
@@ -326,7 +409,14 @@ function ProductsTab({ opportunityId }: { opportunityId: string }) {
                                 <select
                                     className="text-xs font-bold text-blue-600 bg-blue-50 border-none rounded-md py-1 pl-2 pr-8 cursor-pointer focus:ring-2 focus:ring-blue-500"
                                     value={effectiveQuote?.id || ''}
-                                    onChange={(e) => setSelectedQuoteId(e.target.value)}
+                                    onChange={(e) => {
+                                        const qId = e.target.value;
+                                        setSelectedQuoteId(qId);
+                                        const selected = quotes?.find(q => q.id === qId);
+                                        if (selected && opportunity) {
+                                            updateOpportunity(opportunityId, { amount: selected.total_amount });
+                                        }
+                                    }}
                                 >
                                     {sortedQuotes.map(q => (
                                         <option key={q.id} value={q.id}>
@@ -358,34 +448,48 @@ function ProductsTab({ opportunityId }: { opportunityId: string }) {
                             <th className="px-4 py-3">Descripción</th>
                             <th className="px-4 py-3 text-center">Cant.</th>
                             <th className="px-4 py-3 text-right">Unitario</th>
+                            <th className="px-4 py-3 text-center">Dcto. %</th>
                             <th className="px-4 py-3 text-right">Subtotal</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                        {itemsToShow.map((item: any) => (
-                            <tr key={item.id || item.product_id}>
-                                <td className="px-4 py-3 font-medium text-slate-900 min-w-[300px] max-w-sm">
-                                    <div className="line-clamp-2 leading-tight">
-                                        {item.descripcion_linea || item.nombre}
-                                    </div>
-                                </td>
-                                <td className="px-4 py-3 text-center text-slate-600">{item.cantidad}</td>
-                                <td className="px-4 py-3 text-right text-slate-600">
-                                    ${new Intl.NumberFormat().format(item.precio_unitario || item.precio || 0)}
-                                </td>
-                                <td className="px-4 py-3 text-right font-bold text-slate-900">
-                                    ${new Intl.NumberFormat().format(item.subtotal || (item.cantidad * (item.precio_unitario || item.precio || 0)))}
-                                </td>
-                            </tr>
-                        ))}
+                        {itemsToShow.map((item: any) => {
+                            const unitPrice = item.precio_unitario || item.precio || 0;
+                            const discount = item.discount_pct || 0;
+                            const effectiveSubtotal = item.subtotal || (item.cantidad * unitPrice * (1 - discount / 100));
+
+                            return (
+                                <tr key={item.id || item.product_id}>
+                                    <td className="px-4 py-3 font-medium text-slate-900 min-w-[300px] max-w-sm">
+                                        <div className="line-clamp-2 leading-tight">
+                                            {item.descripcion_linea || item.nombre}
+                                        </div>
+                                    </td>
+                                    <td className="px-4 py-3 text-center text-slate-600">{item.cantidad}</td>
+                                    <td className="px-4 py-3 text-right text-slate-600">
+                                        ${new Intl.NumberFormat().format(unitPrice)}
+                                    </td>
+                                    <td className="px-4 py-3 text-center text-slate-600 font-medium">
+                                        {discount > 0 ? (
+                                            <span className="text-emerald-600">-{discount}%</span>
+                                        ) : (
+                                            <span className="text-slate-400">0%</span>
+                                        )}
+                                    </td>
+                                    <td className="px-4 py-3 text-right font-bold text-slate-900">
+                                        ${new Intl.NumberFormat().format(effectiveSubtotal)}
+                                    </td>
+                                </tr>
+                            );
+                        })}
                     </tbody>
                     <tfoot className="bg-slate-50 font-bold border-t border-slate-200">
                         <tr>
-                            <td colSpan={3} className="px-4 py-3 text-right text-slate-500">Total</td>
+                            <td colSpan={4} className="px-4 py-3 text-right text-slate-500">Total</td>
                             <td className="px-4 py-3 text-right text-blue-600 text-lg">
                                 ${new Intl.NumberFormat().format(
                                     itemsToShow.reduce((acc: number, item: any) =>
-                                        acc + (item.subtotal || (item.cantidad * (item.precio_unitario || item.precio || 0))), 0
+                                        acc + (item.subtotal || (item.cantidad * (item.precio_unitario || item.precio || 0) * (1 - (item.discount_pct || 0) / 100))), 0
                                     )
                                 )}
                             </td>
@@ -614,7 +718,7 @@ function ActivitiesTab({ opportunityId }: { opportunityId: string }) {
                                         {act.tipo_actividad === 'EVENTO' ? (
                                             <div className="flex items-center gap-2 text-xs font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded-lg">
                                                 <Clock className="w-3.5 h-3.5" />
-                                                {new Date(act.fecha_inicio).toLocaleDateString()} {new Date(act.fecha_inicio).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                {new Date(act.fecha_inicio).toLocaleDateString(undefined, { day: 'numeric', month: 'numeric', year: 'numeric' })} {new Date(act.fecha_inicio).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: true })}
                                             </div>
                                         ) : (
                                             <div className="flex items-center gap-2 text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-1 rounded-lg">

@@ -20,6 +20,7 @@ import { useRouter } from 'next/navigation';
 import { cn } from '@/components/ui/utils';
 import { supabase } from '@/lib/supabase';
 import { useConfig } from '@/lib/hooks/useConfig';
+import { PriceListUploader } from '@/components/config/PriceListUploader';
 import packageJson from '../../package.json';
 
 const CRM_VERSION = packageJson.version;
@@ -318,6 +319,9 @@ export default function ConfigPage() {
                     </div>
                 </div>
             )}
+
+            {/* Price List Uploader */}
+            <PriceListUploader />
 
             <AdminSettings />
         </div>

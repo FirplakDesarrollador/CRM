@@ -92,15 +92,17 @@ export function useOpportunities() {
             const channelId = account?.canal_id || 'DIST_NAC';
 
             const quoteItems: LocalQuoteItem[] = await Promise.all(items.map(async (item: any) => {
+                // We rely on the Wizard to have picked the correct base price (item.precio) based on channel
+                // We ONLY call fetchPricing to retrieve the VOLUME LIMIT (max_discount_pct) if available.
+                // We ignore the RPC's base_price to avoid overwriting the specific column logic.
                 const pricing = await fetchPricing(item.product_id, channelId, item.cantidad);
 
                 // Pricing Logic:
-                // base_price = List Price
-                // discount_pct from RPC = MAX VOLUME DISCOUNT LIMIT
-                // Actual discount starts at 0 (manual input)
-
-                const unitPrice = pricing ? pricing.base_price : item.precio;
+                // unitPrice = Trusted from Wizard (item.precio)
+                // maxDiscount = From RPC (volume limit)
+                const unitPrice = item.precio || (pricing ? pricing.base_price : 0);
                 const maxDiscount = pricing ? pricing.discount_pct : 0;
+
                 const discount = 0; // Default to 0 manual discount
                 const finalPrice = unitPrice * (1 - discount / 100);
 
@@ -182,6 +184,17 @@ export function useOpportunities() {
     return { opportunities, createOpportunity, generateMockData, deleteOpportunity, updateOpportunity };
 }
 
+// Internal version to be used by other hooks without hook dependency issues
+async function performOpportunityUpdate(id: string, updates: any) {
+    const current = await db.opportunities.get(id);
+    if (!current) return;
+
+    const updated = { ...current, ...updates, updated_at: new Date().toISOString() };
+    await db.opportunities.update(id, updated);
+    await syncEngine.queueMutation('CRM_Oportunidades', id, updated);
+}
+
+
 export function useQuotes(opportunityId?: string) {
     const quotes = useLiveQuery(
         () => opportunityId
@@ -201,6 +214,16 @@ export function useQuotes(opportunityId?: string) {
 
         // Or inherit from opportunity itself
         const opportunity = await db.opportunities.get(oppId);
+
+        // Check Account Channel for Strict Currency
+        let forcedCurrency = latestQuote?.currency_id || opportunity?.currency_id || 'COP';
+        if (opportunity?.account_id) {
+            const acc = await db.accounts.get(opportunity.account_id);
+            if (acc && (acc.canal_id === 'OBRAS_INT' || acc.canal_id === 'DIST_INT')) {
+                forcedCurrency = 'USD';
+            }
+        }
+
         const inheritedItems = latestQuote
             ? await db.quoteItems.where('cotizacion_id').equals(latestQuote.id).toArray()
             : (opportunity?.items || []);
@@ -213,7 +236,7 @@ export function useQuotes(opportunityId?: string) {
             numero_cotizacion: `COT-${Date.now().toString().slice(-6)}`,
             status: 'DRAFT',
             total_amount: latestQuote?.total_amount || 0,
-            currency_id: latestQuote?.currency_id || opportunity?.currency_id || 'COP',
+            currency_id: forcedCurrency,
             created_by: user?.id,
             updated_by: user?.id,
             updated_at: new Date().toISOString(),
@@ -296,7 +319,10 @@ export function useQuotes(opportunityId?: string) {
             await updateQuote(q.id, { status: 'REJECTED', is_winner: false });
         }
 
-        // 3. Queue for SAP Integration
+        // 3. Update parent opportunity amount to match winner quote
+        await performOpportunityUpdate(quote.opportunity_id, { amount: quote.total_amount });
+
+        // 4. Queue for SAP Integration
         const sapQueueId = uuidv4();
         const sapEntry = {
             id: sapQueueId,
@@ -341,14 +367,16 @@ export function useQuoteItems(quoteId?: string) {
     const items = useLiveQuery(
         () => quoteId
             ? db.quoteItems.where('cotizacion_id').equals(quoteId).toArray()
-            : db.quoteItems.toArray(),
+            : [],
         [quoteId]
     );
 
     const addItem = async (quoteId: string, item: Omit<LocalQuoteItem, 'id' | 'cotizacion_id'>) => {
         const id = uuidv4();
         // Fetch Pricing
-        let pricing = null;
+        let unitPrice = item.precio_unitario; // Default to what is passed if logic fails
+        let maxDiscount = 0;
+
         try {
             const parentQuote = await db.quotes.get(quoteId);
             if (parentQuote) {
@@ -356,14 +384,51 @@ export function useQuoteItems(quoteId?: string) {
                 if (opp && opp.account_id) {
                     const acc = await db.accounts.get(opp.account_id);
                     if (acc) {
-                        pricing = await fetchPricing(item.producto_id, acc.canal_id, item.cantidad);
+                        const channelId = acc.canal_id || 'DIST_NAC';
+
+                        // 1. Fetch Full Product Data (Prices columns) + RPC for volume discount
+                        // Import dynamically to avoid circular deps if needed, or just use global supabase
+                        const { data: prodData } = await supabase
+                            .from('CRM_ListaDePrecios')
+                            .select('id, numero_articulo, lista_base_cop, lista_base_exportaciones, lista_base_obras, distribuidor_pvp_iva, pvp_sin_iva')
+                            .eq('id', item.producto_id)
+                            .single();
+
+                        if (prodData) {
+                            // Apply Strict Logic
+                            switch (channelId) {
+                                case 'OBRAS_NAC':
+                                    unitPrice = prodData.lista_base_obras || 0;
+                                    break;
+                                case 'OBRAS_INT':
+                                case 'DIST_INT':
+                                    unitPrice = prodData.lista_base_exportaciones || 0;
+                                    break;
+                                case 'PROPIO':
+                                    unitPrice = prodData.distribuidor_pvp_iva || 0;
+                                    break;
+                                case 'DIST_NAC':
+                                default:
+                                    unitPrice = prodData.lista_base_cop || 0;
+                            }
+                            if (unitPrice === 0) unitPrice = prodData.lista_base_cop || 0; // Fallback
+
+                            // 2. Fetch Volume Discount Limit via RPC
+                            const { data: pricing } = await supabase.rpc('get_recommended_pricing', {
+                                p_numero_articulo: prodData.numero_articulo,
+                                p_canal_id: channelId,
+                                p_qty: item.cantidad
+                            });
+
+                            if (pricing) {
+                                maxDiscount = pricing.discount_pct;
+                            }
+                        }
                     }
                 }
             }
         } catch (e) { console.error("Pricing calc error", e); }
 
-        const unitPrice = pricing ? pricing.base_price : item.precio_unitario;
-        const maxDiscount = pricing ? pricing.discount_pct : 0;
         const discount = 0;
         const finalPrice = unitPrice * (1 - discount / 100);
 

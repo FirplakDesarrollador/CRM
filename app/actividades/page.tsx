@@ -27,7 +27,7 @@ function ActivitiesContent() {
     const { activities, createActivity, updateActivity, toggleComplete } = useActivities();
     const { opportunities } = useOpportunities();
     const [selectedDate, setSelectedDate] = useState(new Date());
-    const [view, setView] = useState<'agenda' | 'month'>('agenda');
+    const [view, setView] = useState<'agenda' | 'month' | 'all'>('agenda');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedActivity, setSelectedActivity] = useState<LocalActivity | null>(null);
 
@@ -68,6 +68,8 @@ function ActivitiesContent() {
 
     // Format activities for display
     const filteredActivities = activities?.filter(act => {
+        if (view === 'all') return true;
+
         const actDate = new Date(act.fecha_inicio);
         return (
             actDate.getDate() === selectedDate.getDate() &&
@@ -107,32 +109,45 @@ function ActivitiesContent() {
                                 onClick={() => setView(view === 'agenda' ? 'month' : 'agenda')}
                                 className="flex items-center gap-2 text-slate-600 hover:text-blue-600 transition-colors"
                             >
-                                {view === 'agenda' ? <CalendarDays className="w-5 h-5 text-blue-500" /> : <CalendarIcon className="w-5 h-5 text-blue-500" />}
-                                <span className="font-bold">{view === 'agenda' ? 'Vista Agenda' : 'Vista Mensual'}</span>
+                                {view === 'agenda' ? <CalendarDays className="w-5 h-5 text-blue-500" /> : view === 'month' ? <CalendarIcon className="w-5 h-5 text-blue-500" /> : <ListTodo className="w-5 h-5 text-blue-500" />}
+                                <span className="font-bold">
+                                    {view === 'agenda' ? 'Vista Agenda' : view === 'month' ? 'Vista Mensual' : 'Todas las Actividades'}
+                                </span>
                             </button>
 
-                            <div className="flex items-center gap-4 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-100">
-                                <button
-                                    onClick={handlePrev}
-                                    className="p-1 hover:bg-white hover:shadow-sm rounded-lg text-slate-400 hover:text-blue-600 transition-all"
-                                >
-                                    <ChevronLeft className="w-5 h-5" />
-                                </button>
-                                <span className="text-base font-bold text-slate-900 capitalize min-w-[160px] text-center">
-                                    {view === 'agenda'
-                                        ? selectedDate.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })
-                                        : selectedDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })
-                                    }
-                                </span>
-                                <button
-                                    onClick={handleNext}
-                                    className="p-1 hover:bg-white hover:shadow-sm rounded-lg text-slate-400 hover:text-blue-600 transition-all"
-                                >
-                                    <ChevronRight className="w-5 h-5" />
-                                </button>
-                            </div>
+                            {view !== 'all' && (
+                                <div className="flex items-center gap-4 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-100">
+                                    <button
+                                        onClick={handlePrev}
+                                        className="p-1 hover:bg-white hover:shadow-sm rounded-lg text-slate-400 hover:text-blue-600 transition-all"
+                                    >
+                                        <ChevronLeft className="w-5 h-5" />
+                                    </button>
+                                    <span className="text-base font-bold text-slate-900 capitalize min-w-[160px] text-center">
+                                        {view === 'agenda'
+                                            ? selectedDate.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })
+                                            : selectedDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })
+                                        }
+                                    </span>
+                                    <button
+                                        onClick={handleNext}
+                                        className="p-1 hover:bg-white hover:shadow-sm rounded-lg text-slate-400 hover:text-blue-600 transition-all"
+                                    >
+                                        <ChevronRight className="w-5 h-5" />
+                                    </button>
+                                </div>
+                            )}
                         </div>
                         <div className="flex gap-2 p-1 bg-slate-50 rounded-xl border border-slate-100">
+                            <button
+                                onClick={() => setView('all')}
+                                className={cn(
+                                    "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                                    view === 'all' ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                                )}
+                            >
+                                Todo
+                            </button>
                             <button
                                 onClick={() => setView('agenda')}
                                 className={cn(
@@ -155,7 +170,7 @@ function ActivitiesContent() {
                     </div>
 
                     <div className="flex-1 overflow-y-auto p-6 bg-slate-50/50">
-                        {view === 'agenda' ? (
+                        {view === 'agenda' || view === 'all' ? (
                             filteredActivities && filteredActivities.length > 0 ? (
                                 <div className="space-y-4">
                                     {filteredActivities.map((act) => {
@@ -201,12 +216,12 @@ function ActivitiesContent() {
                                                             {act.tipo_actividad === 'EVENTO' ? (
                                                                 <div className="flex items-center gap-2 text-xs font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded-lg">
                                                                     <Clock className="w-3.5 h-3.5" />
-                                                                    {new Date(act.fecha_inicio).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                                    {new Date(act.fecha_inicio).toLocaleDateString(undefined, { day: 'numeric', month: 'numeric' })} {new Date(act.fecha_inicio).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: true })}
                                                                 </div>
                                                             ) : (
                                                                 <div className="flex items-center gap-2 text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-1 rounded-lg">
                                                                     <ListTodo className="w-3.5 h-3.5" />
-                                                                    Tarea
+                                                                    Tarea {view === 'all' && act.fecha_inicio && `- ${new Date(act.fecha_inicio).toLocaleDateString()}`}
                                                                 </div>
                                                             )}
                                                         </div>
@@ -236,7 +251,7 @@ function ActivitiesContent() {
                                     </div>
                                     <div className="text-center">
                                         <h3 className="font-bold text-slate-600">No hay actividades</h3>
-                                        <p className="text-sm">Todo despejado para este día</p>
+                                        <p className="text-sm">Todo despejado</p>
                                     </div>
                                 </div>
                             )
@@ -348,7 +363,7 @@ function ActivitiesContent() {
                                                                     )}>
                                                                         <div className="font-medium truncate">{act.asunto}</div>
                                                                         <div className="text-[10px] opacity-70 mt-0.5">
-                                                                            {new Date(act.fecha_inicio).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
+                                                                            {new Date(act.fecha_inicio).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: true })}
                                                                             {act.is_completed && ' • Completada'}
                                                                         </div>
                                                                     </div>

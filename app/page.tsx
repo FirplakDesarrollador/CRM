@@ -168,9 +168,13 @@ export default function Home() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {recentOpps.length > 0 ? recentOpps.map(opp => (
-                    <tr key={opp.id} className="hover:bg-slate-50 transition-colors">
+                    <tr
+                      key={opp.id}
+                      className="hover:bg-slate-50 transition-colors cursor-pointer group"
+                      onClick={() => window.location.href = `/oportunidades/${opp.id}`}
+                    >
                       <td className="px-6 py-4">
-                        <div className="font-medium text-slate-900">{opp.nombre}</div>
+                        <div className="font-medium text-slate-900 group-hover:text-blue-600 transition-colors">{opp.nombre}</div>
                         <div className="text-xs text-slate-400 flex items-center gap-1">
                           <Building2 className="w-3 h-3" />
                           {opp.account_id ? 'Cliente Registrado' : 'Prospecto'}

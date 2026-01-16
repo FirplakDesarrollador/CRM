@@ -1,5 +1,7 @@
 "use client";
 
+import React from "react";
+
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/components/ui/utils";
@@ -37,7 +39,7 @@ export interface SidebarProps {
     toggleSidebar: () => void;
 }
 
-export function Sidebar({ isCollapsed, toggleSidebar }: SidebarProps) {
+export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar }: SidebarProps) {
     const pathname = usePathname();
     const router = useRouter();
 
@@ -96,6 +98,7 @@ export function Sidebar({ isCollapsed, toggleSidebar }: SidebarProps) {
                 {NAV_ITEMS.map((item) => {
                     const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
                     return (
+
                         <Link
                             key={item.href}
                             href={item.href}
@@ -107,6 +110,7 @@ export function Sidebar({ isCollapsed, toggleSidebar }: SidebarProps) {
                                     : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
                                 isCollapsed && "justify-center px-0 w-12 mx-auto"
                             )}
+                            prefetch={false}
                         >
                             <item.icon className="w-5 h-5 shrink-0" />
                             {!isCollapsed && <span className="whitespace-nowrap fade-in">{item.label}</span>}
@@ -134,4 +138,4 @@ export function Sidebar({ isCollapsed, toggleSidebar }: SidebarProps) {
             </div>
         </aside>
     );
-}
+});
