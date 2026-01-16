@@ -8,6 +8,7 @@ import { cn } from "@/components/ui/utils";
 import { FirplakLogo } from "./FirplakLogo";
 import { SyncStatus } from "./SyncStatus";
 import { supabase } from "@/lib/supabase";
+import { useSyncStore } from "@/lib/stores/useSyncStore";
 import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
 import {
     Home,
@@ -32,6 +33,7 @@ const NAV_ITEMS = [
     { label: "Actividades", href: "/actividades", icon: Calendar },
     { label: "Pedidos", href: "/pedidos", icon: Truck },
     { label: "Archivos", href: "/archivos", icon: Files },
+    { label: "Usuarios", href: "/usuarios", icon: Users, requiredRole: 'ADMIN' },
     { label: "Configuración", href: "/configuracion", icon: Settings },
 ];
 
@@ -43,6 +45,7 @@ export interface SidebarProps {
 export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar }: SidebarProps) {
     const pathname = usePathname();
     const router = useRouter();
+    const { userRole } = useSyncStore();
     const [showLogoutConfirm, setShowLogoutConfirm] = React.useState(false);
     const [isLoggingOut, setIsLoggingOut] = React.useState(false);
 
@@ -103,7 +106,7 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
             </div>
 
             <nav className="flex-1 p-3 space-y-2 overflow-y-auto overflow-x-hidden">
-                {NAV_ITEMS.map((item) => {
+                {NAV_ITEMS.filter(item => !item.requiredRole || item.requiredRole === userRole).map((item) => {
                     const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
                     return (
 
