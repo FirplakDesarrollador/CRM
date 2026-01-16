@@ -1,11 +1,14 @@
 "use client";
 
+import React from "react";
+
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/components/ui/utils";
 import { FirplakLogo } from "./FirplakLogo";
 import { SyncStatus } from "./SyncStatus";
 import { supabase } from "@/lib/supabase";
+import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
 import {
     Home,
     Briefcase,
@@ -37,15 +40,22 @@ export interface SidebarProps {
     toggleSidebar: () => void;
 }
 
-export function Sidebar({ isCollapsed, toggleSidebar }: SidebarProps) {
+export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar }: SidebarProps) {
     const pathname = usePathname();
     const router = useRouter();
+    const [showLogoutConfirm, setShowLogoutConfirm] = React.useState(false);
+    const [isLoggingOut, setIsLoggingOut] = React.useState(false);
 
     const handleLogout = async () => {
-        if (confirm('¿Estás seguro de que deseas cerrar sesión?')) {
+        setIsLoggingOut(true);
+        try {
             await supabase.auth.signOut();
+        } catch (err) {
+            console.error('[Sidebar] SignOut error:', err);
+        } finally {
             localStorage.removeItem('cachedUserId');
-            router.push('/login');
+            // Force a clean redirect
+            window.location.href = '/login';
         }
     };
 
@@ -96,6 +106,7 @@ export function Sidebar({ isCollapsed, toggleSidebar }: SidebarProps) {
                 {NAV_ITEMS.map((item) => {
                     const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
                     return (
+
                         <Link
                             key={item.href}
                             href={item.href}
@@ -107,6 +118,7 @@ export function Sidebar({ isCollapsed, toggleSidebar }: SidebarProps) {
                                     : "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
                                 isCollapsed && "justify-center px-0 w-12 mx-auto"
                             )}
+                            prefetch={false}
                         >
                             <item.icon className="w-5 h-5 shrink-0" />
                             {!isCollapsed && <span className="whitespace-nowrap fade-in">{item.label}</span>}
@@ -121,7 +133,7 @@ export function Sidebar({ isCollapsed, toggleSidebar }: SidebarProps) {
 
             <div className="p-4 border-t border-gray-200 flex flex-col gap-2">
                 <button
-                    onClick={handleLogout}
+                    onClick={() => setShowLogoutConfirm(true)}
                     className={cn(
                         "flex items-center gap-3 px-3 py-2 text-sm font-medium text-slate-600 hover:text-red-600 w-full transition-colors",
                         isCollapsed && "justify-center px-0"
@@ -131,7 +143,18 @@ export function Sidebar({ isCollapsed, toggleSidebar }: SidebarProps) {
                     <LogOut className="w-5 h-5 shrink-0" />
                     {!isCollapsed && <span className="whitespace-nowrap fade-in">Cerrar Sesión</span>}
                 </button>
+
+                <ConfirmationModal
+                    isOpen={showLogoutConfirm}
+                    onClose={() => setShowLogoutConfirm(false)}
+                    onConfirm={handleLogout}
+                    isLoading={isLoggingOut}
+                    title="Cerrar Sesión"
+                    message="¿Estás seguro de que deseas salir del sistema? No olvides sincronizar tus cambios pendientes."
+                    confirmLabel="Cerrar Sesión"
+                    variant="danger"
+                />
             </div>
         </aside>
     );
-}
+});
