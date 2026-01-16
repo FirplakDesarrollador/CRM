@@ -191,40 +191,58 @@ export class SyncEngine {
                 });
 
                 if (error) {
-                    console.error(`[Sync] RPC Error for ${table}:`, error.message, error.details, error.hint);
-                    throw error;
+                    console.error(`[Sync] RPC Fatal Error for ${table}:`, error.message);
+                    throw error; // This jumps to the catch block for the whole table
                 }
 
-                console.log(`[Sync] Successfully pushed ${updates.length} updates for ${table}`);
+                // Process individual results
+                const results = data as any[];
+                console.log(`[Sync] Processed ${updates.length} updates for ${table}. ${results.filter(r => r.success).length} success, ${results.filter(r => !r.success).length} failed.`);
 
-                // Cleanup Outbox
-                const idsToDelete = pending
-                    .filter(i => i.entity_type === table)
-                    .map(i => i.id);
+                for (const result of results) {
+                    if (result.success) {
+                        if (result.field === '_all') {
+                            // Successful INSERT (or consolidated update): remove ALL pending items for this ID
+                            const idsToDelete = pending
+                                .filter(p => p.entity_id === result.id && p.entity_type === table)
+                                .map(p => p.id);
+                            await db.outbox.bulkDelete(idsToDelete);
+                        } else {
+                            // Successful single field update
+                            const item = pending.find(p => p.entity_id === result.id && p.field_name === result.field && p.entity_type === table);
+                            if (item) await db.outbox.delete(item.id);
+                        }
+                    } else {
+                        // Failure: Mark relevant items as FAILED
+                        const itemsToFail = result.field === '_all'
+                            ? pending.filter(p => p.entity_id === result.id && p.entity_type === table)
+                            : pending.filter(p => p.entity_id === result.id && p.field_name === result.field && p.entity_type === table);
 
-                await db.outbox.bulkDelete(idsToDelete);
+                        for (const item of itemsToFail) {
+                            console.warn(`[Sync] Push failed for ${table}.${item.field_name}: ${result.message}`);
+                            await db.outbox.update(item.id, {
+                                status: 'FAILED',
+                                error: result.message,
+                                retry_count: (item.retry_count || 0) + 1
+                            });
+                        }
+                    }
+                }
 
             } catch (err: any) {
-                console.error(`[Sync] Fatal error pushing ${table}:`, {
-                    message: err?.message || err,
-                    details: err?.details,
-                    hint: err?.hint,
-                    code: err?.code,
-                    updates_sample: updates.slice(0, 2)
-                });
-                // Revert status to FAILED
+                console.error(`[Sync] Table sweep failure for ${table}:`, err.message);
+                // Revert status to FAILED for remaining items in this table batch that were marked as SYNCING
                 const idsToFail = pending
                     .filter(i => i.entity_type === table)
                     .map(i => i.id);
 
                 await db.outbox.where('id').anyOf(idsToFail).modify({
                     status: 'FAILED',
-                    error: err.message,
-                    retry_count: 1 // Increment logic needed
+                    error: err.message
                 });
 
-                // BREAK ON FAILURE: Prevent processing child tables if parent fails
-                console.warn(`[Sync] Breaking sync loop due to failure in ${table}. FK violations prevented.`);
+                // BREAK ON FATAL: Prevent processing child tables if parent has a fatal RPC error
+                console.warn(`[Sync] Breaking sync loop due to fatal failure in ${table}.`);
                 break;
             }
         }
@@ -253,6 +271,8 @@ export class SyncEngine {
 
         try {
             // Pull Accounts (CRM_Cuentas)
+            // PERF OPTIMIZATION: Disable full sync.
+            /*
             const { data: accounts, error: accountsError } = await supabase
                 .from('CRM_Cuentas')
                 .select('*')
@@ -298,6 +318,7 @@ export class SyncEngine {
                 }
                 console.log(`[Sync] Merged ${mergedCount} accounts (${skippedCount} with pending changes skipped).`);
             }
+            */
 
             // Pull Phases (CRM_FasesOportunidad)
             const { data: phases, error: phasesError } = await supabase
@@ -320,6 +341,8 @@ export class SyncEngine {
             }
 
             // Pull Contacts (CRM_Contactos) - SMART MERGE
+            // PERF OPTIMIZATION: Disable full sync. Only sync by demand or recents in future.
+            /*
             const { data: contacts, error: contactsError } = await supabase
                 .from('CRM_Contactos')
                 .select('*')
@@ -361,8 +384,11 @@ export class SyncEngine {
                 }
                 console.log(`[Sync] Merged ${mergedCount} contacts (${skippedCount} with pending changes skipped).`);
             }
+            */
 
             // Pull Opportunities (CRM_Oportunidades) - SMART MERGE
+            // PERF OPTIMIZATION: Disable full sync.
+            /*
             const { data: opportunities, error: oppsError } = await supabase
                 .from('CRM_Oportunidades')
                 .select('*')
@@ -392,8 +418,11 @@ export class SyncEngine {
                 }
                 console.log(`[Sync] Merged ${mergedCount} opportunities (${skippedCount} with pending changes skipped).`);
             }
+            */
 
             // Pull Quotes (CRM_Cotizaciones) - SMART MERGE
+            // PERF OPTIMIZATION: Disable full sync.
+            /*
             const { data: quotes, error: quotesError } = await supabase
                 .from('CRM_Cotizaciones')
                 .select('*')
@@ -445,6 +474,7 @@ export class SyncEngine {
                 }
                 console.log(`[Sync] Merged ${mergedCount} quotes (${skippedCount} with pending changes skipped).`);
             }
+            */
 
             // Pull Quote Items (CRM_CotizacionItems) - SMART MERGE
             const { data: quoteItems, error: itemsError } = await supabase
@@ -546,6 +576,7 @@ export class SyncEngine {
         for (const [field, value] of Object.entries(changes)) {
             if (value === undefined) continue; // Skip undefined fields
             if (field === '_sync_metadata') continue; // Skip sync metadata
+            if (field === 'id') continue; // Skip ID (it's the key, not a field to update)
 
             items.push({
                 id: uuidv4(),

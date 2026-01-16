@@ -13,6 +13,7 @@ import { useProductSearch, PriceListProduct } from "@/lib/hooks/useProducts";
 import { Trash2, PlusCircle, Search, Loader2 } from "lucide-react";
 import { db } from "@/lib/db";
 import { useLiveQuery } from "dexie-react-hooks";
+import { cn } from "@/components/ui/utils";
 
 const STEP_LABELS = ["Cuenta", "Datos del Negocio", "Productos", "Equipo"];
 
@@ -105,22 +106,61 @@ export default function CreateOpportunityWizard() {
         return await db.phases.where('canal_id').equals(channelId).sortBy('orden');
     }, [selectedAccountId]);
 
-    // Auto-seleccionar primera fase
+    // Auto-seleccionar primera fase y MONEDA según canal
     useEffect(() => {
         if (filteredPhases && filteredPhases.length > 0) {
             const currentFase = Number(watch("fase_id"));
             const isValid = filteredPhases.some(f => f.id === currentFase);
-            // Si el valor actual no está en la lista (o es el default 1 que tal vez no existe), ponemos el primero
             if (!isValid) {
                 setValue("fase_id", filteredPhases[0].id);
             }
         }
-    }, [filteredPhases, setValue, watch]);
+
+        // Force Currency based on Channel
+        if (selectedAccount) {
+            const channel = selectedAccount.canal_id;
+            if (channel === 'OBRAS_INT' || channel === 'DIST_INT') {
+                setValue("currency_id", "USD");
+            } else {
+                // Optional: Reset to COP or keep user selection for others?
+                // Start with COP for non-international if needed, or let them choose.
+                const current = watch("currency_id");
+                if (current === 'USD' && (channel === 'DIST_NAC' || channel === 'OBRAS_NAC' || channel === 'PROPIO')) {
+                    // If they manually switched back to a NAC account from an INT one, maybe default back to COP
+                    setValue("currency_id", "COP");
+                }
+            }
+        }
+    }, [filteredPhases, setValue, watch, selectedAccount]);
 
     const items: any[] = watch("items") || [];
     const amount = watch("amount") || 0;
+    const currencyId = watch("currency_id");
 
     const addProduct = (product: PriceListProduct) => {
+        const channel = selectedAccount?.canal_id || 'DIST_NAC';
+        let price = 0;
+
+        // Strict Price Selection
+        switch (channel) {
+            case 'OBRAS_NAC':
+                price = product.lista_base_obras || 0;
+                break;
+            case 'OBRAS_INT':
+            case 'DIST_INT':
+                price = product.lista_base_exportaciones || 0;
+                break;
+            case 'PROPIO':
+                price = product.distribuidor_pvp_iva || 0;
+                break;
+            case 'DIST_NAC':
+            default:
+                price = product.lista_base_cop || 0;
+        }
+
+        // Fallback if 0
+        if (price === 0) price = product.lista_base_cop || 0;
+
         const existing = items.find((i: any) => i.product_id === product.id);
         if (existing) {
             const newItems = items.map((i: any) => i.product_id === product.id ? { ...i, cantidad: i.cantidad + 1 } : i);
@@ -130,7 +170,7 @@ export default function CreateOpportunityWizard() {
                 product_id: product.id,
                 nombre: product.descripcion,
                 cantidad: 1,
-                precio: product.lista_base_cop || product.pvp_sin_iva || 0
+                precio: price
             }]);
         }
         setSearchTerm("");
@@ -293,11 +333,10 @@ export default function CreateOpportunityWizard() {
 
                         <div className="grid grid-cols-2 gap-4">
                             <div>
-                                <label className="text-sm font-medium">Moneda</label>
-                                <select {...register("currency_id")} className="w-full p-2 border rounded-lg">
-                                    <option value="COP">COP (Pesos)</option>
-                                    <option value="USD">USD (Dólares)</option>
-                                </select>
+                                <label className="text-sm font-medium text-slate-500">Moneda</label>
+                                <div className="mt-1 p-2 bg-slate-50 border border-slate-200 rounded-lg font-bold text-slate-700">
+                                    {watch("currency_id")}
+                                </div>
                             </div>
 
                             {/* Phase Selector (Dynamic) */}
@@ -352,22 +391,35 @@ export default function CreateOpportunityWizard() {
                                     ) : searchResults.length === 0 ? (
                                         <div className="p-4 text-center text-slate-500 text-sm">No se encontraron productos</div>
                                     ) : (
-                                        searchResults.map((product: PriceListProduct) => (
-                                            <button
-                                                key={product.id}
-                                                type="button"
-                                                onClick={() => addProduct(product)}
-                                                className="w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center justify-between border-b last:border-0"
-                                            >
-                                                <div>
-                                                    <div className="font-medium text-slate-900">{product.descripcion}</div>
-                                                    <div className="text-xs text-slate-500">{product.numero_articulo}</div>
-                                                </div>
-                                                <div className="text-sm font-bold text-blue-600">
-                                                    ${new Intl.NumberFormat().format(product.lista_base_cop || product.pvp_sin_iva || 0)}
-                                                </div>
-                                            </button>
-                                        ))
+                                        searchResults.map((product: PriceListProduct) => {
+                                            const channel = selectedAccount?.canal_id || 'DIST_NAC';
+                                            let displayPrice = 0;
+                                            switch (channel) {
+                                                case 'OBRAS_NAC': displayPrice = product.lista_base_obras || 0; break;
+                                                case 'OBRAS_INT':
+                                                case 'DIST_INT': displayPrice = product.lista_base_exportaciones || 0; break;
+                                                case 'PROPIO': displayPrice = product.distribuidor_pvp_iva || 0; break;
+                                                default: displayPrice = product.lista_base_cop || 0;
+                                            }
+                                            if (displayPrice === 0) displayPrice = product.lista_base_cop || 0;
+
+                                            return (
+                                                <button
+                                                    key={product.id}
+                                                    type="button"
+                                                    onClick={() => addProduct(product)}
+                                                    className="w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center justify-between border-b last:border-0"
+                                                >
+                                                    <div>
+                                                        <div className="font-medium text-slate-900">{product.descripcion}</div>
+                                                        <div className="text-xs text-slate-500">{product.numero_articulo}</div>
+                                                    </div>
+                                                    <div className="text-sm font-bold text-blue-600">
+                                                        {currencyId} {new Intl.NumberFormat().format(displayPrice)}
+                                                    </div>
+                                                </button>
+                                            );
+                                        })
                                     )}
                                 </div>
                             )}
@@ -385,7 +437,7 @@ export default function CreateOpportunityWizard() {
                                     <div key={item.product_id} className="flex items-center gap-4 p-3 bg-white border border-slate-200 rounded-xl shadow-sm">
                                         <div className="flex-1">
                                             <div className="font-medium text-sm text-slate-800">{item.nombre}</div>
-                                            <div className="text-xs text-slate-500">${new Intl.NumberFormat().format(item.precio || 0)} c/u</div>
+                                            <div className="text-xs text-slate-500">{currencyId} {new Intl.NumberFormat().format(item.precio || 0)} c/u</div>
                                         </div>
                                         <div className="flex items-center gap-2">
                                             <input
