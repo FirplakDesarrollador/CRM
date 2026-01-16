@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 // Re-export NotificationList to ensure HMR picks it up
 import { Notifications } from "./Notifications";
+import { GlobalSearch } from "./GlobalSearch";
 
 export function TopBar() {
     const { isSyncing, pendingCount, error: syncError } = useSyncStore();
@@ -40,14 +41,9 @@ export function TopBar() {
             {/* Mobile Title (Sidebar hidden) */}
             <h1 className="md:hidden text-lg font-bold text-slate-800">CRM FIRPLAK</h1>
 
-            {/* Desktop Search (Placeholder) */}
-            <div className="hidden md:flex items-center bg-slate-100 rounded-full px-4 py-2 w-96">
-                <Search className="w-4 h-4 text-slate-400 mr-2" />
-                <input
-                    type="text"
-                    placeholder="Buscar cuentas, oportunidades..."
-                    className="bg-transparent border-none focus:outline-none text-sm w-full text-slate-700"
-                />
+            {/* Desktop Search */}
+            <div className="hidden md:flex flex-1 max-w-xl mx-8">
+                <GlobalSearch />
             </div>
 
             <div className="flex items-center gap-4">

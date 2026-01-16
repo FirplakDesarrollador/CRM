@@ -1,41 +1,87 @@
 "use client";
 
-import { useAccounts } from "@/lib/hooks/useAccounts";
+import { useAccountsServer, AccountServer } from "@/lib/hooks/useAccountsServer";
 import { AccountForm } from "@/components/cuentas/AccountForm";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
+import { supabase } from "@/lib/supabase";
 import { Plus, Search, Building, Users, Pencil } from "lucide-react";
 
 function AccountsContent() {
     const searchParams = useSearchParams();
-    const { accounts, isLoading } = useAccounts();
+    const {
+        data: accounts,
+        loading,
+        hasMore,
+        loadMore,
+        setSearchTerm,
+        refresh
+    } = useAccountsServer({ pageSize: 20 });
+
     const [showCreate, setShowCreate] = useState(false);
     const [editingAccount, setEditingAccount] = useState<any>(null);
-    const [search, setSearch] = useState("");
+    const [inputValue, setInputValue] = useState("");
 
-    // Initialize search from URL and handle deep linking
+    // Initialize search from URL
     useEffect(() => {
         const query = searchParams.get('search');
-        if (query) setSearch(query);
-
-        const id = searchParams.get('id');
-        if (id && accounts.length > 0) {
-            const acc = accounts.find(a => a.id === id);
-            if (acc) {
-                setEditingAccount(acc);
-                setShowCreate(false);
-            }
+        if (query) {
+            setInputValue(query);
+            setSearchTerm(query);
         }
+    }, [searchParams, setSearchTerm]);
+
+    // Deep linking for edit: Automatically fetch and open account by ID from URL
+    useEffect(() => {
+        const id = searchParams.get('id');
+        if (!id) return;
+
+        const findAndOpen = async () => {
+            // 1. Check if already in current list
+            const existing = accounts.find(a => a.id === id);
+            if (existing) {
+                setEditingAccount(existing);
+                setShowCreate(false);
+                return;
+            }
+
+            // 2. If not, fetch specifically from server (JIT Sync for Accounts)
+            try {
+                const { data: acc, error } = await supabase
+                    .from('CRM_Cuentas')
+                    .select('*')
+                    .eq('id', id)
+                    .single();
+
+                if (acc && !error) {
+                    setEditingAccount(acc);
+                    setShowCreate(false);
+                }
+            } catch (err) {
+                console.error("Error fetching account for deep link:", err);
+            }
+        };
+
+        findAndOpen();
     }, [searchParams, accounts]);
 
-    const filtered = accounts.filter(a =>
-        a.nombre.toLowerCase().includes(search.toLowerCase()) ||
-        a.nit?.includes(search)
-    );
+    // Debounce Search
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setSearchTerm(inputValue);
+        }, 500);
+        return () => clearTimeout(timer);
+    }, [inputValue, setSearchTerm]);
 
     const handleEdit = (acc: any) => {
         setEditingAccount(acc);
         setShowCreate(false);
+    };
+
+    const handleSuccess = () => {
+        setShowCreate(false);
+        setEditingAccount(null);
+        refresh(); // Refresh list to show new/updated account
     };
 
     return (
@@ -49,8 +95,8 @@ function AccountsContent() {
                         <input
                             className="w-full pl-9 pr-4 py-2 border rounded-lg text-sm"
                             placeholder="Buscar por nombre o NIT..."
-                            value={search}
-                            onChange={(e) => setSearch(e.target.value)}
+                            value={inputValue}
+                            onChange={(e) => setInputValue(e.target.value)}
                         />
                     </div>
                     <button
@@ -79,10 +125,7 @@ function AccountsContent() {
                     </div>
                     <AccountForm
                         account={editingAccount}
-                        onSuccess={() => {
-                            setShowCreate(false);
-                            setEditingAccount(null);
-                        }}
+                        onSuccess={handleSuccess}
                         onCancel={() => {
                             setShowCreate(false);
                             setEditingAccount(null);
@@ -91,9 +134,13 @@ function AccountsContent() {
                 </div>
             )}
 
-            {isLoading ? (
-                <div className="p-8 text-center text-slate-400">Cargando cuentas...</div>
-            ) : filtered.length === 0 ? (
+            {loading && accounts.length === 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                    {[1, 2, 3, 4, 5, 6].map((i) => (
+                        <div key={i} className="h-32 bg-slate-100 rounded-xl animate-pulse border border-slate-200" />
+                    ))}
+                </div>
+            ) : accounts.length === 0 ? (
                 <div className="p-12 text-center border-2 border-dashed border-slate-200 rounded-xl">
                     <Building className="w-12 h-12 text-slate-300 mx-auto mb-3" />
                     <h3 className="text-lg font-medium text-slate-900">No hay cuentas</h3>
@@ -101,44 +148,58 @@ function AccountsContent() {
                     <button onClick={() => setShowCreate(true)} className="text-blue-600 font-medium hover:underline">Crear cuenta ahora</button>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                    {filtered.map(acc => (
-                        <div key={acc.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 hover:border-blue-300 transition-all group relative">
-                            <div className="flex justify-between items-start mb-2">
-                                <div className={`p-2 rounded-lg ${acc.id_cuenta_principal ? 'bg-purple-50 text-purple-600' : 'bg-blue-50 text-blue-600'}`}>
-                                    <Building className="w-5 h-5" />
+                <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                        {accounts.map(acc => (
+                            <div key={acc.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 hover:border-blue-300 transition-all group relative">
+                                <div className="flex justify-between items-start mb-2">
+                                    <div className={`p-2 rounded-lg ${acc.id_cuenta_principal ? 'bg-purple-50 text-purple-600' : 'bg-blue-50 text-blue-600'}`}>
+                                        <Building className="w-5 h-5" />
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        {acc.id_cuenta_principal && (
+                                            <span className="text-[10px] font-bold uppercase bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">
+                                                Sucursal
+                                            </span>
+                                        )}
+                                        <button
+                                            onClick={() => handleEdit(acc)}
+                                            className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                                        >
+                                            <Pencil className="w-4 h-4" />
+                                        </button>
+                                    </div>
                                 </div>
-                                <div className="flex items-center gap-2">
-                                    {acc.id_cuenta_principal && (
-                                        <span className="text-[10px] font-bold uppercase bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">
-                                            Sucursal
+
+                                <div onClick={() => handleEdit(acc)} className="cursor-pointer">
+                                    <h3 className="font-bold text-slate-800 truncate" title={acc.nombre}>{acc.nombre}</h3>
+                                    <p className="text-sm font-mono text-slate-500 mb-3">{acc.nit || acc.nit_base}</p>
+
+                                    <div className="flex items-center text-xs text-slate-400 gap-3 border-t pt-3 mt-1">
+                                        <span className="flex items-center gap-1">
+                                            <Users className="w-3 h-3" /> 0 Contactos
                                         </span>
-                                    )}
-                                    <button
-                                        onClick={() => handleEdit(acc)}
-                                        className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
-                                    >
-                                        <Pencil className="w-4 h-4" />
-                                    </button>
+                                        <span>
+                                            {acc.ciudad || "Sin ciudad"}
+                                        </span>
+                                    </div>
                                 </div>
                             </div>
+                        ))}
+                    </div>
 
-                            <div onClick={() => handleEdit(acc)} className="cursor-pointer">
-                                <h3 className="font-bold text-slate-800 truncate" title={acc.nombre}>{acc.nombre}</h3>
-                                <p className="text-sm font-mono text-slate-500 mb-3">{acc.nit || acc.nit_base}</p>
-
-                                <div className="flex items-center text-xs text-slate-400 gap-3 border-t pt-3 mt-1">
-                                    <span className="flex items-center gap-1">
-                                        <Users className="w-3 h-3" /> 0 Contactos
-                                    </span>
-                                    <span>
-                                        {acc.ciudad || "Sin ciudad"}
-                                    </span>
-                                </div>
-                            </div>
+                    {hasMore && (
+                        <div className="pt-6 flex justify-center pb-8">
+                            <button
+                                onClick={() => loadMore()}
+                                disabled={loading}
+                                className="px-6 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 disabled:opacity-50"
+                            >
+                                {loading ? 'Cargando...' : 'Cargar más cuentas'}
+                            </button>
                         </div>
-                    ))}
-                </div>
+                    )}
+                </>
             )}
         </div>
     );
