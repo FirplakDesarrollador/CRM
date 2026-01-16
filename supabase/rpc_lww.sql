@@ -74,56 +74,67 @@ BEGIN
         INTO v_current_row
         USING v_id;
 
-        IF v_current_row IS NULL THEN
-            -- UPSERT LOGIC: If row doesn't exist, create it with this first field
-            v_current_metadata := jsonb_build_object(v_field, v_ts);
-            
-            -- Construct dynamic INSERT columns and placeholders
-            v_insert_cols := ARRAY['id', v_field, '_sync_metadata', 'created_by', 'updated_by'];
-            v_insert_placeholders := ARRAY['$1', '($2#>>''{}'')::text', '$3', '$4', '$4'];
-
-            -- Auto-fill ownership if not the field being updated
-            IF v_has_owner_col AND v_field != 'owner_user_id' THEN
-                v_insert_cols := v_insert_cols || 'owner_user_id';
-                v_insert_placeholders := v_insert_placeholders || '$4';
-            END IF;
-
-            IF v_has_user_col AND v_field != 'user_id' THEN
-                v_insert_cols := v_insert_cols || 'user_id';
-                v_insert_placeholders := v_insert_placeholders || '$4';
-            END IF;
-
-            v_query := format(
-                'INSERT INTO %I (%s) VALUES (%s)',
-                p_table_name,
-                array_to_string(v_insert_cols, ', '),
-                array_to_string(v_insert_placeholders, ', ')
-            );
-            
-            EXECUTE v_query USING v_id, v_value, v_current_metadata, p_user_id;
-
-            v_success := TRUE;
-            v_message := 'Created';
-        ELSE
-            v_current_metadata := COALESCE(v_current_row->'_sync_metadata', '{}'::jsonb);
-            v_last_ts := COALESCE((v_current_metadata->>v_field)::BIGINT, 0);
-
-            -- 2. LWW Check
-            IF v_ts > v_last_ts THEN
-                -- 3. Apply Update
-                v_current_metadata := jsonb_set(v_current_metadata, ARRAY[v_field], to_jsonb(v_ts));
+        BEGIN -- START INDIVIDUAL UPDATE BLOCK
+            IF v_current_row IS NULL THEN
+                -- UPSERT LOGIC: If row doesn't exist, create it with this first field
+                v_current_metadata := jsonb_build_object(v_field, v_ts);
                 
+                -- Construct dynamic INSERT columns and placeholders
+                v_insert_cols := ARRAY['id', '_sync_metadata', 'created_by', 'updated_by'];
+                v_insert_placeholders := ARRAY['$1', '$3', '$4', '$4'];
+
+                -- Only add the field if it's NOT 'id' (since id is already covered by $1)
+                IF v_field != 'id' THEN
+                    v_insert_cols := v_insert_cols || v_field;
+                    v_insert_placeholders := v_insert_placeholders || '($2#>>''{}'')::text';
+                END IF;
+
+                -- Auto-fill ownership if not the field being updated
+                IF v_has_owner_col AND v_field != 'owner_user_id' THEN
+                    v_insert_cols := v_insert_cols || 'owner_user_id';
+                    v_insert_placeholders := v_insert_placeholders || '$4';
+                END IF;
+
+                IF v_has_user_col AND v_field != 'user_id' THEN
+                    v_insert_cols := v_insert_cols || 'user_id';
+                    v_insert_placeholders := v_insert_placeholders || '$4';
+                END IF;
+
                 v_query := format(
-                    'UPDATE %I SET %I = ($1#>>''{}'')::text, _sync_metadata = $2, updated_at = NOW(), updated_by = $3 WHERE id = $4',
-                    p_table_name, v_field
+                    'INSERT INTO %I (%s) VALUES (%s)',
+                    p_table_name,
+                    array_to_string(v_insert_cols, ', '),
+                    array_to_string(v_insert_placeholders, ', ')
                 );
                 
-                EXECUTE v_query USING v_value, v_current_metadata, p_user_id, v_id;
-                
+                EXECUTE v_query USING v_id, v_value, v_current_metadata, p_user_id;
+
                 v_success := TRUE;
-                v_message := 'Updated';
+                v_message := 'Created';
+            ELSE
+                v_current_metadata := COALESCE(v_current_row->'_sync_metadata', '{}'::jsonb);
+                v_last_ts := COALESCE((v_current_metadata->>v_field)::BIGINT, 0);
+
+                -- 2. LWW Check
+                IF v_ts > v_last_ts THEN
+                    -- 3. Apply Update
+                    v_current_metadata := jsonb_set(v_current_metadata, ARRAY[v_field], to_jsonb(v_ts));
+                    
+                    v_query := format(
+                        'UPDATE %I SET %I = ($1#>>''{}'')::text, _sync_metadata = $2, updated_at = NOW(), updated_by = $3 WHERE id = $4',
+                        p_table_name, v_field
+                    );
+                    
+                    EXECUTE v_query USING v_value, v_current_metadata, p_user_id, v_id;
+                    
+                    v_success := TRUE;
+                    v_message := 'Updated';
+                END IF;
             END IF;
-        END IF;
+        EXCEPTION WHEN OTHERS THEN
+            v_success := FALSE;
+            v_message := SQLERRM;
+        END; -- END INDIVIDUAL UPDATE BLOCK
 
         -- Log result
         v_results := v_results || jsonb_build_object(

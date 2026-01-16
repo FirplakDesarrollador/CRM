@@ -1,6 +1,6 @@
 "use client";
 
-import { useSyncStore } from "@/lib/store/sync";
+import { useSyncStore } from "@/lib/stores/useSyncStore";
 import { cn } from "@/components/ui/utils";
 import { WifiOff } from "lucide-react";
 import { useEffect, useState } from "react";

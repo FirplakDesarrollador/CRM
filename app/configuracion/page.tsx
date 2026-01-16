@@ -20,9 +20,21 @@ import { useRouter } from 'next/navigation';
 import { cn } from '@/components/ui/utils';
 import { supabase } from '@/lib/supabase';
 import { useConfig } from '@/lib/hooks/useConfig';
+import { PriceListUploader } from '@/components/config/PriceListUploader';
+import { ConfirmationModal } from '@/components/ui/ConfirmationModal';
 import packageJson from '../../package.json';
 
 const CRM_VERSION = packageJson.version;
+
+const getFriendlyErrorMessage = (error: string | undefined | null) => {
+    if (!error) return "Error desconocido";
+    if (error.includes("invalid input syntax for type date")) return "Formato de fecha inválido. Se esperaba AAAA-MM-DD.";
+    if (error.includes("violates not-null constraint")) return "Datos imcompletos. Faltan campos obligatorios.";
+    if (error.includes("duplicate key value")) return "Registro duplicado. Ya existe en la base de datos.";
+    if (error.includes("Failed to fetch")) return "Problema de conexión. Verifica tu internet.";
+    if (error.includes("JWT expired")) return "Tu sesión ha expirado. Por favor inicia sesión nuevamente.";
+    return error; // Fallback to raw error if no match
+};
 
 interface Stats {
     opportunities: number;
@@ -38,12 +50,42 @@ export default function ConfigPage() {
     const [outboxItems, setOutboxItems] = useState<OutboxItem[]>([]);
     const [stats, setStats] = useState<Stats | null>(null);
 
+    const [modalConfig, setModalConfig] = useState<{
+        isOpen: boolean;
+        title: string;
+        message: string;
+        onConfirm: () => void;
+        variant?: 'danger' | 'warning' | 'info';
+        confirmLabel?: string;
+        isLoading?: boolean;
+    }>({
+        isOpen: false,
+        title: "",
+        message: "",
+        onConfirm: () => { },
+    });
+
     const handleLogout = async () => {
-        if (confirm('¿Estás seguro de que deseas cerrar sesión?')) {
+        setModalConfig(prev => ({ ...prev, isLoading: true }));
+        try {
             await supabase.auth.signOut();
+        } catch (err) {
+            console.error('[Config] SignOut error:', err);
+        } finally {
             localStorage.removeItem('cachedUserId');
-            router.push('/login');
+            window.location.href = '/login';
         }
+    };
+
+    const confirmLogout = () => {
+        setModalConfig({
+            isOpen: true,
+            title: "Cerrar Sesión",
+            message: "¿Estás seguro de que deseas cerrar sesión? Asegúrate de haber sincronizado tus cambios.",
+            confirmLabel: "Cerrar Sesión",
+            variant: "danger",
+            onConfirm: handleLogout
+        });
     };
 
     const fetchDebugInfo = async () => {
@@ -67,27 +109,63 @@ export default function ConfigPage() {
     }, []);
 
     const clearOutbox = async () => {
-        if (confirm('¿Estás seguro de limpiar la cola de sincronización? Los cambios locales no sincronizados se perderán.')) {
-            await db.outbox.clear();
-            await fetchDebugInfo();
-        }
+        setModalConfig({
+            isOpen: true,
+            title: "Limpiar Cola de Sincronización",
+            message: "¿Estás seguro de limpiar la cola de sincronización? Los cambios locales no sincronizados se perderán permanentemente.",
+            confirmLabel: "Limpiar Ahora",
+            variant: "danger",
+            onConfirm: async () => {
+                await db.outbox.clear();
+                await fetchDebugInfo();
+                setModalConfig(prev => ({ ...prev, isOpen: false }));
+            }
+        });
     };
 
     const resetLocalData = async () => {
-        if (confirm('PELIGRO: Esto borrará TODOS los datos locales y reiniciará la aplicación. Usar solo si hay errores persistentes que no se resuelven sincronizando.\n\n¿Desea continuar?')) {
-            try {
-                await db.delete();
-                alert('Base de datos eliminada. La aplicación se recargará para resincronizar datos limpios.');
-                window.location.href = '/';
-            } catch (e) {
-                alert('Error al borrar DB: ' + e);
+        setModalConfig({
+            isOpen: true,
+            title: "¡PELIGRO! Reset Total",
+            message: "Esto borrará TODOS los datos locales y reiniciará la aplicación. Solo usa esto si hay errores persistentes que no se resuelven sincronizando. ¿Deseas continuar?",
+            confirmLabel: "Borrar Todo",
+            variant: "danger",
+            onConfirm: async () => {
+                setModalConfig(prev => ({ ...prev, isLoading: true }));
+                try {
+                    await db.delete();
+                    setModalConfig({
+                        isOpen: true,
+                        title: "Base de Datos Eliminada",
+                        message: "La aplicación se recargará para resincronizar datos limpios.",
+                        confirmLabel: "Entendido",
+                        onConfirm: () => window.location.href = '/',
+                        variant: "info"
+                    });
+                } catch (e) {
+                    setModalConfig({
+                        isOpen: true,
+                        title: "Error al borrar DB",
+                        message: String(e),
+                        confirmLabel: "Cerrar",
+                        onConfirm: () => setModalConfig(prev => ({ ...prev, isOpen: false })),
+                        variant: "danger"
+                    });
+                }
             }
-        }
+        });
     };
 
     const forceSync = () => {
         if (isPaused) {
-            alert('La sincronización está pausada. Reanúdala para sincronizar.');
+            setModalConfig({
+                isOpen: true,
+                title: "Sincronización Pausada",
+                message: "La sincronización está pausada. Reanúdala para poder sincronizar manualmente.",
+                confirmLabel: "Entendido",
+                onConfirm: () => setModalConfig(prev => ({ ...prev, isOpen: false })),
+                variant: "warning"
+            });
             return;
         }
         syncEngine.triggerSync();
@@ -222,11 +300,26 @@ export default function ConfigPage() {
                     <div className="grid grid-cols-2 gap-4 mt-4">
                         <button
                             onClick={async () => {
-                                if (confirm("Esto forzará la recarga de la configuración (Fases, Canales) desde el servidor. ¿Continuar?")) {
-                                    await db.phases.clear();
-                                    await syncEngine.triggerSync();
-                                    alert("Sincronización forzada iniciada. Por favor espera a que termine.");
-                                }
+                                setModalConfig({
+                                    isOpen: true,
+                                    title: "Recargar Fases de Venta",
+                                    message: "Esto forzará la recarga de la configuración (Fases, Canales) desde el servidor. ¿Deseas continuar?",
+                                    confirmLabel: "Recargar",
+                                    variant: "info",
+                                    onConfirm: async () => {
+                                        setModalConfig(prev => ({ ...prev, isLoading: true }));
+                                        await db.phases.clear();
+                                        await syncEngine.triggerSync();
+                                        setModalConfig({
+                                            isOpen: true,
+                                            title: "Recarga Iniciada",
+                                            message: "La sincronización forzada ha comenzado. Por favor espera a que termine de procesar las fases.",
+                                            confirmLabel: "Entendido",
+                                            onConfirm: () => setModalConfig(prev => ({ ...prev, isOpen: false })),
+                                            variant: "info"
+                                        });
+                                    }
+                                });
                             }}
                             className="flex items-center justify-center gap-2 px-4 py-3 text-blue-600 hover:bg-blue-50 rounded-xl text-sm font-bold transition-colors border border-blue-100"
                         >
@@ -258,7 +351,7 @@ export default function ConfigPage() {
                     </div>
                     <p className="text-sm text-slate-500">Administra tu acceso a la aplicación.</p>
                     <button
-                        onClick={handleLogout}
+                        onClick={confirmLogout}
                         className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-xl text-sm font-bold transition-colors border border-slate-200"
                     >
                         <LogOut className="w-4 h-4" />
@@ -282,6 +375,7 @@ export default function ConfigPage() {
                                     <th className="px-6 py-4">Campo</th>
                                     <th className="px-6 py-4">Nuevo Valor</th>
                                     <th className="px-6 py-4">Estado</th>
+                                    <th className="px-6 py-4">Error / Detalle</th>
                                     <th className="px-6 py-4">Fecha</th>
                                 </tr>
                             </thead>
@@ -308,6 +402,15 @@ export default function ConfigPage() {
                                                 {item.status}
                                             </span>
                                         </td>
+                                        <td className="px-6 py-4 max-w-[200px]">
+                                            {item.status === 'FAILED' ? (
+                                                <div className="text-xs text-red-600 bg-red-50 p-2 rounded border border-red-100">
+                                                    <strong>Error:</strong> {getFriendlyErrorMessage(item.error)}
+                                                </div>
+                                            ) : (
+                                                <span className="text-xs text-slate-400">-</span>
+                                            )}
+                                        </td>
                                         <td className="px-6 py-4 text-slate-400 text-xs">
                                             {new Date(item.field_timestamp).toLocaleTimeString()}
                                         </td>
@@ -319,7 +422,21 @@ export default function ConfigPage() {
                 </div>
             )}
 
-            <AdminSettings />
+            {/* Price List Uploader */}
+            <PriceListUploader />
+
+            <AdminSettings setModalConfig={setModalConfig} />
+
+            <ConfirmationModal
+                isOpen={modalConfig.isOpen}
+                onClose={() => setModalConfig(prev => ({ ...prev, isOpen: false }))}
+                onConfirm={modalConfig.onConfirm}
+                title={modalConfig.title}
+                message={modalConfig.message}
+                confirmLabel={modalConfig.confirmLabel}
+                variant={modalConfig.variant}
+                isLoading={modalConfig.isLoading}
+            />
         </div>
     );
 }
@@ -344,7 +461,7 @@ function StatRow({ label, value, icon: Icon }: StatRowProps) {
     );
 }
 
-function AdminSettings() {
+function AdminSettings({ setModalConfig }: { setModalConfig: any }) {
     const { config, isAdmin, updateConfig, isLoading } = useConfig();
     const [minValue, setMinValue] = useState("");
     const [minInactiveDays, setMinInactiveDays] = useState("");
@@ -369,7 +486,14 @@ function AdminSettings() {
         const p1 = updateConfig('min_premium_order_value', minValue);
         const p2 = updateConfig('inactive_account_days', minInactiveDays);
         await Promise.all([p1, p2]);
-        alert('Configuración guardada correctamente');
+        setModalConfig({
+            isOpen: true,
+            title: "Configuración Guardada",
+            message: "Los parámetros globales han sido actualizados correctamente.",
+            confirmLabel: "Aceptar",
+            onConfirm: () => setModalConfig(prev => ({ ...prev, isOpen: false })),
+            variant: "info"
+        });
         setIsSaving(false);
     };
 
