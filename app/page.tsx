@@ -6,11 +6,14 @@ import { supabase } from "@/lib/supabase";
 import { User } from "@supabase/supabase-js";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { TrendingUp, Calendar, CheckCircle, Plus, Building2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { TrendingUp, Calendar, CheckCircle, Plus, Building2, AlertCircle } from "lucide-react";
+import { cn } from "@/components/ui/utils";
 
 export default function Home() {
   const { opportunities } = useOpportunities();
   const { activities } = useActivities();
+  const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [stats, setStats] = useState({
     openCount: 0,
@@ -32,8 +35,8 @@ export default function Home() {
   useEffect(() => {
     if (!opportunities || !activities) return;
 
-    const openOpps = opportunities.filter(o => o.estado_id !== 4 && o.estado_id !== 5); // Assuming 4=Won, 5=Lost
-    const wonOpps = opportunities.filter(o => o.estado_id === 4);
+    const openOpps = opportunities.filter(o => o.estado_id === 1 || !o.estado_id);
+    const wonOpps = opportunities.filter(o => o.estado_id === 2);
 
     const today = new Date();
     const actsToday = activities.filter(a => {
@@ -58,12 +61,16 @@ export default function Home() {
   };
 
   // Get today's activities sorted by time
-  const todayActivities = activities?.filter(a => {
+  const dashboardActivities = activities?.filter(a => {
     const d = new Date(a.fecha_inicio);
+    d.setHours(0, 0, 0, 0);
     const today = new Date();
-    return d.getDate() === today.getDate() &&
-      d.getMonth() === today.getMonth() &&
-      d.getFullYear() === today.getFullYear();
+    today.setHours(0, 0, 0, 0);
+
+    const isToday = d.getTime() === today.getTime();
+    const isOverdue = !a.is_completed && d.getTime() < today.getTime();
+
+    return isToday || isOverdue;
   }).sort((a, b) => new Date(a.fecha_inicio).getTime() - new Date(b.fecha_inicio).getTime()).slice(0, 5) || [];
 
   // Recent opportunities
@@ -132,15 +139,38 @@ export default function Home() {
           </div>
 
           <div className="space-y-3">
-            {todayActivities.length > 0 ? todayActivities.map(act => (
-              <div key={act.id} className="bg-white p-4 rounded-lg shadow-sm border-l-4 border-blue-500 flex flex-col gap-1">
-                <span className="text-xs font-bold text-blue-600 uppercase">
-                  {new Date(act.fecha_inicio).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </span>
-                <h4 className="font-semibold text-slate-800 line-clamp-1">{act.asunto}</h4>
-                <p className="text-sm text-slate-500 line-clamp-1">{act.descripcion || 'Sin descripción'}</p>
-              </div>
-            )) : (
+            {dashboardActivities.length > 0 ? dashboardActivities.map(act => {
+              const d = new Date(act.fecha_inicio);
+              d.setHours(0, 0, 0, 0);
+              const today = new Date();
+              today.setHours(0, 0, 0, 0);
+              const isOverdue = !act.is_completed && d.getTime() < today.getTime();
+
+              return (
+                <div key={act.id} className={cn(
+                  "bg-white p-4 rounded-lg shadow-sm border-l-4 flex flex-col gap-1 transition-all",
+                  isOverdue ? "border-red-500 bg-red-50/20" : "border-blue-500"
+                )}>
+                  <div className="flex justify-between items-start">
+                    <span className={cn(
+                      "text-xs font-bold uppercase",
+                      isOverdue ? "text-red-600 flex items-center gap-1" : "text-blue-600"
+                    )}>
+                      {isOverdue && <AlertCircle className="w-3 h-3" />}
+                      {isOverdue
+                        ? new Date(act.fecha_inicio).toLocaleDateString()
+                        : new Date(act.fecha_inicio).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                      }
+                    </span>
+                  </div>
+                  <h4 className={cn(
+                    "font-semibold line-clamp-1",
+                    isOverdue ? "text-red-900" : "text-slate-800"
+                  )}>{act.asunto}</h4>
+                  <p className="text-sm text-slate-500 line-clamp-1">{act.descripcion || 'Sin descripción'}</p>
+                </div>
+              );
+            }) : (
               <div className="text-center py-8 bg-slate-50 rounded-lg dashed border-2 border-slate-200">
                 <p className="text-slate-400 text-sm">No tienes actividades para hoy</p>
                 <Link href="/actividades" className="text-blue-600 text-xs font-bold mt-2 block">Agendar Ahora</Link>
@@ -171,7 +201,7 @@ export default function Home() {
                     <tr
                       key={opp.id}
                       className="hover:bg-slate-50 transition-colors cursor-pointer group"
-                      onClick={() => window.location.href = `/oportunidades/${opp.id}`}
+                      onClick={() => router.push(`/oportunidades/${opp.id}`)}
                     >
                       <td className="px-6 py-4">
                         <div className="font-medium text-slate-900 group-hover:text-blue-600 transition-colors">{opp.nombre}</div>

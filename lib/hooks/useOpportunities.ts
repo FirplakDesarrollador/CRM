@@ -174,7 +174,16 @@ export function useOpportunities() {
         const current = await db.opportunities.get(id);
         if (!current) return;
 
-        const updated = { ...current, ...updates, updated_at: new Date().toISOString() };
+        const updated = {
+            ...current,
+            ...updates,
+            updated_at: new Date().toISOString(),
+            // Sanitize critical dates (Postgres dislikes empty strings for DATE type)
+            fecha_cierre_estimada: (updates.fecha_cierre_estimada === "" ? null : (updates.fecha_cierre_estimada ?? current.fecha_cierre_estimada))
+        };
+        // Double check if the merged result is still "" (from current)
+        if (updated.fecha_cierre_estimada === "") updated.fecha_cierre_estimada = null;
+
         await db.opportunities.update(id, updated);
 
         // Send full opportunity data to satisfy NOT NULL constraints on server

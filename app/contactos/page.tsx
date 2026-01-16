@@ -4,6 +4,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, LocalContact } from "@/lib/db";
 import { useState } from "react";
 import { ContactForm } from "@/components/contactos/ContactForm";
+import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
 import { Edit2, Trash2, Phone, Mail, User, Building, Search, Plus } from "lucide-react";
 import { useContacts } from "@/lib/hooks/useContacts";
 
@@ -17,6 +18,23 @@ export default function ContactsPage() {
     const [isCreating, setIsCreating] = useState(false);
     const [selectedAccountIdForCreate, setSelectedAccountIdForCreate] = useState<string>("");
     const [editingContact, setEditingContact] = useState<LocalContact | undefined>(undefined);
+
+    // Modal State
+    const [contactToDelete, setContactToDelete] = useState<LocalContact | null>(null);
+    const [isDeleting, setIsDeleting] = useState(false);
+
+    const handleDelete = async () => {
+        if (!contactToDelete) return;
+        setIsDeleting(true);
+        try {
+            await deleteContact(contactToDelete.id);
+            setContactToDelete(null);
+        } catch (error) {
+            console.error("Error deleting contact:", error);
+        } finally {
+            setIsDeleting(false);
+        }
+    };
 
     // Derived: Filter contacts
     const filteredContacts = contacts?.filter(contact => {
@@ -143,9 +161,7 @@ export default function ContactsPage() {
                                         <Edit2 size={16} />
                                     </button>
                                     <button
-                                        onClick={() => {
-                                            if (confirm('¿Eliminar contacto?')) deleteContact(contact.id);
-                                        }}
+                                        onClick={() => setContactToDelete(contact)}
                                         className="p-1.5 text-red-600 hover:bg-red-50 rounded bg-red-50/50"
                                         title="Eliminar"
                                     >
@@ -189,6 +205,17 @@ export default function ContactsPage() {
                     })}
                 </div>
             )}
+
+            <ConfirmationModal
+                isOpen={!!contactToDelete}
+                onClose={() => setContactToDelete(null)}
+                onConfirm={handleDelete}
+                title="Eliminar Contacto"
+                message={`¿Estás seguro de que deseas eliminar a ${contactToDelete?.nombre}?`}
+                confirmLabel="Eliminar"
+                variant="danger"
+                isLoading={isDeleting}
+            />
         </div>
     );
 }

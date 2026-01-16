@@ -13,6 +13,7 @@ export type OpportunityServer = {
     currency_id: string;
     owner_user_id: string;
     updated_at: string;
+    fecha_cierre_estimada?: string | null;
     account?: { nombre: string } | null; // Joined data
 };
 
@@ -63,6 +64,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                     currency_id, 
                     owner_user_id, 
                     updated_at,
+                    fecha_cierre_estimada,
                     account:CRM_Cuentas(nombre)
                 `, { count: 'exact' });
 
