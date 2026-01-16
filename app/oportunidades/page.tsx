@@ -123,27 +123,54 @@ export default function OpportunitiesPage() {
                 </div>
             ) : (
                 <div className="grid gap-3">
-                    {opportunities.map(opp => (
-                        <Link key={opp.id} href={`/oportunidades/${opp.id}`}>
-                            <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 hover:border-blue-400 transition-all cursor-pointer flex justify-between items-center group">
-                                <div>
-                                    <h3 className="font-bold text-slate-800">{opp.nombre || "Sin nombre"}</h3>
-                                    <div className="flex flex-col gap-0.5 mt-1">
-                                        <p className="text-sm text-blue-600 font-medium">
-                                            {/* Note: Account name comes from join now */}
-                                            {opp.account?.nombre || "Sin cuenta"}
-                                        </p>
-                                        <p className="text-xs text-slate-500">
-                                            {/* Phase mapping would need server-side join or client-side map if Phases are small. 
+                    {opportunities.map(opp => {
+                        const isOverdue = opp.fecha_cierre_estimada && new Date(opp.fecha_cierre_estimada) < new Date(new Date().setHours(0, 0, 0, 0));
+                        return (
+                            <Link key={opp.id} href={`/oportunidades/${opp.id}`}>
+                                <div className={cn(
+                                    "p-4 rounded-xl shadow-sm border transition-all cursor-pointer flex justify-between items-center group",
+                                    isOverdue
+                                        ? "bg-red-50 border-red-200 hover:border-red-400"
+                                        : "bg-white border-slate-200 hover:border-blue-400"
+                                )}>
+                                    <div>
+                                        <h3 className={cn(
+                                            "font-bold",
+                                            isOverdue ? "text-red-900" : "text-slate-800"
+                                        )}>{opp.nombre || "Sin nombre"}</h3>
+                                        <div className="flex flex-col gap-0.5 mt-1">
+                                            <p className="text-sm text-blue-600 font-medium">
+                                                {/* Note: Account name comes from join now */}
+                                                {opp.account?.nombre || "Sin cuenta"}
+                                            </p>
+                                            <p className="text-xs text-slate-500">
+                                                {/* Phase mapping would need server-side join or client-side map if Phases are small. 
                                                 For now we show ID or TODO: map it 
                                             */}
-                                            {opp.fase_id || 'Prospecto'} • {opp.currency_id || 'COP'} {new Intl.NumberFormat().format(opp.amount || 0)}
-                                        </p>
+                                                {opp.fase_id || 'Prospecto'} • {opp.currency_id || 'COP'} {new Intl.NumberFormat().format(opp.amount || 0)}
+                                                {opp.fecha_cierre_estimada && (
+                                                    <span className={cn(
+                                                        "ml-2 font-normal",
+                                                        isOverdue
+                                                            ? "text-red-600 font-bold flex items-center gap-1 inline-flex"
+                                                            : "text-slate-400"
+                                                    )}>
+                                                        • Cierre: {new Date(opp.fecha_cierre_estimada).toLocaleDateString()}
+                                                        {isOverdue && (
+                                                            <span className="relative flex h-2 w-2 ml-1">
+                                                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                                                                <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+                                                            </span>
+                                                        )}
+                                                    </span>
+                                                )}
+                                            </p>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                        </Link>
-                    ))}
+                            </Link>
+                        )
+                    })}
 
                     {hasMore && (
                         <div className="pt-4 flex justify-center">

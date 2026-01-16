@@ -11,6 +11,7 @@ import { supabase } from "@/lib/supabase";
 import AccountContactsTab from "./AccountContactsTab";
 import AccountOpportunitiesTab from "./AccountOpportunitiesTab";
 import { Briefcase } from "lucide-react";
+import { cn } from "@/components/ui/utils";
 
 // Schema
 const accountSchema = z.object({
@@ -109,10 +110,30 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
         }
     };
 
+    const [nitError, setNitError] = useState<string | null>(null);
+
     const onSubmit = async (data: AccountFormData) => {
         setIsSubmitting(true);
+        setNitError(null);
         try {
             const formData = data;
+
+            // PRE-VALIDATION: Check for duplicate NIT if it's a new PARENT account
+            if (!account?.id && !formData.is_child) {
+                const { data: existing, error: checkError } = await supabase
+                    .from('CRM_Cuentas')
+                    .select('id, nombre')
+                    .eq('nit_base', formData.nit_base)
+                    .is('id_cuenta_principal', null)
+                    .single();
+
+                if (existing) {
+                    setNitError(`El NIT ${formData.nit_base} ya pertenece a la cuenta: ${existing.nombre}`);
+                    setIsSubmitting(false);
+                    return;
+                }
+            }
+
             if (formData.is_child && formData.id_cuenta_principal) {
                 const parent = parents.find(a => a.id === formData.id_cuenta_principal);
                 if (parent) formData.nit_base = parent.nit_base || "";
@@ -268,8 +289,17 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                     ) : (
                         <div className="space-y-1">
                             <label className="text-sm font-medium">NIT (Sin dígito de verificación)</label>
-                            <input {...register("nit_base")} className="w-full border p-2 rounded" placeholder="Ej. 890900123" />
+                            <input
+                                {...register("nit_base")}
+                                className={cn("w-full border p-2 rounded", nitError ? "border-red-500 bg-red-50" : "border-slate-200")}
+                                placeholder="Ej. 890900123"
+                                onChange={(e) => {
+                                    register("nit_base").onChange(e);
+                                    if (nitError) setNitError(null);
+                                }}
+                            />
                             {errors.nit_base && <span className="text-red-500 text-xs">{errors.nit_base.message}</span>}
+                            {nitError && <div className="text-red-600 text-xs font-bold mt-1 bg-red-50 p-2 rounded border border-red-100">{nitError}</div>}
                         </div>
                     )}
 

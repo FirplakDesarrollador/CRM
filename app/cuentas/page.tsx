@@ -4,6 +4,7 @@ import { useAccountsServer, AccountServer } from "@/lib/hooks/useAccountsServer"
 import { AccountForm } from "@/components/cuentas/AccountForm";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
+import { supabase } from "@/lib/supabase";
 import { Plus, Search, Building, Users, Pencil } from "lucide-react";
 
 function AccountsContent() {
@@ -30,17 +31,38 @@ function AccountsContent() {
         }
     }, [searchParams, setSearchTerm]);
 
-    // Deep linking for edit (requires fetching specific ID if not in list? 
-    // Implementation for now just checks loaded list or ignores deep link if not loaded)
+    // Deep linking for edit: Automatically fetch and open account by ID from URL
     useEffect(() => {
         const id = searchParams.get('id');
-        if (id && accounts.length > 0) {
-            const acc = accounts.find(a => a.id === id);
-            if (acc) {
-                setEditingAccount(acc);
+        if (!id) return;
+
+        const findAndOpen = async () => {
+            // 1. Check if already in current list
+            const existing = accounts.find(a => a.id === id);
+            if (existing) {
+                setEditingAccount(existing);
                 setShowCreate(false);
+                return;
             }
-        }
+
+            // 2. If not, fetch specifically from server (JIT Sync for Accounts)
+            try {
+                const { data: acc, error } = await supabase
+                    .from('CRM_Cuentas')
+                    .select('*')
+                    .eq('id', id)
+                    .single();
+
+                if (acc && !error) {
+                    setEditingAccount(acc);
+                    setShowCreate(false);
+                }
+            } catch (err) {
+                console.error("Error fetching account for deep link:", err);
+            }
+        };
+
+        findAndOpen();
     }, [searchParams, accounts]);
 
     // Debounce Search

@@ -175,6 +175,12 @@ function ActivitiesContent() {
                                 <div className="space-y-4">
                                     {filteredActivities.map((act) => {
                                         const opp = opportunities?.find(o => o.id === act.opportunity_id);
+                                        const today = new Date();
+                                        today.setHours(0, 0, 0, 0);
+                                        const actDate = new Date(act.fecha_inicio);
+                                        actDate.setHours(0, 0, 0, 0);
+                                        const isOverdue = !act.is_completed && actDate < today;
+
                                         return (
                                             <div
                                                 key={act.id}
@@ -182,9 +188,11 @@ function ActivitiesContent() {
                                                     "group p-4 bg-white rounded-2xl border transition-all hover:shadow-md cursor-pointer",
                                                     act.is_completed
                                                         ? "border-slate-100 opacity-75"
-                                                        : act.tipo_actividad === 'TAREA'
-                                                            ? "border-emerald-200 hover:border-emerald-300 hover:shadow-emerald-100"
-                                                            : "border-blue-200 hover:border-blue-300 hover:shadow-blue-100"
+                                                        : isOverdue
+                                                            ? "border-red-200 bg-red-50/30 hover:border-red-300 hover:shadow-red-100"
+                                                            : act.tipo_actividad === 'TAREA'
+                                                                ? "border-emerald-200 hover:border-emerald-300 hover:shadow-emerald-100"
+                                                                : "border-blue-200 hover:border-blue-300 hover:shadow-blue-100"
                                                 )}
                                                 onClick={() => {
                                                     setSelectedActivity(act);
@@ -201,6 +209,10 @@ function ActivitiesContent() {
                                                     >
                                                         {act.is_completed ? (
                                                             <CheckCircle2 className="w-6 h-6 text-emerald-500" />
+                                                        ) : isOverdue ? (
+                                                            <div className="w-6 h-6 flex items-center justify-center">
+                                                                <Circle className="w-6 h-6 text-red-500" />
+                                                            </div>
                                                         ) : (
                                                             <Circle className="w-6 h-6 text-slate-300 hover:text-blue-400" />
                                                         )}
@@ -209,17 +221,23 @@ function ActivitiesContent() {
                                                         <div className="flex justify-between items-start">
                                                             <h4 className={cn(
                                                                 "font-bold text-lg",
-                                                                act.is_completed ? "text-slate-500 line-through" : "text-slate-900"
+                                                                act.is_completed ? "text-slate-500 line-through" : isOverdue ? "text-red-700" : "text-slate-900"
                                                             )}>
                                                                 {act.asunto}
                                                             </h4>
                                                             {act.tipo_actividad === 'EVENTO' ? (
-                                                                <div className="flex items-center gap-2 text-xs font-medium text-blue-600 bg-blue-50 px-2 py-1 rounded-lg">
+                                                                <div className={cn(
+                                                                    "flex items-center gap-2 text-xs font-medium px-2 py-1 rounded-lg",
+                                                                    isOverdue ? "text-red-600 bg-red-100" : "text-blue-600 bg-blue-50"
+                                                                )}>
                                                                     <Clock className="w-3.5 h-3.5" />
                                                                     {new Date(act.fecha_inicio).toLocaleDateString(undefined, { day: 'numeric', month: 'numeric' })} {new Date(act.fecha_inicio).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: true })}
                                                                 </div>
                                                             ) : (
-                                                                <div className="flex items-center gap-2 text-xs font-medium text-emerald-600 bg-emerald-50 px-2 py-1 rounded-lg">
+                                                                <div className={cn(
+                                                                    "flex items-center gap-2 text-xs font-medium px-2 py-1 rounded-lg",
+                                                                    isOverdue ? "text-red-600 bg-red-100" : "text-emerald-600 bg-emerald-50"
+                                                                )}>
                                                                     <ListTodo className="w-3.5 h-3.5" />
                                                                     Tarea {view === 'all' && act.fecha_inicio && `- ${new Date(act.fecha_inicio).toLocaleDateString()}`}
                                                                 </div>
@@ -322,18 +340,23 @@ function ActivitiesContent() {
 
                                                     {/* Activity Preview */}
                                                     <div className="flex-1 overflow-hidden space-y-0.5">
-                                                        {dayActivities.slice(0, 2).map(act => (
-                                                            <div key={act.id} className={cn(
-                                                                "text-[10px] px-1.5 py-0.5 rounded truncate font-medium border-l-2",
-                                                                act.is_completed
-                                                                    ? "bg-slate-50 text-slate-400 border-slate-300 line-through"
-                                                                    : act.tipo_actividad === 'TAREA'
-                                                                        ? "bg-emerald-50 text-emerald-700 border-emerald-400"
-                                                                        : "bg-blue-50 text-blue-700 border-blue-400"
-                                                            )}>
-                                                                {act.asunto}
-                                                            </div>
-                                                        ))}
+                                                        {dayActivities.slice(0, 2).map(act => {
+                                                            const isOverdueAct = !act.is_completed && new Date(act.fecha_inicio).setHours(0, 0, 0, 0) < new Date().setHours(0, 0, 0, 0);
+                                                            return (
+                                                                <div key={act.id} className={cn(
+                                                                    "text-[10px] px-1.5 py-0.5 rounded truncate font-medium border-l-2",
+                                                                    act.is_completed
+                                                                        ? "bg-slate-50 text-slate-400 border-slate-300 line-through"
+                                                                        : isOverdueAct
+                                                                            ? "bg-red-50 text-red-700 border-red-400"
+                                                                            : act.tipo_actividad === 'TAREA'
+                                                                                ? "bg-emerald-50 text-emerald-700 border-emerald-400"
+                                                                                : "bg-blue-50 text-blue-700 border-blue-400"
+                                                                )}>
+                                                                    {act.asunto}
+                                                                </div>
+                                                            );
+                                                        })}
                                                         {dayActivities.length > 2 && (
                                                             <div className="text-[9px] text-slate-400 font-medium pl-1">
                                                                 +{dayActivities.length - 2} más
@@ -352,22 +375,27 @@ function ActivitiesContent() {
                                                                 <span className="text-slate-400 font-normal text-[10px]">({dayActivities.length})</span>
                                                             </div>
                                                             <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                                                                {dayActivities.map(act => (
-                                                                    <div key={act.id} className={cn(
-                                                                        "text-[11px] p-1.5 rounded border-l-2",
-                                                                        act.is_completed
-                                                                            ? "bg-slate-50 text-slate-400 border-slate-300"
-                                                                            : act.tipo_actividad === 'TAREA'
-                                                                                ? "bg-emerald-50 text-emerald-800 border-emerald-400"
-                                                                                : "bg-blue-50 text-blue-800 border-blue-400"
-                                                                    )}>
-                                                                        <div className="font-medium truncate">{act.asunto}</div>
-                                                                        <div className="text-[10px] opacity-70 mt-0.5">
-                                                                            {new Date(act.fecha_inicio).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: true })}
-                                                                            {act.is_completed && ' • Completada'}
+                                                                {dayActivities.map(act => {
+                                                                    const isOverdueAct = !act.is_completed && new Date(act.fecha_inicio).setHours(0, 0, 0, 0) < new Date().setHours(0, 0, 0, 0);
+                                                                    return (
+                                                                        <div key={act.id} className={cn(
+                                                                            "text-[11px] p-1.5 rounded border-l-2",
+                                                                            act.is_completed
+                                                                                ? "bg-slate-50 text-slate-400 border-slate-300"
+                                                                                : isOverdueAct
+                                                                                    ? "bg-red-50 text-red-800 border-red-400"
+                                                                                    : act.tipo_actividad === 'TAREA'
+                                                                                        ? "bg-emerald-50 text-emerald-800 border-emerald-400"
+                                                                                        : "bg-blue-50 text-blue-800 border-blue-400"
+                                                                        )}>
+                                                                            <div className="font-medium truncate">{act.asunto}</div>
+                                                                            <div className="text-[10px] opacity-70 mt-0.5">
+                                                                                {new Date(act.fecha_inicio).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: true })}
+                                                                                {act.is_completed && ' • Completada'}
+                                                                            </div>
                                                                         </div>
-                                                                    </div>
-                                                                ))}
+                                                                    );
+                                                                })}
                                                             </div>
                                                         </div>
                                                     )}
