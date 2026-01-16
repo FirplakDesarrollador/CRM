@@ -4,7 +4,7 @@ import { Sidebar } from "./Sidebar";
 import { MobileNav } from "./MobileNav";
 import { TopBar } from "./TopBar";
 import { OfflineBanner } from "./OfflineBanner";
-import { useSyncStore } from "@/lib/store/sync";
+import { useSyncStore } from "@/lib/stores/useSyncStore";
 import { useEffect, useState } from "react";
 import { syncEngine } from "@/lib/sync";
 import { usePathname } from "next/navigation";
