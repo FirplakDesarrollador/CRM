@@ -5,14 +5,21 @@
   --foreground: #171717;
 }
 
+/* Hide Next.js development indicator */
+#__next-build-watcher {
+  display: none !important;
+}
+
+nextjs-portal {
+  display: none !important;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
-
-
 
 body {
   background: var(--background);
