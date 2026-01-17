@@ -9,6 +9,7 @@ import { FirplakLogo } from "./FirplakLogo";
 import { SyncStatus } from "./SyncStatus";
 import { supabase } from "@/lib/supabase";
 import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
+import { PermissionGuard } from "@/components/auth/PermissionGuard";
 import {
     Home,
     Briefcase,
@@ -22,6 +23,7 @@ import {
     Truck,
     ChevronLeft,
     ChevronRight,
+    UserCircle,
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -33,6 +35,11 @@ const NAV_ITEMS = [
     { label: "Pedidos", href: "/pedidos", icon: Truck },
     { label: "Archivos", href: "/archivos", icon: Files },
     { label: "Configuración", href: "/configuracion", icon: Settings },
+];
+
+// Admin-only navigation items
+const ADMIN_NAV_ITEMS = [
+    { label: "Usuarios", href: "/usuarios", icon: UserCircle, permission: "manage_users" as const },
 ];
 
 export interface SidebarProps {
@@ -138,6 +145,38 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
                                 <div className="absolute right-3 w-1.5 h-1.5 bg-white rounded-full"></div>
                             )}
                         </Link>
+                    );
+                })}
+
+                {/* Admin-only navigation items */}
+                {ADMIN_NAV_ITEMS.map((item) => {
+                    const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
+                    return (
+                        <PermissionGuard key={item.href} permission={item.permission}>
+                            <Link
+                                href={item.href}
+                                title={isCollapsed ? item.label : undefined}
+                                className={cn(
+                                    "flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-sm font-semibold group/item relative",
+                                    isActive
+                                        ? "bg-gradient-to-r from-[#254153] to-[#1a2f3d] text-white shadow-lg shadow-[#254153]/20"
+                                        : "text-slate-600 hover:bg-slate-100 hover:text-[#254153]",
+                                    isCollapsed && "justify-center px-0 w-14 mx-auto"
+                                )}
+                                prefetch={false}
+                            >
+                                <item.icon className={cn(
+                                    "w-5 h-5 shrink-0 transition-transform",
+                                    !isActive && "group-hover/item:scale-110"
+                                )} />
+                                {!isCollapsed && (
+                                    <span className="whitespace-nowrap">{item.label}</span>
+                                )}
+                                {isActive && !isCollapsed && (
+                                    <div className="absolute right-3 w-1.5 h-1.5 bg-white rounded-full"></div>
+                                )}
+                            </Link>
+                        </PermissionGuard>
                     );
                 })}
             </nav>
