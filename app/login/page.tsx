@@ -101,7 +101,7 @@ export default function LoginPage() {
 
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-slate-100 via-slate-50 to-blue-50 flex items-center justify-center p-3 md:p-4 relative overflow-hidden">
+        <div className="min-h-screen bg-linear-to-br from-slate-100 via-slate-50 to-blue-50 flex items-center justify-center p-3 md:p-4 relative overflow-hidden">
             {/* Subtle background decoration */}
             <div className="absolute inset-0 overflow-hidden pointer-events-none">
                 <div className="absolute -top-40 -right-40 w-80 h-80 bg-blue-400/10 rounded-full blur-3xl"></div>
@@ -110,7 +110,7 @@ export default function LoginPage() {
 
             <div className="bg-white rounded-2xl md:rounded-3xl shadow-2xl w-full max-w-6xl overflow-hidden grid md:grid-cols-2 relative z-10 border border-slate-200/50">
                 {/* Left Panel - Branding (Desktop Only) */}
-                <div className="hidden md:flex flex-col justify-between bg-gradient-to-br from-[#254153] via-[#1e3844] to-[#152a35] p-8 lg:p-12 text-white relative overflow-hidden">
+                <div className="hidden md:flex flex-col justify-between bg-linear-to-br from-[#254153] via-[#1e3844] to-[#152a35] p-8 lg:p-12 text-white relative overflow-hidden">
                     {/* Animated background pattern */}
                     <div className="absolute inset-0 opacity-5">
                         <div className="absolute inset-0" style={{
@@ -120,7 +120,7 @@ export default function LoginPage() {
                     </div>
 
                     {/* Gradient overlay */}
-                    <div className="absolute inset-0 bg-gradient-to-t from-[#152a35]/50 to-transparent"></div>
+                    <div className="absolute inset-0 bg-linear-to-t from-[#152a35]/50 to-transparent"></div>
 
                     {/* Content */}
                     <div className="relative z-10">
@@ -131,13 +131,13 @@ export default function LoginPage() {
                                 </svg>
                             </div>
                             <h1 className="text-4xl lg:text-5xl font-bold mb-3 lg:mb-4 tracking-tight leading-tight">CRM<br />FIRPLAK</h1>
-                            <div className="w-12 lg:w-16 h-1 bg-gradient-to-r from-blue-400 to-transparent rounded-full mb-3 lg:mb-4"></div>
+                            <div className="w-12 lg:w-16 h-1 bg-linear-to-r from-blue-400 to-transparent rounded-full mb-3 lg:mb-4"></div>
                             <p className="text-base lg:text-lg text-blue-100/90 font-light leading-relaxed">Sistema de Gestión Comercial</p>
                         </div>
 
                         <div className="space-y-6 lg:space-y-8 mt-12 lg:mt-16">
                             <div className="flex items-start space-x-4 lg:space-x-5 group">
-                                <div className="w-10 lg:w-12 h-10 lg:h-12 bg-white/10 backdrop-blur-md rounded-xl lg:rounded-2xl flex items-center justify-center flex-shrink-0 border border-white/20 group-hover:bg-white/20 transition-all duration-300 shadow-lg">
+                                <div className="w-10 lg:w-12 h-10 lg:h-12 bg-white/10 backdrop-blur-md rounded-xl lg:rounded-2xl flex items-center justify-center shrink-0 border border-white/20 group-hover:bg-white/20 transition-all duration-300 shadow-lg">
                                     <svg className="w-5 lg:w-6 h-5 lg:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                                     </svg>
@@ -149,7 +149,7 @@ export default function LoginPage() {
                             </div>
 
                             <div className="flex items-start space-x-4 lg:space-x-5 group">
-                                <div className="w-10 lg:w-12 h-10 lg:h-12 bg-white/10 backdrop-blur-md rounded-xl lg:rounded-2xl flex items-center justify-center flex-shrink-0 border border-white/20 group-hover:bg-white/20 transition-all duration-300 shadow-lg">
+                                <div className="w-10 lg:w-12 h-10 lg:h-12 bg-white/10 backdrop-blur-md rounded-xl lg:rounded-2xl flex items-center justify-center shrink-0 border border-white/20 group-hover:bg-white/20 transition-all duration-300 shadow-lg">
                                     <svg className="w-5 lg:w-6 h-5 lg:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                                     </svg>
@@ -161,7 +161,7 @@ export default function LoginPage() {
                             </div>
 
                             <div className="flex items-start space-x-4 lg:space-x-5 group">
-                                <div className="w-10 lg:w-12 h-10 lg:h-12 bg-white/10 backdrop-blur-md rounded-xl lg:rounded-2xl flex items-center justify-center flex-shrink-0 border border-white/20 group-hover:bg-white/20 transition-all duration-300 shadow-lg">
+                                <div className="w-10 lg:w-12 h-10 lg:h-12 bg-white/10 backdrop-blur-md rounded-xl lg:rounded-2xl flex items-center justify-center shrink-0 border border-white/20 group-hover:bg-white/20 transition-all duration-300 shadow-lg">
                                     <svg className="w-5 lg:w-6 h-5 lg:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                                     </svg>
@@ -181,10 +181,10 @@ export default function LoginPage() {
                 </div>
 
                 {/* Right Panel - Login Form */}
-                <div className="p-6 sm:p-8 md:p-10 lg:p-14 flex flex-col justify-center bg-gradient-to-br from-white to-slate-50/30">
+                <div className="p-6 sm:p-8 md:p-10 lg:p-14 flex flex-col justify-center bg-linear-to-br from-white to-slate-50/30">
                     {/* Mobile Branding Header */}
                     <div className="md:hidden mb-8 text-center">
-                        <div className="w-16 h-16 bg-gradient-to-br from-[#254153] to-[#1a2f3d] rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl">
+                        <div className="w-16 h-16 bg-linear-to-br from-[#254153] to-[#1a2f3d] rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl">
                             <svg className="w-9 h-9 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
                             </svg>
@@ -202,8 +202,8 @@ export default function LoginPage() {
                             </div>
 
                             {recoverySent ? (
-                                <div className="text-center space-y-4 md:space-y-6 bg-gradient-to-br from-green-50 to-emerald-50/50 p-8 md:p-10 rounded-2xl md:rounded-3xl border border-green-200/50 shadow-lg">
-                                    <div className="mx-auto w-16 md:w-20 h-16 md:h-20 bg-gradient-to-br from-green-400 to-emerald-500 rounded-full flex items-center justify-center shadow-xl">
+                                <div className="text-center space-y-4 md:space-y-6 bg-linear-to-br from-green-50 to-emerald-50/50 p-8 md:p-10 rounded-2xl md:rounded-3xl border border-green-200/50 shadow-lg">
+                                    <div className="mx-auto w-16 md:w-20 h-16 md:h-20 bg-linear-to-br from-green-400 to-emerald-500 rounded-full flex items-center justify-center shadow-xl">
                                         <Mail className="w-8 md:w-10 h-8 md:h-10 text-white" />
                                     </div>
                                     <div>
@@ -220,8 +220,8 @@ export default function LoginPage() {
                             ) : (
                                 <form onSubmit={handleSubmitRecovery(onRecoverySubmit)} className="space-y-5 md:space-y-6">
                                     {error && (
-                                        <div className="bg-gradient-to-r from-red-50 to-rose-50 text-red-800 p-4 md:p-5 rounded-xl md:rounded-2xl text-sm border border-red-200/50 flex items-center shadow-sm">
-                                            <AlertCircle className="w-5 h-5 mr-3 flex-shrink-0" />
+                                        <div className="bg-linear-to-r from-red-50 to-rose-50 text-red-800 p-4 md:p-5 rounded-xl md:rounded-2xl text-sm border border-red-200/50 flex items-center shadow-sm">
+                                            <AlertCircle className="w-5 h-5 mr-3 shrink-0" />
                                             <span className="font-medium">{error}</span>
                                         </div>
                                     )}
@@ -245,7 +245,7 @@ export default function LoginPage() {
                                     <button
                                         type="submit"
                                         disabled={isLoading}
-                                        className="w-full bg-gradient-to-r from-[#254153] to-[#1a2f3d] hover:from-[#1a2f3d] hover:to-[#254153] text-white font-bold py-3 md:py-4 rounded-xl md:rounded-2xl transition-all flex items-center justify-center shadow-xl hover:shadow-2xl hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed text-sm md:text-base"
+                                        className="w-full bg-linear-to-r from-[#254153] to-[#1a2f3d] hover:from-[#1a2f3d] hover:to-[#254153] text-white font-bold py-3 md:py-4 rounded-xl md:rounded-2xl transition-all flex items-center justify-center shadow-xl hover:shadow-2xl hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed text-sm md:text-base"
                                     >
                                         {isLoading ? (
                                             <Loader2 className="w-5 h-5 animate-spin mr-2" />
@@ -274,8 +274,8 @@ export default function LoginPage() {
 
                             <form onSubmit={handleSubmit(onSubmit)} className="space-y-5 md:space-y-6">
                                 {error && (
-                                    <div className="bg-gradient-to-r from-red-50 to-rose-50 text-red-800 p-4 md:p-5 rounded-xl md:rounded-2xl text-sm border border-red-200/50 flex items-center shadow-sm">
-                                        <AlertCircle className="w-5 h-5 mr-3 flex-shrink-0" />
+                                    <div className="bg-linear-to-r from-red-50 to-rose-50 text-red-800 p-4 md:p-5 rounded-xl md:rounded-2xl text-sm border border-red-200/50 flex items-center shadow-sm">
+                                        <AlertCircle className="w-5 h-5 mr-3 shrink-0" />
                                         <span className="font-medium">{error}</span>
                                     </div>
                                 )}
@@ -315,7 +315,7 @@ export default function LoginPage() {
                                 <button
                                     type="submit"
                                     disabled={isLoading}
-                                    className="w-full bg-gradient-to-r from-[#254153] to-[#1a2f3d] hover:from-[#1a2f3d] hover:to-[#254153] text-white font-bold py-3 md:py-4 rounded-xl md:rounded-2xl transition-all flex items-center justify-center shadow-xl hover:shadow-2xl hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed text-sm md:text-base mt-6 md:mt-8"
+                                    className="w-full bg-linear-to-r from-[#254153] to-[#1a2f3d] hover:from-[#1a2f3d] hover:to-[#254153] text-white font-bold py-3 md:py-4 rounded-xl md:rounded-2xl transition-all flex items-center justify-center shadow-xl hover:shadow-2xl hover:-translate-y-0.5 disabled:opacity-50 disabled:cursor-not-allowed text-sm md:text-base mt-6 md:mt-8"
                                 >
                                     {isLoading ? (
                                         <>

@@ -72,7 +72,7 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
     return (
         <aside
             className={cn(
-                "hidden md:flex flex-col bg-gradient-to-b from-white to-slate-50/50 text-slate-900 h-screen border-r border-slate-200/60 shadow-lg transition-all duration-300 z-40 shrink-0 group",
+                "hidden md:flex flex-col bg-linear-to-b from-white to-slate-50/50 text-slate-900 h-screen border-r border-slate-200/60 shadow-lg transition-all duration-300 z-40 shrink-0 group",
                 isCollapsed ? "w-20" : "w-72"
             )}
         >
@@ -84,7 +84,7 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
                 {/* Logo */}
                 <div className="w-full flex justify-center mb-2">
                     {isCollapsed ? (
-                        <div className="w-12 h-12 bg-gradient-to-br from-[#254153] to-[#1a2f3d] rounded-2xl flex items-center justify-center shadow-lg transition-all">
+                        <div className="w-12 h-12 bg-linear-to-br from-[#254153] to-[#1a2f3d] rounded-2xl flex items-center justify-center shadow-lg transition-all">
                             <img
                                 src="/Isotipo FIRPLAK CRM.svg"
                                 alt="Logo"
@@ -131,7 +131,7 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
                             className={cn(
                                 "flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-sm font-semibold group/item relative",
                                 isActive
-                                    ? "bg-gradient-to-r from-[#254153] to-[#1a2f3d] text-white shadow-lg shadow-[#254153]/20"
+                                    ? "bg-linear-to-r from-[#254153] to-[#1a2f3d] text-white shadow-lg shadow-[#254153]/20"
                                     : "text-slate-600 hover:bg-slate-100 hover:text-[#254153]",
                                 isCollapsed && "justify-center px-0 w-14 mx-auto"
                             )}
@@ -162,7 +162,7 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
                                 className={cn(
                                     "flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-sm font-semibold group/item relative",
                                     isActive
-                                        ? "bg-gradient-to-r from-[#254153] to-[#1a2f3d] text-white shadow-lg shadow-[#254153]/20"
+                                        ? "bg-linear-to-r from-[#254153] to-[#1a2f3d] text-white shadow-lg shadow-[#254153]/20"
                                         : "text-slate-600 hover:bg-slate-100 hover:text-[#254153]",
                                     isCollapsed && "justify-center px-0 w-14 mx-auto"
                                 )}
