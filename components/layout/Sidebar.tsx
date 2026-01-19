@@ -8,6 +8,7 @@ import { cn } from "@/components/ui/utils";
 import { FirplakLogo } from "./FirplakLogo";
 import { SyncStatus } from "./SyncStatus";
 import { supabase } from "@/lib/supabase";
+import { useSyncStore } from "@/lib/stores/useSyncStore";
 import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
 import { PermissionGuard } from "@/components/auth/PermissionGuard";
 import {
@@ -34,6 +35,7 @@ const NAV_ITEMS = [
     { label: "Actividades", href: "/actividades", icon: Calendar },
     { label: "Pedidos", href: "/pedidos", icon: Truck },
     { label: "Archivos", href: "/archivos", icon: Files },
+    { label: "Usuarios", href: "/usuarios", icon: Users, requiredRole: 'ADMIN' },
     { label: "Configuración", href: "/configuracion", icon: Settings },
 ];
 
@@ -50,6 +52,7 @@ export interface SidebarProps {
 export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar }: SidebarProps) {
     const pathname = usePathname();
     const router = useRouter();
+    const { userRole } = useSyncStore();
     const [showLogoutConfirm, setShowLogoutConfirm] = React.useState(false);
     const [isLoggingOut, setIsLoggingOut] = React.useState(false);
 
@@ -69,7 +72,7 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
     return (
         <aside
             className={cn(
-                "hidden md:flex flex-col bg-gradient-to-b from-white to-slate-50/50 text-slate-900 h-screen border-r border-slate-200/60 shadow-lg transition-all duration-300 z-40 shrink-0 group",
+                "hidden md:flex flex-col bg-linear-to-b from-white to-slate-50/50 text-slate-900 h-screen border-r border-slate-200/60 shadow-lg transition-all duration-300 z-40 shrink-0 group",
                 isCollapsed ? "w-20" : "w-72"
             )}
         >
@@ -81,7 +84,7 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
                 {/* Logo */}
                 <div className="w-full flex justify-center mb-2">
                     {isCollapsed ? (
-                        <div className="w-12 h-12 bg-gradient-to-br from-[#254153] to-[#1a2f3d] rounded-2xl flex items-center justify-center shadow-lg transition-all">
+                        <div className="w-12 h-12 bg-linear-to-br from-[#254153] to-[#1a2f3d] rounded-2xl flex items-center justify-center shadow-lg transition-all">
                             <img
                                 src="/Isotipo FIRPLAK CRM.svg"
                                 alt="Logo"
@@ -99,7 +102,7 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
                 {!isCollapsed && (
                     <div className="w-full mt-3 pt-3 border-t border-slate-200/60">
                         <p className="text-xs text-slate-400 text-center font-semibold uppercase tracking-wider">
-                            Versión 1.0.3
+                            Versión 1.0.4
                         </p>
                     </div>
                 )}
@@ -118,7 +121,7 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
 
             {/* Navigation Section */}
             <nav className="flex-1 p-4 space-y-1.5 overflow-y-auto overflow-x-hidden">
-                {NAV_ITEMS.map((item) => {
+                {NAV_ITEMS.filter(item => !item.requiredRole || item.requiredRole === userRole).map((item) => {
                     const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
                     return (
                         <Link
@@ -128,7 +131,7 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
                             className={cn(
                                 "flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-sm font-semibold group/item relative",
                                 isActive
-                                    ? "bg-gradient-to-r from-[#254153] to-[#1a2f3d] text-white shadow-lg shadow-[#254153]/20"
+                                    ? "bg-linear-to-r from-[#254153] to-[#1a2f3d] text-white shadow-lg shadow-[#254153]/20"
                                     : "text-slate-600 hover:bg-slate-100 hover:text-[#254153]",
                                 isCollapsed && "justify-center px-0 w-14 mx-auto"
                             )}
@@ -159,7 +162,7 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
                                 className={cn(
                                     "flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-sm font-semibold group/item relative",
                                     isActive
-                                        ? "bg-gradient-to-r from-[#254153] to-[#1a2f3d] text-white shadow-lg shadow-[#254153]/20"
+                                        ? "bg-linear-to-r from-[#254153] to-[#1a2f3d] text-white shadow-lg shadow-[#254153]/20"
                                         : "text-slate-600 hover:bg-slate-100 hover:text-[#254153]",
                                     isCollapsed && "justify-center px-0 w-14 mx-auto"
                                 )}
