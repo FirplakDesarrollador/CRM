@@ -5,7 +5,8 @@ import { AccountForm } from "@/components/cuentas/AccountForm";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { Plus, Search, Building, Users, Pencil } from "lucide-react";
+import { Plus, Search, Building, Users, Pencil, Filter } from "lucide-react";
+import { UserPickerFilter } from "@/components/cuentas/UserPickerFilter";
 
 function AccountsContent() {
     const searchParams = useSearchParams();
@@ -15,8 +16,11 @@ function AccountsContent() {
         hasMore,
         loadMore,
         setSearchTerm,
+        setAssignedUserId,
         refresh
     } = useAccountsServer({ pageSize: 20 });
+
+    const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
 
     const [showCreate, setShowCreate] = useState(false);
     const [editingAccount, setEditingAccount] = useState<any>(null);
@@ -89,7 +93,15 @@ function AccountsContent() {
             <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
                 <h1 className="text-2xl font-bold text-slate-900">Cuentas</h1>
 
-                <div className="flex gap-2 w-full md:w-auto">
+                <div className="flex flex-wrap md:flex-nowrap gap-2 w-full md:w-auto items-center">
+                    <UserPickerFilter
+                        selectedUserId={selectedUserId}
+                        onUserSelect={(userId) => {
+                            setSelectedUserId(userId);
+                            setAssignedUserId(userId);
+                        }}
+                    />
+
                     <div className="relative flex-1 md:w-64">
                         <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
                         <input
