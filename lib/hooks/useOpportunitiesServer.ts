@@ -32,6 +32,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
     // Filters
     const [searchTerm, setSearchTerm] = useState<string>("");
     const [userFilter, setUserFilter] = useState<'mine' | 'team' | 'all'>('mine');
+    const [accountOwnerId, setAccountOwnerId] = useState<string | null>(null);
 
     // User Context
     const { userRole } = useSyncStore();
@@ -88,6 +89,13 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                 }
             }
 
+            if (accountOwnerId) {
+                // Filter by owner of the associated account
+                // Note: We use the alias 'account' from the join CRM_Cuentas
+                // But Supabase query filter on joined tables uses the dot notation.
+                query = query.eq('CRM_Cuentas.created_by', accountOwnerId);
+            }
+
             // Order
             query = query.order('updated_at', { ascending: false });
 
@@ -123,13 +131,13 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
         } finally {
             setLoading(false);
         }
-    }, [currentUserId, pageSize, userFilter, searchTerm, userRole, page]);
+    }, [currentUserId, pageSize, userFilter, searchTerm, accountOwnerId, userRole, page]);
 
     // Initial Fetch & Filter Fetch
     useEffect(() => {
         // Reset page when filters change
         fetchOpportunities(false);
-    }, [userFilter, searchTerm, currentUserId]);
+    }, [userFilter, searchTerm, accountOwnerId, currentUserId]);
     // Note: removed fetchOpportunities from dep array to avoid loops, but added filters. 
     // However, fetchOpportunities depends on 'page' which is updated inside... 
     // We should separate "reset" from "load more".
@@ -148,6 +156,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
         loadMore,
         setSearchTerm,
         setUserFilter,
+        setAccountOwnerId,
         refresh: () => fetchOpportunities(false)
     };
 }

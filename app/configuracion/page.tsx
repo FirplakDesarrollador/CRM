@@ -15,7 +15,7 @@ import {
     HardDrive,
     LogOut
 } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Dispatch, SetStateAction } from 'react';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/components/ui/utils';
 import { supabase } from '@/lib/supabase';
@@ -44,21 +44,23 @@ interface Stats {
     outbox: number;
 }
 
+interface ModalConfig {
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+    variant?: 'danger' | 'warning' | 'info';
+    confirmLabel?: string;
+    isLoading?: boolean;
+}
+
 export default function ConfigPage() {
     const router = useRouter();
     const { isSyncing, pendingCount, lastSyncTime, error, isPaused, setPaused } = useSyncStore();
     const [outboxItems, setOutboxItems] = useState<OutboxItem[]>([]);
     const [stats, setStats] = useState<Stats | null>(null);
 
-    const [modalConfig, setModalConfig] = useState<{
-        isOpen: boolean;
-        title: string;
-        message: string;
-        onConfirm: () => void;
-        variant?: 'danger' | 'warning' | 'info';
-        confirmLabel?: string;
-        isLoading?: boolean;
-    }>({
+    const [modalConfig, setModalConfig] = useState<ModalConfig>({
         isOpen: false,
         title: "",
         message: "",
@@ -363,9 +365,32 @@ export default function ConfigPage() {
             {/* Outbox Debug Table */}
             {outboxItems.length > 0 && (
                 <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
-                    <div className="p-6 border-b border-slate-100 flex items-center gap-2">
-                        <HardDrive className="w-5 h-5 text-slate-600" />
-                        <h3 className="font-bold text-slate-900 text-lg">Cola de Cambios (Outbox)</h3>
+                    <div className="p-6 border-b border-slate-100 flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                            <HardDrive className="w-5 h-5 text-slate-600" />
+                            <h3 className="font-bold text-slate-900 text-lg">Cola de Cambios (Outbox)</h3>
+                        </div>
+                        <button
+                            onClick={() => {
+                                const report = outboxItems.map(item =>
+                                    `[${item.status}] ${item.entity_type} (${item.field_name}): ${item.error || 'OK'}`
+                                ).join('\n');
+                                const fullReport = `=== REPORTE DE SINCRONIZACIÓN ===\nFecha: ${new Date().toLocaleString()}\nPending Items: ${outboxItems.length}\n\n${report}`;
+                                navigator.clipboard.writeText(fullReport);
+                                setModalConfig({
+                                    isOpen: true,
+                                    title: "Reporte Copiado",
+                                    message: "El reporte técnico ha sido copiado al portapapeles. Puedes pegarlo en el chat de soporte.",
+                                    confirmLabel: "Entendido",
+                                    onConfirm: () => setModalConfig(prev => ({ ...prev, isOpen: false })),
+                                    variant: "info"
+                                });
+                            }}
+                            className="text-xs font-bold text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-colors border border-blue-100 flex items-center gap-1"
+                        >
+                            <Info className="w-3 h-3" />
+                            Copiar Info Técnica
+                        </button>
                     </div>
                     <div className="overflow-x-auto">
                         <table className="w-full text-left text-sm">
@@ -461,7 +486,7 @@ function StatRow({ label, value, icon: Icon }: StatRowProps) {
     );
 }
 
-function AdminSettings({ setModalConfig }: { setModalConfig: any }) {
+function AdminSettings({ setModalConfig }: { setModalConfig: Dispatch<SetStateAction<ModalConfig>> }) {
     const { config, isAdmin, updateConfig, isLoading } = useConfig();
     const [minValue, setMinValue] = useState("");
     const [minInactiveDays, setMinInactiveDays] = useState("");

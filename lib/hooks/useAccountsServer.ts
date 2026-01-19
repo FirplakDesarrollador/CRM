@@ -13,6 +13,8 @@ export type AccountServer = {
     telefono: string | null;
     direccion: string | null;
     ciudad: string | null;
+    created_by: string | null;
+    creator_name?: string | null;
     updated_at: string;
 };
 
@@ -29,6 +31,7 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
 
     // Filters
     const [searchTerm, setSearchTerm] = useState<string>("");
+    const [assignedUserId, setAssignedUserId] = useState<string | null>(null);
 
     // User Context (needed if we want to filter by permissions, though Accounts are usually global in this CRM)
     const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -60,16 +63,20 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                     telefono,
                     direccion,
                     ciudad,
+                    created_by,
                     updated_at
                 `, { count: 'exact' });
 
-            // Apply Filters
             if (searchTerm) {
                 query = query.or(`nombre.ilike.%${searchTerm}%,nit.ilike.%${searchTerm}%`);
             }
 
+            if (assignedUserId) {
+                query = query.eq('created_by', assignedUserId);
+            }
+
             // Order
-            query = query.order('nombre', { ascending: true }); // Alphabetical for accounts usually makes sense
+            query = query.order('updated_at', { ascending: false }).order('created_at', { ascending: false }).order('id', { ascending: false });
 
             // Paging
             query = query.range(from, to);
@@ -78,15 +85,22 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
 
             if (error) throw error;
 
+            console.log(`[useAccountsServer] Fetched ${result?.length} accounts. Order: updated_at DESC`, result?.slice(0, 3));
+
+            const flattenedResults = (result as any[]).map(item => ({
+                ...item,
+                creator_name: item.creator?.full_name || null
+            }));
+
             if (isLoadMore) {
                 setData(prev => {
                     const existingIds = new Set(prev.map(i => i.id));
-                    const newItems = (result as any[]).filter(i => !existingIds.has(i.id));
+                    const newItems = flattenedResults.filter(i => !existingIds.has(i.id));
                     return [...prev, ...newItems];
                 });
                 setPage(currentPage);
             } else {
-                setData(result as any);
+                setData(flattenedResults as any);
                 setPage(1);
             }
 
@@ -100,13 +114,13 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
         } finally {
             setLoading(false);
         }
-    }, [currentUserId, pageSize, searchTerm, page]);
+    }, [currentUserId, pageSize, searchTerm, assignedUserId, page]);
 
     // Initial Fetch & Filter Fetch
     useEffect(() => {
         // Reset page when filters change
         fetchAccounts(false);
-    }, [searchTerm]);
+    }, [searchTerm, assignedUserId, fetchAccounts]); // Added fetchAccounts here
 
     const loadMore = () => {
         if (!loading && hasMore) {
@@ -121,6 +135,7 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
         hasMore,
         loadMore,
         setSearchTerm,
+        setAssignedUserId,
         refresh: () => fetchAccounts(false)
     };
 }
