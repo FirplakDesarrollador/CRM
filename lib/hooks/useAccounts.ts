@@ -11,9 +11,11 @@ export function useAccounts() {
 
     const createAccount = async (data: Partial<LocalCuenta>) => {
         const id = crypto.randomUUID();
+        const { data: { user } } = await supabase.auth.getUser();
         const newAccount = {
             ...data,
             id,
+            created_by: user?.id,
             updated_at: new Date().toISOString()
         };
         await db.accounts.add(newAccount as LocalCuenta);
