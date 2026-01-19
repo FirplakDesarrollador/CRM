@@ -17,13 +17,13 @@ import { cn } from "@/components/ui/utils";
 const accountSchema = z.object({
     nombre: z.string().min(2, "Nombre requerido"),
     nit_base: z.string().min(5, "NIT requerido"),
-    is_child: z.boolean().default(false),
+    is_child: z.boolean(),
     id_cuenta_principal: z.string().nullable().optional(),
     canal_id: z.string().min(1, "Canal de venta requerido"),
     telefono: z.string().nullable().optional(),
     direccion: z.string().nullable().optional(),
     ciudad: z.string().nullable().optional(),
-    es_premium: z.boolean().default(false).optional(),
+    es_premium: z.boolean().optional(),
 });
 
 type AccountFormData = z.infer<typeof accountSchema>;
@@ -38,6 +38,33 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
     const { createAccount, updateAccount } = useAccounts();
     const [parents, setParents] = useState<any[]>([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [assignedUserName, setAssignedUserName] = useState<string | null>(null);
+
+    // Fetch assigned user name if exists
+    useEffect(() => {
+        // If it's already in the object (from server join), use it
+        if ((account as any)?.creator_name) {
+            setAssignedUserName((account as any).creator_name);
+            return;
+        }
+
+        if (account?.created_by) {
+            supabase
+                .from('CRM_Usuarios')
+                .select('full_name')
+                .eq('id', account.created_by)
+                .single()
+                .then(({ data }) => {
+                    if (data?.full_name) {
+                        setAssignedUserName(data.full_name);
+                    } else {
+                        setAssignedUserName(null);
+                    }
+                });
+        } else {
+            setAssignedUserName(null);
+        }
+    }, [account?.created_by, (account as any)?.creator_name]);
 
     // Fetch potential parents (server-side lite fetch)
     useEffect(() => {
@@ -67,7 +94,7 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
         defaultValues: {
             nombre: account?.nombre || "",
             nit_base: account?.nit_base || "",
-            is_child: !!account?.id_cuenta_principal,
+            is_child: account?.id_cuenta_principal ? true : false,
             id_cuenta_principal: account?.id_cuenta_principal || "",
             canal_id: account?.canal_id || "DIST_NAC",
             telefono: account?.telefono || "",
@@ -83,7 +110,7 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             reset({
                 nombre: account.nombre || "",
                 nit_base: account.nit_base || "",
-                is_child: !!account.id_cuenta_principal,
+                is_child: account.id_cuenta_principal ? true : false,
                 id_cuenta_principal: account.id_cuenta_principal || "",
                 canal_id: account.canal_id || "DIST_NAC",
                 telefono: account.telefono || "",
@@ -211,7 +238,7 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             </div>
 
             {activeTab === 'info' ? (
-                <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 p-4">
+                <form onSubmit={handleSubmit((data) => onSubmit(data as AccountFormData))} className="space-y-4 p-4">
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {/* Nombre */}
@@ -219,6 +246,12 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                             <label className="text-sm font-medium">Nombre de Cuenta</label>
                             <input {...register("nombre")} className="w-full border p-2 rounded" placeholder="Ej. Constructora XYZ" />
                             {errors.nombre && <span className="text-red-500 text-xs">{errors.nombre.message}</span>}
+                            {assignedUserName && (
+                                <p className="text-xs text-slate-500 flex items-center gap-1 mt-1">
+                                    <User size={12} className="text-slate-400" />
+                                    Usuario asignado: <span className="font-semibold text-slate-700">{assignedUserName}</span>
+                                </p>
+                            )}
                         </div>
 
                         {/* Hierarchy Switch */}
