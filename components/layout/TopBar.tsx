@@ -39,7 +39,16 @@ export function TopBar() {
     return (
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 sticky top-0 z-30">
             {/* Mobile Title (Sidebar hidden) */}
-            <h1 className="md:hidden text-lg font-bold text-slate-800">CRM FIRPLAK</h1>
+            <div className="md:hidden flex items-center gap-2.5">
+                <div className="w-9 h-9 bg-linear-to-br from-[#254153] to-[#1a2f3d] rounded-lg flex items-center justify-center shadow-md">
+                    <img
+                        src="/Isotipo FIRPLAK CRM.svg"
+                        alt="Logo"
+                        className="h-5 w-auto"
+                    />
+                </div>
+                <h1 className="text-lg font-bold text-slate-800 tracking-tight">CRM FIRPLAK</h1>
+            </div>
 
             {/* Desktop Search */}
             <div className="hidden md:flex flex-1 max-w-xl mx-8">
