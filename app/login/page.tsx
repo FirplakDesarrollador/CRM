@@ -125,7 +125,7 @@ export default function LoginPage() {
                     {/* Content */}
                     <div className="relative z-10">
                         <div className="mb-8 lg:mb-12">
-                            <div className="w-16 lg:w-20 h-16 lg:h-20 bg-white backdrop-blur-md rounded-2xl lg:rounded-3xl flex items-center justify-center mb-6 lg:mb-8 border border-white/20 shadow-xl overflow-hidden">
+                            <div className="w-16 lg:w-20 h-16 lg:h-20 bg-linear-to-br from-[#254153] to-[#1a2f3d] rounded-2xl lg:rounded-3xl flex items-center justify-center mb-6 lg:mb-8 border border-white/20 shadow-xl overflow-hidden">
                                 <img
                                     src="/Isotipo FIRPLAK CRM.svg"
                                     alt="Logo"
@@ -186,7 +186,7 @@ export default function LoginPage() {
                 <div className="p-6 sm:p-8 md:p-10 lg:p-14 flex flex-col justify-center bg-linear-to-br from-white to-slate-50/30">
                     {/* Mobile Branding Header */}
                     <div className="md:hidden mb-8 text-center">
-                        <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl overflow-hidden">
+                        <div className="w-16 h-16 bg-linear-to-br from-[#254153] to-[#1a2f3d] rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl overflow-hidden">
                             <img
                                 src="/Isotipo FIRPLAK CRM.svg"
                                 alt="Logo"
