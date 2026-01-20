@@ -13,6 +13,7 @@ const userSchema = z.object({
     password: z.string().min(6, 'La contraseña debe tener al menos 6 caracteres').optional(),
     full_name: z.string().min(2, 'El nombre debe tener al menos 2 caracteres'),
     role: z.enum(['ADMIN', 'COORDINADOR', 'VENDEDOR']),
+    allowed_modules: z.array(z.string()).optional(),
 });
 
 type UserFormData = z.infer<typeof userSchema>;
@@ -23,6 +24,16 @@ interface UserFormProps {
     onSuccess: () => void;
 }
 
+const AVAILABLE_MODULES = [
+    { value: '/oportunidades', label: 'Oportunidades' },
+    { value: '/cuentas', label: 'Cuentas' },
+    { value: '/contactos', label: 'Contactos' },
+    { value: '/actividades', label: 'Actividades' },
+    { value: '/pedidos', label: 'Pedidos' },
+    { value: '/archivos', label: 'Archivos' },
+    { value: '/configuracion', label: 'Configuración' },
+];
+
 export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
     const { createUser, updateUser } = useUsers();
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -31,6 +42,7 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
     const {
         register,
         handleSubmit,
+        watch,
         formState: { errors },
     } = useForm<UserFormData>({
         resolver: zodResolver(userSchema),
@@ -38,8 +50,10 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
             email: user.email,
             full_name: user.full_name || '',
             role: user.role,
+            allowed_modules: user.allowed_modules || [],
         } : {
             role: 'VENDEDOR',
+            allowed_modules: [],
         },
     });
 
@@ -53,6 +67,7 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
                 const updates: UpdateUserData = {
                     full_name: data.full_name,
                     role: data.role,
+                    allowed_modules: data.allowed_modules,
                 };
 
                 const result = await updateUser(user.id, updates);
@@ -73,6 +88,7 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
                     password: data.password,
                     full_name: data.full_name,
                     role: data.role,
+                    allowed_modules: data.allowed_modules,
                 };
 
                 const result = await createUser(createData);
@@ -186,6 +202,31 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
                             Define los permisos y accesos del usuario en el sistema
                         </p>
                     </div>
+
+                    {/* Access Control */}
+                    {watch('role') !== 'ADMIN' && (
+                        <div>
+                            <label className="block text-sm font-semibold text-slate-700 mb-2">
+                                Acceso a Módulos (Opcional)
+                                <span className="block text-xs font-normal text-slate-500 mt-0.5">
+                                    Selecciona los módulos visibles. Si no seleccionas ninguno, se usarán los permisos por defecto del rol.
+                                </span>
+                            </label>
+                            <div className="grid grid-cols-2 gap-2 mt-2">
+                                {AVAILABLE_MODULES.map(module => (
+                                    <label key={module.value} className="flex items-center gap-2 p-2 border border-slate-200 rounded hover:bg-slate-50 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            value={module.value}
+                                            {...register('allowed_modules')}
+                                            className="rounded text-[#254153] focus:ring-[#254153]"
+                                        />
+                                        <span className="text-sm text-slate-700">{module.label}</span>
+                                    </label>
+                                ))}
+                            </div>
+                        </div>
+                    )}
 
                     {/* Actions */}
                     <div className="flex gap-3 pt-4">

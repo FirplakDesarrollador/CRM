@@ -8,6 +8,7 @@ export interface User {
     full_name: string | null;
     role: UserRole;
     is_active: boolean;
+    allowed_modules?: string[] | null;
     created_at: string;
     updated_at: string;
 }
@@ -17,12 +18,14 @@ export interface CreateUserData {
     password: string;
     full_name: string;
     role: UserRole;
+    allowed_modules?: string[];
 }
 
 export interface UpdateUserData {
     full_name?: string;
     role?: UserRole;
     is_active?: boolean;
+    allowed_modules?: string[] | null;
 }
 
 /**
@@ -76,11 +79,15 @@ export function useUsers() {
             }
 
             // The trigger handle_new_user will automatically create the CRM_Usuarios record
-            // But we need to update the role if it's not VENDEDOR (default)
-            if (userData.role !== 'VENDEDOR') {
+            // But we need to update the role and allowed_modules
+            if (userData.role !== 'VENDEDOR' || (userData.allowed_modules && userData.allowed_modules.length > 0)) {
+                const updates: any = { full_name: userData.full_name };
+                if (userData.role) updates.role = userData.role;
+                if (userData.allowed_modules) updates.allowed_modules = userData.allowed_modules;
+
                 const { error: updateError } = await supabase
                     .from('CRM_Usuarios')
-                    .update({ role: userData.role, full_name: userData.full_name })
+                    .update(updates)
                     .eq('id', authData.user.id);
 
                 if (updateError) throw updateError;

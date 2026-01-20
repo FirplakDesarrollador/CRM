@@ -15,6 +15,8 @@ export type OpportunityServer = {
     updated_at: string;
     fecha_cierre_estimada?: string | null;
     account?: { nombre: string } | null; // Joined data
+    fase_data?: { nombre: string } | null; // Joined data
+    estado_data?: { nombre: string } | null; // Joined data
 };
 
 type UseOpportunitiesServerProps = {
@@ -66,7 +68,9 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                     owner_user_id, 
                     updated_at,
                     fecha_cierre_estimada,
-                    account:CRM_Cuentas(nombre)
+                    account:CRM_Cuentas(nombre),
+                    fase_data:CRM_FasesOportunidad(nombre),
+                    estado_data:CRM_EstadosOportunidad(nombre)
                 `, { count: 'exact' });
 
             // Apply Filters
