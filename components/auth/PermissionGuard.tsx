@@ -1,12 +1,16 @@
 "use client";
 
 import { ReactNode } from 'react';
+import { useSyncStore } from '@/lib/stores/useSyncStore';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { hasPermission, hasAnyPermission, Permission } from '@/lib/permissions';
+import { UserRole } from '@/lib/hooks/useCurrentUser';
 
 interface PermissionGuardProps {
     /** Single permission or array of permissions required */
     permission?: Permission | Permission[];
+    /** Module path to check against allowed_modules override */
+    modulePath?: string;
     /** If true, user needs ALL permissions. If false, user needs ANY permission */
     requireAll?: boolean;
     /** Content to show when user has permission */
@@ -17,48 +21,30 @@ interface PermissionGuardProps {
 
 /**
  * Component to conditionally render content based on user permissions
- * 
- * @example
- * // Single permission
- * <PermissionGuard permission="delete_opportunity">
- *   <DeleteButton />
- * </PermissionGuard>
- * 
- * @example
- * // Multiple permissions (any)
- * <PermissionGuard permission={['edit_own_opportunity', 'edit_all_opportunities']}>
- *   <EditButton />
- * </PermissionGuard>
- * 
- * @example
- * // Multiple permissions (all required)
- * <PermissionGuard 
- *   permission={['view_reports', 'export_reports']} 
- *   requireAll
- * >
- *   <ExportButton />
- * </PermissionGuard>
- * 
- * @example
- * // With fallback
- * <PermissionGuard 
- *   permission="manage_users"
- *   fallback={<p>No tienes permisos para ver esto</p>}
- * >
- *   <UserManagementPanel />
- * </PermissionGuard>
+ * Uses useSyncStore to match Sidebar logic.
  */
 export function PermissionGuard({
     permission,
+    modulePath,
     requireAll = false,
     children,
     fallback = null
 }: PermissionGuardProps) {
-    const { role, isLoading } = useCurrentUser();
+    const { userRole } = useSyncStore();
+    const { user } = useCurrentUser();
 
-    // While loading, don't show anything
-    if (isLoading) {
-        return null;
+    // Map Store Role (English) to Permission Role (Spanish)
+    const getPermissionRole = (storeRole: string): UserRole => {
+        if (storeRole === 'ADMIN') return 'ADMIN';
+        if (storeRole === 'COORDINATOR') return 'COORDINADOR';
+        return 'VENDEDOR'; // Default / SALES
+    };
+
+    const role = getPermissionRole(userRole);
+
+    // 1. Check if allowed_modules explicitly grants access to this module
+    if (modulePath && user?.allowed_modules?.includes(modulePath)) {
+        return <>{children}</>;
     }
 
     // If no permission specified, always show children
