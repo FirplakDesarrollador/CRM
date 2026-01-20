@@ -25,6 +25,10 @@ export const metadata: Metadata = {
     maximumScale: 1,
     userScalable: false,
   },
+  icons: {
+    icon: "/isotipo.svg",
+    apple: "/isotipo.svg",
+  },
 };
 
 export default function RootLayout({

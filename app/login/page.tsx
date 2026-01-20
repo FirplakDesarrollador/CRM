@@ -127,7 +127,7 @@ export default function LoginPage() {
                         <div className="mb-8 lg:mb-12">
                             <div className="w-16 lg:w-20 h-16 lg:h-20 bg-linear-to-br from-[#254153] to-[#1a2f3d] rounded-2xl lg:rounded-3xl flex items-center justify-center mb-6 lg:mb-8 border border-white/20 shadow-xl overflow-hidden">
                                 <img
-                                    src="/Isotipo FIRPLAK CRM.svg"
+                                    src="/isotipo.svg"
                                     alt="Logo"
                                     className="w-10 lg:w-12 h-auto"
                                 />
@@ -188,7 +188,7 @@ export default function LoginPage() {
                     <div className="md:hidden mb-8 text-center">
                         <div className="w-16 h-16 bg-linear-to-br from-[#254153] to-[#1a2f3d] rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl overflow-hidden">
                             <img
-                                src="/Isotipo FIRPLAK CRM.svg"
+                                src="/isotipo.svg"
                                 alt="Logo"
                                 className="w-10 h-auto"
                             />
