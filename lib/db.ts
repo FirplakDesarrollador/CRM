@@ -24,6 +24,7 @@ export interface LocalCuenta {
     nit_base?: string;
     id_cuenta_principal?: string | null;
     canal_id: string; // Nuevo campo obligatorio
+    subclasificacion_id?: number | null; // Nuevo campo opcional
     es_premium?: boolean;
     telefono?: string;
     direccion?: string;
@@ -111,6 +112,38 @@ export interface LocalFase {
     canal_id: string;
 }
 
+export interface LocalSubclasificacion {
+    id: number;
+    nombre: string;
+    canal_id: string;
+}
+
+export interface LocalSegmento {
+    id: number;
+    nombre: string;
+    subclasificacion_id: number;
+}
+
+export interface LocalOportunidad {
+    id: string;
+    account_id: string;
+    fase_id: number;
+    fase?: string; // Legacy/Join field
+    nombre: string;
+    valor: number; // Referred to as 'amount' in some places, need to standardize or allow both
+    amount?: number; // Alias for valor to satisfy legacy code
+    currency_id?: string;
+    estado_id?: number;
+    status?: string; // Legacy field
+    fecha_cierre?: string;
+    fecha_cierre_estimada?: string; // Alias
+    items?: any[];
+    owner_user_id?: string;
+    segmento_id?: number | null;
+    created_at?: string;
+    updated_at?: string;
+}
+
 export class CRMFirplakDB extends Dexie {
     // Sync Queues
     outbox!: Table<OutboxItem, string>;
@@ -118,25 +151,29 @@ export class CRMFirplakDB extends Dexie {
 
     // Local Mirrors (Add more as needed)
     accounts!: Table<LocalCuenta, string>;
-    opportunities!: Table<any, string>;
+    opportunities!: Table<LocalOportunidad, string>;
     contacts!: Table<LocalContact, string>;
     quotes!: Table<LocalQuote, string>;
     quoteItems!: Table<LocalQuoteItem, string>;
     activities!: Table<any, string>; // We will stricter type this below
     phases!: Table<LocalFase, number>; // Local table
+    subclasificaciones!: Table<LocalSubclasificacion, number>; // Local table
+    segments!: Table<LocalSegmento, number>; // Local table
 
     constructor() {
         super('CRMFirplakDB');
-        this.version(5).stores({ // Bumped version to 5
+        this.version(6).stores({ // Bumped version to 6
             outbox: 'id, entity_type, status, field_timestamp',
             fileQueue: 'id, status',
             accounts: 'id, nit, nombre',
-            opportunities: 'id, account_id, owner_user_id, items',
+            opportunities: 'id, account_id, owner_user_id', // Simplified index
             contacts: 'id, account_id, email',
-            quotes: 'id, opportunity_id, status, es_pedido', // Added es_pedido index
+            quotes: 'id, opportunity_id, status, es_pedido',
             quoteItems: 'id, cotizacion_id',
-            activities: 'id, opportunity_id, user_id, fecha_inicio, tipo_actividad', // Added index
-            phases: 'id, canal_id, orden'
+            activities: 'id, opportunity_id, user_id, fecha_inicio, tipo_actividad',
+            phases: 'id, canal_id, orden',
+            subclasificaciones: 'id, canal_id',
+            segments: '++id, subclasificacion_id'
         });
     }
 }
