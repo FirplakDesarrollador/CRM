@@ -9,6 +9,7 @@ const nextConfig = {
         appIsrStatus: false,
         buildActivity: false,
     },
+    turbopack: {},
 };
 
 const withPWA = withPWAInit({
