@@ -42,7 +42,7 @@ export function TopBar() {
             <div className="md:hidden flex items-center gap-2.5">
                 <div className="w-9 h-9 bg-linear-to-br from-[#254153] to-[#1a2f3d] rounded-lg flex items-center justify-center shadow-md">
                     <img
-                        src="/Isotipo FIRPLAK CRM.svg"
+                        src="/isotipo.svg"
                         alt="Logo"
                         className="h-5 w-auto"
                     />
