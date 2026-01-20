@@ -60,6 +60,8 @@ export function useOpportunities() {
             account_id: oppData.account_id,
             estado_id: oppData.estado_id || 1,
             fase_id: oppData.fase_id || 1,
+            segmento_id: oppData.segmento_id ? Number(oppData.segmento_id) : null,
+            fecha_cierre_estimada: oppData.fecha_cierre_estimada === "" ? null : (oppData.fecha_cierre_estimada || null),
             created_by: user?.id,
             updated_by: user?.id,
             updated_at: new Date().toISOString()
@@ -135,20 +137,24 @@ export function useOpportunities() {
         const mocks = [
             {
                 id: uuidv4(),
+                account_id: uuidv4(), // Mock account
                 nombre: "Reforma Oficinas Centrales",
+                valor: 45000000,
                 amount: 45000000,
                 currency_id: "COP",
-                fase_id: "NEG",
+                fase_id: 1,
                 owner_user_id: userId,
                 status: "OPEN",
                 updated_at: new Date().toISOString()
             },
             {
                 id: uuidv4(),
+                account_id: uuidv4(), // Mock account
                 nombre: "Dotación Baños CC",
+                valor: 12000,
                 amount: 12000,
                 currency_id: "USD",
-                fase_id: "PROP",
+                fase_id: 1,
                 owner_user_id: userId,
                 status: "OPEN",
                 updated_at: new Date().toISOString()
