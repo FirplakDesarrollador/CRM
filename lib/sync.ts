@@ -184,6 +184,8 @@ export class SyncEngine {
 
         for (const [table, updates] of sortedTables) {
             try {
+                console.log(`[Sync] DEBUG - Sending RPC for ${table} with updates:`, JSON.stringify(updates, null, 2));
+
                 const { data, error } = await supabase.rpc('process_field_updates', {
                     p_table_name: table,
                     p_updates: updates,
@@ -198,6 +200,7 @@ export class SyncEngine {
                 // Process individual results
                 const results = data as any[];
                 console.log(`[Sync] Processed ${updates.length} updates for ${table}. ${results.filter(r => r.success).length} success, ${results.filter(r => !r.success).length} failed.`);
+                console.log(`[Sync] DEBUG - Full RPC results:`, JSON.stringify(results, null, 2));
 
                 for (const result of results) {
                     if (result.success) {
@@ -570,6 +573,10 @@ export class SyncEngine {
         entityId: string,
         changes: Record<string, any>
     ) {
+        console.log('[SyncEngine] DEBUG - queueMutation called:', { entityTable, entityId });
+        console.log('[SyncEngine] DEBUG - changes object:', changes);
+        console.log('[SyncEngine] DEBUG - subclasificacion_id in changes:', changes.subclasificacion_id);
+
         const now = Date.now();
         const items: OutboxItem[] = [];
 
@@ -577,6 +584,8 @@ export class SyncEngine {
             if (value === undefined) continue; // Skip undefined fields
             if (field === '_sync_metadata') continue; // Skip sync metadata
             if (field === 'id') continue; // Skip ID (it's the key, not a field to update)
+
+            console.log(`[SyncEngine] DEBUG - Adding field to outbox: ${field} = ${JSON.stringify(value)}`);
 
             items.push({
                 id: uuidv4(),
@@ -591,6 +600,9 @@ export class SyncEngine {
             });
         }
 
+        console.log('[SyncEngine] DEBUG - Total items to queue:', items.length);
+        console.log('[SyncEngine] DEBUG - Items:', items.map(i => ({ field: i.field_name, value: i.new_value })));
+
         await db.outbox.bulkAdd(items);
         this.updatePendingCount();
 
@@ -598,8 +610,8 @@ export class SyncEngine {
         // await db.table(entityTable).update(entityId, changes); 
         // Note: Needs mapping logic if local table names differ slightly or just generic
 
-        // Trigger Sync lightly
-        this.triggerSync();
+        // Trigger Sync and WAIT for it to complete (critical for server-side list consistency)
+        await this.triggerSync();
     }
     async getCurrentUser() {
         return await supabase.auth.getUser();

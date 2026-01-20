@@ -20,6 +20,7 @@ const accountSchema = z.object({
     is_child: z.boolean(),
     id_cuenta_principal: z.string().nullable().optional(),
     canal_id: z.string().min(1, "Canal de venta requerido"),
+    subclasificacion_id: z.string().optional().nullable(), // Form uses string, convert to number on submit
     telefono: z.string().nullable().optional(),
     direccion: z.string().nullable().optional(),
     ciudad: z.string().nullable().optional(),
@@ -37,6 +38,7 @@ interface AccountFormProps {
 export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) {
     const { createAccount, updateAccount } = useAccounts();
     const [parents, setParents] = useState<any[]>([]);
+    const [subclassifications, setSubclassifications] = useState<any[]>([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [assignedUserName, setAssignedUserName] = useState<string | null>(null);
 
@@ -77,6 +79,15 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             .then(({ data }) => {
                 if (data) setParents(data);
             });
+
+        // Fetch Subclassifications
+        supabase
+            .from('CRM_Subclasificacion')
+            .select('id, nombre, canal_id')
+            .then(({ data }) => {
+                console.log('[AccountForm] DEBUG - Fetched subclassifications:', data);
+                if (data) setSubclassifications(data);
+            });
     }, []);
 
     // Tab State
@@ -97,6 +108,7 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             is_child: account?.id_cuenta_principal ? true : false,
             id_cuenta_principal: account?.id_cuenta_principal || "",
             canal_id: account?.canal_id || "DIST_NAC",
+            subclasificacion_id: account?.subclasificacion_id ? String(account.subclasificacion_id) : "",
             telefono: account?.telefono || "",
             direccion: account?.direccion || "",
             ciudad: account?.ciudad || "",
@@ -107,12 +119,16 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
     // Update form when account changes (for editing different accounts)
     useEffect(() => {
         if (account) {
+            console.log('[AccountForm] DEBUG - Form reset with account:', account);
+            console.log('[AccountForm] DEBUG - account.subclasificacion_id:', account.subclasificacion_id);
+            console.log('[AccountForm] DEBUG - typeof account.subclasificacion_id:', typeof account.subclasificacion_id);
             reset({
                 nombre: account.nombre || "",
                 nit_base: account.nit_base || "",
                 is_child: account.id_cuenta_principal ? true : false,
                 id_cuenta_principal: account.id_cuenta_principal || "",
                 canal_id: account.canal_id || "DIST_NAC",
+                subclasificacion_id: account.subclasificacion_id ? String(account.subclasificacion_id) : "",
                 telefono: account.telefono || "",
                 direccion: account.direccion || "",
                 ciudad: account.ciudad || "",
@@ -123,8 +139,32 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
 
     const isChild = watch("is_child");
     const selectedParentId = watch("id_cuenta_principal");
+    const selectedChannel = watch("canal_id");
 
+    // Reset subclasificacion when channel changes (except on initial load)
+    const [initialChannelLoaded, setInitialChannelLoaded] = useState(false);
+    useEffect(() => {
+        if (initialChannelLoaded && selectedChannel) {
+            // Channel was changed by user, reset subclasificacion
+            const currentSubId = watch("subclasificacion_id");
+            const isValidForChannel = subclassifications.some(
+                sub => sub.canal_id === selectedChannel && String(sub.id) === currentSubId
+            );
+            if (!isValidForChannel) {
+                console.log('[AccountForm] DEBUG - Resetting subclasificacion_id because channel changed and current value is invalid');
+                setValue("subclasificacion_id", "");
+            }
+        } else if (selectedChannel) {
+            setInitialChannelLoaded(true);
+        }
+    }, [selectedChannel]);
 
+    // DEBUG: Log filtered options whenever channel or subclassifications change
+    useEffect(() => {
+        const filteredOptions = subclassifications.filter(sub => sub.canal_id === selectedChannel);
+        console.log('[AccountForm] DEBUG - selectedChannel:', selectedChannel);
+        console.log('[AccountForm] DEBUG - Filtered options for channel:', filteredOptions);
+    }, [selectedChannel, subclassifications]);
 
     // Filter possible parents (exclude self)
     const potentialParents = parents.filter(p => p.id !== account?.id);
@@ -171,13 +211,19 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                 nit_base: formData.nit_base,
                 id_cuenta_principal: formData.is_child ? formData.id_cuenta_principal : null,
                 canal_id: formData.canal_id,
+                subclasificacion_id: formData.subclasificacion_id ? Number(formData.subclasificacion_id) : null,
                 telefono: formData.telefono || null,
                 direccion: formData.direccion || null,
                 ciudad: formData.ciudad || null,
                 es_premium: formData.es_premium || false
             };
 
+            // DEBUG: Log the payload being sent
+            console.log('[AccountForm] DEBUG - formData.subclasificacion_id:', formData.subclasificacion_id);
+            console.log('[AccountForm] DEBUG - payload:', JSON.stringify(payload, null, 2));
+
             if (account?.id) {
+                console.log('[AccountForm] DEBUG - Calling updateAccount with id:', account.id);
                 await updateAccount(account.id, payload);
             } else {
                 await createAccount(payload);
@@ -298,6 +344,25 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                             <option value="PROPIO">Canal Propio</option>
                         </select>
                         {errors.canal_id && <span className="text-red-500 text-xs">{errors.canal_id.message}</span>}
+                    </div>
+
+                    <div className="space-y-1">
+                        <label className="text-sm font-medium">Subclasificación</label>
+                        <select
+                            {...register("subclasificacion_id")}
+                            className="w-full border p-2 rounded bg-white disabled:bg-slate-100 disabled:text-slate-400"
+                            disabled={!selectedChannel}
+                        >
+                            <option value="">Seleccione...</option>
+                            {subclassifications
+                                .filter(sub => sub.canal_id === selectedChannel)
+                                .map(sub => (
+                                    <option key={sub.id} value={String(sub.id)}>
+                                        {sub.nombre}
+                                    </option>
+                                ))}
+                        </select>
+                        <p className="text-xs text-slate-500">Opciones disponibles según el canal seleccionado.</p>
                     </div>
 
                     {isChild ? (

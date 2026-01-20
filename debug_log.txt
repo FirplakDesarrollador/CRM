@@ -1,0 +1,4 @@
+﻿SCRIPT STARTED
+[dotenv@17.2.3] injecting env (2) from .env.local -- tip: ÔÜÖ´©Å  specify custom .env file path with { path: '/custom/path/.env' }
+Testing RPC process_field_updates...
+No accounts found to test.
