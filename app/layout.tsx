@@ -18,6 +18,17 @@ export const metadata: Metadata = {
   title: "CRM FIRPLAK",
   description: "PWA Offline-First CRM",
   manifest: "/manifest.json",
+  themeColor: "#254153",
+  viewport: {
+    width: "device-width",
+    initialScale: 1,
+    maximumScale: 1,
+    userScalable: false,
+  },
+  icons: {
+    icon: "/isotipo.svg",
+    apple: "/isotipo.svg",
+  },
 };
 
 export default function RootLayout({

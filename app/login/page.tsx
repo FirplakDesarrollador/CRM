@@ -125,10 +125,12 @@ export default function LoginPage() {
                     {/* Content */}
                     <div className="relative z-10">
                         <div className="mb-8 lg:mb-12">
-                            <div className="w-16 lg:w-20 h-16 lg:h-20 bg-white/10 backdrop-blur-md rounded-2xl lg:rounded-3xl flex items-center justify-center mb-6 lg:mb-8 border border-white/20 shadow-xl">
-                                <svg className="w-9 lg:w-11 h-9 lg:h-11 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                                </svg>
+                            <div className="w-16 lg:w-20 h-16 lg:h-20 bg-linear-to-br from-[#254153] to-[#1a2f3d] rounded-2xl lg:rounded-3xl flex items-center justify-center mb-6 lg:mb-8 border border-white/20 shadow-xl overflow-hidden">
+                                <img
+                                    src="/isotipo.svg"
+                                    alt="Logo"
+                                    className="w-10 lg:w-12 h-auto"
+                                />
                             </div>
                             <h1 className="text-4xl lg:text-5xl font-bold mb-3 lg:mb-4 tracking-tight leading-tight">CRM<br />FIRPLAK</h1>
                             <div className="w-12 lg:w-16 h-1 bg-linear-to-r from-blue-400 to-transparent rounded-full mb-3 lg:mb-4"></div>
@@ -184,10 +186,12 @@ export default function LoginPage() {
                 <div className="p-6 sm:p-8 md:p-10 lg:p-14 flex flex-col justify-center bg-linear-to-br from-white to-slate-50/30">
                     {/* Mobile Branding Header */}
                     <div className="md:hidden mb-8 text-center">
-                        <div className="w-16 h-16 bg-linear-to-br from-[#254153] to-[#1a2f3d] rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl">
-                            <svg className="w-9 h-9 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                            </svg>
+                        <div className="w-16 h-16 bg-linear-to-br from-[#254153] to-[#1a2f3d] rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl overflow-hidden">
+                            <img
+                                src="/isotipo.svg"
+                                alt="Logo"
+                                className="w-10 h-auto"
+                            />
                         </div>
                         <h1 className="text-3xl font-bold text-slate-900 mb-1 tracking-tight">CRM FIRPLAK</h1>
                         <p className="text-sm text-slate-600">Sistema de Gestión Comercial</p>

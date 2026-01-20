@@ -1,0 +1,73 @@
+﻿
+> crm-app@1.0.4 build
+> next build
+
+Ôû▓ Next.js 16.1.1 (Turbopack)
+- Environments: .env.local, .env
+
+node.exe : ÔÜá The 
+"middleware" file 
+convention is deprecated. 
+Please use "proxy" instead. 
+Learn more: https://nextjs.o
+rg/docs/messages/middleware-
+to-proxy
+En línea: 1 Carácter: 1
++ & "C:\Program 
+Files\nodejs/node.exe" 
+"C:\Program 
+Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~
+    + CategoryInfo          
+    : NotSpecified: (ÔÜá T  
+  he "middle...leware-to-   
+ proxy:String) [], Remot    
+eException
+    + FullyQualifiedErrorId 
+    : NativeCommandError
+ 
+  Creating an optimized production build ...
+Ô¿» ERROR: This build is 
+using Turbopack, with a 
+`webpack` config and no 
+`turbopack` config.
+   This may be a mistake.
+
+   As of Next.js 16 
+Turbopack is enabled by 
+default and
+   custom webpack 
+configurations may need to 
+be migrated to Turbopack.
+
+   NOTE: your `webpack` 
+config may have been added 
+by a configuration plugin.
+
+   To configure Turbopack, 
+see https://nextjs.org/docs/
+app/api-reference/next-confi
+g-js/turbopack
+
+   TIP: Many applications 
+work fine under Turbopack 
+with no configuration,
+   if that is the case for 
+you, you can silence this 
+error by passing the
+   `--turbopack` or 
+`--webpack` flag explicitly 
+or simply setting an 
+   empty turbopack config 
+in your Next config file 
+(e.g. `turbopack: {}`).
+
+> Build error occurred
+Error: Call retries were 
+exceeded
+    at ignore-listed frames 
+{
+  type: 'WorkerError'
+}
