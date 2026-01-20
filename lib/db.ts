@@ -47,6 +47,7 @@ export interface LocalQuote {
     status: 'DRAFT' | 'SENT' | 'APPROVED' | 'REJECTED' | 'WINNER';
     is_winner?: boolean;
     es_pedido?: boolean; // Nuevo campo para diferenciar pedidos
+    segmento_id?: number | null; // Segmento del pedido/cotización
 
     // SAP Data
     fecha_minima_requerida?: string;

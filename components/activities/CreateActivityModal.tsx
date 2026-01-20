@@ -140,6 +140,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                             <input
                                 type={tipo === 'TAREA' ? "date" : "datetime-local"}
                                 {...register('fecha_inicio', { required: true })}
+                                min={tipo === 'TAREA' ? toLocalISO(new Date()).slice(0, 10) : toLocalISO(new Date())}
                                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                             />
                         </div>
@@ -149,6 +150,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                 <input
                                     type="datetime-local"
                                     {...register('fecha_fin')}
+                                    min={fechaInicio ? fechaInicio : toLocalISO(new Date())}
                                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                                 />
                             </div>
@@ -192,12 +194,33 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                             onClick={handleSubmit((data) => {
                                 // Ensure dates are unambiguous ISO with Z (UTC) for storage
                                 const processed = { ...data };
+
+                                // VALIDATION: Check for past dates
+                                const todayISO = toLocalISO(new Date()).slice(0, 10);
+                                const selectedISO = data.fecha_inicio ? data.fecha_inicio.slice(0, 10) : "";
+
+                                if (selectedISO && selectedISO < todayISO) {
+                                    // If strictly before today, allow ONLY if it matches the initial value (preserving existing past records)
+                                    // We compare against the formatted initial value used in defaultValues
+                                    const initialISO = initialData?.fecha_inicio
+                                        ? toLocalISO(initialData.fecha_inicio).slice(0, 10)
+                                        : "";
+
+                                    if (!isEditing || selectedISO !== initialISO) {
+                                        alert("No se puede programar una actividad para una fecha anterior a hoy.");
+                                        return;
+                                    }
+                                }
+
                                 if (data.fecha_inicio) {
                                     processed.fecha_inicio = new Date(data.fecha_inicio).toISOString();
                                 }
+
                                 if (data.fecha_fin) {
-                                    processed.fecha_fin = new Date(data.fecha_fin).toISOString();
+                                    const selectedEndDate = new Date(data.fecha_fin);
+                                    processed.fecha_fin = selectedEndDate.toISOString();
                                 }
+
                                 onSubmit(processed);
                             })}
                             className={cn(
