@@ -24,6 +24,8 @@ const schema = z.object({
     currency_id: z.enum(["COP", "USD"]),
     estado_id: z.coerce.number().default(1), // 1 = Abierta
     fase_id: z.coerce.number().min(1, "Fase requerida").default(1),
+    segmento_id: z.coerce.number().nullable().optional(),
+    fecha_cierre_estimada: z.string().optional().nullable(),
     items: z.array(z.object({
         product_id: z.string(),
         cantidad: z.number().min(1),
@@ -43,6 +45,22 @@ export default function CreateOpportunityWizard() {
     const [accountSearchTerm, setAccountSearchTerm] = useState("");
     const [showAccountDropdown, setShowAccountDropdown] = useState(false);
     const [selectedAccount, setSelectedAccount] = useState<any>(null);
+    const [segments, setSegments] = useState<any[]>([]);
+
+    useEffect(() => {
+        // Fetch all segments (small table, safe to fetch all)
+        // Or we could fetch only relevant ones if we wanted to optmize
+        const fetchSegments = async () => {
+            // Try fetching from local DB first if available, else Server
+            // Since we didn't add it to sync engine completely, let's fetch from Supabase
+            // to ensure we have the latest structure.
+            // Ideally we should use Local DB if we added it to Sync.
+            // Given time constraints, straightforward fetch:
+            const { data } = await import("@/lib/supabase").then(m => m.supabase.from('CRM_Segmentos').select('*'));
+            if (data) setSegments(data);
+        };
+        fetchSegments();
+    }, []);
 
     const {
         register,
@@ -60,6 +78,7 @@ export default function CreateOpportunityWizard() {
             estado_id: 1,
             fase_id: 1,
             amount: 0,
+            fecha_cierre_estimada: '',
             items: []
         }
     });
@@ -353,10 +372,40 @@ export default function CreateOpportunityWizard() {
                             </div>
                         </div>
 
+                        {/* SEGMENT SELECTOR */}
                         <div>
-                            <label className="text-sm font-medium">Valor Estimado</label>
-                            <input type="number" {...register("amount")} className="w-full p-2 border rounded-lg" />
-                            {items.length > 0 && <p className="text-[10px] text-blue-600 mt-1">Calculado automáticamente por productos</p>}
+                            <label className="text-sm font-medium">Segmento</label>
+                            <select
+                                {...register("segmento_id")}
+                                className="w-full p-2 border rounded-lg disabled:bg-slate-100 disabled:text-slate-400"
+                                disabled={!selectedAccount?.subclasificacion_id}
+                            >
+                                <option value="">Seleccione un segmento...</option>
+                                {segments
+                                    .filter((seg: any) => selectedAccount?.subclasificacion_id && seg.subclasificacion_id === Number(selectedAccount.subclasificacion_id))
+                                    .map((seg: any) => (
+                                        <option key={seg.id} value={seg.id}>
+                                            {seg.nombre}
+                                        </option>
+                                    ))}
+                            </select>
+                            {!selectedAccount?.subclasificacion_id && (
+                                <p className="text-xs text-orange-500 mt-1">
+                                    La cuenta seleccionada no tiene subclasificación configurada.
+                                </p>
+                            )}
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="text-sm font-medium">Valor Estimado</label>
+                                <input type="number" {...register("amount")} className="w-full p-2 border rounded-lg" />
+                                {items.length > 0 && <p className="text-[10px] text-blue-600 mt-1">Calculado automáticamente por productos</p>}
+                            </div>
+                            <div>
+                                <label className="text-sm font-medium">Fecha Cierre Estimada</label>
+                                <input type="date" {...register("fecha_cierre_estimada")} className="w-full p-2 border rounded-lg" />
+                            </div>
                         </div>
                     </div>
                 )}
