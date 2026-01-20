@@ -86,15 +86,18 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
                     {isCollapsed ? (
                         <div className="w-12 h-12 bg-linear-to-br from-[#254153] to-[#1a2f3d] rounded-2xl flex items-center justify-center shadow-lg transition-all">
                             <img
-                                src="/Isotipo FIRPLAK CRM.svg"
+                                src="/isotipo.svg"
                                 alt="Logo"
                                 className="h-7 w-auto"
                             />
                         </div>
                     ) : (
-                        <div className="flex flex-col items-center">
-                            <FirplakLogo className="h-10 w-auto text-[#254153] mb-2" />
-                            <p className="text-xs text-slate-500 font-medium">Inspiring homes</p>
+                        <div className="flex items-center justify-center py-2">
+                            <img
+                                src="/logo.svg"
+                                alt="Firplak Logo"
+                                className="h-12 w-auto"
+                            />
                         </div>
                     )}
                 </div>
