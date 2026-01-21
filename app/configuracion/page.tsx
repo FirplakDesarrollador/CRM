@@ -20,6 +20,7 @@ import { useRouter } from 'next/navigation';
 import { cn } from '@/components/ui/utils';
 import { supabase } from '@/lib/supabase';
 import { useConfig } from '@/lib/hooks/useConfig';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { PriceListUploader } from '@/components/config/PriceListUploader';
 import { ConfirmationModal } from '@/components/ui/ConfirmationModal';
 import packageJson from '../../package.json';
@@ -57,6 +58,7 @@ interface ModalConfig {
 export default function ConfigPage() {
     const router = useRouter();
     const { isSyncing, pendingCount, lastSyncTime, error, isPaused, setPaused } = useSyncStore();
+    const { role } = useCurrentUser();
     const [outboxItems, setOutboxItems] = useState<OutboxItem[]>([]);
     const [stats, setStats] = useState<Stats | null>(null);
 
@@ -447,8 +449,8 @@ export default function ConfigPage() {
                 </div>
             )}
 
-            {/* Price List Uploader */}
-            <PriceListUploader />
+            {/* Price List Uploader - Admin Only */}
+            {role === 'ADMIN' && <PriceListUploader />}
 
             <AdminSettings setModalConfig={setModalConfig} />
 
