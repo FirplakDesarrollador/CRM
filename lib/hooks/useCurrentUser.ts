@@ -9,6 +9,7 @@ export interface CurrentUser {
     full_name: string | null;
     role: UserRole;
     is_active: boolean;
+    allowed_modules?: string[] | null;
 }
 
 /**
@@ -36,22 +37,30 @@ export function useCurrentUser() {
                 // Get authenticated user from Supabase Auth
                 const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
 
+                console.log('[useCurrentUser] Auth User:', authUser?.id, authUser?.email);
+
                 if (authError) {
+                    console.error('[useCurrentUser] Auth Error:', authError);
                     throw authError;
                 }
 
                 if (!authUser) {
+                    console.log('[useCurrentUser] No auth user found');
                     setUser(null);
                     setIsLoading(false);
                     return;
                 }
 
                 // Fetch user details from CRM_Usuarios table
+                console.log('[useCurrentUser] Fetching CRM user for ID:', authUser.id);
                 const { data: crmUser, error: crmError } = await supabase
                     .from('CRM_Usuarios')
                     .select('id, email, full_name, role, is_active')
                     .eq('id', authUser.id)
                     .single();
+
+                console.log('[useCurrentUser] CRM User Result:', crmUser);
+                console.log('[useCurrentUser] CRM Error:', crmError);
 
                 if (crmError) {
                     console.error('[useCurrentUser] Error fetching CRM user:', crmError);
@@ -59,13 +68,17 @@ export function useCurrentUser() {
                 }
 
                 if (crmUser) {
+                    console.log('[useCurrentUser] Setting user:', crmUser);
                     setUser({
                         id: crmUser.id,
                         email: crmUser.email,
                         full_name: crmUser.full_name,
                         role: crmUser.role as UserRole,
                         is_active: crmUser.is_active,
+                        allowed_modules: null, // Column missing in DB currently
                     });
+                } else {
+                    console.warn('[useCurrentUser] CRM user not found for auth ID:', authUser.id);
                 }
             } catch (err: any) {
                 console.error('[useCurrentUser] Error:', err);
