@@ -9,7 +9,7 @@ import { useSyncStore } from "@/lib/stores/useSyncStore";
 import { UserPickerFilter } from "@/components/cuentas/UserPickerFilter";
 
 export default function OpportunitiesPage() {
-    const { userRole, setUserRole } = useSyncStore();
+    const { userRole } = useSyncStore();
 
     // Server Side Hook
     const {
@@ -49,12 +49,7 @@ export default function OpportunitiesPage() {
             <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
                 <div className="flex items-center gap-3">
                     <h1 className="text-2xl font-bold text-slate-900">Oportunidades</h1>
-                    <span
-                        className="text-xs bg-slate-100 text-slate-500 px-2 py-1 rounded border border-slate-200 cursor-pointer hover:bg-slate-200"
-                        onClick={() => setUserRole(userRole === 'ADMIN' ? 'SALES' : 'ADMIN')}
-                    >
-                        Rol: {userRole} (Click cambiar)
-                    </span>
+
                 </div>
                 <Link
                     href="/oportunidades/nueva"
@@ -161,7 +156,7 @@ export default function OpportunitiesPage() {
                                                 {/* Phase mapping would need server-side join or client-side map if Phases are small. 
                                                 For now we show ID or TODO: map it 
                                             */}
-                                                {opp.fase_id || 'Prospecto'} • {opp.currency_id || 'COP'} {new Intl.NumberFormat().format(opp.amount || 0)}
+                                                {opp.fase_data?.nombre || 'Prospecto'} • {opp.estado_data?.nombre || 'Abierta'} • {opp.currency_id || 'COP'} {new Intl.NumberFormat().format(opp.amount || 0)}
                                                 {opp.fecha_cierre_estimada && (
                                                     <span className={cn(
                                                         "ml-2 font-normal",

@@ -2,8 +2,7 @@
 
 import { useOpportunities } from "@/lib/hooks/useOpportunities";
 import { useActivities } from "@/lib/hooks/useActivities";
-import { supabase } from "@/lib/supabase";
-import { User } from "@supabase/supabase-js";
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -14,23 +13,12 @@ export default function Home() {
   const { opportunities } = useOpportunities();
   const { activities } = useActivities();
   const router = useRouter();
-  const [user, setUser] = useState<User | null>(null);
+  const { user, role, isLoading, error } = useCurrentUser();
   const [stats, setStats] = useState({
     openCount: 0,
     wonAmount: 0,
     activitiesToday: 0
   });
-
-  useEffect(() => {
-    supabase.auth.getUser()
-      .then(({ data }) => setUser(data.user))
-      .catch((err) => {
-        // Silently ignore network errors (offline mode)
-        if (!err.message?.includes('Failed to fetch')) {
-          console.error('Error getting user:', err);
-        }
-      });
-  }, []);
 
   useEffect(() => {
     if (!opportunities || !activities) return;
@@ -83,10 +71,20 @@ export default function Home() {
       {/* Header */}
       <div className="flex justify-between items-end">
         <div>
-          <h2 className="text-2xl font-bold text-slate-900">
-            Hola, {user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Vendedor'}
+          <h2 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
+            Hola, {isLoading ? 'Cargando...' : (user?.full_name || user?.email?.split('@')[0] || 'Usuario')}
+            {error && <span className="text-xs text-red-500">Error: {error}</span>}
+            {!user && !isLoading && !error && <span className="text-xs text-orange-500">No encontrado en CRM</span>}
           </h2>
-          <p className="text-slate-500">Aquí está tu resumen de hoy.</p>
+          <div className="flex flex-col gap-1 mt-1">
+            <p className="text-sm font-medium text-slate-600">
+              Rol: <span className="text-blue-600">{role || 'No definido'}</span>
+            </p>
+            <p className="text-xs text-slate-400 font-mono">
+              ID: {user?.id}
+            </p>
+          </div>
+          <p className="text-slate-500 mt-2">Aquí está tu resumen de hoy.</p>
         </div>
         <div className="text-right hidden sm:block">
           <p className="text-sm font-medium text-slate-900 capitalize">

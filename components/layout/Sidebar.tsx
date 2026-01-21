@@ -9,6 +9,7 @@ import { FirplakLogo, FirplakIsotipo } from "./FirplakLogo";
 import { SyncStatus } from "./SyncStatus";
 import { supabase } from "@/lib/supabase";
 import { useSyncStore } from "@/lib/stores/useSyncStore";
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
 import { PermissionGuard } from "@/components/auth/PermissionGuard";
 import {
@@ -35,14 +36,12 @@ const NAV_ITEMS = [
     { label: "Actividades", href: "/actividades", icon: Calendar },
     { label: "Pedidos", href: "/pedidos", icon: Truck },
     { label: "Archivos", href: "/archivos", icon: Files },
-    { label: "Usuarios", href: "/usuarios", icon: Users, requiredRole: 'ADMIN' },
+    { label: "Usuarios", href: "/usuarios", icon: UserCircle, requiredRole: 'ADMIN' },
     { label: "Configuración", href: "/configuracion", icon: Settings },
 ];
 
 // Admin-only navigation items
-const ADMIN_NAV_ITEMS = [
-    { label: "Usuarios", href: "/usuarios", icon: UserCircle, permission: "manage_users" as const },
-];
+const ADMIN_NAV_ITEMS = [];
 
 export interface SidebarProps {
     isCollapsed: boolean;
@@ -52,9 +51,19 @@ export interface SidebarProps {
 export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar }: SidebarProps) {
     const pathname = usePathname();
     const router = useRouter();
-    const { userRole } = useSyncStore();
+    const { userRole, setUserRole } = useSyncStore();
+    const { user, role, isLoading } = useCurrentUser();
     const [showLogoutConfirm, setShowLogoutConfirm] = React.useState(false);
     const [isLoggingOut, setIsLoggingOut] = React.useState(false);
+
+    // Sync DB Role to UI Store
+    React.useEffect(() => {
+        if (!isLoading && role) {
+            if (role === 'ADMIN') setUserRole('ADMIN');
+            else if (role === 'COORDINADOR') setUserRole('COORDINATOR');
+            else setUserRole('SALES');
+        }
+    }, [role, isLoading, setUserRole]);
 
     const handleLogout = async () => {
         setIsLoggingOut(true);
@@ -116,7 +125,25 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
 
             {/* Navigation Section */}
             <nav className="flex-1 p-4 space-y-1.5 overflow-y-auto overflow-x-hidden">
-                {NAV_ITEMS.filter(item => !item.requiredRole || item.requiredRole === userRole).map((item) => {
+                {NAV_ITEMS.filter(item => {
+                    // STRICT: Users module is ADMIN only
+                    // This overrides any allowlist configuration
+                    if (item.href === '/usuarios' && userRole !== 'ADMIN') return false;
+
+                    // Admins see everything by default
+                    if (userRole === 'ADMIN') return true;
+
+                    // Dynamic Config: If defined, strictly follow the allowed list
+                    // This allows granting "Admin-only" modules to other roles if strictly configured
+                    if (user?.allowed_modules && user.allowed_modules.length > 0) {
+                        return user.allowed_modules.includes(item.href);
+                    }
+
+                    // Fallback to Role Default limits
+                    if (item.requiredRole && item.requiredRole !== userRole) return false;
+
+                    return true;
+                }).map((item) => {
                     const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
                     return (
                         <Link
@@ -143,38 +170,6 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
                                 <div className="absolute right-3 w-1.5 h-1.5 bg-white rounded-full"></div>
                             )}
                         </Link>
-                    );
-                })}
-
-                {/* Admin-only navigation items */}
-                {ADMIN_NAV_ITEMS.map((item) => {
-                    const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
-                    return (
-                        <PermissionGuard key={item.href} permission={item.permission}>
-                            <Link
-                                href={item.href}
-                                title={isCollapsed ? item.label : undefined}
-                                className={cn(
-                                    "flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-sm font-semibold group/item relative",
-                                    isActive
-                                        ? "bg-linear-to-r from-[#254153] to-[#1a2f3d] text-white shadow-lg shadow-[#254153]/20"
-                                        : "text-slate-600 hover:bg-slate-100 hover:text-[#254153]",
-                                    isCollapsed && "justify-center px-0 w-14 mx-auto"
-                                )}
-                                prefetch={false}
-                            >
-                                <item.icon className={cn(
-                                    "w-5 h-5 shrink-0 transition-transform",
-                                    !isActive && "group-hover/item:scale-110"
-                                )} />
-                                {!isCollapsed && (
-                                    <span className="whitespace-nowrap">{item.label}</span>
-                                )}
-                                {isActive && !isCollapsed && (
-                                    <div className="absolute right-3 w-1.5 h-1.5 bg-white rounded-full"></div>
-                                )}
-                            </Link>
-                        </PermissionGuard>
                     );
                 })}
             </nav>
