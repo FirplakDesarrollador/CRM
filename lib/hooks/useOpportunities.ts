@@ -194,6 +194,18 @@ export function useOpportunities() {
 
         // Send full opportunity data to satisfy NOT NULL constraints on server
         await syncEngine.queueMutation('CRM_Oportunidades', id, updated);
+
+        // PROPAGATION: If segmento_id changed, update all associated quotes
+        if (updates.segmento_id !== undefined) {
+            const quotes = await db.quotes.where('opportunity_id').equals(id).toArray();
+            for (const q of quotes) {
+                if (q.segmento_id !== updates.segmento_id) {
+                    const updatedQuote = { ...q, segmento_id: updates.segmento_id, updated_at: new Date().toISOString() };
+                    await db.quotes.update(q.id, updatedQuote);
+                    await syncEngine.queueMutation('CRM_Cotizaciones', q.id, updatedQuote);
+                }
+            }
+        }
     };
 
     return { opportunities, createOpportunity, generateMockData, deleteOpportunity, updateOpportunity };
@@ -252,6 +264,7 @@ export function useQuotes(opportunityId?: string) {
             status: 'DRAFT',
             total_amount: latestQuote?.total_amount || 0,
             currency_id: forcedCurrency,
+            segmento_id: latestQuote?.segmento_id || opportunity?.segmento_id || null,
             created_by: user?.id,
             updated_by: user?.id,
             updated_at: new Date().toISOString(),
@@ -309,6 +322,16 @@ export function useQuotes(opportunityId?: string) {
             opportunity_id: currentQuote.opportunity_id,
         };
         await syncEngine.queueMutation('CRM_Cotizaciones', id, syncPayload);
+
+        // PROPAGATION: If segmento_id changed, update the parent opportunity
+        if (updates.segmento_id !== undefined && currentQuote.opportunity_id) {
+            const opp = await db.opportunities.get(currentQuote.opportunity_id);
+            if (opp && opp.segmento_id !== updates.segmento_id) {
+                const updatedOpp = { ...opp, segmento_id: updates.segmento_id, updated_at: new Date().toISOString() };
+                await db.opportunities.update(opp.id, updatedOpp);
+                await syncEngine.queueMutation('CRM_Oportunidades', opp.id, updatedOpp);
+            }
+        }
     };
 
     const updateQuoteTotal = async (quoteId: string) => {
