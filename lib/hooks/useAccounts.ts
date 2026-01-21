@@ -23,9 +23,13 @@ export function useAccounts() {
     };
 
     const updateAccount = async (id: string, updates: Partial<LocalCuenta>) => {
+        console.log('[useAccounts] DEBUG - updateAccount called with:', { id, updates });
+        console.log('[useAccounts] DEBUG - subclasificacion_id in updates:', updates.subclasificacion_id);
         const fullUpdates = { ...updates, updated_at: new Date().toISOString() };
         await db.accounts.update(id, fullUpdates);
+        console.log('[useAccounts] DEBUG - Calling syncEngine.queueMutation with updates:', updates);
         await syncEngine.queueMutation('CRM_Cuentas', id, updates);
+        console.log('[useAccounts] DEBUG - queueMutation completed');
     };
 
     return {

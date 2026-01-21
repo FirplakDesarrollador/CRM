@@ -9,6 +9,7 @@ export type AccountServer = {
     nit_base: string | null;
     id_cuenta_principal: string | null;
     canal_id: string;
+    subclasificacion_id?: number | null;
     es_premium: boolean;
     telefono: string | null;
     direccion: string | null;
@@ -59,6 +60,7 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                     nit_base,
                     id_cuenta_principal,
                     canal_id,
+                    subclasificacion_id,
                     es_premium,
                     telefono,
                     direccion,

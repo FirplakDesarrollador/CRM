@@ -159,7 +159,7 @@ export default function OpportunityDetailPage() {
 
                 {/* Content */}
                 {activeTab === 'cotizaciones' && (
-                    <QuotesTab opportunityId={id} currency={opportunity.currency_id} />
+                    <QuotesTab opportunityId={id} currency={opportunity.currency_id || 'COP'} />
                 )}
 
                 {activeTab === 'productos' && (
@@ -196,6 +196,34 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     const [localClosingDate, setLocalClosingDate] = useState(opportunity.fecha_cierre_estimada || "");
     const [isSaving, setIsSaving] = useState(false);
     const [isSavingDate, setIsSavingDate] = useState(false);
+
+    // Segments Logic
+    const [segments, setSegments] = useState<any[]>([]);
+    const [localSegmentId, setLocalSegmentId] = useState<string>(opportunity.segmento_id ? String(opportunity.segmento_id) : "");
+    const [isSavingSegment, setIsSavingSegment] = useState(false);
+
+    // Sync local state when prop updates
+    useEffect(() => {
+        setLocalSegmentId(opportunity.segmento_id ? String(opportunity.segmento_id) : "");
+    }, [opportunity.segmento_id]);
+
+    useEffect(() => {
+        const fetchSegments = async () => {
+            const { data } = await supabase.from('CRM_Segmentos').select('*');
+            if (data) setSegments(data);
+        };
+        fetchSegments();
+    }, []);
+
+    const handleSegmentChange = async (newId: string) => {
+        setLocalSegmentId(newId);
+        setIsSavingSegment(true);
+        try {
+            await updateOpportunity(opportunity.id, { segmento_id: newId ? Number(newId) : null });
+        } finally {
+            setIsSavingSegment(false);
+        }
+    };
 
 
     // Fetch Account
@@ -441,6 +469,41 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                 <div className="px-3 py-1.5 bg-slate-50 rounded-lg text-slate-700 font-bold text-sm">
                                     {opportunity.currency_id}
                                 </div>
+                            </div>
+                        </div>
+
+                        {/* SEGMENTO SELECTOR */}
+                        <div className="pt-4 border-t border-slate-100">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                                Segmento (Subclasificación)
+                            </label>
+                            <div className="relative group">
+                                <select
+                                    className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-bold text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none disabled:opacity-50"
+                                    value={localSegmentId}
+                                    onChange={(e) => handleSegmentChange(e.target.value)}
+                                    disabled={!account.subclasificacion_id || segments.length === 0}
+                                >
+                                    <option value="">Seleccione un segmento...</option>
+                                    {segments
+                                        .filter(seg => account.subclasificacion_id && seg.subclasificacion_id === Number(account.subclasificacion_id))
+                                        .map(seg => (
+                                            <option key={seg.id} value={String(seg.id)}>
+                                                {seg.nombre}
+                                            </option>
+                                        ))
+                                    }
+                                </select>
+                                {isSavingSegment && (
+                                    <div className="absolute right-8 top-1/2 -translate-y-1/2">
+                                        <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                    </div>
+                                )}
+                                {!account.subclasificacion_id && (
+                                    <p className="text-[10px] text-orange-500 mt-1">
+                                        La cuenta no tiene subclasificación. Edite la cuenta para habilitar segmentos.
+                                    </p>
+                                )}
                             </div>
                         </div>
 
