@@ -1,0 +1,9 @@
+
+C:\CRM\lib\hooks\useUsers.ts
+   54:23  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+   84:32  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  100:23  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  123:23  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+??? 4 problems (4 errors, 0 warnings)
+
