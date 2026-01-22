@@ -174,8 +174,66 @@ export class SyncEngine {
             }
         }
 
+        // 3.2 Proactive Fix: Repair invalid fase_id for Opportunities
+        // Maps invalid/legacy phase IDs (e.g. 1) to valid ones based on Channel
+        if (batches['CRM_Oportunidades']) {
+            const updates = batches['CRM_Oportunidades'];
+            const faseEntries = updates.filter(u => u.field === 'fase_id');
 
-        // 3.3 Process batches by priority
+            if (faseEntries.length > 0) {
+                // Fallback Map (derived from server data)
+                const PHASE_DEFAULTS: Record<string, number> = {
+                    'OBRAS_NAC': 56,
+                    'OBRAS_INT': 63,
+                    'DIST_NAC': 70,
+                    'DIST_INT': 76,
+                    'PROPIO': 82
+                };
+
+                // Fetch local phases if possible to check validity
+                let validPhaseIds = new Set<number>();
+                try {
+                    const localPhases = await db.phases.toArray();
+                    localPhases.forEach(p => validPhaseIds.add(p.id));
+                } catch (e) { console.warn("[Sync] Could not read local phases for validation", e); }
+
+                const isValidId = (id: number) => {
+                    // Check local DB if available, otherwise check if it matches range (>=56)
+                    // We saw IDs start at 56. Simple heuristic.
+                    if (validPhaseIds.size > 0) return validPhaseIds.has(id);
+                    return id >= 56;
+                };
+
+                for (const entry of faseEntries) {
+                    const currentId = Number(entry.value);
+                    if (isValidId(currentId)) continue;
+
+                    console.warn(`[Sync] Repairing invalid fase_id ${currentId} for opp ${entry.id}`);
+
+                    // Find channel
+                    let channel = 'DIST_NAC'; // default
+                    let accountId = updates.find(u => u.id === entry.id && u.field === 'account_id')?.value;
+
+                    if (!accountId) {
+                        try {
+                            const localOpp = await db.opportunities.get(entry.id);
+                            accountId = localOpp?.account_id;
+                        } catch (e) { /* ignore */ }
+                    }
+
+                    if (accountId) {
+                        try {
+                            const acc = await db.accounts.get(accountId);
+                            if (acc?.canal_id) channel = acc.canal_id;
+                        } catch (e) { /* ignore */ }
+                    }
+
+                    const fixedId = PHASE_DEFAULTS[channel] || 70; // Default to DIST_NAC (70)
+                    entry.value = fixedId;
+                    console.log(`[Sync] ...Repaired to ${fixedId} (Channel: ${channel})`);
+                }
+            }
+        }
         const sortedTables = Object.entries(batches).sort(([tableA], [tableB]) => {
             const priorityA = TABLE_PRIORITY[tableA] || 99;
             const priorityB = TABLE_PRIORITY[tableB] || 99;
@@ -280,9 +338,9 @@ export class SyncEngine {
                 .from('CRM_Cuentas')
                 .select('*')
                 .eq('is_deleted', false);
-
+    
             if (accountsError) throw accountsError;
-
+    
             if (accounts && accounts.length > 0) {
                 // Get all pending entity IDs for this table
                 const pendingAccountIds = new Set(
@@ -292,16 +350,16 @@ export class SyncEngine {
                         .toArray()
                     ).map(item => item.entity_id)
                 );
-
+    
                 let mergedCount = 0;
                 let skippedCount = 0;
-
+    
                 for (const a of accounts) {
                     if (pendingAccountIds.has(a.id)) {
                         skippedCount++;
                         continue;
                     }
-
+    
                     await db.accounts.put({
                         id: a.id,
                         nombre: a.nombre,
@@ -350,9 +408,9 @@ export class SyncEngine {
                 .from('CRM_Contactos')
                 .select('*')
                 .eq('is_deleted', false);
-
+    
             if (contactsError) throw contactsError;
-
+    
             if (contacts && contacts.length > 0) {
                 // Smart merge: Skip records with pending changes
                 const pendingContactIds = new Set(
@@ -362,10 +420,10 @@ export class SyncEngine {
                         .toArray()
                     ).map(item => item.entity_id)
                 );
-
+    
                 let mergedCount = 0;
                 let skippedCount = 0;
-
+    
                 for (const c of contacts) {
                     if (pendingContactIds.has(c.id)) {
                         skippedCount++;
@@ -396,9 +454,9 @@ export class SyncEngine {
                 .from('CRM_Oportunidades')
                 .select('*')
                 .eq('is_deleted', false);
-
+    
             if (oppsError) throw oppsError;
-
+    
             if (opportunities && opportunities.length > 0) {
                 const pendingOppIds = new Set(
                     (await db.outbox
@@ -407,10 +465,10 @@ export class SyncEngine {
                         .toArray()
                     ).map(item => item.entity_id)
                 );
-
+    
                 let mergedCount = 0;
                 let skippedCount = 0;
-
+    
                 for (const opp of opportunities) {
                     if (pendingOppIds.has(opp.id)) {
                         skippedCount++;
@@ -430,9 +488,9 @@ export class SyncEngine {
                 .from('CRM_Cotizaciones')
                 .select('*')
                 .eq('is_deleted', false);
-
+    
             if (quotesError) throw quotesError;
-
+    
             if (quotes && quotes.length > 0) {
                 // Get all pending entity IDs for this table
                 const pendingQuoteIds = new Set(
@@ -442,16 +500,16 @@ export class SyncEngine {
                         .toArray()
                     ).map(item => item.entity_id)
                 );
-
+    
                 let mergedCount = 0;
                 let skippedCount = 0;
-
+    
                 for (const q of quotes) {
                     if (pendingQuoteIds.has(q.id)) {
                         skippedCount++;
                         continue; // Skip - local has pending changes
                     }
-
+    
                     await db.quotes.put({
                         id: q.id,
                         opportunity_id: q.opportunity_id,
