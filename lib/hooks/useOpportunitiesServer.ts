@@ -82,22 +82,18 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                 query = query.ilike('nombre', `%${searchTerm}%`);
             }
 
-            if (userFilter === 'mine') {
-                query = query.eq('owner_user_id', currentUserId);
-            } else if (userFilter === 'team') {
-                // Admin sees all, but maybe we want to filter by specific team members later?
-                // For now 'team' implies everything if ADMIN
-                if (userRole !== 'ADMIN') {
-                    // CAUTION: Fallback for non-admins trying to see team
-                    query = query.eq('owner_user_id', currentUserId);
-                }
-            }
-
             if (accountOwnerId) {
-                // Filter by owner of the associated account
-                // Note: We use the alias 'account' from the join CRM_Cuentas
-                // But Supabase query filter on joined tables uses the dot notation.
-                query = query.eq('CRM_Cuentas.created_by', accountOwnerId);
+                // Filtramos por el dueño de la oportunidad (owner_user_id)
+                query = query.eq('owner_user_id', accountOwnerId);
+            } else {
+                // Solo aplicamos el filtro de pestaña si no hay un usuario específico seleccionado
+                if (userFilter === 'mine') {
+                    query = query.eq('owner_user_id', currentUserId);
+                } else if (userFilter === 'team') {
+                    if (userRole !== 'ADMIN') {
+                        query = query.eq('owner_user_id', currentUserId);
+                    }
+                }
             }
 
             // Order
