@@ -5,7 +5,7 @@ import React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/components/ui/utils";
-import { FirplakLogo } from "./FirplakLogo";
+import { FirplakLogo, FirplakIsotipo } from "./FirplakLogo";
 import { SyncStatus } from "./SyncStatus";
 import { supabase } from "@/lib/supabase";
 import { useSyncStore } from "@/lib/stores/useSyncStore";
@@ -93,20 +93,12 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
                 {/* Logo */}
                 <div className="w-full flex justify-center mb-2">
                     {isCollapsed ? (
-                        <div className="w-12 h-12 bg-linear-to-br from-[#254153] to-[#1a2f3d] rounded-2xl flex items-center justify-center shadow-lg transition-all">
-                            <img
-                                src="/isotipo.svg"
-                                alt="Logo"
-                                className="h-7 w-auto"
-                            />
+                        <div className="w-12 h-12 bg-linear-to-br from-[#254153] to-[#1a2f3d] rounded-2xl flex items-center justify-center shadow-lg transition-all p-2.5 text-white">
+                            <FirplakIsotipo className="w-full h-full" />
                         </div>
                     ) : (
-                        <div className="flex items-center justify-center py-2">
-                            <img
-                                src="/logo.svg"
-                                alt="Firplak Logo"
-                                className="h-12 w-auto"
-                            />
+                        <div className="flex items-center justify-center py-2 h-12">
+                            <FirplakLogo className="h-full w-auto text-[#254153]" />
                         </div>
                     )}
                 </div>
