@@ -1,6 +1,6 @@
 import { useSyncStore } from "@/lib/stores/useSyncStore";
 import { cn } from "@/components/ui/utils";
-import { Bell, Search, RefreshCw, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Bell, RefreshCw, AlertCircle, CheckCircle2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 // Re-export NotificationList to ensure HMR picks it up
@@ -47,10 +47,8 @@ export function TopBar() {
                 <h1 className="text-lg font-bold text-slate-800 tracking-tight">CRM FIRPLAK</h1>
             </div>
 
-            {/* Desktop Search */}
-            <div className="hidden md:flex flex-1 max-w-xl mx-8">
-                <GlobalSearch />
-            </div>
+            {/* Desktop Spacer */}
+            <div className="hidden md:flex flex-1" />
 
             <div className="flex items-center gap-4">
                 {/* Sync Status Badge */}

@@ -88,16 +88,45 @@ export default function CreateOpportunityWizard() {
     // Auto-select account from URL param and jump to step 1
     useEffect(() => {
         const accountId = searchParams.get('account_id');
-        if (accountId && accounts.length > 0) {
-            const acc = accounts.find(a => a.id === accountId);
+        if (!accountId) return;
+
+        const resolveAccount = async () => {
+            // Only jump if we are at step 0 to avoid resetting user progress if they navigate back/forth
+            if (step !== 0) return;
+
+            // 1. Try currently loaded accounts
+            let acc = accounts.find(a => a.id === accountId);
+
+            // 2. Try direct local DB lookup (in case accounts list is still filtering/loading)
+            if (!acc) {
+                acc = await db.accounts.get(accountId);
+            }
+
+            // 3. JIT Fetch from Supabase if still not found
+            if (!acc) {
+                try {
+                    const { supabase } = await import("@/lib/supabase");
+                    const { data, error } = await supabase
+                        .from('CRM_Cuentas')
+                        .select('*')
+                        .eq('id', accountId)
+                        .single();
+                    if (data && !error) acc = data;
+                } catch (err) {
+                    console.error("Error fetching account JIT:", err);
+                }
+            }
+
             if (acc) {
                 setValue("account_id", acc.id);
                 setSelectedAccount(acc);
                 setAccountSearchTerm(acc.nombre);
                 setStep(1); // Advance to "Datos del Negocio"
             }
-        }
-    }, [searchParams, accounts, setValue]);
+        };
+
+        resolveAccount();
+    }, [searchParams, accounts, setValue, step]);
 
     const { products: searchResults, isLoading: isSearching } = useProductSearch(searchTerm);
 
