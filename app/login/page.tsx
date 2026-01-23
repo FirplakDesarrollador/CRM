@@ -8,6 +8,7 @@ import { Lock, Mail, Loader2 } from "lucide-react";
 import { useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { recoverPasswordAction } from "./actions";
+import { FirplakIsotipo } from "@/components/layout/FirplakLogo";
 
 const loginSchema = z.object({
     email: z.string().email("Email inválido"),
@@ -125,12 +126,8 @@ export default function LoginPage() {
                     {/* Content */}
                     <div className="relative z-10">
                         <div className="mb-8 lg:mb-12">
-                            <div className="w-16 lg:w-20 h-16 lg:h-20 bg-linear-to-br from-[#254153] to-[#1a2f3d] rounded-2xl lg:rounded-3xl flex items-center justify-center mb-6 lg:mb-8 border border-white/20 shadow-xl overflow-hidden">
-                                <img
-                                    src="/isotipo.svg"
-                                    alt="Logo"
-                                    className="w-10 lg:w-12 h-auto"
-                                />
+                            <div className="w-16 lg:w-20 h-16 lg:h-20 bg-linear-to-br from-[#254153] to-[#1a2f3d] rounded-2xl lg:rounded-3xl flex items-center justify-center mb-6 lg:mb-8 border border-white/20 shadow-xl overflow-hidden p-3 lg:p-4 text-white">
+                                <FirplakIsotipo className="w-full h-full" />
                             </div>
                             <h1 className="text-4xl lg:text-5xl font-bold mb-3 lg:mb-4 tracking-tight leading-tight">CRM<br />FIRPLAK</h1>
                             <div className="w-12 lg:w-16 h-1 bg-linear-to-r from-blue-400 to-transparent rounded-full mb-3 lg:mb-4"></div>
@@ -186,12 +183,8 @@ export default function LoginPage() {
                 <div className="p-6 sm:p-8 md:p-10 lg:p-14 flex flex-col justify-center bg-linear-to-br from-white to-slate-50/30">
                     {/* Mobile Branding Header */}
                     <div className="md:hidden mb-8 text-center">
-                        <div className="w-16 h-16 bg-linear-to-br from-[#254153] to-[#1a2f3d] rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl overflow-hidden">
-                            <img
-                                src="/isotipo.svg"
-                                alt="Logo"
-                                className="w-10 h-auto"
-                            />
+                        <div className="w-16 h-16 bg-linear-to-br from-[#254153] to-[#1a2f3d] rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl overflow-hidden p-3 text-white">
+                            <FirplakIsotipo className="w-full h-full" />
                         </div>
                         <h1 className="text-3xl font-bold text-slate-900 mb-1 tracking-tight">CRM FIRPLAK</h1>
                         <p className="text-sm text-slate-600">Sistema de Gestión Comercial</p>
