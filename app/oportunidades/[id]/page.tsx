@@ -21,12 +21,14 @@ import { useActivities, LocalActivity } from "@/lib/hooks/useActivities";
 import { CreateActivityModal } from "@/components/activities/CreateActivityModal";
 import { supabase } from "@/lib/supabase";
 import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
+import { useSyncStore } from "@/lib/stores/useSyncStore";
 
 export default function OpportunityDetailPage() {
     const params = useParams();
     const router = useRouter();
     const id = params.id as string;
     const { opportunities, deleteOpportunity } = useOpportunities();
+    const { userRole } = useSyncStore();
 
     const phases = useLiveQuery(() => db.phases.toArray());
     const phaseMap = new Map(phases?.map(p => [p.id, p.nombre]));
@@ -77,10 +79,12 @@ export default function OpportunityDetailPage() {
         setIsDeleting(true);
         try {
             await deleteOpportunity(id);
+            setIsDeleteModalOpen(false); // Close modal before navigation
             router.push("/oportunidades");
         } catch (error) {
             console.error("Error deleting opportunity:", error);
             setIsDeleting(false);
+            setIsDeleteModalOpen(false);
         }
     };
 
@@ -128,12 +132,12 @@ export default function OpportunityDetailPage() {
                 }
                 backHref="/oportunidades"
                 actions={[
-                    {
+                    ...(userRole === 'ADMIN' || userRole === 'COORDINATOR' ? [{
                         label: "Eliminar Oportunidad",
                         icon: Trash2,
-                        variant: 'danger',
+                        variant: 'danger' as const,
                         onClick: () => setIsDeleteModalOpen(true)
-                    }
+                    }] : [])
                 ]}
             />
 

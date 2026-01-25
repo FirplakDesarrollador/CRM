@@ -128,12 +128,18 @@ export class SyncEngine {
         const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
         const ownershipMap: Record<string, string> = {
             'CRM_Oportunidades': 'owner_user_id',
-            'CRM_Actividades': 'user_id'
+            'CRM_Actividades': 'user_id',
+            'CRM_Cuentas': 'created_by'
         };
 
         for (const [table, ownerField] of Object.entries(ownershipMap)) {
             if (batches[table]) {
                 const idsInBatch = Array.from(new Set(batches[table].map(u => u.id)));
+
+                // CRM_Cuentas Specific Debugging
+                if (table === 'CRM_Cuentas') {
+                    console.log('[Sync] CRITICAL DEBUG - Account Batch detected:', batches[table]);
+                }
 
                 for (const id of idsInBatch) {
                     // 1. Fix Ownership
@@ -382,23 +388,69 @@ export class SyncEngine {
             */
 
             // Pull Phases (CRM_FasesOportunidad)
-            const { data: phases, error: phasesError } = await supabase
-                .from('CRM_FasesOportunidad')
-                .select('*')
-                .eq('is_active', true);
+            try {
+                const { data: phases, error: phasesError } = await supabase
+                    .from('CRM_FasesOportunidad')
+                    .select('*')
+                    .eq('is_active', true);
 
-            if (phasesError) throw phasesError;
+                if (phasesError) throw phasesError;
 
-            if (phases && phases.length > 0) {
-                await db.phases.clear();
-                await db.phases.bulkPut(phases.map((f: any) => ({
-                    id: f.id,
-                    nombre: f.nombre,
-                    orden: f.orden,
-                    is_active: f.is_active,
-                    canal_id: f.canal_id
-                })));
-                console.log(`[Sync] Pulled ${phases.length} phases.`);
+                if (phases && phases.length > 0) {
+                    await db.phases.clear();
+                    await db.phases.bulkPut(phases.map((f: any) => ({
+                        id: f.id,
+                        nombre: f.nombre,
+                        orden: f.orden,
+                        is_active: f.is_active,
+                        canal_id: f.canal_id
+                    })));
+                    console.log(`[Sync] Pulled ${phases.length} phases.`);
+                }
+            } catch (pErr: any) {
+                console.error('[Sync] Failed to pull phases:', pErr.message);
+            }
+
+            // Pull Subclassifications (CRM_Subclasificacion)
+            try {
+                const { data: subs, error: subsError } = await supabase
+                    .from('CRM_Subclasificacion')
+                    .select('*');
+
+                if (subsError) throw subsError;
+
+                if (subs && subs.length > 0) {
+                    await db.subclasificaciones.clear();
+                    await db.subclasificaciones.bulkPut(subs.map((s: any) => ({
+                        id: s.id,
+                        nombre: s.nombre,
+                        canal_id: s.canal_id
+                    })));
+                    console.log(`[Sync] Pulled ${subs.length} subclassifications.`);
+                }
+            } catch (sErr: any) {
+                console.error('[Sync] Failed to pull subclassifications:', sErr.message);
+            }
+
+            // Pull Segments (CRM_Segmentos)
+            try {
+                const { data: segments, error: segmentsError } = await supabase
+                    .from('CRM_Segmentos')
+                    .select('*');
+
+                if (segmentsError) throw segmentsError;
+
+                if (segments && segments.length > 0) {
+                    await db.segments.clear();
+                    await db.segments.bulkPut(segments.map((s: any) => ({
+                        id: s.id,
+                        nombre: s.nombre,
+                        subclasificacion_id: s.subclasificacion_id
+                    })));
+                    console.log(`[Sync] Pulled ${segments.length} segments.`);
+                }
+            } catch (segErr: any) {
+                console.error('[Sync] Failed to pull segments:', segErr.message);
             }
 
             // Pull Contacts (CRM_Contactos) - SMART MERGE
@@ -537,7 +589,10 @@ export class SyncEngine {
             }
             */
 
-            // Pull Quote Items (CRM_CotizacionItems) - SMART MERGE
+            // PERF OPTIMIZATION: Disable full sync for CRM_CotizacionItems
+            // Quote items are loaded on-demand when viewing a specific quote
+            // This dramatically improves app startup time
+            /*
             const { data: quoteItems, error: itemsError } = await supabase
                 .from('CRM_CotizacionItems')
                 .select('*')
@@ -583,8 +638,12 @@ export class SyncEngine {
                 }
                 console.log(`[Sync] Merged ${mergedCount} quote items (${skippedCount} with pending changes skipped).`);
             }
+            */
 
-            // Pull Activities (CRM_Actividades) - SMART MERGE
+            // PERF OPTIMIZATION: Disable full sync for CRM_Actividades
+            // Activities are loaded on-demand via server-side hook
+            // This dramatically improves app startup time
+            /*
             const { data: activities, error: activitiesError } = await supabase
                 .from('CRM_Actividades')
                 .select('*')
@@ -615,6 +674,7 @@ export class SyncEngine {
                 }
                 console.log(`[Sync] Merged ${mergedCount} activities (${skippedCount} with pending changes skipped).`);
             }
+            */
 
             console.log('[Sync] Pull completed successfully.');
         } catch (err: any) {
@@ -631,45 +691,50 @@ export class SyncEngine {
         entityId: string,
         changes: Record<string, any>
     ) {
-        console.log('[SyncEngine] DEBUG - queueMutation called:', { entityTable, entityId });
-        console.log('[SyncEngine] DEBUG - changes object:', changes);
-        console.log('[SyncEngine] DEBUG - subclasificacion_id in changes:', changes.subclasificacion_id);
+        useSyncStore.getState().setProcessing(true);
+        try {
+            console.log('[SyncEngine] DEBUG - queueMutation called:', { entityTable, entityId });
+            console.log('[SyncEngine] DEBUG - changes object:', changes);
+            console.log('[SyncEngine] DEBUG - subclasificacion_id in changes:', changes.subclasificacion_id);
 
-        const now = Date.now();
-        const items: OutboxItem[] = [];
+            const now = Date.now();
+            const items: OutboxItem[] = [];
 
-        for (const [field, value] of Object.entries(changes)) {
-            if (value === undefined) continue; // Skip undefined fields
-            if (field === '_sync_metadata') continue; // Skip sync metadata
-            if (field === 'id') continue; // Skip ID (it's the key, not a field to update)
+            for (const [field, value] of Object.entries(changes)) {
+                if (value === undefined) continue; // Skip undefined fields
+                if (field === '_sync_metadata') continue; // Skip sync metadata
+                if (field === 'id') continue; // Skip ID (it's the key, not a field to update)
 
-            console.log(`[SyncEngine] DEBUG - Adding field to outbox: ${field} = ${JSON.stringify(value)}`);
+                console.log(`[SyncEngine] DEBUG - Adding field to outbox: ${field} = ${JSON.stringify(value)}`);
 
-            items.push({
-                id: uuidv4(),
-                entity_type: entityTable,
-                entity_id: entityId,
-                field_name: field,
-                old_value: null, // Optional tracking
-                new_value: value,
-                field_timestamp: now,
-                status: 'PENDING',
-                retry_count: 0
-            });
+                items.push({
+                    id: uuidv4(),
+                    entity_type: entityTable,
+                    entity_id: entityId,
+                    field_name: field,
+                    old_value: null, // Optional tracking
+                    new_value: value,
+                    field_timestamp: now,
+                    status: 'PENDING',
+                    retry_count: 0
+                });
+            }
+
+            console.log('[SyncEngine] DEBUG - Total items to queue:', items.length);
+            console.log('[SyncEngine] DEBUG - Items:', items.map(i => ({ field: i.field_name, value: i.new_value })));
+
+            await db.outbox.bulkAdd(items);
+            this.updatePendingCount();
+
+            // Update local mirror immediately (Optimistic UI)
+            // await db.table(entityTable).update(entityId, changes); 
+            // Note: Needs mapping logic if local table names differ slightly or just generic
+
+            // Trigger Sync and WAIT for it to complete (critical for server-side list consistency)
+            await this.triggerSync();
+        } finally {
+            useSyncStore.getState().setProcessing(false);
         }
-
-        console.log('[SyncEngine] DEBUG - Total items to queue:', items.length);
-        console.log('[SyncEngine] DEBUG - Items:', items.map(i => ({ field: i.field_name, value: i.new_value })));
-
-        await db.outbox.bulkAdd(items);
-        this.updatePendingCount();
-
-        // Update local mirror immediately (Optimistic UI)
-        // await db.table(entityTable).update(entityId, changes); 
-        // Note: Needs mapping logic if local table names differ slightly or just generic
-
-        // Trigger Sync and WAIT for it to complete (critical for server-side list consistency)
-        await this.triggerSync();
     }
     async getCurrentUser() {
         return await supabase.auth.getUser();

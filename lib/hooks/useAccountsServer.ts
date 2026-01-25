@@ -11,12 +11,14 @@ export type AccountServer = {
     canal_id: string;
     subclasificacion_id?: number | null;
     es_premium: boolean;
+    nivel_premium?: 'ORO' | 'PLATA' | 'BRONCE' | null;
     telefono: string | null;
     direccion: string | null;
     ciudad: string | null;
     created_by: string | null;
     creator_name?: string | null;
     updated_at: string;
+    contact_count?: number;
 };
 
 type UseAccountsServerProps = {
@@ -62,11 +64,13 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                     canal_id,
                     subclasificacion_id,
                     es_premium,
+                    nivel_premium,
                     telefono,
                     direccion,
                     ciudad,
                     created_by,
-                    updated_at
+                    updated_at,
+                    contacts:CRM_Contactos(count)
                 `, { count: 'exact' });
 
             if (searchTerm) {
@@ -91,7 +95,8 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
 
             const flattenedResults = (result as any[]).map(item => ({
                 ...item,
-                creator_name: item.creator?.full_name || null
+                creator_name: item.creator?.full_name || null,
+                contact_count: item.contacts?.[0]?.count || 0
             }));
 
             if (isLoadMore) {
