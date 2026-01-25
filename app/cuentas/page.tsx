@@ -5,7 +5,7 @@ import { AccountForm } from "@/components/cuentas/AccountForm";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { Plus, Search, Building, Users, Pencil, Filter } from "lucide-react";
+import { Plus, Search, Building, Users, Pencil, Filter, Medal } from "lucide-react";
 import { UserPickerFilter } from "@/components/cuentas/UserPickerFilter";
 
 function AccountsContent() {
@@ -169,6 +169,24 @@ function AccountsContent() {
                                         <Building className="w-5 h-5" />
                                     </div>
                                     <div className="flex items-center gap-2">
+                                        {acc.nivel_premium === 'ORO' && (
+                                            <div className="flex items-center gap-0.5 bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full border border-amber-200 shadow-sm" title="Cliente Gold">
+                                                <Medal className="w-3.5 h-3.5 fill-amber-400" />
+                                                <span className="text-[10px] font-bold">GOLD</span>
+                                            </div>
+                                        )}
+                                        {acc.nivel_premium === 'PLATA' && (
+                                            <div className="flex items-center gap-0.5 bg-slate-50 text-slate-600 px-2 py-0.5 rounded-full border border-slate-200 shadow-sm" title="Cliente Silver">
+                                                <Medal className="w-3.5 h-3.5 fill-slate-300" />
+                                                <span className="text-[10px] font-bold">SILVER</span>
+                                            </div>
+                                        )}
+                                        {acc.nivel_premium === 'BRONCE' && (
+                                            <div className="flex items-center gap-0.5 bg-orange-50 text-orange-600 px-2 py-0.5 rounded-full border border-orange-200 shadow-sm" title="Cliente Bronze">
+                                                <Medal className="w-3.5 h-3.5 fill-orange-400" />
+                                                <span className="text-[10px] font-bold">BRONZE</span>
+                                            </div>
+                                        )}
                                         {acc.id_cuenta_principal && (
                                             <span className="text-[10px] font-bold uppercase bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">
                                                 Sucursal
@@ -189,7 +207,7 @@ function AccountsContent() {
 
                                     <div className="flex items-center text-xs text-slate-400 gap-3 border-t pt-3 mt-1">
                                         <span className="flex items-center gap-1">
-                                            <Users className="w-3 h-3" /> 0 Contactos
+                                            <Users className="w-3 h-3" /> {acc.contact_count || 0} Contactos
                                         </span>
                                         <span>
                                             {acc.ciudad || "Sin ciudad"}

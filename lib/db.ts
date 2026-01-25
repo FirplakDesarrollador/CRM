@@ -26,6 +26,7 @@ export interface LocalCuenta {
     canal_id: string; // Nuevo campo obligatorio
     subclasificacion_id?: number | null; // Nuevo campo opcional
     es_premium?: boolean;
+    nivel_premium?: 'ORO' | 'PLATA' | 'BRONCE' | null; // Nuevo campo jerárquico
     telefono?: string;
     direccion?: string;
     ciudad?: string;
