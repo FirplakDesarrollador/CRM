@@ -72,9 +72,17 @@ export default function ConfigPage() {
     const handleLogout = async () => {
         setModalConfig(prev => ({ ...prev, isLoading: true }));
 
-        // Clear local data FIRST
+        // Clear ALL local data FIRST
         localStorage.removeItem('cachedUserId');
         sessionStorage.removeItem('crm_initialSyncDone');
+
+        // Clear Supabase cookies (critical for mobile)
+        document.cookie.split(';').forEach(cookie => {
+            const name = cookie.split('=')[0].trim();
+            if (name.includes('sb-')) {
+                document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
+            }
+        });
 
         // Fire signOut in background (don't wait for it)
         supabase.auth.signOut().catch(err => {
