@@ -68,23 +68,18 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
     const handleLogout = async () => {
         setIsLoggingOut(true);
 
-        // Safety timeout: Force redirect after 2s if signOut hangs (common on mobile)
-        const forceRedirect = setTimeout(() => {
-            console.warn('[Sidebar] SignOut timeout - forcing redirect');
-            localStorage.removeItem('cachedUserId');
-            window.location.replace('/login');
-        }, 2000);
+        // Clear local data FIRST
+        localStorage.removeItem('cachedUserId');
+        sessionStorage.removeItem('crm_initialSyncDone');
 
-        try {
-            await supabase.auth.signOut();
-        } catch (err) {
-            console.error('[Sidebar] SignOut error:', err);
-        } finally {
-            clearTimeout(forceRedirect);
-            localStorage.removeItem('cachedUserId');
-            // Use replace() instead of href for better mobile compatibility
-            window.location.replace('/login');
-        }
+        // Fire signOut in background (don't wait for it)
+        supabase.auth.signOut().catch(err => {
+            console.warn('[Sidebar] SignOut background error (ignored):', err);
+        });
+
+        // Redirect IMMEDIATELY - don't wait for Supabase
+        console.log('[Sidebar] Redirecting to login immediately');
+        window.location.replace('/login');
     };
 
     return (
@@ -115,7 +110,7 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
                 {!isCollapsed && (
                     <div className="w-full mt-3 pt-3 border-t border-slate-200/60">
                         <p className="text-xs text-slate-400 text-center font-semibold uppercase tracking-wider">
-                            Versión 1.0.7.1
+                            Versión 1.0.7.2
                         </p>
                     </div>
                 )}
