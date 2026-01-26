@@ -46,20 +46,64 @@ export default function CreateOpportunityWizard() {
     const [showAccountDropdown, setShowAccountDropdown] = useState(false);
     const [selectedAccount, setSelectedAccount] = useState<any>(null);
     const [segments, setSegments] = useState<any[]>([]);
+    const [phasesLoading, setPhasesLoading] = useState(false);
+    const [phasesError, setPhasesError] = useState<string | null>(null);
 
     useEffect(() => {
         // Fetch all segments (small table, safe to fetch all)
-        // Or we could fetch only relevant ones if we wanted to optmize
         const fetchSegments = async () => {
-            // Try fetching from local DB first if available, else Server
-            // Since we didn't add it to sync engine completely, let's fetch from Supabase
-            // to ensure we have the latest structure.
-            // Ideally we should use Local DB if we added it to Sync.
-            // Given time constraints, straightforward fetch:
             const { data } = await import("@/lib/supabase").then(m => m.supabase.from('CRM_Segmentos').select('*'));
             if (data) setSegments(data);
         };
         fetchSegments();
+    }, []);
+
+    // Fallback: Fetch phases from Supabase if local DB is empty
+    useEffect(() => {
+        const ensurePhasesLoaded = async () => {
+            try {
+                // Check if we have any phases in local DB
+                const localPhasesCount = await db.phases.count();
+                console.log('[Phases] Local phases count:', localPhasesCount);
+
+                if (localPhasesCount === 0) {
+                    console.log('[Phases] Local DB empty, fetching from Supabase...');
+                    setPhasesLoading(true);
+                    setPhasesError(null);
+
+                    const { supabase } = await import("@/lib/supabase");
+                    const { data: phases, error } = await supabase
+                        .from('CRM_FasesOportunidad')
+                        .select('*')
+                        .eq('is_active', true);
+
+                    if (error) {
+                        console.error('[Phases] Error fetching from Supabase:', error);
+                        setPhasesError('Error al cargar las fases. Por favor, recarga la página.');
+                    } else if (phases && phases.length > 0) {
+                        console.log('[Phases] Fetched', phases.length, 'phases from Supabase, saving to local DB...');
+                        await db.phases.bulkPut(phases.map((f: any) => ({
+                            id: f.id,
+                            nombre: f.nombre,
+                            orden: f.orden,
+                            is_active: f.is_active,
+                            canal_id: f.canal_id
+                        })));
+                        console.log('[Phases] Phases saved to local DB successfully');
+                    } else {
+                        setPhasesError('No se encontraron fases en el servidor.');
+                    }
+
+                    setPhasesLoading(false);
+                }
+            } catch (err) {
+                console.error('[Phases] Error in ensurePhasesLoaded:', err);
+                setPhasesError('Error al cargar las fases.');
+                setPhasesLoading(false);
+            }
+        };
+
+        ensurePhasesLoaded();
     }, []);
 
     const {
@@ -147,11 +191,28 @@ export default function CreateOpportunityWizard() {
     const selectedAccountId = watch("account_id");
 
     const filteredPhases = useLiveQuery(async () => {
-        if (!selectedAccountId) return [];
+        if (!selectedAccountId) {
+            console.log('[Phases] No account selected yet');
+            return [];
+        }
+
         const acc = await db.accounts.get(selectedAccountId);
-        if (!acc) return [];
+        if (!acc) {
+            console.warn('[Phases] Account not found in local DB:', selectedAccountId);
+            return [];
+        }
+
         const channelId = acc.canal_id || 'DIST_NAC';
-        return await db.phases.where('canal_id').equals(channelId).sortBy('orden');
+        console.log('[Phases] Selected account canal_id:', channelId, 'Account:', acc.nombre);
+
+        const phases = await db.phases.where('canal_id').equals(channelId).sortBy('orden');
+        console.log('[Phases] Filtered phases count:', phases.length, 'for channel:', channelId);
+
+        if (phases.length === 0) {
+            console.warn('[Phases] No phases found in local DB for channel:', channelId);
+        }
+
+        return phases;
     }, [selectedAccountId]);
 
     // Auto-seleccionar primera fase y MONEDA según canal
@@ -390,14 +451,30 @@ export default function CreateOpportunityWizard() {
                             {/* Phase Selector (Dynamic) */}
                             <div>
                                 <label className="text-sm font-medium">Fase Inicial</label>
-                                <select {...register("fase_id")} className="w-full p-2 border rounded-lg">
-                                    {filteredPhases?.map(phase => (
+                                <select
+                                    {...register("fase_id")}
+                                    className="w-full p-2 border rounded-lg"
+                                    disabled={phasesLoading || (!filteredPhases || filteredPhases.length === 0)}
+                                >
+                                    {phasesLoading && <option value="">Cargando fases...</option>}
+                                    {phasesError && <option value="">Error al cargar fases</option>}
+                                    {!phasesLoading && !phasesError && filteredPhases?.map(phase => (
                                         <option key={phase.id} value={phase.id}>
                                             {phase.nombre}
                                         </option>
                                     ))}
-                                    {(!filteredPhases || filteredPhases.length === 0) && <option value="1">Cargando fases...</option>}
+                                    {!phasesLoading && !phasesError && (!filteredPhases || filteredPhases.length === 0) && (
+                                        <option value="">No hay fases disponibles para este canal</option>
+                                    )}
                                 </select>
+                                {phasesError && (
+                                    <p className="text-xs text-red-500 mt-1">{phasesError}</p>
+                                )}
+                                {selectedAccount && (
+                                    <p className="text-xs text-slate-500 mt-1">
+                                        Canal: <span className="font-mono font-bold">{selectedAccount.canal_id || 'DIST_NAC'}</span>
+                                    </p>
+                                )}
                             </div>
                         </div>
 
