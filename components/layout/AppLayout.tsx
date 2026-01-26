@@ -10,11 +10,50 @@ import { syncEngine } from "@/lib/sync";
 import { usePathname } from "next/navigation";
 import { LoadingOverlay } from "@/components/ui/LoadingOverlay";
 import { cn } from "@/components/ui/utils";
+import { supabase } from "@/lib/supabase";
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
     const setOnline = useSyncStore((state) => state.setOnline);
     const pathname = usePathname();
     const isLoginPage = pathname === '/login';
+
+    // Auth state listener - Redirect to login when signed out (critical for mobile)
+    useEffect(() => {
+        if (isLoginPage) return; // Don't listen on login page
+
+        // Check initial session
+        const checkSession = async () => {
+            try {
+                const { data: { session } } = await supabase.auth.getSession();
+                if (!session && navigator.onLine) {
+                    console.log('[AppLayout] No active session, redirecting to login');
+                    window.location.replace('/login');
+                }
+            } catch (err) {
+                console.warn('[AppLayout] Session check failed (likely offline):', err);
+            }
+        };
+
+        checkSession();
+
+        // Listen for auth state changes (SIGNED_OUT, etc.)
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+            console.log('[AppLayout] Auth state changed:', event);
+
+            if (event === 'SIGNED_OUT') {
+                console.log('[AppLayout] User signed out, redirecting to login');
+                // Clear any cached data
+                localStorage.removeItem('cachedUserId');
+                sessionStorage.removeItem('crm_initialSyncDone');
+                // Redirect to login
+                window.location.replace('/login');
+            }
+        });
+
+        return () => {
+            subscription.unsubscribe();
+        };
+    }, [isLoginPage]);
 
     // Global monitoring of online status
     useEffect(() => {
