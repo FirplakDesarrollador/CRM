@@ -506,7 +506,7 @@ export function useQuoteItems(quoteId?: string) {
         // Plan says: "no recalcular automáticamente líneas existentes si luego cambian descuentos/listas"
         // But usually if I change QTY, volume discount SHOULD update.
         // Let's implement Recalc on Quantity change for best UX
-        if (updates.cantidad && updates.cantidad !== current.cantidad) {
+        if (updates.cantidad !== undefined && updates.cantidad !== current.cantidad) {
             let pricing = null;
             try {
                 const parentQuote = await db.quotes.get(current.cotizacion_id);
@@ -519,32 +519,30 @@ export function useQuoteItems(quoteId?: string) {
                         }
                     }
                 }
-            } catch (e) { }
+            } catch (e) {
+                console.error("[useQuoteItems] Error fetching pricing for update:", e);
+            }
 
-            if (pricing) {
+            if (pricing && pricing.base_price > 0) {
+                // ONLY update base price if we got a valid non-zero price
                 updated.precio_unitario = pricing.base_price;
                 updated.max_discount_pct = pricing.discount_pct;
 
-                // Cap Discount if needed
-                if ((updated.discount_pct || 0) > pricing.discount_pct) {
+                // Cap existing manual discount if it now exceeds the new maximum allowed
+                const manualDiscount = updated.discount_pct !== undefined ? updated.discount_pct : (current.discount_pct || 0);
+                if (manualDiscount > pricing.discount_pct) {
                     updated.discount_pct = pricing.discount_pct;
                 }
-
-                // Recalc Final Price
-                const currentDiscount = updated.discount_pct !== undefined ? updated.discount_pct : (current.discount_pct || 0);
-                updated.final_unit_price = updated.precio_unitario * (1 - currentDiscount / 100);
             }
         }
 
         // Recalc subtotal if anything changed
-        // Ensure we rely on updated fields or fallbacks
-        const currentPrice = updated.precio_unitario !== undefined ? updated.precio_unitario : current.precio_unitario;
+        // Ensure we rely on updated fields or fallbacks from current/record
+        const currentPrice = updated.precio_unitario !== undefined ? updated.precio_unitario : (current.precio_unitario || 0);
         const currentDiscount = updated.discount_pct !== undefined ? updated.discount_pct : (current.discount_pct || 0);
 
-        // Always recalc final unit price just in case
-        if (!updated.final_unit_price) {
-            updated.final_unit_price = currentPrice * (1 - currentDiscount / 100);
-        }
+        // ALWAYS recalculate final unit price to ensure consistency
+        updated.final_unit_price = currentPrice * (1 - currentDiscount / 100);
         updated.subtotal = updated.cantidad * updated.final_unit_price;
 
         await db.quoteItems.update(itemId, updated);

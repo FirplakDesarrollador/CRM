@@ -8,6 +8,7 @@ import { useSyncStore } from "@/lib/stores/useSyncStore";
 import { useEffect, useState } from "react";
 import { syncEngine } from "@/lib/sync";
 import { usePathname } from "next/navigation";
+import { LoadingOverlay } from "@/components/ui/LoadingOverlay";
 import { cn } from "@/components/ui/utils";
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
@@ -33,10 +34,19 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     }, [setOnline]);
 
     // Trigger sync on app initialization (pull + push)
+    // PERF OPTIMIZATION: Only sync once per session to avoid repeated network calls
     useEffect(() => {
         if (!isLoginPage) {
+            // Check if we already synced this session
+            const hasInitialSync = sessionStorage.getItem('crm_initialSyncDone');
+            if (hasInitialSync) {
+                console.log('[AppLayout] Skipping sync - already done this session');
+                return;
+            }
+
             console.log('[AppLayout] Triggering initial sync...');
             syncEngine.triggerSync();
+            sessionStorage.setItem('crm_initialSyncDone', 'true');
         }
     }, [isLoginPage]);
 
@@ -48,6 +58,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
     return (
         <div className="flex h-screen bg-slate-50 overflow-hidden">
+            <LoadingOverlay />
             {/* Sidebar (Desktop) */}
             <Sidebar isCollapsed={isCollapsed} toggleSidebar={() => setIsCollapsed(!isCollapsed)} />
 

@@ -3,10 +3,11 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
+import { useLiveQuery } from "dexie-react-hooks";
+import { db, LocalCuenta } from "@/lib/db";
 import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useState, useEffect } from "react";
-import { Loader2, User, Building2 } from "lucide-react";
-import { LocalCuenta } from "@/lib/db";
+import { Loader2, User, Building2, Medal } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import AccountContactsTab from "./AccountContactsTab";
 import AccountOpportunitiesTab from "./AccountOpportunitiesTab";
@@ -25,6 +26,7 @@ const accountSchema = z.object({
     direccion: z.string().nullable().optional(),
     ciudad: z.string().nullable().optional(),
     es_premium: z.boolean().optional(),
+    nivel_premium: z.enum(['ORO', 'PLATA', 'BRONCE']).nullable().optional(),
 });
 
 type AccountFormData = z.infer<typeof accountSchema>;
@@ -38,9 +40,28 @@ interface AccountFormProps {
 export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) {
     const { createAccount, updateAccount } = useAccounts();
     const [parents, setParents] = useState<any[]>([]);
-    const [subclassifications, setSubclassifications] = useState<any[]>([]);
+
+    // Live Query for Subclassifications from local DB
+    const subclassifications = useLiveQuery(() => db.subclasificaciones.toArray()) || [];
+
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [assignedUserName, setAssignedUserName] = useState<string | null>(null);
+    const [fallbackSubclassifications, setFallbackSubclassifications] = useState<any[]>([]);
+
+    // Safety Fallback: If local sync is empty/pending, fetch manually from server
+    useEffect(() => {
+        if (subclassifications.length === 0) {
+            console.log('[AccountForm] INFO - Local subclasificaciones empty, fetching fallback from server...');
+            supabase
+                .from('CRM_Subclasificacion')
+                .select('id, nombre, canal_id')
+                .then(({ data }) => {
+                    if (data) setFallbackSubclassifications(data);
+                });
+        }
+    }, [subclassifications.length]);
+
+    const displaySubclassifications = subclassifications.length > 0 ? subclassifications : fallbackSubclassifications;
 
     // Fetch assigned user name if exists
     useEffect(() => {
@@ -80,14 +101,6 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                 if (data) setParents(data);
             });
 
-        // Fetch Subclassifications
-        supabase
-            .from('CRM_Subclasificacion')
-            .select('id, nombre, canal_id')
-            .then(({ data }) => {
-                console.log('[AccountForm] DEBUG - Fetched subclassifications:', data);
-                if (data) setSubclassifications(data);
-            });
     }, []);
 
     // Tab State
@@ -99,7 +112,7 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
         watch,
         setValue,
         reset,
-        formState: { errors },
+        formState: { errors, isDirty },
     } = useForm<AccountFormData>({
         resolver: zodResolver(accountSchema),
         defaultValues: {
@@ -108,63 +121,72 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             is_child: account?.id_cuenta_principal ? true : false,
             id_cuenta_principal: account?.id_cuenta_principal || "",
             canal_id: account?.canal_id || "DIST_NAC",
-            subclasificacion_id: account?.subclasificacion_id ? String(account.subclasificacion_id) : "",
+            subclasificacion_id: (account?.subclasificacion_id !== undefined && account?.subclasificacion_id !== null) ? String(account.subclasificacion_id) : "",
             telefono: account?.telefono || "",
             direccion: account?.direccion || "",
             ciudad: account?.ciudad || "",
-            es_premium: account?.es_premium || false
+            es_premium: account?.es_premium || false,
+            nivel_premium: account?.nivel_premium || null
         }
     });
 
-    // Update form when account changes (for editing different accounts)
+    // Update form when account changes (ONLY if not modified by user to avoid overwriting)
     useEffect(() => {
-        if (account) {
-            console.log('[AccountForm] DEBUG - Form reset with account:', account);
-            console.log('[AccountForm] DEBUG - account.subclasificacion_id:', account.subclasificacion_id);
-            console.log('[AccountForm] DEBUG - typeof account.subclasificacion_id:', typeof account.subclasificacion_id);
+        if (account && !isDirty) {
+            console.log('[AccountForm] DEBUG - Syncing form with fresh account data (not dirty)');
             reset({
                 nombre: account.nombre || "",
                 nit_base: account.nit_base || "",
                 is_child: account.id_cuenta_principal ? true : false,
                 id_cuenta_principal: account.id_cuenta_principal || "",
                 canal_id: account.canal_id || "DIST_NAC",
-                subclasificacion_id: account.subclasificacion_id ? String(account.subclasificacion_id) : "",
+                subclasificacion_id: (account.subclasificacion_id !== undefined && account.subclasificacion_id !== null) ? String(account.subclasificacion_id) : "",
                 telefono: account.telefono || "",
                 direccion: account.direccion || "",
                 ciudad: account.ciudad || "",
-                es_premium: account.es_premium || false
-            });
+                es_premium: account.es_premium || false,
+                nivel_premium: account.nivel_premium || null
+            }, { keepDefaultValues: true });
         }
-    }, [account, reset]);
+    }, [account, reset, isDirty]);
 
     const isChild = watch("is_child");
     const selectedParentId = watch("id_cuenta_principal");
     const selectedChannel = watch("canal_id");
 
-    // Reset subclasificacion when channel changes (except on initial load)
-    const [initialChannelLoaded, setInitialChannelLoaded] = useState(false);
-    useEffect(() => {
-        if (initialChannelLoaded && selectedChannel) {
-            // Channel was changed by user, reset subclasificacion
-            const currentSubId = watch("subclasificacion_id");
-            const isValidForChannel = subclassifications.some(
-                sub => sub.canal_id === selectedChannel && String(sub.id) === currentSubId
-            );
-            if (!isValidForChannel) {
-                console.log('[AccountForm] DEBUG - Resetting subclasificacion_id because channel changed and current value is invalid');
-                setValue("subclasificacion_id", "");
-            }
-        } else if (selectedChannel) {
-            setInitialChannelLoaded(true);
-        }
-    }, [selectedChannel]);
+    // Reset subclasificacion when channel changes (ONLY if it's a manual change, not initial load)
+    const [lastProcessedChannel, setLastProcessedChannel] = useState<string | null>(account?.canal_id || null);
 
-    // DEBUG: Log filtered options whenever channel or subclassifications change
     useEffect(() => {
-        const filteredOptions = subclassifications.filter(sub => sub.canal_id === selectedChannel);
-        console.log('[AccountForm] DEBUG - selectedChannel:', selectedChannel);
-        console.log('[AccountForm] DEBUG - Filtered options for channel:', filteredOptions);
-    }, [selectedChannel, subclassifications]);
+        // If channel changed manually
+        if (selectedChannel && lastProcessedChannel && selectedChannel !== lastProcessedChannel) {
+            const currentSubId = watch("subclasificacion_id");
+
+            // CRITICAL: Only validate if we actually have options loaded. 
+            // If they are empty, it might be a sync delay, so we WAIT.
+            if (currentSubId && subclassifications.length > 0) {
+                const isValidForChannel = subclassifications.some(
+                    sub => sub.canal_id === selectedChannel && String(sub.id) === currentSubId
+                );
+
+                if (!isValidForChannel) {
+                    console.log('[AccountForm] DEBUG - Resetting subclasificacion_id because channel changed and current is invalid');
+                    setValue("subclasificacion_id", "", { shouldDirty: true });
+                }
+            } else if (currentSubId && displaySubclassifications.length > 0) {
+                // Secondary check with fallback data if local sync is pending
+                const isValidInFallback = displaySubclassifications.some(
+                    sub => sub.canal_id === selectedChannel && String(sub.id) === currentSubId
+                );
+                if (!isValidInFallback) {
+                    setValue("subclasificacion_id", "", { shouldDirty: true });
+                }
+            }
+            setLastProcessedChannel(selectedChannel);
+        } else if (selectedChannel && !lastProcessedChannel) {
+            setLastProcessedChannel(selectedChannel);
+        }
+    }, [selectedChannel, lastProcessedChannel, subclassifications, displaySubclassifications, setValue, watch]);
 
     // Filter possible parents (exclude self)
     const potentialParents = parents.filter(p => p.id !== account?.id);
@@ -207,20 +229,22 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             }
 
             const payload: any = {
-                nombre: formData.nombre,
-                nit_base: formData.nit_base,
-                id_cuenta_principal: formData.is_child ? formData.id_cuenta_principal : null,
-                canal_id: formData.canal_id,
-                subclasificacion_id: formData.subclasificacion_id ? Number(formData.subclasificacion_id) : null,
-                telefono: formData.telefono || null,
-                direccion: formData.direccion || null,
-                ciudad: formData.ciudad || null,
-                es_premium: formData.es_premium || false
+                nombre: data.nombre,
+                nit_base: data.nit_base,
+                id_cuenta_principal: data.is_child ? data.id_cuenta_principal : null,
+                canal_id: data.canal_id,
+                subclasificacion_id: data.subclasificacion_id ? Number(data.subclasificacion_id) : null,
+                telefono: data.telefono || null,
+                direccion: data.direccion || null,
+                ciudad: data.ciudad || null,
+                es_premium: !!data.nivel_premium,
+                nivel_premium: data.nivel_premium || null
             };
 
-            // DEBUG: Log the payload being sent
-            console.log('[AccountForm] DEBUG - formData.subclasificacion_id:', formData.subclasificacion_id);
-            console.log('[AccountForm] DEBUG - payload:', JSON.stringify(payload, null, 2));
+            // DEBUG: Log the final payload
+            console.log('--- SUBMITTING ACCOUNT PAYLOAD ---');
+            console.table(payload);
+            console.log('---------------------------------');
 
             if (account?.id) {
                 console.log('[AccountForm] DEBUG - Calling updateAccount with id:', account.id);
@@ -313,17 +337,76 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                             </label>
                         </div>
 
-                        {/* Premium Switch */}
-                        <div className="flex items-center space-x-2 pt-6">
-                            <input
-                                type="checkbox"
-                                id="es_premium"
-                                {...register("es_premium")}
-                                className="w-4 h-4"
-                            />
-                            <label htmlFor="es_premium" className="text-sm font-bold text-amber-600 cursor-pointer select-none flex items-center gap-1">
-                                Cliente Premium
+                        {/* Premium Tiers (Medals) */}
+                        <div className="pt-6">
+                            <label className="text-sm font-bold text-slate-700 block mb-2">
+                                Nivel de Cliente (Premium)
                             </label>
+
+                            <div className="flex gap-3">
+                                {/* ORO */}
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const current = watch("nivel_premium");
+                                        const newVal = current === 'ORO' ? null : 'ORO';
+                                        setValue("nivel_premium", newVal);
+                                        setValue("es_premium", !!newVal);
+                                    }}
+                                    className={cn(
+                                        "flex-1 flex flex-col items-center justify-center p-3 rounded-lg border-2 transition-all",
+                                        watch("nivel_premium") === 'ORO'
+                                            ? "bg-amber-50 border-amber-400 text-amber-700 shadow-sm"
+                                            : "bg-white border-slate-100 text-slate-400 hover:border-amber-200 hover:text-amber-600/70"
+                                    )}
+                                >
+                                    <Medal className={cn("w-6 h-6 mb-1", watch("nivel_premium") === 'ORO' ? "fill-amber-400 text-amber-500" : "fill-none")} />
+                                    <span className="text-xs font-bold">ORO</span>
+                                </button>
+
+                                {/* PLATA */}
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const current = watch("nivel_premium");
+                                        const newVal = current === 'PLATA' ? null : 'PLATA';
+                                        setValue("nivel_premium", newVal);
+                                        setValue("es_premium", !!newVal);
+                                    }}
+                                    className={cn(
+                                        "flex-1 flex flex-col items-center justify-center p-3 rounded-lg border-2 transition-all",
+                                        watch("nivel_premium") === 'PLATA'
+                                            ? "bg-slate-100 border-slate-400 text-slate-700 shadow-sm"
+                                            : "bg-white border-slate-100 text-slate-400 hover:border-slate-300 hover:text-slate-600/70"
+                                    )}
+                                >
+                                    <Medal className={cn("w-6 h-6 mb-1", watch("nivel_premium") === 'PLATA' ? "fill-slate-300 text-slate-500" : "fill-none")} />
+                                    <span className="text-xs font-bold">PLATA</span>
+                                </button>
+
+                                {/* BRONCE */}
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const current = watch("nivel_premium");
+                                        const newVal = current === 'BRONCE' ? null : 'BRONCE';
+                                        setValue("nivel_premium", newVal);
+                                        setValue("es_premium", !!newVal);
+                                    }}
+                                    className={cn(
+                                        "flex-1 flex flex-col items-center justify-center p-3 rounded-lg border-2 transition-all",
+                                        watch("nivel_premium") === 'BRONCE'
+                                            ? "bg-orange-50 border-orange-400 text-orange-700 shadow-sm"
+                                            : "bg-white border-slate-100 text-slate-400 hover:border-orange-200 hover:text-orange-600/70"
+                                    )}
+                                >
+                                    <Medal className={cn("w-6 h-6 mb-1", watch("nivel_premium") === 'BRONCE' ? "fill-orange-400 text-orange-600" : "fill-none")} />
+                                    <span className="text-xs font-bold">BRONCE</span>
+                                </button>
+                            </div>
+
+                            {/* Hidden field for es_premium compatibility */}
+                            <input type="hidden" {...register("es_premium")} />
                         </div>
                     </div>
 
@@ -349,18 +432,23 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                     <div className="space-y-1">
                         <label className="text-sm font-medium">Subclasificación</label>
                         <select
+                            key={`sub-${displaySubclassifications.length}-${selectedChannel}`}
                             {...register("subclasificacion_id")}
                             className="w-full border p-2 rounded bg-white disabled:bg-slate-100 disabled:text-slate-400"
                             disabled={!selectedChannel}
                         >
                             <option value="">Seleccione...</option>
-                            {subclassifications
-                                .filter(sub => sub.canal_id === selectedChannel)
-                                .map(sub => (
-                                    <option key={sub.id} value={String(sub.id)}>
-                                        {sub.nombre}
-                                    </option>
-                                ))}
+                            {displaySubclassifications.length > 0 ? (
+                                displaySubclassifications
+                                    .filter(sub => sub.canal_id === selectedChannel)
+                                    .map(sub => (
+                                        <option key={sub.id} value={String(sub.id)}>
+                                            {sub.nombre}
+                                        </option>
+                                    ))
+                            ) : (
+                                <option disabled>Cargando opciones...</option>
+                            )}
                         </select>
                         <p className="text-xs text-slate-500">Opciones disponibles según el canal seleccionado.</p>
                     </div>
