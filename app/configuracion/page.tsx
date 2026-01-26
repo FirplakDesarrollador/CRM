@@ -71,13 +71,23 @@ export default function ConfigPage() {
 
     const handleLogout = async () => {
         setModalConfig(prev => ({ ...prev, isLoading: true }));
+
+        // Safety timeout: Force redirect after 2s if signOut hangs (common on mobile)
+        const forceRedirect = setTimeout(() => {
+            console.warn('[Config] SignOut timeout - forcing redirect');
+            localStorage.removeItem('cachedUserId');
+            window.location.replace('/login');
+        }, 2000);
+
         try {
             await supabase.auth.signOut();
         } catch (err) {
             console.error('[Config] SignOut error:', err);
         } finally {
+            clearTimeout(forceRedirect);
             localStorage.removeItem('cachedUserId');
-            window.location.href = '/login';
+            // Use replace() instead of href for better mobile compatibility
+            window.location.replace('/login');
         }
     };
 
