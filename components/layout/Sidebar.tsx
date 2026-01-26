@@ -68,9 +68,17 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
     const handleLogout = async () => {
         setIsLoggingOut(true);
 
-        // Clear local data FIRST
+        // Clear ALL local data FIRST
         localStorage.removeItem('cachedUserId');
         sessionStorage.removeItem('crm_initialSyncDone');
+
+        // Clear Supabase cookies (critical for mobile)
+        document.cookie.split(';').forEach(cookie => {
+            const name = cookie.split('=')[0].trim();
+            if (name.includes('sb-')) {
+                document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
+            }
+        });
 
         // Fire signOut in background (don't wait for it)
         supabase.auth.signOut().catch(err => {
@@ -110,7 +118,7 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
                 {!isCollapsed && (
                     <div className="w-full mt-3 pt-3 border-t border-slate-200/60">
                         <p className="text-xs text-slate-400 text-center font-semibold uppercase tracking-wider">
-                            Versión 1.0.7.2
+                            Versión 1.0.7.3
                         </p>
                     </div>
                 )}
