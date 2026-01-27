@@ -2,6 +2,7 @@
 
 import React from "react";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { getFriendlyToday } from "@/lib/date-utils";
 import { Settings2 } from "lucide-react";
 import { cn } from "@/components/ui/utils";
 
@@ -11,14 +12,7 @@ interface DashboardHeaderProps {
 
 export const DashboardHeader = ({ onPersonalize }: DashboardHeaderProps) => {
     const { user, role, isLoading } = useCurrentUser();
-    const today = new Date();
-
-    const formattedDate = today.toLocaleDateString("es-ES", {
-        weekday: "long",
-        day: "numeric",
-        month: "long",
-        year: "numeric",
-    });
+    const formattedDate = getFriendlyToday();
 
     return (
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
