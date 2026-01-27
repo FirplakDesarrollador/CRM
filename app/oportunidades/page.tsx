@@ -8,6 +8,7 @@ import { cn } from "@/components/ui/utils";
 import { useSyncStore } from "@/lib/stores/useSyncStore";
 import { UserPickerFilter } from "@/components/cuentas/UserPickerFilter";
 import { OpportunityFilters } from "@/components/oportunidades/OpportunityFilters";
+import { formatColombiaDate, isDateOverdue } from "@/lib/date-utils";
 
 export default function OpportunitiesPage() {
     const { userRole } = useSyncStore();
@@ -151,7 +152,7 @@ export default function OpportunitiesPage() {
             ) : (
                 <div className="grid gap-3">
                     {opportunities.map(opp => {
-                        const isOverdue = opp.fecha_cierre_estimada && new Date(opp.fecha_cierre_estimada) < new Date(new Date().setHours(0, 0, 0, 0));
+                        const isOverdue = isDateOverdue(opp.fecha_cierre_estimada);
                         return (
                             <Link key={opp.id} href={`/oportunidades/${opp.id}`}>
                                 <div className={cn(
@@ -182,7 +183,7 @@ export default function OpportunitiesPage() {
                                                             ? "text-red-600 font-bold items-center gap-1 inline-flex"
                                                             : "text-slate-400"
                                                     )}>
-                                                        • Cierre: {new Date(opp.fecha_cierre_estimada).toLocaleDateString()}
+                                                        • Cierre: {formatColombiaDate(opp.fecha_cierre_estimada, "dd/MM/yyyy")}
                                                         {isOverdue && (
                                                             <span className="relative flex h-2 w-2 ml-1">
                                                                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>

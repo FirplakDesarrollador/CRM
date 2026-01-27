@@ -68,10 +68,13 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                     telefono,
                     direccion,
                     ciudad,
+                    departamento_id,
+                    ciudad_id,
                     created_by,
                     updated_at,
                     contacts:CRM_Contactos(count)
-                `, { count: 'exact' });
+                `, { count: 'exact' })
+                .eq('is_deleted', false);
 
             if (searchTerm) {
                 query = query.or(`nombre.ilike.%${searchTerm}%,nit.ilike.%${searchTerm}%`);
