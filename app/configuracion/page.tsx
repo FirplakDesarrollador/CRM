@@ -58,7 +58,7 @@ interface ModalConfig {
 export default function ConfigPage() {
     const router = useRouter();
     const { isSyncing, pendingCount, lastSyncTime, error, isPaused, setPaused } = useSyncStore();
-    const { role } = useCurrentUser();
+    const { user, role } = useCurrentUser();
     const [outboxItems, setOutboxItems] = useState<OutboxItem[]>([]);
     const [stats, setStats] = useState<Stats | null>(null);
 
@@ -71,14 +71,27 @@ export default function ConfigPage() {
 
     const handleLogout = async () => {
         setModalConfig(prev => ({ ...prev, isLoading: true }));
-        try {
-            await supabase.auth.signOut();
-        } catch (err) {
-            console.error('[Config] SignOut error:', err);
-        } finally {
-            localStorage.removeItem('cachedUserId');
-            window.location.href = '/login';
-        }
+
+        // Clear ALL local data FIRST
+        localStorage.removeItem('cachedUserId');
+        sessionStorage.removeItem('crm_initialSyncDone');
+
+        // Clear Supabase cookies (critical for mobile)
+        document.cookie.split(';').forEach(cookie => {
+            const name = cookie.split('=')[0].trim();
+            if (name.includes('sb-')) {
+                document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
+            }
+        });
+
+        // Fire signOut in background (don't wait for it)
+        supabase.auth.signOut().catch(err => {
+            console.warn('[Config] SignOut background error (ignored):', err);
+        });
+
+        // Redirect IMMEDIATELY - don't wait for Supabase
+        console.log('[Config] Redirecting to login immediately');
+        window.location.replace('/login');
     };
 
     const confirmLogout = () => {
@@ -348,19 +361,49 @@ export default function ConfigPage() {
                 </div>
 
                 {/* Session Card */}
-                <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-6">
-                    <div className="flex items-center gap-2">
+                <div className="md:col-span-2 bg-white rounded-3xl border border-slate-200 shadow-sm p-6">
+                    <div className="flex items-center gap-2 mb-4">
                         <LogOut className="w-5 h-5 text-slate-600" />
                         <h3 className="font-bold text-slate-900">Sesión</h3>
                     </div>
-                    <p className="text-sm text-slate-500">Administra tu acceso a la aplicación.</p>
-                    <button
-                        onClick={confirmLogout}
-                        className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-xl text-sm font-bold transition-colors border border-slate-200"
-                    >
-                        <LogOut className="w-4 h-4" />
-                        Cerrar Sesión
-                    </button>
+                    <p className="text-sm text-slate-500 mb-6">Administra tu acceso a la aplicación.</p>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {/* User Info */}
+                        <div className="bg-slate-50 rounded-2xl p-5 border border-slate-100 space-y-4">
+                            <div className="flex items-center gap-4">
+                                <div className="w-14 h-14 bg-gradient-to-br from-blue-600 to-cyan-500 rounded-2xl flex items-center justify-center text-xl font-bold text-white shadow-md">
+                                    {user?.email?.substring(0, 2).toUpperCase() || '??'}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-bold text-slate-900 truncate">{user?.email || 'Usuario'}</p>
+                                    <span className={cn(
+                                        "inline-block mt-1 px-2.5 py-0.5 text-[10px] font-bold uppercase rounded-full",
+                                        role === 'ADMIN' ? "bg-purple-100 text-purple-700" :
+                                            role === 'COORDINADOR' ? "bg-blue-100 text-blue-700" :
+                                                "bg-slate-100 text-slate-600"
+                                    )}>
+                                        {role || 'Vendedor'}
+                                    </span>
+                                </div>
+                            </div>
+                            <div className="text-xs text-slate-400 pt-2 border-t border-slate-200">
+                                Sesión activa desde: {new Date().toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' })}
+                            </div>
+                        </div>
+
+                        {/* Logout Button */}
+                        <div className="flex flex-col justify-center">
+                            <button
+                                onClick={confirmLogout}
+                                className="w-full flex items-center justify-center gap-2 px-4 py-4 bg-red-50 text-red-700 hover:bg-red-100 rounded-xl text-sm font-bold transition-colors border border-red-200"
+                            >
+                                <LogOut className="w-4 h-4" />
+                                Cerrar Sesión
+                            </button>
+                            <p className="text-xs text-slate-400 text-center mt-3">Asegúrate de sincronizar antes de salir.</p>
+                        </div>
+                    </div>
                 </div>
             </div>
 

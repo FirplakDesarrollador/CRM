@@ -1,11 +1,12 @@
 import { useSyncStore } from "@/lib/stores/useSyncStore";
 import { cn } from "@/components/ui/utils";
-import { Bell, Search, RefreshCw, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Bell, RefreshCw, AlertCircle, CheckCircle2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 // Re-export NotificationList to ensure HMR picks it up
 import { Notifications } from "./Notifications";
 import { GlobalSearch } from "./GlobalSearch";
+import { FirplakIsotipo } from "./FirplakLogo";
 
 export function TopBar() {
     const { isSyncing, pendingCount, error: syncError } = useSyncStore();
@@ -40,20 +41,14 @@ export function TopBar() {
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 sticky top-0 z-30">
             {/* Mobile Title (Sidebar hidden) */}
             <div className="md:hidden flex items-center gap-2.5">
-                <div className="w-9 h-9 bg-linear-to-br from-[#254153] to-[#1a2f3d] rounded-lg flex items-center justify-center shadow-md">
-                    <img
-                        src="/isotipo.svg"
-                        alt="Logo"
-                        className="h-5 w-auto"
-                    />
+                <div className="w-9 h-9 bg-linear-to-br from-[#254153] to-[#1a2f3d] rounded-lg flex items-center justify-center shadow-md p-1.5 text-white">
+                    <FirplakIsotipo className="w-full h-full" />
                 </div>
                 <h1 className="text-lg font-bold text-slate-800 tracking-tight">CRM FIRPLAK</h1>
             </div>
 
-            {/* Desktop Search */}
-            <div className="hidden md:flex flex-1 max-w-xl mx-8">
-                <GlobalSearch />
-            </div>
+            {/* Desktop Spacer */}
+            <div className="hidden md:flex flex-1" />
 
             <div className="flex items-center gap-4">
                 {/* Sync Status Badge */}

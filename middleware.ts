@@ -37,6 +37,11 @@ export async function middleware(request: NextRequest) {
 
     const pathname = request.nextUrl.pathname;
 
+    // Skip auth check for public routes
+    if (isPublicRoute(pathname)) {
+        return response;
+    }
+
     // Create an authenticated Supabase client for the server environment
     const supabase = createServerClient(
         process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -87,49 +92,48 @@ export async function middleware(request: NextRequest) {
     // Try to get the current user
     const { data: { user }, error: userError } = await supabase.auth.getUser()
 
-    console.log("Middleware Path:", pathname, "User:", user?.email || "No User", "Error:", userError?.message || "None");
+    console.log("[Middleware]", pathname, "| User:", user?.email || "NONE", "| Error:", userError?.message || "OK");
 
-    // Handle network errors (offline mode)
+    // Handle network errors (offline mode) - Allow access if has cookies
     if (userError && isNetworkError(userError)) {
-        console.log("Middleware: Network error detected (offline mode)");
+        console.log("[Middleware] Network error - checking local session cookies");
 
-        // Check if there's a local session
         const hasSession = hasLocalSession(request);
-
-        if (!hasSession && !isPublicRoute(pathname)) {
-            // No local session and trying to access protected route
-            console.log("Middleware: No local session, redirecting to /login");
-            const url = request.nextUrl.clone();
-            url.pathname = '/login';
-            return NextResponse.redirect(url);
+        if (hasSession) {
+            console.log("[Middleware] Offline mode allowed - has local session cookies");
+            return response;
         }
 
-        // Has local session or is public route, allow access
-        console.log("Middleware: Local session found or public route, allowing offline access");
-        return response;
-    }
-
-    // If there's a non-network error, treat as no user
-    if (userError && !isNetworkError(userError)) {
-        console.log("Middleware: Auth error (not network):", userError.message);
-    }
-
-    // Protect routes: redirect to login if no user and not on public route
-    if (!user && !isPublicRoute(pathname)) {
-        console.log("Middleware: No user, redirecting to /login");
+        // No cookies, redirect to login
+        console.log("[Middleware] No local session, redirecting to /login");
         const url = request.nextUrl.clone();
         url.pathname = '/login';
         return NextResponse.redirect(url);
     }
 
-    // If user is logged in and tries to access login page, redirect to home
-    if (user && pathname === '/login') {
-        console.log("Middleware: User already logged in, redirecting to /");
-        const url = request.nextUrl.clone();
-        url.pathname = '/';
-        return NextResponse.redirect(url);
+    // NO USER = NOT AUTHENTICATED (regardless of cookies)
+    // This is the key fix: if getUser() returns null, the session is invalid
+    if (!user) {
+        console.log("[Middleware] No valid user session, redirecting to /login");
+
+        // Clear any stale auth cookies to prevent loops
+        const redirectUrl = request.nextUrl.clone();
+        redirectUrl.pathname = '/login';
+        const redirectResponse = NextResponse.redirect(redirectUrl);
+
+        // Clear Supabase cookies to ensure clean state
+        const cookiesToClear = Array.from(request.cookies.getAll())
+            .filter(c => c.name.includes('sb-'))
+            .map(c => c.name);
+
+        for (const cookieName of cookiesToClear) {
+            redirectResponse.cookies.set(cookieName, '', { maxAge: 0, path: '/' });
+        }
+
+        return redirectResponse;
     }
 
+    // User is authenticated, allow access
     return response;
 }
 
