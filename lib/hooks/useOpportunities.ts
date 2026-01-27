@@ -61,6 +61,8 @@ export function useOpportunities() {
             estado_id: oppData.estado_id || 1,
             fase_id: oppData.fase_id || 1,
             segmento_id: oppData.segmento_id ? Number(oppData.segmento_id) : null,
+            departamento_id: oppData.departamento_id ? Number(oppData.departamento_id) : null,
+            ciudad_id: oppData.ciudad_id ? Number(oppData.ciudad_id) : null,
             fecha_cierre_estimada: oppData.fecha_cierre_estimada === "" ? null : (oppData.fecha_cierre_estimada || null),
             created_by: user?.id,
             updated_by: user?.id,
@@ -180,9 +182,20 @@ export function useOpportunities() {
         const current = await db.opportunities.get(id);
         if (!current) return;
 
+        // Defensive conversion for numeric fields
+        const sanitizedUpdates = {
+            ...updates,
+            segmento_id: updates.segmento_id !== undefined ? (updates.segmento_id ? Number(updates.segmento_id) : null) : undefined,
+            departamento_id: updates.departamento_id !== undefined ? (updates.departamento_id ? Number(updates.departamento_id) : null) : undefined,
+            ciudad_id: updates.ciudad_id !== undefined ? (updates.ciudad_id ? Number(updates.ciudad_id) : null) : undefined,
+        };
+
+        // Remove undefined fields to avoid overwriting with undefined
+        Object.keys(sanitizedUpdates).forEach(key => (sanitizedUpdates as any)[key] === undefined && delete (sanitizedUpdates as any)[key]);
+
         const updated = {
             ...current,
-            ...updates,
+            ...sanitizedUpdates,
             updated_at: new Date().toISOString(),
             // Sanitize critical dates (Postgres dislikes empty strings for DATE type)
             fecha_cierre_estimada: (updates.fecha_cierre_estimada === "" ? null : (updates.fecha_cierre_estimada ?? current.fecha_cierre_estimada))

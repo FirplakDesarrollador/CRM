@@ -9,6 +9,7 @@ import Link from "next/link";
 import { cn } from "@/components/ui/utils";
 import { db } from "@/lib/db";
 import { useLiveQuery } from "dexie-react-hooks";
+import { formatColombiaDate, isDateOverdue, toInputDate, parseColombiaDate } from "@/lib/date-utils";
 import {
     Calendar as CalendarIcon,
     CheckCircle2,
@@ -197,7 +198,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     const { updateOpportunity } = useOpportunities();
     const { quotes } = useQuotes(opportunity.id);
     const [localAmount, setLocalAmount] = useState(opportunity.amount || 0);
-    const [localClosingDate, setLocalClosingDate] = useState(opportunity.fecha_cierre_estimada || "");
+    const [localClosingDate, setLocalClosingDate] = useState(toInputDate(opportunity.fecha_cierre_estimada));
     const [isSaving, setIsSaving] = useState(false);
     const [isSavingDate, setIsSavingDate] = useState(false);
 
@@ -209,7 +210,8 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     // Sync local state when prop updates
     useEffect(() => {
         setLocalSegmentId(opportunity.segmento_id ? String(opportunity.segmento_id) : "");
-    }, [opportunity.segmento_id]);
+        setLocalClosingDate(toInputDate(opportunity.fecha_cierre_estimada));
+    }, [opportunity.segmento_id, opportunity.fecha_cierre_estimada]);
 
     useEffect(() => {
         const fetchSegments = async () => {
@@ -839,7 +841,7 @@ function QuotesTab({ opportunityId, currency }: { opportunityId: string, currenc
                                         {q.is_winner && <Check className="w-4 h-4 text-green-600" />}
                                     </div>
                                     <p className="text-xs text-slate-500 mt-1">
-                                        Creada el {new Date(q.updated_at || Date.now()).toLocaleDateString()}
+                                        Creada el {formatColombiaDate(q.updated_at || Date.now(), "dd/MM/yyyy")}
                                     </p>
                                 </Link>
 
@@ -928,11 +930,7 @@ function ActivitiesTab({ opportunityId }: { opportunityId: string }) {
             ) : (
                 <div className="grid gap-4">
                     {sortedActivities.map((act) => {
-                        const today = new Date();
-                        today.setHours(0, 0, 0, 0);
-                        const actDate = new Date(act.fecha_inicio);
-                        actDate.setHours(0, 0, 0, 0);
-                        const isOverdue = !act.is_completed && actDate < today;
+                        const isOverdue = isDateOverdue(act.fecha_inicio) && !act.is_completed;
 
                         return (
                             <div
@@ -982,7 +980,7 @@ function ActivitiesTab({ opportunityId }: { opportunityId: string }) {
                                                     isOverdue ? "text-red-600 bg-red-100" : "text-blue-600 bg-blue-50"
                                                 )}>
                                                     <Clock className="w-3.5 h-3.5" />
-                                                    {new Date(act.fecha_inicio).toLocaleDateString(undefined, { day: 'numeric', month: 'numeric', year: 'numeric' })} {new Date(act.fecha_inicio).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: true })}
+                                                    {formatColombiaDate(act.fecha_inicio, "dd/MM/yyyy p")}
                                                 </div>
                                             ) : (
                                                 <div className={cn(
@@ -990,7 +988,7 @@ function ActivitiesTab({ opportunityId }: { opportunityId: string }) {
                                                     isOverdue ? "text-red-600 bg-red-100" : "text-emerald-600 bg-emerald-50"
                                                 )}>
                                                     {isOverdue ? <AlertCircle className="w-3.5 h-3.5" /> : <ListTodo className="w-3.5 h-3.5" />}
-                                                    Tarea {act.fecha_inicio && `- ${new Date(act.fecha_inicio).toLocaleDateString()}`}
+                                                    Tarea {act.fecha_inicio && `- ${formatColombiaDate(act.fecha_inicio, "dd/MM/yyyy")}`}
                                                 </div>
                                             )}
                                         </div>

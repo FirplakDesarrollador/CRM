@@ -453,6 +453,47 @@ export class SyncEngine {
                 console.error('[Sync] Failed to pull segments:', segErr.message);
             }
 
+            // Pull Departments (CRM_Departamentos)
+            try {
+                const { data: deps, error: depsError } = await supabase
+                    .from('CRM_Departamentos')
+                    .select('*');
+
+                if (depsError) throw depsError;
+
+                if (deps && deps.length > 0) {
+                    await db.departments.clear();
+                    await db.departments.bulkPut(deps.map((d: any) => ({
+                        id: d.id,
+                        nombre: d.nombre
+                    })));
+                    console.log(`[Sync] Pulled ${deps.length} departments.`);
+                }
+            } catch (depErr: any) {
+                console.error('[Sync] Failed to pull departments:', depErr.message);
+            }
+
+            // Pull Cities (CRM_Ciudades)
+            try {
+                const { data: cities, error: citiesError } = await supabase
+                    .from('CRM_Ciudades')
+                    .select('*');
+
+                if (citiesError) throw citiesError;
+
+                if (cities && cities.length > 0) {
+                    await db.cities.clear();
+                    await db.cities.bulkPut(cities.map((c: any) => ({
+                        id: c.id,
+                        departamento_id: c.departamento_id,
+                        nombre: c.nombre
+                    })));
+                    console.log(`[Sync] Pulled ${cities.length} cities.`);
+                }
+            } catch (cityErr: any) {
+                console.error('[Sync] Failed to pull cities:', cityErr.message);
+            }
+
             // Pull Contacts (CRM_Contactos) - SMART MERGE
             // PERF OPTIMIZATION: Disable full sync. Only sync by demand or recents in future.
             /*
