@@ -24,7 +24,9 @@ const accountSchema = z.object({
     subclasificacion_id: z.string().optional().nullable(), // Form uses string, convert to number on submit
     telefono: z.string().nullable().optional(),
     direccion: z.string().nullable().optional(),
-    ciudad: z.string().nullable().optional(),
+    departamento_id: z.string().nullable().optional(),
+    ciudad_id: z.string().nullable().optional(),
+    ciudad: z.string().nullable().optional(), // Keep for backward compat
     es_premium: z.boolean().optional(),
     nivel_premium: z.enum(['ORO', 'PLATA', 'BRONCE']).nullable().optional(),
 });
@@ -43,12 +45,15 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
 
     // Live Query for Subclassifications from local DB
     const subclassifications = useLiveQuery(() => db.subclasificaciones.toArray()) || [];
+    const departmentsList = useLiveQuery(() => db.departments.toArray()) || [];
+    const citiesList = useLiveQuery(() => db.cities.toArray()) || [];
 
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [assignedUserName, setAssignedUserName] = useState<string | null>(null);
     const [fallbackSubclassifications, setFallbackSubclassifications] = useState<any[]>([]);
+    const [fallbackDepartments, setFallbackDepartments] = useState<any[]>([]);
+    const [fallbackCities, setFallbackCities] = useState<any[]>([]);
 
-    // Safety Fallback: If local sync is empty/pending, fetch manually from server
     useEffect(() => {
         if (subclassifications.length === 0) {
             console.log('[AccountForm] INFO - Local subclasificaciones empty, fetching fallback from server...');
@@ -59,9 +64,31 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                     if (data) setFallbackSubclassifications(data);
                 });
         }
-    }, [subclassifications.length]);
+
+        if (departmentsList.length === 0) {
+            console.log('[AccountForm] INFO - Local departments empty, fetching fallback...');
+            supabase
+                .from('CRM_Departamentos')
+                .select('*')
+                .then(({ data }) => {
+                    if (data) setFallbackDepartments(data);
+                });
+        }
+
+        if (citiesList.length === 0) {
+            console.log('[AccountForm] INFO - Local cities empty, fetching fallback...');
+            supabase
+                .from('CRM_Ciudades')
+                .select('*')
+                .then(({ data }) => {
+                    if (data) setFallbackCities(data);
+                });
+        }
+    }, [subclassifications.length, departmentsList.length, citiesList.length]);
 
     const displaySubclassifications = subclassifications.length > 0 ? subclassifications : fallbackSubclassifications;
+    const displayDepartments = departmentsList.length > 0 ? departmentsList : fallbackDepartments;
+    const displayCities = citiesList.length > 0 ? citiesList : fallbackCities;
 
     // Fetch assigned user name if exists
     useEffect(() => {
@@ -124,6 +151,8 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             subclasificacion_id: (account?.subclasificacion_id !== undefined && account?.subclasificacion_id !== null) ? String(account.subclasificacion_id) : "",
             telefono: account?.telefono || "",
             direccion: account?.direccion || "",
+            departamento_id: account?.departamento_id ? String(account.departamento_id) : "",
+            ciudad_id: account?.ciudad_id ? String(account.ciudad_id) : "",
             ciudad: account?.ciudad || "",
             es_premium: account?.es_premium || false,
             nivel_premium: account?.nivel_premium || null
@@ -143,6 +172,8 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                 subclasificacion_id: (account.subclasificacion_id !== undefined && account.subclasificacion_id !== null) ? String(account.subclasificacion_id) : "",
                 telefono: account.telefono || "",
                 direccion: account.direccion || "",
+                departamento_id: account.departamento_id ? String(account.departamento_id) : "",
+                ciudad_id: account.ciudad_id ? String(account.ciudad_id) : "",
                 ciudad: account.ciudad || "",
                 es_premium: account.es_premium || false,
                 nivel_premium: account.nivel_premium || null
@@ -236,7 +267,9 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                 subclasificacion_id: data.subclasificacion_id ? Number(data.subclasificacion_id) : null,
                 telefono: data.telefono || null,
                 direccion: data.direccion || null,
-                ciudad: data.ciudad || null,
+                departamento_id: data.departamento_id ? Number(data.departamento_id) : null,
+                ciudad_id: data.ciudad_id ? Number(data.ciudad_id) : null,
+                ciudad: data.ciudad_id ? citiesList.find(c => String(c.id) === data.ciudad_id)?.nombre : (data.ciudad || null),
                 es_premium: !!data.nivel_premium,
                 nivel_premium: data.nivel_premium || null
             };
@@ -489,14 +522,47 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                         </div>
                     )}
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
-                            <label className="text-sm font-medium">Teléfono</label>
-                            <input {...register("telefono")} className="w-full border p-2 rounded" />
+                            <label className="text-sm font-medium">Departamento</label>
+                            <select
+                                key={`dep-${displayDepartments.length}-${account?.id || 'new'}`}
+                                {...register("departamento_id")}
+                                className="w-full border p-2 rounded bg-white"
+                                onChange={(e) => {
+                                    register("departamento_id").onChange(e);
+                                    setValue("ciudad_id", "");
+                                }}
+                            >
+                                <option value="">Seleccione Departamento...</option>
+                                {displayDepartments.map(dep => (
+                                    <option key={dep.id} value={String(dep.id)}>{dep.nombre}</option>
+                                ))}
+                            </select>
                         </div>
                         <div>
                             <label className="text-sm font-medium">Ciudad</label>
-                            <input {...register("ciudad")} className="w-full border p-2 rounded" />
+                            <select
+                                key={`city-${displayCities.length}-${watch("departamento_id")}-${account?.id || 'new'}`}
+                                {...register("ciudad_id")}
+                                className="w-full border p-2 rounded bg-white disabled:bg-slate-50"
+                                disabled={!watch("departamento_id")}
+                            >
+                                <option value="">Seleccione Ciudad...</option>
+                                {displayCities
+                                    .filter(c => String(c.departamento_id) === watch("departamento_id"))
+                                    .map(city => (
+                                        <option key={city.id} value={String(city.id)}>{city.nombre}</option>
+                                    ))
+                                }
+                            </select>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="text-sm font-medium">Teléfono</label>
+                            <input {...register("telefono")} className="w-full border p-2 rounded" />
                         </div>
                         <div>
                             <label className="text-sm font-medium">Dirección</label>
