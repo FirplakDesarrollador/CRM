@@ -4,6 +4,7 @@ import { useForm } from "react-hook-form";
 import { useEffect } from "react";
 import { CalendarClock, ListTodo } from "lucide-react";
 import { cn } from "@/components/ui/utils";
+import { toInputDate, toInputDateTime, parseColombiaDate } from "@/lib/date-utils";
 
 interface CreateActivityModalProps {
     onClose: () => void;
@@ -13,18 +14,7 @@ interface CreateActivityModalProps {
     initialData?: any;
 }
 
-// Helper to format date for datetime-local input (YYYY-MM-DDTHH:mm) in LOCAL time
-function toLocalISO(dateSource: Date | string | undefined) {
-    if (!dateSource) return "";
-    const d = typeof dateSource === 'string' ? new Date(dateSource) : dateSource;
-    if (isNaN(d.getTime())) return "";
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    const hours = String(d.getHours()).padStart(2, '0');
-    const minutes = String(d.getMinutes()).padStart(2, '0');
-    return `${year}-${month}-${day}T${hours}:${minutes}`;
-}
+// Helper removed in favor of @/lib/date-utils
 
 export function CreateActivityModal({ onClose, onSubmit, opportunities, initialOpportunityId, initialData }: CreateActivityModalProps) {
     const isEditing = !!initialData;
@@ -35,11 +25,11 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
             descripcion: initialData?.descripcion || '',
             tipo_actividad: (initialData?.tipo_actividad || 'EVENTO') as 'TAREA' | 'EVENTO',
             fecha_inicio: initialData?.fecha_inicio
-                ? (initialData.tipo_actividad === 'TAREA' ? toLocalISO(initialData.fecha_inicio).slice(0, 10) : toLocalISO(initialData.fecha_inicio))
-                : (initialData?.tipo_actividad === 'TAREA' ? toLocalISO(new Date()).slice(0, 10) : toLocalISO(new Date())),
+                ? (initialData.tipo_actividad === 'TAREA' ? toInputDate(initialData.fecha_inicio) : toInputDateTime(initialData.fecha_inicio))
+                : (initialData?.tipo_actividad === 'TAREA' ? toInputDate(new Date()) : toInputDateTime(new Date())),
             fecha_fin: initialData?.fecha_fin
-                ? toLocalISO(initialData.fecha_fin)
-                : toLocalISO(new Date(Date.now() + 3600000)),
+                ? toInputDateTime(initialData.fecha_fin)
+                : toInputDateTime(new Date(Date.now() + 3600000)),
             opportunity_id: initialData?.opportunity_id || initialOpportunityId || '',
             is_completed: !!initialData?.is_completed
         }
@@ -56,14 +46,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                 if (!isNaN(start.getTime())) {
                     const end = new Date(start.getTime() + 3600000); // +1 hour
 
-                    // Format correctly as YYYY-MM-DDTHH:mm using LOCAL time
-                    const year = end.getFullYear();
-                    const month = String(end.getMonth() + 1).padStart(2, '0');
-                    const day = String(end.getDate()).padStart(2, '0');
-                    const hours = String(end.getHours()).padStart(2, '0');
-                    const minutes = String(end.getMinutes()).padStart(2, '0');
-
-                    const formattedEnd = `${year}-${month}-${day}T${hours}:${minutes}`;
+                    const formattedEnd = toInputDateTime(end);
                     setValue('fecha_fin', formattedEnd, { shouldDirty: true });
                 }
             } catch (e) {
@@ -74,13 +57,13 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
 
     return (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col max-h-[90vh]">
+            <div className="bg-white rounded-2xl md:rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col max-h-[95vh] md:max-h-[90vh]">
                 <div className="p-6 border-b border-slate-100 flex justify-between items-center shrink-0">
                     <h2 className="text-xl font-bold text-slate-900">{isEditing ? 'Editar Actividad' : 'Programar Actividad'}</h2>
                     <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-2xl">&times;</button>
                 </div>
 
-                <form onSubmit={handleSubmit(onSubmit)} className="p-6 space-y-4 overflow-y-auto">
+                <form onSubmit={handleSubmit(onSubmit)} className="p-4 md:p-6 space-y-4 overflow-y-auto flex-1 overscroll-contain pb-6">
                     {/* Activity Type Selector */}
                     <div className="flex bg-slate-100 p-1 rounded-xl">
                         <button
@@ -132,7 +115,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                         />
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div className="space-y-1">
                             <label className="text-xs font-bold text-slate-500 uppercase">
                                 {tipo === 'TAREA' ? 'Fecha Vencimiento' : 'Fecha Inicio'}
@@ -140,6 +123,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                             <input
                                 type={tipo === 'TAREA' ? "date" : "datetime-local"}
                                 {...register('fecha_inicio', { required: true })}
+                                min={tipo === 'TAREA' ? toInputDate(new Date()) : toInputDateTime(new Date())}
                                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                             />
                         </div>
@@ -149,6 +133,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                 <input
                                     type="datetime-local"
                                     {...register('fecha_fin')}
+                                    min={fechaInicio ? fechaInicio : toInputDateTime(new Date())}
                                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                                 />
                             </div>
@@ -179,7 +164,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                         />
                     </div>
 
-                    <div className="flex gap-3 pt-4 sticky bottom-0 bg-white">
+                    <div className="flex gap-3 pt-6 mt-auto border-t border-slate-100 bg-white shrink-0 sticky bottom-0">
                         <button
                             type="button"
                             onClick={onClose}
@@ -192,12 +177,33 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                             onClick={handleSubmit((data) => {
                                 // Ensure dates are unambiguous ISO with Z (UTC) for storage
                                 const processed = { ...data };
+
+                                // VALIDATION: Check for past dates
+                                const todayDate = new Date();
+                                const todayISO = toInputDate(todayDate);
+                                const selectedISO = data.fecha_inicio ? data.fecha_inicio.slice(0, 10) : "";
+
+                                if (selectedISO && selectedISO < todayISO) {
+                                    // If strictly before today, allow ONLY if it matches the initial value (preserving existing past records)
+                                    const initialISO = initialData?.fecha_inicio
+                                        ? toInputDate(initialData.fecha_inicio)
+                                        : "";
+
+                                    if (!isEditing || selectedISO !== initialISO) {
+                                        alert("No se puede programar una actividad para una fecha anterior a hoy.");
+                                        return;
+                                    }
+                                }
+
                                 if (data.fecha_inicio) {
                                     processed.fecha_inicio = new Date(data.fecha_inicio).toISOString();
                                 }
+
                                 if (data.fecha_fin) {
-                                    processed.fecha_fin = new Date(data.fecha_fin).toISOString();
+                                    const selectedEndDate = new Date(data.fecha_fin);
+                                    processed.fecha_fin = selectedEndDate.toISOString();
                                 }
+
                                 onSubmit(processed);
                             })}
                             className={cn(

@@ -26,8 +26,11 @@ export const metadata: Metadata = {
     userScalable: false,
   },
   icons: {
-    icon: "/isotipo.svg",
-    apple: "/isotipo.svg",
+    icon: [
+      { url: "/isotipo.svg", type: "image/svg+xml" },
+      { url: "/icons/icon-192x192.png", sizes: "192x192", type: "image/png" },
+    ],
+    apple: "/apple-touch-icon.png",
   },
 };
 

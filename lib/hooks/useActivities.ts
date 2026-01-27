@@ -64,10 +64,19 @@ export function useActivities(opportunityId?: string) {
         await syncEngine.queueMutation('CRM_Actividades', id, { is_completed: isCompleted, updated_at });
     };
 
+    const deleteActivity = async (id: string) => {
+        const current = await db.activities.get(id);
+        if (!current) return;
+
+        await db.activities.delete(id);
+        await syncEngine.queueMutation('CRM_Actividades', id, { ...current, is_deleted: true });
+    };
+
     return {
         activities,
         createActivity,
         updateActivity,
-        toggleComplete
+        toggleComplete,
+        deleteActivity
     };
 }

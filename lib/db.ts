@@ -26,15 +26,29 @@ export interface LocalCuenta {
     canal_id: string; // Nuevo campo obligatorio
     subclasificacion_id?: number | null; // Nuevo campo opcional
     es_premium?: boolean;
+    nivel_premium?: 'ORO' | 'PLATA' | 'BRONCE' | null; // Nuevo campo jerárquico
     telefono?: string;
     direccion?: string;
-    ciudad?: string;
+    ciudad?: string; // Legacy/Text field
+    ciudad_id?: number | null;
+    departamento_id?: number | null;
     // ... other fields optional for now in local definition, or use 'any' schema
     _sync_metadata?: any;
     created_at?: string;
     created_by?: string;
     updated_by?: string;
     updated_at?: string;
+}
+
+export interface LocalDepartamento {
+    id: number;
+    nombre: string;
+}
+
+export interface LocalCiudad {
+    id: number;
+    departamento_id: number;
+    nombre: string;
 }
 
 // Types for Quotes
@@ -47,6 +61,7 @@ export interface LocalQuote {
     status: 'DRAFT' | 'SENT' | 'APPROVED' | 'REJECTED' | 'WINNER';
     is_winner?: boolean;
     es_pedido?: boolean; // Nuevo campo para diferenciar pedidos
+    segmento_id?: number | null; // Segmento del pedido/cotización
 
     // SAP Data
     fecha_minima_requerida?: string;
@@ -140,6 +155,8 @@ export interface LocalOportunidad {
     items?: any[];
     owner_user_id?: string;
     segmento_id?: number | null;
+    ciudad_id?: number | null;
+    departamento_id?: number | null;
     created_at?: string;
     updated_at?: string;
 }
@@ -159,6 +176,8 @@ export class CRMFirplakDB extends Dexie {
     phases!: Table<LocalFase, number>; // Local table
     subclasificaciones!: Table<LocalSubclasificacion, number>; // Local table
     segments!: Table<LocalSegmento, number>; // Local table
+    departments!: Table<LocalDepartamento, number>;
+    cities!: Table<LocalCiudad, number>;
 
     constructor() {
         super('CRMFirplakDB');
@@ -173,7 +192,9 @@ export class CRMFirplakDB extends Dexie {
             activities: 'id, opportunity_id, user_id, fecha_inicio, tipo_actividad',
             phases: 'id, canal_id, orden',
             subclasificaciones: 'id, canal_id',
-            segments: '++id, subclasificacion_id'
+            segments: '++id, subclasificacion_id',
+            departments: 'id, nombre',
+            cities: 'id, departamento_id, nombre'
         });
     }
 }

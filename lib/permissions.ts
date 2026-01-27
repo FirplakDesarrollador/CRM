@@ -108,7 +108,6 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
         'view_accounts',
         'create_account',
         'edit_account',
-        'delete_account',
 
         // Contactos - acceso completo
         'view_contacts',

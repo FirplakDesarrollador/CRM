@@ -448,6 +448,10 @@ function SapDataEditor({ quote, onSave }: { quote: LocalQuote, onSave: (d: Parti
                     <label className="text-sm font-medium">Notas Integración SAP</label>
                     <textarea {...register("notas_sap")} className="w-full mt-1 p-2 border rounded-lg" rows={3} />
                 </div>
+
+                <div className="md:col-span-2 border-t pt-4 mt-2">
+                    <QuotationSegmentSelector opportunity_id={quote.opportunity_id} initialValue={quote.segmento_id} onSave={(v: number | null) => onSave({ segmento_id: v })} />
+                </div>
             </div>
 
             <div className="pt-4 border-t flex justify-end">
@@ -460,7 +464,7 @@ function SapDataEditor({ quote, onSave }: { quote: LocalQuote, onSave: (d: Parti
                     Guardar Datos SAP
                 </button>
             </div>
-        </form>
+        </form >
     );
 }
 
@@ -504,6 +508,63 @@ function QuoteValidationBanner({ quote }: { quote: LocalQuote }) {
                 <p className="text-sm">El valor de esta cotización (<span className="font-bold">${new Intl.NumberFormat().format(quote.total_amount || 0)}</span>) es inferior al mínimo configurado de <span className="font-bold">${new Intl.NumberFormat().format(validation.minVal)}</span>.</p>
                 <p className="mt-1 text-xs text-red-600 font-medium">No se podrá generar el pedido en SAP hasta alcanzar el monto mínimo.</p>
             </div>
+        </div>
+    );
+}
+
+function QuotationSegmentSelector({ opportunity_id, initialValue, onSave }: { opportunity_id: string, initialValue?: number | null, onSave: (v: number | null) => void }) {
+    const [segments, setSegments] = useState<any[]>([]);
+    const [localValue, setLocalValue] = useState<string>(initialValue ? String(initialValue) : "");
+
+    const account = useLiveQuery(async () => {
+        const opp = await db.opportunities.get(opportunity_id);
+        if (!opp) return null;
+        return await db.accounts.get(opp.account_id);
+    }, [opportunity_id]);
+
+    useEffect(() => {
+        const fetchSegments = async () => {
+            const { supabase } = await import('@/lib/supabase');
+            const { data } = await supabase.from('CRM_Segmentos').select('*');
+            if (data) setSegments(data);
+        };
+        fetchSegments();
+    }, []);
+
+    useEffect(() => {
+        setLocalValue(initialValue ? String(initialValue) : "");
+    }, [initialValue]);
+
+    if (!account) return null;
+
+    return (
+        <div>
+            <label className="text-sm font-medium text-slate-700">Segmento del Pedido</label>
+            <select
+                className="w-full mt-1 p-2 border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500 transition-all outline-none disabled:opacity-50"
+                value={localValue}
+                onChange={(e) => {
+                    const val = e.target.value;
+                    setLocalValue(val);
+                    onSave(val ? Number(val) : null);
+                }}
+                disabled={!account.subclasificacion_id}
+            >
+                <option value="">Seleccione un segmento...</option>
+                {segments
+                    .filter(seg => account.subclasificacion_id && seg.subclasificacion_id === Number(account.subclasificacion_id))
+                    .map(seg => (
+                        <option key={seg.id} value={String(seg.id)}>
+                            {seg.nombre}
+                        </option>
+                    ))
+                }
+            </select>
+            {!account.subclasificacion_id && (
+                <p className="text-[10px] text-orange-600 mt-1 italic font-medium">
+                    La cuenta no tiene subclasificación. Edite la cuenta para habilitar segmentos.
+                </p>
+            )}
         </div>
     );
 }

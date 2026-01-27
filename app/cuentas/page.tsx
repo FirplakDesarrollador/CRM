@@ -5,8 +5,10 @@ import { AccountForm } from "@/components/cuentas/AccountForm";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { Plus, Search, Building, Users, Pencil, Filter } from "lucide-react";
+import { Plus, Search, Building, Users, Pencil, Filter, Medal, Trash2 } from "lucide-react";
 import { UserPickerFilter } from "@/components/cuentas/UserPickerFilter";
+import { useAccounts } from "@/lib/hooks/useAccounts";
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 
 function AccountsContent() {
     const searchParams = useSearchParams();
@@ -19,6 +21,9 @@ function AccountsContent() {
         setAssignedUserId,
         refresh
     } = useAccountsServer({ pageSize: 20 });
+
+    const { deleteAccount } = useAccounts();
+    const { isAdmin } = useCurrentUser();
 
     const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
 
@@ -83,9 +88,24 @@ function AccountsContent() {
     };
 
     const handleSuccess = () => {
+        refresh(); // Refresh list FIRST
         setShowCreate(false);
         setEditingAccount(null);
-        refresh(); // Refresh list to show new/updated account
+    };
+
+    const handleDelete = async (e: React.MouseEvent, acc: any) => {
+        e.stopPropagation();
+        if (!window.confirm(`¿Estás seguro de eliminar la cuenta "${acc.nombre}"? Esto eliminará también sus contactos, oportunidades y actividades relacionadas.`)) {
+            return;
+        }
+
+        try {
+            await deleteAccount(acc.id);
+            refresh();
+        } catch (err) {
+            console.error("Error deleting account:", err);
+            alert("Error al eliminar la cuenta");
+        }
     };
 
     return (
@@ -136,6 +156,7 @@ function AccountsContent() {
                         }} className="text-blue-400 hover:text-blue-700">✕</button>
                     </div>
                     <AccountForm
+                        key={editingAccount?.id || 'new'}
                         account={editingAccount}
                         onSuccess={handleSuccess}
                         onCancel={() => {
@@ -169,6 +190,24 @@ function AccountsContent() {
                                         <Building className="w-5 h-5" />
                                     </div>
                                     <div className="flex items-center gap-2">
+                                        {acc.nivel_premium === 'ORO' && (
+                                            <div className="flex items-center gap-0.5 bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full border border-amber-200 shadow-sm" title="Cliente Gold">
+                                                <Medal className="w-3.5 h-3.5 fill-amber-400" />
+                                                <span className="text-[10px] font-bold">GOLD</span>
+                                            </div>
+                                        )}
+                                        {acc.nivel_premium === 'PLATA' && (
+                                            <div className="flex items-center gap-0.5 bg-slate-50 text-slate-600 px-2 py-0.5 rounded-full border border-slate-200 shadow-sm" title="Cliente Silver">
+                                                <Medal className="w-3.5 h-3.5 fill-slate-300" />
+                                                <span className="text-[10px] font-bold">SILVER</span>
+                                            </div>
+                                        )}
+                                        {acc.nivel_premium === 'BRONCE' && (
+                                            <div className="flex items-center gap-0.5 bg-orange-50 text-orange-600 px-2 py-0.5 rounded-full border border-orange-200 shadow-sm" title="Cliente Bronze">
+                                                <Medal className="w-3.5 h-3.5 fill-orange-400" />
+                                                <span className="text-[10px] font-bold">BRONZE</span>
+                                            </div>
+                                        )}
                                         {acc.id_cuenta_principal && (
                                             <span className="text-[10px] font-bold uppercase bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">
                                                 Sucursal
@@ -177,9 +216,19 @@ function AccountsContent() {
                                         <button
                                             onClick={() => handleEdit(acc)}
                                             className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                                            title="Editar cuenta"
                                         >
                                             <Pencil className="w-4 h-4" />
                                         </button>
+                                        {isAdmin && (
+                                            <button
+                                                onClick={(e) => handleDelete(e, acc)}
+                                                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                                                title="Eliminar cuenta"
+                                            >
+                                                <Trash2 className="w-4 h-4" />
+                                            </button>
+                                        )}
                                     </div>
                                 </div>
 
@@ -189,7 +238,7 @@ function AccountsContent() {
 
                                     <div className="flex items-center text-xs text-slate-400 gap-3 border-t pt-3 mt-1">
                                         <span className="flex items-center gap-1">
-                                            <Users className="w-3 h-3" /> 0 Contactos
+                                            <Users className="w-3 h-3" /> {acc.contact_count || 0} Contactos
                                         </span>
                                         <span>
                                             {acc.ciudad || "Sin ciudad"}

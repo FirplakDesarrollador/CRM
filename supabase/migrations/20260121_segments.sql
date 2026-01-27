@@ -68,6 +68,21 @@ ALTER TABLE "CRM_Oportunidades"
     ADD CONSTRAINT fk_crmoportunidades_segmento 
     FOREIGN KEY (segmento_id) REFERENCES "CRM_Segmentos"(id);
 
+-- 3.1 Modify CRM_Cotizaciones (Missed in original plan, added for fix)
+ALTER TABLE "CRM_Cotizaciones" 
+    ADD COLUMN IF NOT EXISTS segmento_id INT;
+
+-- Reset FK for Cotizaciones if exists
+DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_crmcotizaciones_segmento') THEN
+        ALTER TABLE "CRM_Cotizaciones" DROP CONSTRAINT fk_crmcotizaciones_segmento;
+    END IF;
+END $$;
+
+ALTER TABLE "CRM_Cotizaciones" 
+    ADD CONSTRAINT fk_crmcotizaciones_segmento 
+    FOREIGN KEY (segmento_id) REFERENCES "CRM_Segmentos"(id);
+
 -- 4. Update Audit Trigger for Opportunities
 -- Use COALESCE to handle NULLs safely (Lesson Learned)
 

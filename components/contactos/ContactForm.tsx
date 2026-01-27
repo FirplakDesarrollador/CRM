@@ -3,6 +3,8 @@ import { useContacts } from "@/lib/hooks/useContacts";
 import { LocalContact } from "@/lib/db";
 import { useForm } from "react-hook-form";
 import { useEffect } from "react";
+import { ContactImportButton } from "./ContactImportButton";
+import { ParsedContact } from "@/lib/vcard";
 
 interface ContactFormProps {
     accountId: string;
@@ -12,7 +14,7 @@ interface ContactFormProps {
 }
 
 export function ContactForm({ accountId, existingContact, onSuccess, onCancel }: ContactFormProps) {
-    const { createContact, updateContact } = useContacts(accountId);
+    const { createContact, updateContact, contacts } = useContacts(accountId);
 
     // Initialize default values based on existingContact
     const defaultValues: Partial<LocalContact> = existingContact ? {
@@ -25,9 +27,33 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel }:
         es_principal: false
     };
 
-    const { register, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm<LocalContact>({
+    const { register, handleSubmit, reset, setValue, formState: { errors, isSubmitting } } = useForm<LocalContact>({
         defaultValues
     });
+
+    const handleImport = (imported: ParsedContact) => {
+        // Deduplication Check
+        const isDuplicate = contacts?.some(c =>
+            (imported.email && c.email?.toLowerCase() === imported.email.toLowerCase()) ||
+            (imported.tel && c.telefono === imported.tel)
+        );
+
+        if (isDuplicate) {
+            const proceed = window.confirm("Ya existe un contacto con este email o teléfono en esta cuenta. ¿Deseas importarlo de todos modos?");
+            if (!proceed) return;
+        }
+
+        if (imported.name) setValue("nombre", imported.name);
+        if (imported.title) setValue("cargo", imported.title);
+        if (imported.email) setValue("email", imported.email);
+        if (imported.tel) setValue("telefono", imported.tel);
+        if (imported.org) {
+            // We don't have an explicit 'Company' field in LocalContact visible in this form usually, 
+            // but if we did, we would set it. 
+            // For now, let's append it to notes or ignore if not present in form.
+            // LocalContact doesn't seem to have 'notes' or 'organization' in the interface shown in creating/editing.
+        }
+    };
 
     // Clean reset when switching between add/edit or changing contacts
     useEffect(() => {
@@ -66,9 +92,12 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel }:
 
     return (
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 p-4 border rounded-lg bg-white dark:bg-slate-900 border-blue-100 dark:border-slate-800">
-            <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100 border-b pb-2">
-                {existingContact ? 'Editar Contacto' : 'Nuevo Contacto'}
-            </h3>
+            <div className="flex justify-between items-center border-b pb-2">
+                <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100">
+                    {existingContact ? 'Editar Contacto' : 'Nuevo Contacto'}
+                </h3>
+                {!existingContact && <ContactImportButton onContactImported={handleImport} />}
+            </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
