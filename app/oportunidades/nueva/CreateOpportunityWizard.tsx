@@ -25,6 +25,8 @@ const schema = z.object({
     estado_id: z.coerce.number().default(1), // 1 = Abierta
     fase_id: z.coerce.number().min(1, "Fase requerida").default(1),
     segmento_id: z.coerce.number().nullable().optional(),
+    departamento_id: z.coerce.number().nullable().optional(),
+    ciudad_id: z.coerce.number().nullable().optional(),
     fecha_cierre_estimada: z.string().optional().nullable(),
     items: z.array(z.object({
         product_id: z.string(),
@@ -46,20 +48,88 @@ export default function CreateOpportunityWizard() {
     const [showAccountDropdown, setShowAccountDropdown] = useState(false);
     const [selectedAccount, setSelectedAccount] = useState<any>(null);
     const [segments, setSegments] = useState<any[]>([]);
+    const [fallbackDepartments, setFallbackDepartments] = useState<any[]>([]);
+    const [fallbackCities, setFallbackCities] = useState<any[]>([]);
+
+    // Catalogs for cities
+    const departmentsList = useLiveQuery(() => db.departments.toArray()) || [];
+    const citiesList = useLiveQuery(() => db.cities.toArray()) || [];
+
+    const [phasesLoading, setPhasesLoading] = useState(false);
+    const [phasesError, setPhasesError] = useState<string | null>(null);
 
     useEffect(() => {
         // Fetch all segments (small table, safe to fetch all)
-        // Or we could fetch only relevant ones if we wanted to optmize
         const fetchSegments = async () => {
-            // Try fetching from local DB first if available, else Server
-            // Since we didn't add it to sync engine completely, let's fetch from Supabase
-            // to ensure we have the latest structure.
-            // Ideally we should use Local DB if we added it to Sync.
-            // Given time constraints, straightforward fetch:
-            const { data } = await import("@/lib/supabase").then(m => m.supabase.from('CRM_Segmentos').select('*'));
+            const { supabase } = await import("@/lib/supabase");
+            const { data } = await supabase.from('CRM_Segmentos').select('*');
             if (data) setSegments(data);
         };
         fetchSegments();
+
+        const fetchCatalogs = async () => {
+            const { supabase } = await import("@/lib/supabase");
+            if (departmentsList.length === 0) {
+                const { data } = await supabase.from('CRM_Departamentos').select('*');
+                if (data) setFallbackDepartments(data);
+            }
+            if (citiesList.length === 0) {
+                const { data } = await supabase.from('CRM_Ciudades').select('*');
+                if (data) setFallbackCities(data);
+            }
+        };
+        fetchCatalogs();
+    }, [departmentsList.length, citiesList.length]);
+
+    const displayDepartments = departmentsList.length > 0 ? departmentsList : fallbackDepartments;
+    const displayCities = citiesList.length > 0 ? citiesList : fallbackCities;
+
+    // Fallback: Fetch phases from Supabase if local DB is empty
+    useEffect(() => {
+        const ensurePhasesLoaded = async () => {
+            try {
+                // Check if we have any phases in local DB
+                const localPhasesCount = await db.phases.count();
+                console.log('[Phases] Local phases count:', localPhasesCount);
+
+                if (localPhasesCount === 0) {
+                    console.log('[Phases] Local DB empty, fetching from Supabase...');
+                    setPhasesLoading(true);
+                    setPhasesError(null);
+
+                    const { supabase } = await import("@/lib/supabase");
+                    const { data: phases, error } = await supabase
+                        .from('CRM_FasesOportunidad')
+                        .select('*')
+                        .eq('is_active', true);
+
+                    if (error) {
+                        console.error('[Phases] Error fetching from Supabase:', error);
+                        setPhasesError('Error al cargar las fases. Por favor, recarga la página.');
+                    } else if (phases && phases.length > 0) {
+                        console.log('[Phases] Fetched', phases.length, 'phases from Supabase, saving to local DB...');
+                        await db.phases.bulkPut(phases.map((f: any) => ({
+                            id: f.id,
+                            nombre: f.nombre,
+                            orden: f.orden,
+                            is_active: f.is_active,
+                            canal_id: f.canal_id
+                        })));
+                        console.log('[Phases] Phases saved to local DB successfully');
+                    } else {
+                        setPhasesError('No se encontraron fases en el servidor.');
+                    }
+
+                    setPhasesLoading(false);
+                }
+            } catch (err) {
+                console.error('[Phases] Error in ensurePhasesLoaded:', err);
+                setPhasesError('Error al cargar las fases.');
+                setPhasesLoading(false);
+            }
+        };
+
+        ensurePhasesLoaded();
     }, []);
 
     const {
@@ -78,6 +148,8 @@ export default function CreateOpportunityWizard() {
             estado_id: 1,
             fase_id: 1,
             amount: 0,
+            departamento_id: null,
+            ciudad_id: null,
             fecha_cierre_estimada: '',
             items: []
         }
@@ -88,16 +160,45 @@ export default function CreateOpportunityWizard() {
     // Auto-select account from URL param and jump to step 1
     useEffect(() => {
         const accountId = searchParams.get('account_id');
-        if (accountId && accounts.length > 0) {
-            const acc = accounts.find(a => a.id === accountId);
+        if (!accountId) return;
+
+        const resolveAccount = async () => {
+            // Only jump if we are at step 0 to avoid resetting user progress if they navigate back/forth
+            if (step !== 0) return;
+
+            // 1. Try currently loaded accounts
+            let acc = accounts.find(a => a.id === accountId);
+
+            // 2. Try direct local DB lookup (in case accounts list is still filtering/loading)
+            if (!acc) {
+                acc = await db.accounts.get(accountId);
+            }
+
+            // 3. JIT Fetch from Supabase if still not found
+            if (!acc) {
+                try {
+                    const { supabase } = await import("@/lib/supabase");
+                    const { data, error } = await supabase
+                        .from('CRM_Cuentas')
+                        .select('*')
+                        .eq('id', accountId)
+                        .single();
+                    if (data && !error) acc = data;
+                } catch (err) {
+                    console.error("Error fetching account JIT:", err);
+                }
+            }
+
             if (acc) {
                 setValue("account_id", acc.id);
                 setSelectedAccount(acc);
                 setAccountSearchTerm(acc.nombre);
                 setStep(1); // Advance to "Datos del Negocio"
             }
-        }
-    }, [searchParams, accounts, setValue]);
+        };
+
+        resolveAccount();
+    }, [searchParams, accounts, setValue, step]);
 
     const { products: searchResults, isLoading: isSearching } = useProductSearch(searchTerm);
 
@@ -118,11 +219,28 @@ export default function CreateOpportunityWizard() {
     const selectedAccountId = watch("account_id");
 
     const filteredPhases = useLiveQuery(async () => {
-        if (!selectedAccountId) return [];
+        if (!selectedAccountId) {
+            console.log('[Phases] No account selected yet');
+            return [];
+        }
+
         const acc = await db.accounts.get(selectedAccountId);
-        if (!acc) return [];
+        if (!acc) {
+            console.warn('[Phases] Account not found in local DB:', selectedAccountId);
+            return [];
+        }
+
         const channelId = acc.canal_id || 'DIST_NAC';
-        return await db.phases.where('canal_id').equals(channelId).sortBy('orden');
+        console.log('[Phases] Selected account canal_id:', channelId, 'Account:', acc.nombre);
+
+        const phases = await db.phases.where('canal_id').equals(channelId).sortBy('orden');
+        console.log('[Phases] Filtered phases count:', phases.length, 'for channel:', channelId);
+
+        if (phases.length === 0) {
+            console.warn('[Phases] No phases found in local DB for channel:', channelId);
+        }
+
+        return phases;
     }, [selectedAccountId]);
 
     // Auto-seleccionar primera fase y MONEDA según canal
@@ -214,7 +332,22 @@ export default function CreateOpportunityWizard() {
 
     const onSubmit = async (data: any) => {
         try {
-            await createOpportunity(data);
+            // Defensive conversion for numeric IDs
+            const sanitizedData = {
+                ...data,
+                departamento_id: data.departamento_id ? Number(data.departamento_id) : null,
+                ciudad_id: data.ciudad_id ? Number(data.ciudad_id) : null,
+                segmento_id: data.segmento_id ? Number(data.segmento_id) : null
+            };
+
+            // Maintain legacy 'ciudad' string for list views
+            if (sanitizedData.ciudad_id) {
+                const cityName = displayCities.find(c => c.id === Number(sanitizedData.ciudad_id))?.nombre;
+                if (cityName) sanitizedData.ciudad = cityName;
+            }
+
+            console.log('[Wizard] Submitting sanitized opportunity data:', sanitizedData);
+            await createOpportunity(sanitizedData);
             router.push("/oportunidades");
         } catch (err) {
             console.error(err);
@@ -361,14 +494,30 @@ export default function CreateOpportunityWizard() {
                             {/* Phase Selector (Dynamic) */}
                             <div>
                                 <label className="text-sm font-medium">Fase Inicial</label>
-                                <select {...register("fase_id")} className="w-full p-2 border rounded-lg">
-                                    {filteredPhases?.map(phase => (
+                                <select
+                                    {...register("fase_id")}
+                                    className="w-full p-2 border rounded-lg"
+                                    disabled={phasesLoading || (!filteredPhases || filteredPhases.length === 0)}
+                                >
+                                    {phasesLoading && <option value="">Cargando fases...</option>}
+                                    {phasesError && <option value="">Error al cargar fases</option>}
+                                    {!phasesLoading && !phasesError && filteredPhases?.map(phase => (
                                         <option key={phase.id} value={phase.id}>
                                             {phase.nombre}
                                         </option>
                                     ))}
-                                    {(!filteredPhases || filteredPhases.length === 0) && <option value="1">Cargando fases...</option>}
+                                    {!phasesLoading && !phasesError && (!filteredPhases || filteredPhases.length === 0) && (
+                                        <option value="">No hay fases disponibles para este canal</option>
+                                    )}
                                 </select>
+                                {phasesError && (
+                                    <p className="text-xs text-red-500 mt-1">{phasesError}</p>
+                                )}
+                                {selectedAccount && (
+                                    <p className="text-xs text-slate-500 mt-1">
+                                        Canal: <span className="font-mono font-bold">{selectedAccount.canal_id || 'DIST_NAC'}</span>
+                                    </p>
+                                )}
                             </div>
                         </div>
 
@@ -394,6 +543,42 @@ export default function CreateOpportunityWizard() {
                                     La cuenta seleccionada no tiene subclasificación configurada.
                                 </p>
                             )}
+                        </div>
+
+                        {/* CITY SELECTION */}
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="text-sm font-medium">Departamento</label>
+                                <select
+                                    {...register("departamento_id")}
+                                    className="w-full p-2 border rounded-lg"
+                                    onChange={(e) => {
+                                        register("departamento_id").onChange(e);
+                                        setValue("ciudad_id", null);
+                                    }}
+                                >
+                                    <option value="">Seleccione Departamento...</option>
+                                    {displayDepartments.map(dep => (
+                                        <option key={dep.id} value={dep.id}>{dep.nombre}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="text-sm font-medium">Ciudad</label>
+                                <select
+                                    {...register("ciudad_id")}
+                                    className="w-full p-2 border rounded-lg disabled:bg-slate-50"
+                                    disabled={!watch("departamento_id")}
+                                >
+                                    <option value="">Seleccione Ciudad...</option>
+                                    {displayCities
+                                        .filter(c => c.departamento_id === Number(watch("departamento_id")))
+                                        .map(city => (
+                                            <option key={city.id} value={city.id}>{city.nombre}</option>
+                                        ))
+                                    }
+                                </select>
+                            </div>
                         </div>
 
                         <div className="grid grid-cols-2 gap-4">

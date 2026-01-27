@@ -8,12 +8,52 @@ import { useSyncStore } from "@/lib/stores/useSyncStore";
 import { useEffect, useState } from "react";
 import { syncEngine } from "@/lib/sync";
 import { usePathname } from "next/navigation";
+import { LoadingOverlay } from "@/components/ui/LoadingOverlay";
 import { cn } from "@/components/ui/utils";
+import { supabase } from "@/lib/supabase";
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
     const setOnline = useSyncStore((state) => state.setOnline);
     const pathname = usePathname();
     const isLoginPage = pathname === '/login';
+
+    // Auth state listener - Redirect to login when signed out (critical for mobile)
+    useEffect(() => {
+        if (isLoginPage) return; // Don't listen on login page
+
+        // Check initial session
+        const checkSession = async () => {
+            try {
+                const { data: { session } } = await supabase.auth.getSession();
+                if (!session && navigator.onLine) {
+                    console.log('[AppLayout] No active session, redirecting to login');
+                    window.location.replace('/login');
+                }
+            } catch (err) {
+                console.warn('[AppLayout] Session check failed (likely offline):', err);
+            }
+        };
+
+        checkSession();
+
+        // Listen for auth state changes (SIGNED_OUT, etc.)
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+            console.log('[AppLayout] Auth state changed:', event);
+
+            if (event === 'SIGNED_OUT') {
+                console.log('[AppLayout] User signed out, redirecting to login');
+                // Clear any cached data
+                localStorage.removeItem('cachedUserId');
+                sessionStorage.removeItem('crm_initialSyncDone');
+                // Redirect to login
+                window.location.replace('/login');
+            }
+        });
+
+        return () => {
+            subscription.unsubscribe();
+        };
+    }, [isLoginPage]);
 
     // Global monitoring of online status
     useEffect(() => {
@@ -33,10 +73,19 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     }, [setOnline]);
 
     // Trigger sync on app initialization (pull + push)
+    // PERF OPTIMIZATION: Only sync once per session to avoid repeated network calls
     useEffect(() => {
         if (!isLoginPage) {
+            // Check if we already synced this session
+            const hasInitialSync = sessionStorage.getItem('crm_initialSyncDone');
+            if (hasInitialSync) {
+                console.log('[AppLayout] Skipping sync - already done this session');
+                return;
+            }
+
             console.log('[AppLayout] Triggering initial sync...');
             syncEngine.triggerSync();
+            sessionStorage.setItem('crm_initialSyncDone', 'true');
         }
     }, [isLoginPage]);
 
@@ -48,6 +97,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
     return (
         <div className="flex h-screen bg-slate-50 overflow-hidden">
+            <LoadingOverlay />
             {/* Sidebar (Desktop) */}
             <Sidebar isCollapsed={isCollapsed} toggleSidebar={() => setIsCollapsed(!isCollapsed)} />
 
