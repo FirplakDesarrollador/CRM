@@ -42,6 +42,28 @@ async function fetchPricing(productId: string, channelId: string, qty: number) {
     }
 }
 
+// Helper to sanitize opportunity data before syncing
+function sanitizeOpportunityForSync(opp: any) {
+    const {
+        ciudad, // Text representation of city from UI
+        fase,   // Joined phase name
+        valor,  // Legacy 'valor' field (replaced by 'amount')
+        items,  // Items are synced separately through CRM_CotizacionItems
+        status, // Legacy 'status' field (replaced by 'estado_id')
+        ...sanitized
+    } = opp;
+
+    // Ensure numeric fields are indeed numbers
+    if (sanitized.amount !== undefined) sanitized.amount = sanitized.amount ? Number(sanitized.amount) : 0;
+    if (sanitized.segmento_id !== undefined) sanitized.segmento_id = sanitized.segmento_id ? Number(sanitized.segmento_id) : null;
+    if (sanitized.departamento_id !== undefined) sanitized.departamento_id = sanitized.departamento_id ? Number(sanitized.departamento_id) : null;
+    if (sanitized.ciudad_id !== undefined) sanitized.ciudad_id = sanitized.ciudad_id ? Number(sanitized.ciudad_id) : null;
+    if (sanitized.estado_id !== undefined) sanitized.estado_id = sanitized.estado_id ? Number(sanitized.estado_id) : 1;
+    if (sanitized.fase_id !== undefined) sanitized.fase_id = sanitized.fase_id ? Number(sanitized.fase_id) : 1;
+
+    return sanitized;
+}
+
 export function useOpportunities() {
     const opportunities = useLiveQuery(() => db.opportunities.toArray());
 
@@ -68,9 +90,8 @@ export function useOpportunities() {
             updated_by: user?.id,
             updated_at: new Date().toISOString()
         };
-
         await db.opportunities.add(newOpp);
-        await syncEngine.queueMutation('CRM_Oportunidades', id, newOpp);
+        await syncEngine.queueMutation('CRM_Oportunidades', id, sanitizeOpportunityForSync(newOpp));
 
         // If items are present, create an initial quote
         if (items && items.length > 0) {
@@ -172,10 +193,10 @@ export function useOpportunities() {
         await db.opportunities.delete(id);
 
         // Include full row data to satisfy NOT NULL constraints on server if it's an upsert-style sync
-        await syncEngine.queueMutation('CRM_Oportunidades', id, {
+        await syncEngine.queueMutation('CRM_Oportunidades', id, sanitizeOpportunityForSync({
             ...current,
             is_deleted: true
-        });
+        }));
     };
 
     const updateOpportunity = async (id: string, updates: any) => {
@@ -206,7 +227,7 @@ export function useOpportunities() {
         await db.opportunities.update(id, updated);
 
         // Send full opportunity data to satisfy NOT NULL constraints on server
-        await syncEngine.queueMutation('CRM_Oportunidades', id, updated);
+        await syncEngine.queueMutation('CRM_Oportunidades', id, sanitizeOpportunityForSync(updated));
 
         // PROPAGATION: If segmento_id changed, update all associated quotes
         if (updates.segmento_id !== undefined) {
@@ -231,7 +252,7 @@ async function performOpportunityUpdate(id: string, updates: any) {
 
     const updated = { ...current, ...updates, updated_at: new Date().toISOString() };
     await db.opportunities.update(id, updated);
-    await syncEngine.queueMutation('CRM_Oportunidades', id, updated);
+    await syncEngine.queueMutation('CRM_Oportunidades', id, sanitizeOpportunityForSync(updated));
 }
 
 
