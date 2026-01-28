@@ -432,6 +432,48 @@ export class SyncEngine {
                 console.error('[Sync] Failed to pull subclassifications:', sErr.message);
             }
 
+            // Pull Activity Classifications
+            try {
+                const { data: actCls, error: actClsError } = await supabase
+                    .from('CRM_Activity_Clasificacion')
+                    .select('*');
+
+                if (actClsError) throw actClsError;
+
+                if (actCls && actCls.length > 0) {
+                    await db.activityClassifications.clear();
+                    await db.activityClassifications.bulkPut(actCls.map((c: any) => ({
+                        id: c.id,
+                        nombre: c.nombre,
+                        tipo_actividad: c.tipo_actividad
+                    })));
+                    console.log(`[Sync] Pulled ${actCls.length} activity classifications.`);
+                }
+            } catch (acErr: any) {
+                console.error('[Sync] Failed to pull activity classifications:', acErr.message);
+            }
+
+            // Pull Activity Subclassifications
+            try {
+                const { data: actSubs, error: actSubsError } = await supabase
+                    .from('CRM_Activity_Subclasificacion')
+                    .select('*');
+
+                if (actSubsError) throw actSubsError;
+
+                if (actSubs && actSubs.length > 0) {
+                    await db.activitySubclassifications.clear();
+                    await db.activitySubclassifications.bulkPut(actSubs.map((s: any) => ({
+                        id: s.id,
+                        nombre: s.nombre,
+                        clasificacion_id: s.clasificacion_id
+                    })));
+                    console.log(`[Sync] Pulled ${actSubs.length} activity subclassifications.`);
+                }
+            } catch (asErr: any) {
+                console.error('[Sync] Failed to pull activity subclassifications:', asErr.message);
+            }
+
             // Pull Segments (CRM_Segmentos)
             try {
                 const { data: segments, error: segmentsError } = await supabase
@@ -681,41 +723,42 @@ export class SyncEngine {
             }
             */
 
-            // PERF OPTIMIZATION: Disable full sync for CRM_Actividades
-            // Activities are loaded on-demand via server-side hook
-            // This dramatically improves app startup time
-            /*
-            const { data: activities, error: activitiesError } = await supabase
-                .from('CRM_Actividades')
-                .select('*')
-                .eq('is_deleted', false);
+            // Pull Activities (CRM_Actividades) - SMART MERGE
+            // Re-enabled to ensure activities persist across browser sessions
+            try {
+                const { data: activities, error: activitiesError } = await supabase
+                    .from('CRM_Actividades')
+                    .select('*')
+                    .eq('is_deleted', false);
 
-            if (activitiesError) throw activitiesError;
+                if (activitiesError) throw activitiesError;
 
-            if (activities && activities.length > 0) {
-                // Smart merge: Skip records with pending changes
-                const pendingActivityIds = new Set(
-                    (await db.outbox
-                        .where('entity_type').equals('CRM_Actividades')
-                        .and(item => item.status === 'PENDING' || item.status === 'SYNCING')
-                        .toArray()
-                    ).map(item => item.entity_id)
-                );
+                if (activities && activities.length > 0) {
+                    // Smart merge: Skip records with pending changes
+                    const pendingActivityIds = new Set(
+                        (await db.outbox
+                            .where('entity_type').equals('CRM_Actividades')
+                            .and(item => item.status === 'PENDING' || item.status === 'SYNCING')
+                            .toArray()
+                        ).map(item => item.entity_id)
+                    );
 
-                let mergedCount = 0;
-                let skippedCount = 0;
+                    let mergedCount = 0;
+                    let skippedCount = 0;
 
-                for (const a of activities) {
-                    if (pendingActivityIds.has(a.id)) {
-                        skippedCount++;
-                        continue;
+                    for (const a of activities) {
+                        if (pendingActivityIds.has(a.id)) {
+                            skippedCount++;
+                            continue;
+                        }
+                        await db.activities.put(a);
+                        mergedCount++;
                     }
-                    await db.activities.put(a);
-                    mergedCount++;
+                    console.log(`[Sync] Merged ${mergedCount} activities (${skippedCount} with pending changes skipped).`);
                 }
-                console.log(`[Sync] Merged ${mergedCount} activities (${skippedCount} with pending changes skipped).`);
+            } catch (actErr: any) {
+                console.error('[Sync] Failed to pull activities:', actErr.message);
             }
-            */
 
             console.log('[Sync] Pull completed successfully.');
         } catch (err: any) {
