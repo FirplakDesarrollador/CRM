@@ -240,6 +240,23 @@ export class SyncEngine {
                 }
             }
         }
+
+        // 3.3 Proactive Fix: Filter out non-existent fields for CRM_Oportunidades
+        // This handles items already in the outbox that contain the invalid 'ciudad' field.
+        if (batches['CRM_Oportunidades']) {
+            const invalidFieldsForOpp = ['ciudad', 'fase', 'valor', 'items'];
+            batches['CRM_Oportunidades'] = batches['CRM_Oportunidades'].filter(update => {
+                if (invalidFieldsForOpp.includes(update.field)) {
+                    console.warn(`[Sync] Filtering out invalid field '${update.field}' from CRM_Oportunidades batch`);
+                    // We delete these from Dexie outbox so they don't keep failing
+                    db.outbox.filter(i => i.entity_id === update.id && i.field_name === update.field && i.entity_type === 'CRM_Oportunidades')
+                        .delete()
+                        .catch(e => console.error("[Sync] Failed to delete filtered item from outbox", e));
+                    return false;
+                }
+                return true;
+            });
+        }
         const sortedTables = Object.entries(batches).sort(([tableA], [tableB]) => {
             const priorityA = TABLE_PRIORITY[tableA] || 99;
             const priorityB = TABLE_PRIORITY[tableB] || 99;
