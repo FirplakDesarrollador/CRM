@@ -1,10 +1,13 @@
 "use client";
 
 import { useForm } from "react-hook-form";
-import { useEffect } from "react";
-import { CalendarClock, ListTodo } from "lucide-react";
+import { useEffect, useMemo } from "react";
+import { CalendarClock, ListTodo, Loader2 } from "lucide-react";
+import { useLiveQuery } from "dexie-react-hooks";
 import { cn } from "@/components/ui/utils";
-import { toInputDate, toInputDateTime, parseColombiaDate } from "@/lib/date-utils";
+import { toInputDate, toInputDateTime } from "@/lib/date-utils";
+import { db, LocalActivityClassification, LocalActivitySubclassification } from "@/lib/db";
+import { syncEngine } from "@/lib/sync";
 
 interface CreateActivityModalProps {
     onClose: () => void;
@@ -14,16 +17,33 @@ interface CreateActivityModalProps {
     initialData?: any;
 }
 
-// Helper removed in favor of @/lib/date-utils
-
 export function CreateActivityModal({ onClose, onSubmit, opportunities, initialOpportunityId, initialData }: CreateActivityModalProps) {
     const isEditing = !!initialData;
 
-    const { register, handleSubmit, watch, setValue } = useForm({
+    // Load Catalogs
+    const classifications = useLiveQuery(() => db.activityClassifications.toArray(), []) || [];
+    const subclassifications = useLiveQuery(() => db.activitySubclassifications.toArray(), []) || [];
+
+    // PROACTIVE SYNC: If catalogs are empty, trigger a pull
+    useEffect(() => {
+        if (classifications.length === 0 && navigator.onLine) {
+            console.log("[CreateActivityModal] Catalogs empty, triggering sync...");
+            syncEngine.triggerSync();
+        }
+    }, [classifications.length]);
+
+    // DEBUG: Log initialData to diagnose classification issue
+    console.log("[CreateActivityModal] initialData received:", initialData);
+    console.log("[CreateActivityModal] clasificacion_id:", initialData?.clasificacion_id, "type:", typeof initialData?.clasificacion_id);
+    console.log("[CreateActivityModal] Available classifications:", classifications.length);
+
+    const { register, handleSubmit, watch, setValue, reset } = useForm({
         defaultValues: {
             asunto: initialData?.asunto || '',
             descripcion: initialData?.descripcion || '',
             tipo_actividad: (initialData?.tipo_actividad || 'EVENTO') as 'TAREA' | 'EVENTO',
+            clasificacion_id: initialData?.clasificacion_id ? String(initialData.clasificacion_id) : "",
+            subclasificacion_id: initialData?.subclasificacion_id ? String(initialData.subclasificacion_id) : "",
             fecha_inicio: initialData?.fecha_inicio
                 ? (initialData.tipo_actividad === 'TAREA' ? toInputDate(initialData.fecha_inicio) : toInputDateTime(initialData.fecha_inicio))
                 : (initialData?.tipo_actividad === 'TAREA' ? toInputDate(new Date()) : toInputDateTime(new Date())),
@@ -35,8 +55,58 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         }
     });
 
+    // Force form reset when initialData changes OR when classifications finish loading
+    // This fixes the timing issue where the select options don't exist yet when form resets
+    useEffect(() => {
+        if (initialData && classifications.length > 0) {
+            console.log("[CreateActivityModal] Resetting form with classifications loaded:", classifications.length);
+            reset({
+                asunto: initialData.asunto || '',
+                descripcion: initialData.descripcion || '',
+                tipo_actividad: (initialData.tipo_actividad || 'EVENTO') as 'TAREA' | 'EVENTO',
+                clasificacion_id: initialData.clasificacion_id ? String(initialData.clasificacion_id) : "",
+                subclasificacion_id: initialData.subclasificacion_id ? String(initialData.subclasificacion_id) : "",
+                fecha_inicio: initialData.fecha_inicio
+                    ? (initialData.tipo_actividad === 'TAREA' ? toInputDate(initialData.fecha_inicio) : toInputDateTime(initialData.fecha_inicio))
+                    : (initialData.tipo_actividad === 'TAREA' ? toInputDate(new Date()) : toInputDateTime(new Date())),
+                fecha_fin: initialData.fecha_fin
+                    ? toInputDateTime(initialData.fecha_fin)
+                    : toInputDateTime(new Date(Date.now() + 3600000)),
+                opportunity_id: initialData.opportunity_id || initialOpportunityId || '',
+                is_completed: !!initialData.is_completed
+            });
+        }
+    }, [initialData, reset, initialOpportunityId, classifications.length]);
+
+    const handleActualSubmit = (data: any) => {
+        console.log("[CreateActivityModal] Raw Submit Data:", data);
+        // Ensure numbers for IDs (or null if empty)
+        const processed = { ...data };
+        processed.clasificacion_id = (data.clasificacion_id && data.clasificacion_id !== "") ? Number(data.clasificacion_id) : null;
+        processed.subclasificacion_id = (data.subclasificacion_id && data.subclasificacion_id !== "") ? Number(data.subclasificacion_id) : null;
+
+        console.log("[CreateActivityModal] Processed Submit Data:", processed);
+        onSubmit(processed);
+    };
+
     const tipo = watch('tipo_actividad');
     const fechaInicio = watch('fecha_inicio');
+    const selectedClasificacionId = watch('clasificacion_id');
+
+    // Filtered Lists
+    const filteredClassifications = useMemo(() => {
+        console.log("[CreateActivityModal] Filtering classifications for type:", tipo);
+        console.log("[CreateActivityModal] All classifications:", classifications.map(c => ({ id: c.id, nombre: c.nombre, tipo: c.tipo_actividad })));
+        const filtered = classifications.filter(c => c.tipo_actividad === tipo);
+        console.log("[CreateActivityModal] Filtered classifications:", filtered.map(c => ({ id: c.id, nombre: c.nombre })));
+        console.log("[CreateActivityModal] Looking for ID:", initialData?.clasificacion_id, "Is it in filtered?", filtered.some(c => c.id === initialData?.clasificacion_id || String(c.id) === String(initialData?.clasificacion_id)));
+        return filtered;
+    }, [classifications, tipo, initialData?.clasificacion_id]);
+
+    const filteredSubclassifications = useMemo(() => {
+        if (!selectedClasificacionId) return [];
+        return subclassifications.filter(s => s.clasificacion_id === Number(selectedClasificacionId));
+    }, [subclassifications, selectedClasificacionId]);
 
     // Auto-set fecha_fin as 1 hour after fecha_inicio for EVENTO
     useEffect(() => {
@@ -63,12 +133,21 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                     <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-2xl">&times;</button>
                 </div>
 
-                <form onSubmit={handleSubmit(onSubmit)} className="p-4 md:p-6 space-y-4 overflow-y-auto flex-1 overscroll-contain pb-6">
+                <form
+                    onSubmit={handleSubmit(handleActualSubmit, (errors) => {
+                        console.error("[CreateActivityModal] Validation Errors:", errors);
+                    })}
+                    className="p-4 md:p-6 space-y-4 overflow-y-auto flex-1 overscroll-contain pb-6"
+                >
                     {/* Activity Type Selector */}
                     <div className="flex bg-slate-100 p-1 rounded-xl">
                         <button
                             type="button"
-                            onClick={() => setValue('tipo_actividad', 'EVENTO')}
+                            onClick={() => {
+                                setValue('tipo_actividad', 'EVENTO');
+                                setValue('clasificacion_id', "");
+                                setValue('subclasificacion_id', "");
+                            }}
                             className={cn(
                                 "flex-1 py-2 text-sm font-bold rounded-lg flex items-center justify-center gap-2 transition-all",
                                 tipo === 'EVENTO' ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
@@ -78,7 +157,11 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                         </button>
                         <button
                             type="button"
-                            onClick={() => setValue('tipo_actividad', 'TAREA')}
+                            onClick={() => {
+                                setValue('tipo_actividad', 'TAREA');
+                                setValue('clasificacion_id', "");
+                                setValue('subclasificacion_id', "");
+                            }}
                             className={cn(
                                 "flex-1 py-2 text-sm font-bold rounded-lg flex items-center justify-center gap-2 transition-all",
                                 tipo === 'TAREA' ? "bg-white text-emerald-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
@@ -106,8 +189,69 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                         </div>
                     )}
 
+                    {/* CLASSIFICATION SELECTORS */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                            <label className="text-xs font-bold text-slate-500 uppercase">
+                                Clasificación <span className="text-red-500">*</span>
+                            </label>
+                            <div className="relative">
+                                <select
+                                    {...register('clasificacion_id', {
+                                        required: "La clasificación es obligatoria",
+                                        onChange: (e) => {
+                                            console.log("[CreateActivityModal] Classification Selected:", e.target.value);
+                                            setValue('subclasificacion_id', "");
+                                        }
+                                    })}
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all appearance-none"
+                                >
+                                    <option value="">{classifications.length === 0 ? 'Sincronizando...' : 'Seleccione...'}</option>
+                                    {filteredClassifications.map(c => (
+                                        <option key={c.id} value={String(c.id)}>{c.nombre}</option>
+                                    ))}
+                                    {/* If current classification is not in filtered list, show it anyway (historical data) */}
+                                    {initialData?.clasificacion_id &&
+                                        !filteredClassifications.some(c => String(c.id) === String(initialData.clasificacion_id)) &&
+                                        classifications.find(c => String(c.id) === String(initialData.clasificacion_id)) && (
+                                            <option
+                                                key={initialData.clasificacion_id}
+                                                value={String(initialData.clasificacion_id)}
+                                                className="text-amber-600"
+                                            >
+                                                {classifications.find(c => String(c.id) === String(initialData.clasificacion_id))?.nombre} (otro tipo)
+                                            </option>
+                                        )}
+                                </select>
+                                {classifications.length === 0 && (
+                                    <div className="absolute right-10 top-1/2 -translate-y-1/2">
+                                        <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Show Subclassification ONLY if the selected classification has options */}
+                        {filteredSubclassifications.length > 0 && (
+                            <div className="space-y-1 animate-in fade-in slide-in-from-left-2 duration-200">
+                                <label className="text-xs font-bold text-slate-500 uppercase">
+                                    Subclasificación <span className="text-red-500">*</span>
+                                </label>
+                                <select
+                                    {...register('subclasificacion_id', { required: "La subclasificación es requerida" })}
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all appearance-none"
+                                >
+                                    <option value="">Seleccione...</option>
+                                    {filteredSubclassifications.map(s => (
+                                        <option key={s.id} value={String(s.id)}>{s.nombre}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
+                    </div>
+
                     <div className="space-y-1">
-                        <label className="text-xs font-bold text-slate-500 uppercase">Asunto</label>
+                        <label className="text-xs font-bold text-slate-500 uppercase">Asunto <span className="text-red-500">*</span></label>
                         <input
                             {...register('asunto', { required: true })}
                             className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
@@ -118,7 +262,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div className="space-y-1">
                             <label className="text-xs font-bold text-slate-500 uppercase">
-                                {tipo === 'TAREA' ? 'Fecha Vencimiento' : 'Fecha Inicio'}
+                                {tipo === 'TAREA' ? 'Fecha Vencimiento' : 'Fecha Inicio'} <span className="text-red-500">*</span>
                             </label>
                             <input
                                 type={tipo === 'TAREA' ? "date" : "datetime-local"}
@@ -173,39 +317,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                             Cancelar
                         </button>
                         <button
-                            type="button"
-                            onClick={handleSubmit((data) => {
-                                // Ensure dates are unambiguous ISO with Z (UTC) for storage
-                                const processed = { ...data };
-
-                                // VALIDATION: Check for past dates
-                                const todayDate = new Date();
-                                const todayISO = toInputDate(todayDate);
-                                const selectedISO = data.fecha_inicio ? data.fecha_inicio.slice(0, 10) : "";
-
-                                if (selectedISO && selectedISO < todayISO) {
-                                    // If strictly before today, allow ONLY if it matches the initial value (preserving existing past records)
-                                    const initialISO = initialData?.fecha_inicio
-                                        ? toInputDate(initialData.fecha_inicio)
-                                        : "";
-
-                                    if (!isEditing || selectedISO !== initialISO) {
-                                        alert("No se puede programar una actividad para una fecha anterior a hoy.");
-                                        return;
-                                    }
-                                }
-
-                                if (data.fecha_inicio) {
-                                    processed.fecha_inicio = new Date(data.fecha_inicio).toISOString();
-                                }
-
-                                if (data.fecha_fin) {
-                                    const selectedEndDate = new Date(data.fecha_fin);
-                                    processed.fecha_fin = selectedEndDate.toISOString();
-                                }
-
-                                onSubmit(processed);
-                            })}
+                            type="submit"
                             className={cn(
                                 "flex-1 text-white px-4 py-3 rounded-xl font-bold shadow-lg transition-colors",
                                 tipo === 'TAREA' ? "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200" : "bg-blue-600 hover:bg-blue-700 shadow-blue-200"

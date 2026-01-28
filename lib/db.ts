@@ -178,10 +178,12 @@ export class CRMFirplakDB extends Dexie {
     segments!: Table<LocalSegmento, number>; // Local table
     departments!: Table<LocalDepartamento, number>;
     cities!: Table<LocalCiudad, number>;
+    activityClassifications!: Table<LocalActivityClassification, number>;
+    activitySubclassifications!: Table<LocalActivitySubclassification, number>;
 
     constructor() {
         super('CRMFirplakDB');
-        this.version(6).stores({ // Bumped version to 6
+        this.version(7).stores({
             outbox: 'id, entity_type, status, field_timestamp',
             fileQueue: 'id, status',
             accounts: 'id, nit, nombre',
@@ -194,7 +196,9 @@ export class CRMFirplakDB extends Dexie {
             subclasificaciones: 'id, canal_id',
             segments: '++id, subclasificacion_id',
             departments: 'id, nombre',
-            cities: 'id, departamento_id, nombre'
+            cities: 'id, departamento_id, nombre',
+            activityClassifications: 'id, tipo_actividad',
+            activitySubclassifications: 'id, clasificacion_id'
         });
     }
 }
@@ -206,11 +210,26 @@ export interface LocalActivity {
     fecha_inicio: string;
     fecha_fin?: string;
     tipo_actividad: 'TAREA' | 'EVENTO';
+    clasificacion_id?: number | null;
+    subclasificacion_id?: number | null;
     is_completed: boolean;
     opportunity_id?: string;
     user_id?: string;
     created_at?: string;
     updated_at?: string;
+    is_deleted?: boolean;
+}
+
+export interface LocalActivityClassification {
+    id: number;
+    nombre: string;
+    tipo_actividad: 'TAREA' | 'EVENTO';
+}
+
+export interface LocalActivitySubclassification {
+    id: number;
+    nombre: string;
+    clasificacion_id: number;
 }
 
 export const db = new CRMFirplakDB();
