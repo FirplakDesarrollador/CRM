@@ -25,6 +25,7 @@ import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { PriceListUploader } from '@/components/config/PriceListUploader';
 import { ConfirmationModal } from '@/components/ui/ConfirmationModal';
 import { ActivityClassificationManager } from '@/components/config/ActivityClassificationManager';
+import { useSearchParams } from 'next/navigation';
 import packageJson from '../../package.json';
 
 const CRM_VERSION = packageJson.version;
@@ -61,7 +62,9 @@ export default function ConfigPage() {
     const router = useRouter();
     const { isSyncing, pendingCount, lastSyncTime, error, isPaused, setPaused } = useSyncStore();
     const { user, role } = useCurrentUser();
+    const searchParams = useSearchParams();
     const [outboxItems, setOutboxItems] = useState<OutboxItem[]>([]);
+    const [msConnected, setMsConnected] = useState<boolean | null>(null);
     const [stats, setStats] = useState<Stats | null>(null);
 
     const [modalConfig, setModalConfig] = useState<ModalConfig>({
@@ -126,6 +129,61 @@ export default function ConfigPage() {
         const interval = setInterval(fetchDebugInfo, 3000);
         return () => clearInterval(interval);
     }, []);
+
+    const checkMicrosoftStatus = async () => {
+        if (!user) return;
+        try {
+            const { data, error } = await supabase
+                .from('CRM_MicrosoftTokens')
+                .select('user_id')
+                .eq('user_id', user.id)
+                .maybeSingle();
+
+            setMsConnected(!!data);
+        } catch (e) {
+            setMsConnected(false);
+        }
+    };
+
+    useEffect(() => {
+        checkMicrosoftStatus();
+    }, [user]);
+
+    useEffect(() => {
+        const syncStatus = searchParams.get('ms_sync');
+        const msError = searchParams.get('ms_error');
+
+        if (syncStatus === 'success') {
+            setModalConfig({
+                isOpen: true,
+                title: "Microsoft Sincronizado",
+                message: "Tu cuenta de Microsoft ha sido vinculada correctamente. Ahora puedes usar Planner y Calendario.",
+                confirmLabel: "Excelente",
+                onConfirm: () => {
+                    setModalConfig(prev => ({ ...prev, isOpen: false }));
+                    router.replace('/configuracion');
+                },
+                variant: 'info'
+            });
+            checkMicrosoftStatus();
+        } else if (msError) {
+            setModalConfig({
+                isOpen: true,
+                title: "Error de Sincronización",
+                message: `No se pudo vincular la cuenta de Microsoft: ${msError}`,
+                confirmLabel: "Cerrar",
+                onConfirm: () => {
+                    setModalConfig(prev => ({ ...prev, isOpen: false }));
+                    router.replace('/configuracion');
+                },
+                variant: 'danger'
+            });
+        }
+    }, [searchParams]);
+
+    const handleMicrosoftSync = () => {
+        window.location.href = '/api/microsoft/login';
+    };
 
     const clearOutbox = async () => {
         setModalConfig({
@@ -202,19 +260,36 @@ export default function ConfigPage() {
     return (
         <div className="p-6 max-w-5xl mx-auto space-y-6">
             {/* Header */}
-            <div className="flex items-center gap-4 mb-8">
-                <div className="bg-slate-900 p-3 rounded-2xl text-white">
-                    <Settings className="w-8 h-8" />
-                </div>
-                <div>
-                    <div className="flex items-center gap-3">
-                        <h1 className="text-3xl font-bold text-slate-900">Configuración</h1>
-                        <span className="px-2.5 py-1 text-xs font-bold bg-slate-100 text-slate-600 rounded-full border border-slate-200">
-                            v{CRM_VERSION}
-                        </span>
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+                <div className="flex items-center gap-4">
+                    <div className="bg-slate-900 p-3 rounded-2xl text-white">
+                        <Settings className="w-8 h-8" />
                     </div>
-                    <p className="text-slate-500 font-medium">Estado del sistema y herrmientas de diagnóstico</p>
+                    <div>
+                        <div className="flex items-center gap-3">
+                            <h1 className="text-3xl font-bold text-slate-900">Configuración</h1>
+                            <span className="px-2.5 py-1 text-xs font-bold bg-slate-100 text-slate-600 rounded-full border border-slate-200">
+                                v{CRM_VERSION}
+                            </span>
+                        </div>
+                        <p className="text-slate-500 font-medium">Estado del sistema y herramientas de diagnóstico</p>
+                    </div>
                 </div>
+
+                <button
+                    onClick={handleMicrosoftSync}
+                    className={cn(
+                        "flex items-center justify-center gap-3 px-6 py-3.5 rounded-2xl text-sm font-bold transition-all shadow-lg active:scale-95",
+                        msConnected
+                            ? "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50"
+                            : "bg-[#00a1f1] text-white hover:bg-[#008ad8] shadow-[#00a1f1]/20"
+                    )}
+                >
+                    <svg className="w-5 h-5" viewBox="0 0 23 23" fill="currentColor">
+                        <path d="M11.4 24H0V12.6h11.4V24zM24 24H12.6V12.6H24V24zM11.4 11.4H0V0h11.4v11.4zM24 11.4H12.6V0H24v11.4z" />
+                    </svg>
+                    {msConnected ? 'Cuenta Microsoft Vinculada' : 'Sincronizar cuenta Microsoft'}
+                </button>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -405,6 +480,52 @@ export default function ConfigPage() {
                             </button>
                             <p className="text-xs text-slate-400 text-center mt-3">Asegúrate de sincronizar antes de salir.</p>
                         </div>
+                    </div>
+                </div>
+
+                {/* Microsoft Integration Card */}
+                <div className="md:col-span-1 bg-white rounded-3xl border border-slate-200 shadow-sm p-6 flex flex-col justify-between">
+                    <div>
+                        <div className="flex items-center gap-2 mb-4">
+                            <Cloud className="w-5 h-5 text-[#00a1f1]" />
+                            <h3 className="font-bold text-slate-900">Integración Microsoft</h3>
+                        </div>
+                        <p className="text-sm text-slate-500 mb-6">
+                            Sincroniza tus tareas con Planner y eventos con Outlook.
+                        </p>
+                    </div>
+
+                    <div className="space-y-4">
+                        <div className={cn(
+                            "p-4 rounded-2xl border flex items-center gap-3",
+                            msConnected === true ? "bg-emerald-50 border-emerald-100" :
+                                msConnected === false ? "bg-slate-50 border-slate-100" :
+                                    "bg-slate-50/50 border-slate-100 animate-pulse"
+                        )}>
+                            <div className={cn(
+                                "w-2 h-2 rounded-full",
+                                msConnected === true ? "bg-emerald-500" : "bg-slate-300"
+                            )} />
+                            <span className="text-sm font-bold text-slate-700">
+                                {msConnected === true ? 'Cuenta Vinculada' :
+                                    msConnected === false ? 'No Conectado' : 'Verificando...'}
+                            </span>
+                        </div>
+
+                        <button
+                            onClick={handleMicrosoftSync}
+                            className={cn(
+                                "w-full flex items-center justify-center gap-2 px-4 py-4 rounded-xl text-sm font-bold transition-all shadow-md",
+                                msConnected
+                                    ? "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50"
+                                    : "bg-[#00a1f1] text-white hover:bg-[#008ad8] shadow-[#00a1f1]/20"
+                            )}
+                        >
+                            <svg className="w-4 h-4" viewBox="0 0 23 23" fill="currentColor">
+                                <path d="M11.4 24H0V12.6h11.4V24zM24 24H12.6V12.6H24V24zM11.4 11.4H0V0h11.4v11.4zM24 11.4H12.6V0H24v11.4z" />
+                            </svg>
+                            {msConnected ? 'Volver a Sincronizar' : 'Sincronizar Microsoft'}
+                        </button>
                     </div>
                 </div>
             </div>
