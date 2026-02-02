@@ -9,15 +9,20 @@ export function parseColombiaDate(dateSource: string | Date | null | undefined):
     if (!dateSource) return null;
     if (dateSource instanceof Date) return isValid(dateSource) ? dateSource : null;
 
-    // If it's strictly YYYY-MM-DD (10 chars), parse manualy as local to avoid UTC shift
+    // If it's strictly YYYY-MM-DD (10 chars), parse manually as local to avoid UTC shift
     if (typeof dateSource === 'string' && dateSource.length === 10 && dateSource.includes('-')) {
         const [year, month, day] = dateSource.split('-').map(Number);
         const date = new Date(year, month - 1, day);
         return isValid(date) ? date : null;
     }
 
-    const date = parseISO(dateSource);
-    return isValid(date) ? date : null;
+    // Try parseISO first (for ISO strings)
+    const isoDate = parseISO(dateSource);
+    if (isValid(isoDate)) return isoDate;
+
+    // Fallback to native Date constructor
+    const nativeDate = new Date(dateSource);
+    return isValid(nativeDate) ? nativeDate : null;
 }
 
 /**
