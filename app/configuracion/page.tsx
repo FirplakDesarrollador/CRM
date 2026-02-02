@@ -24,6 +24,7 @@ import { useConfig } from '@/lib/hooks/useConfig';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { PriceListUploader } from '@/components/config/PriceListUploader';
 import { ConfirmationModal } from '@/components/ui/ConfirmationModal';
+import { ActivityClassificationManager } from '@/components/config/ActivityClassificationManager';
 import packageJson from '../../package.json';
 
 const CRM_VERSION = packageJson.version;
@@ -494,7 +495,12 @@ export default function ConfigPage() {
             )}
 
             {/* Price List Uploader - Admin Only */}
-            {role === 'ADMIN' && <PriceListUploader />}
+            {role === 'ADMIN' && (
+                <>
+                    <PriceListUploader />
+                    <ActivityClassificationManager />
+                </>
+            )}
 
             {/* Goals Configuration - Admin Only */}
             {/* Goals Configuration - Admin Only */}
