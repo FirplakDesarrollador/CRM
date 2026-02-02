@@ -45,3 +45,5 @@ yarn-error.log*
 # Google OAuth credentials (if needed in future)
 credentials.json
 token.json
+
+.env.local
