@@ -8,6 +8,7 @@ import { FileText, Plus, AlertCircle, Check, Trash2, Loader2, Truck, Package, Bu
 import Link from "next/link";
 import { cn } from "@/components/ui/utils";
 import { db } from "@/lib/db";
+import { syncEngine } from "@/lib/sync";
 import { useLiveQuery } from "dexie-react-hooks";
 import { formatColombiaDate, isDateOverdue, toInputDate, parseColombiaDate } from "@/lib/date-utils";
 import {
@@ -841,7 +842,7 @@ function QuotesTab({ opportunityId, currency }: { opportunityId: string, currenc
                                         {q.is_winner && <Check className="w-4 h-4 text-green-600" />}
                                     </div>
                                     <p className="text-xs text-slate-500 mt-1">
-                                        Creada el {formatColombiaDate(q.updated_at || Date.now(), "dd/MM/yyyy")}
+                                        Creada el {formatColombiaDate(q.updated_at || new Date(), "dd/MM/yyyy")}
                                     </p>
                                 </Link>
 
@@ -903,6 +904,18 @@ function ActivitiesTab({ opportunityId }: { opportunityId: string }) {
 
     const sortedActivities = activities?.sort((a, b) => new Date(b.fecha_inicio).getTime() - new Date(a.fecha_inicio).getTime());
 
+    // Catalogs
+    const classifications = useLiveQuery(() => db.activityClassifications.toArray(), []) || [];
+    const subclassifications = useLiveQuery(() => db.activitySubclassifications.toArray(), []) || [];
+
+    // PROACTIVE SYNC: If catalogs are empty, trigger a pull
+    useEffect(() => {
+        if (classifications.length === 0 && navigator.onLine) {
+            console.log("[ActivitiesTab] Catalogs empty, triggering sync...");
+            syncEngine.triggerSync();
+        }
+    }, [classifications.length]);
+
     return (
         <div className="space-y-4">
             <div className="flex justify-between items-center bg-blue-50 p-4 rounded-lg border border-blue-100">
@@ -931,6 +944,10 @@ function ActivitiesTab({ opportunityId }: { opportunityId: string }) {
                 <div className="grid gap-4">
                     {sortedActivities.map((act) => {
                         const isOverdue = isDateOverdue(act.fecha_inicio) && !act.is_completed;
+
+                        // Resolve Names (Robust matching using String conversion for type-safety)
+                        const clsName = classifications.find(c => String(c.id) === String(act.clasificacion_id))?.nombre;
+                        const subName = subclassifications.find(s => String(s.id) === String(act.subclasificacion_id))?.nombre;
 
                         return (
                             <div
@@ -967,13 +984,25 @@ function ActivitiesTab({ opportunityId }: { opportunityId: string }) {
                                         )}
                                     </button>
                                     <div className="flex-1 min-w-0">
-                                        <div className="flex justify-between items-start">
-                                            <h4 className={cn(
-                                                "font-bold text-lg",
-                                                act.is_completed ? "text-slate-500 line-through" : isOverdue ? "text-red-700" : "text-slate-900"
-                                            )}>
-                                                {act.asunto}
-                                            </h4>
+                                        <div className="flex flex-col sm:flex-row justify-between items-start gap-2">
+                                            <div>
+                                                <h4 className={cn(
+                                                    "font-bold text-lg",
+                                                    act.is_completed ? "text-slate-500 line-through" : isOverdue ? "text-red-700" : "text-slate-900"
+                                                )}>
+                                                    {act.asunto}
+                                                </h4>
+                                                {(clsName || subName) && (
+                                                    <div className="flex flex-wrap gap-1 mt-1">
+                                                        {clsName && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{clsName}</span>}
+                                                        {subName && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200">{subName}</span>}
+                                                    </div>
+                                                )}
+                                                {/* DEBUG INDICATOR */}
+                                                {act.clasificacion_id && !clsName && (
+                                                    <div className="text-[10px] text-red-500 font-bold mt-1">Error L: {act.clasificacion_id}</div>
+                                                )}
+                                            </div>
                                             {act.tipo_actividad === 'EVENTO' ? (
                                                 <div className={cn(
                                                     "flex items-center gap-2 text-xs font-medium px-2 py-1 rounded-lg",
@@ -1010,11 +1039,12 @@ function ActivitiesTab({ opportunityId }: { opportunityId: string }) {
                         setIsModalOpen(false);
                         setSelectedActivity(null);
                     }}
-                    onSubmit={(data: any) => {
+                    onSubmit={async (data: any) => {
+                        console.log("[ActivitiesTab] Modal Submitted Data:", data);
                         if (selectedActivity) {
-                            updateActivity(selectedActivity.id, data);
+                            await updateActivity(selectedActivity.id, data);
                         } else {
-                            createActivity(data);
+                            await createActivity(data);
                         }
                         setIsModalOpen(false);
                         setSelectedActivity(null);

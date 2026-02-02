@@ -13,7 +13,8 @@ import {
     AlertCircle,
     CheckCircle2,
     HardDrive,
-    LogOut
+    LogOut,
+    Target
 } from 'lucide-react';
 import { useState, useEffect, Dispatch, SetStateAction } from 'react';
 import { useRouter } from 'next/navigation';
@@ -23,6 +24,7 @@ import { useConfig } from '@/lib/hooks/useConfig';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { PriceListUploader } from '@/components/config/PriceListUploader';
 import { ConfirmationModal } from '@/components/ui/ConfirmationModal';
+import { ActivityClassificationManager } from '@/components/config/ActivityClassificationManager';
 import packageJson from '../../package.json';
 
 const CRM_VERSION = packageJson.version;
@@ -493,7 +495,35 @@ export default function ConfigPage() {
             )}
 
             {/* Price List Uploader - Admin Only */}
-            {role === 'ADMIN' && <PriceListUploader />}
+            {role === 'ADMIN' && (
+                <>
+                    <PriceListUploader />
+                    <ActivityClassificationManager />
+                </>
+            )}
+
+            {/* Goals Configuration - Admin Only */}
+            {/* Goals Configuration - Admin Only */}
+            {role === 'ADMIN' && (
+                <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="flex items-center gap-4">
+                        <div className="bg-indigo-100 p-3 rounded-2xl text-indigo-600">
+                            <Target className="w-6 h-6" />
+                        </div>
+                        <div>
+                            <h3 className="font-bold text-slate-900 text-lg">Metas y Objetivos</h3>
+                            <p className="text-sm text-slate-500">Configurar y asignar metas comerciales a los usuarios</p>
+                        </div>
+                    </div>
+                    <button
+                        onClick={() => router.push('/configuracion/metas')}
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-xl text-sm font-bold shadow-md shadow-indigo-100 transition-all flex items-center justify-center gap-2"
+                    >
+                        <Target className="w-4 h-4" />
+                        Configurar Metas
+                    </button>
+                </div>
+            )}
 
             <AdminSettings setModalConfig={setModalConfig} />
 
@@ -507,6 +537,8 @@ export default function ConfigPage() {
                 variant={modalConfig.variant}
                 isLoading={modalConfig.isLoading}
             />
+
+
         </div>
     );
 }

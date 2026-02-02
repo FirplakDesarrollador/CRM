@@ -38,3 +38,10 @@ yarn-error.log*
 
 # typescript
 *.tsbuildinfo
+
+# Agent Architecture - Temporary files
+/.tmp/
+
+# Google OAuth credentials (if needed in future)
+credentials.json
+token.json

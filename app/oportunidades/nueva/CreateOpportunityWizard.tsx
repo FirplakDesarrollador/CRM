@@ -219,19 +219,21 @@ export default function CreateOpportunityWizard() {
     const selectedAccountId = watch("account_id");
 
     const filteredPhases = useLiveQuery(async () => {
-        if (!selectedAccountId) {
+        if (!selectedAccountId && !selectedAccount) {
             console.log('[Phases] No account selected yet');
             return [];
         }
 
-        const acc = await db.accounts.get(selectedAccountId);
-        if (!acc) {
-            console.warn('[Phases] Account not found in local DB:', selectedAccountId);
-            return [];
+        // Try to get channel from selectedAccount state first
+        let channelId = selectedAccount?.canal_id;
+
+        // Fallback to local DB lookup if state is missing canal_id (unlikely)
+        if (!channelId) {
+            const acc = await db.accounts.get(selectedAccountId);
+            channelId = acc?.canal_id || 'DIST_NAC';
         }
 
-        const channelId = acc.canal_id || 'DIST_NAC';
-        console.log('[Phases] Selected account canal_id:', channelId, 'Account:', acc.nombre);
+        console.log('[Phases] Filtering phases for canal_id:', channelId, 'Account:', selectedAccount?.nombre || selectedAccountId);
 
         const phases = await db.phases.where('canal_id').equals(channelId).sortBy('orden');
         console.log('[Phases] Filtered phases count:', phases.length, 'for channel:', channelId);
@@ -241,7 +243,7 @@ export default function CreateOpportunityWizard() {
         }
 
         return phases;
-    }, [selectedAccountId]);
+    }, [selectedAccountId, selectedAccount]);
 
     // Auto-seleccionar primera fase y MONEDA según canal
     useEffect(() => {
