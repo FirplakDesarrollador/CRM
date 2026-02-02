@@ -9,6 +9,10 @@ const nextConfig = {
         appIsrStatus: false,
         buildActivity: false,
     },
+    // Forzado de Webpack para compatibilidad con PWA
+    webpack: (config) => {
+        return config;
+    },
 };
 
 const withPWA = withPWAInit({
