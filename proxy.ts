@@ -28,7 +28,7 @@ function hasLocalSession(request: NextRequest): boolean {
     return hasAuthCookie;
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
     let response = NextResponse.next({
         request: {
             headers: request.headers,
