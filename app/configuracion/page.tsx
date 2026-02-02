@@ -16,7 +16,7 @@ import {
     LogOut,
     Target
 } from 'lucide-react';
-import { useState, useEffect, Dispatch, SetStateAction } from 'react';
+import { useState, useEffect, Dispatch, SetStateAction, Suspense } from 'react';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/components/ui/utils';
 import { supabase } from '@/lib/supabase';
@@ -58,7 +58,7 @@ interface ModalConfig {
     isLoading?: boolean;
 }
 
-export default function ConfigPage() {
+function ConfigPageContent() {
     const router = useRouter();
     const { isSyncing, pendingCount, lastSyncTime, error, isPaused, setPaused } = useSyncStore();
     const { user, role } = useCurrentUser();
@@ -783,5 +783,20 @@ function AdminSettings({ setModalConfig }: { setModalConfig: Dispatch<SetStateAc
                 </button>
             </div>
         </div>
+    );
+}
+
+export default function ConfigPage() {
+    return (
+        <Suspense fallback={
+            <div className="flex items-center justify-center min-h-screen bg-slate-50">
+                <div className="flex flex-col items-center gap-4">
+                    <div className="w-10 h-10 border-4 border-[#254153] border-t-transparent rounded-full animate-spin"></div>
+                    <p className="text-slate-500 font-medium">Cargando configuración...</p>
+                </div>
+            </div>
+        }>
+            <ConfigPageContent />
+        </Suspense>
     );
 }
