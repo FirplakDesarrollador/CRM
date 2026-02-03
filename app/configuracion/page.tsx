@@ -61,7 +61,7 @@ interface ModalConfig {
 function ConfigPageContent() {
     const router = useRouter();
     const { isSyncing, pendingCount, lastSyncTime, error, isPaused, setPaused } = useSyncStore();
-    const { user, role } = useCurrentUser();
+    const { user, role, realRole, viewMode, setViewMode } = useCurrentUser();
     const searchParams = useSearchParams();
     const [outboxItems, setOutboxItems] = useState<OutboxItem[]>([]);
     const [msConnected, setMsConnected] = useState<boolean | null>(null);
@@ -80,6 +80,9 @@ function ConfigPageContent() {
         // Clear ALL local data FIRST
         localStorage.removeItem('cachedUserId');
         sessionStorage.removeItem('crm_initialSyncDone');
+
+        // Also clear view mode
+        localStorage.removeItem('crm_view_mode');
 
         // Clear Supabase cookies (critical for mobile)
         document.cookie.split(';').forEach(cookie => {
@@ -276,21 +279,8 @@ function ConfigPageContent() {
                     </div>
                 </div>
 
-                <button
-                    onClick={handleMicrosoftSync}
-                    className={cn(
-                        "flex items-center justify-center gap-3 px-6 py-3.5 rounded-2xl text-sm font-bold transition-all shadow-lg active:scale-95",
-                        msConnected
-                            ? "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50"
-                            : "bg-[#00a1f1] text-white hover:bg-[#008ad8] shadow-[#00a1f1]/20"
-                    )}
-                >
-                    <svg className="w-5 h-5" viewBox="0 0 23 23" fill="currentColor">
-                        <path d="M11.4 24H0V12.6h11.4V24zM24 24H12.6V12.6H24V24zM11.4 11.4H0V0h11.4v11.4zM24 11.4H12.6V0H24v11.4z" />
-                    </svg>
-                    {msConnected ? 'Cuenta Microsoft Vinculada' : 'Sincronizar cuenta Microsoft'}
-                </button>
             </div>
+
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 {/* Sync Status Card */}
@@ -464,6 +454,43 @@ function ConfigPageContent() {
                                     </span>
                                 </div>
                             </div>
+
+                            {/* View Mode Toggle for Admins */}
+                            {realRole === 'ADMIN' && (
+                                <div className="pt-3 border-t border-slate-200">
+                                    <label className="text-xs font-bold text-slate-500 uppercase block mb-2">Modo de Vista</label>
+                                    <div className="flex bg-slate-100 p-1 rounded-xl">
+                                        <button
+                                            onClick={() => setViewMode(null)}
+                                            className={cn(
+                                                "flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all",
+                                                !viewMode || viewMode === 'ADMIN'
+                                                    ? "bg-white text-slate-900 shadow-sm"
+                                                    : "text-slate-500 hover:text-slate-700"
+                                            )}
+                                        >
+                                            Administrador
+                                        </button>
+                                        <button
+                                            onClick={() => setViewMode('VENDEDOR')}
+                                            className={cn(
+                                                "flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all",
+                                                viewMode === 'VENDEDOR'
+                                                    ? "bg-white text-slate-900 shadow-sm"
+                                                    : "text-slate-500 hover:text-slate-700"
+                                            )}
+                                        >
+                                            Vendedor
+                                        </button>
+                                    </div>
+                                    <p className="text-[10px] text-slate-400 mt-2">
+                                        {viewMode === 'VENDEDOR'
+                                            ? 'Viendo solo tus datos personales (Simulación).'
+                                            : 'Viendo todos los datos del sistema.'}
+                                    </p>
+                                </div>
+                            )}
+
                             <div className="text-xs text-slate-400 pt-2 border-t border-slate-200">
                                 Sesión activa desde: {new Date().toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' })}
                             </div>

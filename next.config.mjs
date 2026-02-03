@@ -9,6 +9,8 @@ const nextConfig = {
         appIsrStatus: false,
         buildActivity: false,
     },
+    // Turbopack config (Next.js 16 default)
+    turbopack: {},
     // Forzado de Webpack para compatibilidad con PWA
     webpack: (config) => {
         return config;

@@ -29,7 +29,28 @@ export function useAccounts() {
         };
         await db.accounts.add(newAccount as LocalCuenta);
         await syncEngine.queueMutation('CRM_Cuentas', id, sanitizedData);
+
+        // AUTO-CREATE CONTACT FOR 'PROPIO' CHANNEL
+        if (sanitizedData.canal_id === 'PROPIO') {
+            const contactId = crypto.randomUUID();
+            const contactData = {
+                id: contactId,
+                account_id: id,
+                nombre: sanitizedData.nombre || 'Cliente',
+                cargo: 'Cliente final',
+                telefono: sanitizedData.telefono || null,
+                email: (sanitizedData as any).email || null,
+                es_principal: true,
+                created_by: user?.id,
+                updated_by: user?.id,
+                updated_at: new Date().toISOString()
+            };
+            await db.contacts.add(contactData as any);
+            await syncEngine.queueMutation('CRM_Contactos', contactId, contactData);
+            console.log('[useAccounts] Auto-created contact for PROPIO account:', contactId);
+        }
     };
+
 
     const updateAccount = async (id: string, updates: Partial<LocalCuenta>) => {
         console.log('[useAccounts] DEBUG - updateAccount called with:', { id, updates });
