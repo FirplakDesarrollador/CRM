@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Upload, FileSpreadsheet, AlertCircle, CheckCircle, Loader2, X } from 'lucide-react';
-import * as XLSX from 'xlsx';
+
 import { cn } from '@/components/ui/utils';
 
 export function PriceListUploader() {
@@ -27,6 +27,9 @@ export function PriceListUploader() {
 
         reader.onload = async (evt) => {
             try {
+                // Dynamically import xlsx only when needed
+                const XLSX = await import('xlsx');
+
                 const bstr = evt.target?.result;
                 const workbook = XLSX.read(bstr, { type: 'binary' });
                 const sheetName = workbook.SheetNames[0];
