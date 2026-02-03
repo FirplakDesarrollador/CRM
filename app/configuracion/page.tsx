@@ -439,7 +439,7 @@ function ConfigPageContent() {
                         {/* User Info */}
                         <div className="bg-slate-50 rounded-2xl p-5 border border-slate-100 space-y-4">
                             <div className="flex items-center gap-4">
-                                <div className="w-14 h-14 bg-gradient-to-br from-blue-600 to-cyan-500 rounded-2xl flex items-center justify-center text-xl font-bold text-white shadow-md">
+                                <div className="w-14 h-14 bg-linear-to-br from-blue-600 to-cyan-500 rounded-2xl flex items-center justify-center text-xl font-bold text-white shadow-md">
                                     {user?.email?.substring(0, 2).toUpperCase() || '??'}
                                 </div>
                                 <div className="flex-1 min-w-0">
