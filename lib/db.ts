@@ -125,6 +125,7 @@ export interface LocalFase {
     orden: number;
     is_active: boolean;
     canal_id: string;
+    probability?: number;
 }
 
 export interface LocalSubclasificacion {
@@ -159,6 +160,7 @@ export interface LocalOportunidad {
     departamento_id?: number | null;
     created_at?: string;
     updated_at?: string;
+    probability?: number; // New field
 }
 
 export class CRMFirplakDB extends Dexie {

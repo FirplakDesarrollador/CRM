@@ -193,6 +193,13 @@ export default function CreateOpportunityWizard() {
                 setValue("account_id", acc.id);
                 setSelectedAccount(acc);
                 setAccountSearchTerm(acc.nombre);
+                // Inherit location from account
+                if (acc.departamento_id) {
+                    setValue("departamento_id", Number(acc.departamento_id));
+                }
+                if (acc.ciudad_id) {
+                    setValue("ciudad_id", Number(acc.ciudad_id));
+                }
                 setStep(1); // Advance to "Datos del Negocio"
             }
         };
@@ -213,6 +220,14 @@ export default function CreateOpportunityWizard() {
         setSelectedAccount(acc);
         setAccountSearchTerm(acc.nombre);
         setShowAccountDropdown(false);
+
+        // Inherit location from account
+        if (acc.departamento_id) {
+            setValue("departamento_id", Number(acc.departamento_id));
+        }
+        if (acc.ciudad_id) {
+            setValue("ciudad_id", Number(acc.ciudad_id));
+        }
     };
 
     // Obtener fases según canal de la cuenta

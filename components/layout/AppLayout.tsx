@@ -26,7 +26,6 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             try {
                 const { data: { session } } = await supabase.auth.getSession();
                 if (!session && navigator.onLine) {
-                    console.log('[AppLayout] No active session, redirecting to login');
                     window.location.replace('/login');
                 }
             } catch (err) {
@@ -38,10 +37,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
         // Listen for auth state changes (SIGNED_OUT, etc.)
         const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-            console.log('[AppLayout] Auth state changed:', event);
 
             if (event === 'SIGNED_OUT') {
-                console.log('[AppLayout] User signed out, redirecting to login');
                 // Clear any cached data
                 localStorage.removeItem('cachedUserId');
                 sessionStorage.removeItem('crm_initialSyncDone');
@@ -79,11 +76,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             // Check if we already synced this session
             const hasInitialSync = sessionStorage.getItem('crm_initialSyncDone');
             if (hasInitialSync) {
-                console.log('[AppLayout] Skipping sync - already done this session');
                 return;
             }
 
-            console.log('[AppLayout] Triggering initial sync...');
             syncEngine.triggerSync();
             sessionStorage.setItem('crm_initialSyncDone', 'true');
         }

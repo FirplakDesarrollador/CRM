@@ -13,13 +13,24 @@ export function ContactImportButton({ onContactImported }: ContactImportButtonPr
     const [showModal, setShowModal] = useState(false);
 
     const handleClick = async () => {
-        if (isNativeSupported) {
+        // Feature detection + UA check for strict Android behavior (Direct Open)
+        // For iOS/others: Open modal, but offer Native option if supported.
+        const isAndroid = /Android/i.test(navigator.userAgent);
+
+        if (isNativeSupported && isAndroid) {
             const contact = await triggerNativeImport();
             if (contact) {
                 onContactImported(contact);
             }
         } else {
             setShowModal(true);
+        }
+    };
+
+    const handleNativeFromModal = async () => {
+        const contact = await triggerNativeImport();
+        if (contact) {
+            onContactImported(contact);
         }
     };
 
@@ -39,6 +50,8 @@ export function ContactImportButton({ onContactImported }: ContactImportButtonPr
                 isOpen={showModal}
                 onClose={() => setShowModal(false)}
                 onImport={onContactImported}
+                showNativeOption={isNativeSupported} // Show native button in modal if supported (e.g. iOS)
+                onNativeClick={handleNativeFromModal}
             />
         </>
     );

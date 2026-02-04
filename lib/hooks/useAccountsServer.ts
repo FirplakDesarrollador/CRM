@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { syncEngine } from '@/lib/sync';
 
@@ -32,6 +32,8 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
     const [page, setPage] = useState<number>(1);
     const [hasMore, setHasMore] = useState<boolean>(true);
 
+    const pageRef = useRef(1);
+
     // Filters
     const [searchTerm, setSearchTerm] = useState<string>("");
     const [assignedUserId, setAssignedUserId] = useState<string | null>(null);
@@ -49,7 +51,7 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
         setLoading(true);
         try {
             // Calculate range
-            const currentPage = isLoadMore ? page + 1 : 1;
+            const currentPage = isLoadMore ? pageRef.current + 1 : 1;
             const from = (currentPage - 1) * pageSize;
             const to = from + pageSize - 1;
 
@@ -109,9 +111,11 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                     return [...prev, ...newItems];
                 });
                 setPage(currentPage);
+                pageRef.current = currentPage;
             } else {
                 setData(flattenedResults as any);
                 setPage(1);
+                pageRef.current = 1;
             }
 
             if (totalCount !== null) {
@@ -124,13 +128,13 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
         } finally {
             setLoading(false);
         }
-    }, [currentUserId, pageSize, searchTerm, assignedUserId, page]);
+    }, [currentUserId, pageSize, searchTerm, assignedUserId]);
 
     // Initial Fetch & Filter Fetch
     useEffect(() => {
         // Reset page when filters change
         fetchAccounts(false);
-    }, [searchTerm, assignedUserId, fetchAccounts]); // Added fetchAccounts here
+    }, [fetchAccounts]);
 
     const loadMore = () => {
         if (!loading && hasMore) {
