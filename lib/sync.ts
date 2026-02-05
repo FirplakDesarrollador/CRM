@@ -161,21 +161,9 @@ export class SyncEngine {
                     }
 
                     // 2. Fix Mandatory Fields for Activities (asunto)
-                    if (table === 'CRM_Actividades') {
-                        const asuntoEntry = batches[table].find(u => u.id === id && u.field === 'asunto');
-                        if (!asuntoEntry || !asuntoEntry.value) {
-                            if (asuntoEntry) {
-                                asuntoEntry.value = 'Nueva Actividad (Sync Repair)';
-                            } else {
-                                batches[table].push({
-                                    id: id,
-                                    field: 'asunto',
-                                    value: 'Nueva Actividad (Sync Repair)',
-                                    ts: now
-                                });
-                            }
-                        }
-                    }
+                    // REMOVED: This logic was too aggressive and overwriting valid activity names 
+                    // when they weren't present in the update batch. Relying on UI validation.
+
                 }
             }
         }
