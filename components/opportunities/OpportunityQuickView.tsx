@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
-import { X, Save, AlertCircle, CheckCircle2, TrendingUp, Calendar, Hash } from "lucide-react";
+import { X, Save, AlertCircle, CheckCircle2, TrendingUp, Calendar, Hash, Percent } from "lucide-react";
 import { cn } from "@/components/ui/utils";
+import { ProbabilityDonut } from "@/components/ui/ProbabilityDonut";
 
 interface OpportunityQuickViewProps {
     opportunityId: string;
@@ -32,16 +33,22 @@ export function OpportunityQuickView({ opportunityId, isOpen, onClose, onUpdate 
         setIsLoading(true);
         setError(null);
         try {
-            const { data, error } = await supabase
+            const { data: opp, error } = await supabase
                 .from('CRM_Oportunidades')
-                .select('*')
+                .select(`
+                    *,
+                    fase_detail:CRM_FasesOportunidad(probability)
+                `)
                 .eq('id', opportunityId)
                 .single();
 
             if (error) throw error;
-            setOpportunity(data);
-            setStatusId(data.estado_id);
-            setPhaseId(data.fase_id);
+
+            // Map the probability from the joined phase if the opportunity probability is missing/zero
+            const probability = opp.probability || (opp.fase_detail as any)?.probability || 0;
+            setOpportunity({ ...opp, probability });
+            setStatusId(opp.estado_id);
+            setPhaseId(opp.fase_id);
 
         } catch (err: any) {
             console.error("Error fetching opportunity:", err);
@@ -79,7 +86,7 @@ export function OpportunityQuickView({ opportunityId, isOpen, onClose, onUpdate 
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="bg-white rounded-3xl shadow-xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh]">
                 <div className="p-6 border-b border-slate-100 flex justify-between items-start bg-slate-50">
                     <div>
@@ -126,6 +133,24 @@ export function OpportunityQuickView({ opportunityId, isOpen, onClose, onUpdate 
                                         {opportunity?.fecha_cierre_estimada || 'Sin Fecha'}
                                     </p>
                                 </div>
+                            </div>
+
+                            {/* Probability */}
+                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 flex items-center justify-between mb-6">
+                                <div>
+                                    <div className="flex items-center gap-2 text-slate-500 mb-1">
+                                        <Percent className="w-4 h-4" />
+                                        <span className="text-sm font-bold">Probabilidad de Éxito</span>
+                                    </div>
+                                    <p className="text-xs text-slate-400 max-w-[150px]">
+                                        Calculado automáticamente según la etapa del proceso
+                                    </p>
+                                </div>
+                                <ProbabilityDonut
+                                    percentage={opportunity?.probability || 0}
+                                    size={64}
+                                    strokeWidth={6}
+                                />
                             </div>
 
                             {/* Status Edit */}

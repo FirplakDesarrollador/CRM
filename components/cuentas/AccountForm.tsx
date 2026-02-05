@@ -23,6 +23,7 @@ const accountSchema = z.object({
     canal_id: z.string().min(1, "Canal de venta requerido"),
     subclasificacion_id: z.string().optional().nullable(), // Form uses string, convert to number on submit
     telefono: z.string().nullable().optional(),
+    email: z.string().email("Email inválido").nullable().optional().or(z.literal("")),
     direccion: z.string().nullable().optional(),
     departamento_id: z.string().nullable().optional(),
     ciudad_id: z.string().nullable().optional(),
@@ -150,6 +151,7 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             canal_id: account?.canal_id || "DIST_NAC",
             subclasificacion_id: (account?.subclasificacion_id !== undefined && account?.subclasificacion_id !== null) ? String(account.subclasificacion_id) : "",
             telefono: account?.telefono || "",
+            email: (account as any)?.email || "",
             direccion: account?.direccion || "",
             departamento_id: account?.departamento_id ? String(account.departamento_id) : "",
             ciudad_id: account?.ciudad_id ? String(account.ciudad_id) : "",
@@ -171,6 +173,7 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                 canal_id: account.canal_id || "DIST_NAC",
                 subclasificacion_id: (account.subclasificacion_id !== undefined && account.subclasificacion_id !== null) ? String(account.subclasificacion_id) : "",
                 telefono: account.telefono || "",
+                email: (account as any)?.email || "",
                 direccion: account.direccion || "",
                 departamento_id: account.departamento_id ? String(account.departamento_id) : "",
                 ciudad_id: account.ciudad_id ? String(account.ciudad_id) : "",
@@ -266,6 +269,7 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                 canal_id: data.canal_id,
                 subclasificacion_id: data.subclasificacion_id ? Number(data.subclasificacion_id) : null,
                 telefono: data.telefono || null,
+                email: data.email || null,
                 direccion: data.direccion || null,
                 departamento_id: data.departamento_id ? Number(data.departamento_id) : null,
                 ciudad_id: data.ciudad_id ? Number(data.ciudad_id) : null,
@@ -567,6 +571,14 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                         <div>
                             <label className="text-sm font-medium">Dirección</label>
                             <input {...register("direccion")} className="w-full border p-2 rounded" />
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="text-sm font-medium">Email</label>
+                            <input {...register("email")} type="email" className="w-full border p-2 rounded" placeholder="correo@ejemplo.com" />
+                            {errors.email && <span className="text-red-500 text-xs">{errors.email.message}</span>}
                         </div>
                     </div>
 

@@ -15,6 +15,9 @@ const nextConfig = {
     webpack: (config) => {
         return config;
     },
+    compiler: {
+        removeConsole: process.env.NODE_ENV === "production",
+    },
 };
 
 const withPWA = withPWAInit({

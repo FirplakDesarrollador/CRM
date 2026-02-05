@@ -7,9 +7,11 @@ interface VCardImportModalProps {
     isOpen: boolean;
     onClose: () => void;
     onImport: (contact: ParsedContact) => void;
+    showNativeOption?: boolean;
+    onNativeClick?: () => void;
 }
 
-export function VCardImportModal({ isOpen, onClose, onImport }: VCardImportModalProps) {
+export function VCardImportModal({ isOpen, onClose, onImport, showNativeOption, onNativeClick }: VCardImportModalProps) {
     const { parseVCardFile, error: hookError } = useContactImport();
     const [dragActive, setDragActive] = useState(false);
     const [localError, setLocalError] = useState<string | null>(null);
@@ -65,19 +67,47 @@ export function VCardImportModal({ isOpen, onClose, onImport }: VCardImportModal
         inputRef.current?.click();
     };
 
+    const handleNativeClick = () => {
+        if (onNativeClick) {
+            onNativeClick();
+            onClose();
+        }
+    };
+
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
             <div className="bg-white dark:bg-slate-900 rounded-lg shadow-xl w-full max-w-md border border-slate-200 dark:border-slate-800">
                 <div className="flex justify-between items-center p-4 border-b dark:border-slate-800">
-                    <h3 className="text-lg font-semibold text-slate-800 dark:text-white">Importar Contacto (vCard)</h3>
+                    <h3 className="text-lg font-semibold text-slate-800 dark:text-white">Importar Contacto</h3>
                     <button onClick={onClose} className="text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200">
                         <X className="w-5 h-5" />
                     </button>
                 </div>
 
-                <div className="p-6">
+                <div className="p-6 space-y-4">
+                    {showNativeOption && (
+                        <>
+                            <button
+                                onClick={handleNativeClick}
+                                className="w-full flex items-center justify-center gap-2 p-3 bg-blue-50 text-blue-700 rounded-lg border border-blue-200 hover:bg-blue-100 transition-colors dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-800"
+                            >
+                                {/* We assume Smartphone icon is imported or we can reuse/add it. But let's check imports first. 
+                                   Wait, Smartphone is NOT imported in this file. It is in the parent. Let's stick to text or add import if needed.
+                                   Actually, let's keep it simple or fix imports later if strictly needed, but better to add proper import now.
+                                 */}
+                                <span className="font-semibold">Seleccionar desde Contactos (Nativo)</span>
+                            </button>
+
+                            <div className="relative flex items-center py-2">
+                                <div className="grow border-t border-slate-200 dark:border-slate-700"></div>
+                                <span className="shrink-0 mx-4 text-slate-400 text-sm">O sube un archivo</span>
+                                <div className="grow border-t border-slate-200 dark:border-slate-700"></div>
+                            </div>
+                        </>
+                    )}
+
                     <div
-                        className={`flex flex-col items-center justify-center w-full h-48 border-2 border-dashed rounded-lg cursor-pointer transition-colors
+                        className={`flex flex-col items-center justify-center w-full h-40 border-2 border-dashed rounded-lg cursor-pointer transition-colors
                             ${dragActive ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800'}`}
                         onDragEnter={handleDrag}
                         onDragLeave={handleDrag}

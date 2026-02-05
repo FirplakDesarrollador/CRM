@@ -8,6 +8,7 @@ import { FileText, Plus, AlertCircle, Check, Trash2, Loader2, Truck, Package, Bu
 import Link from "next/link";
 import { cn } from "@/components/ui/utils";
 import { db } from "@/lib/db";
+import { ProbabilityDonut } from "@/components/ui/ProbabilityDonut";
 import { syncEngine } from "@/lib/sync";
 import { useLiveQuery } from "dexie-react-hooks";
 import { formatColombiaDate, isDateOverdue, toInputDate, parseColombiaDate } from "@/lib/date-utils";
@@ -398,6 +399,19 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                     </div>
 
                     <div className="space-y-4 flex-1">
+                        {/* Probability Donut - Added */}
+                        <div className="flex items-center justify-between bg-slate-50 p-4 rounded-xl border border-slate-100 mb-4">
+                            <div>
+                                <h4 className="font-bold text-slate-700 text-sm">Probabilidad de Éxito</h4>
+                                <p className="text-xs text-slate-400 mt-1">Calculado según fase actual</p>
+                            </div>
+                            <ProbabilityDonut
+                                percentage={opportunity?.probability || (opportunity?.fase_id ? phases?.find(p => p.id === opportunity.fase_id)?.probability : 0) || 0}
+                                size={64}
+                                strokeWidth={6}
+                            />
+                        </div>
+
                         <div>
                             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
                                 Valor de la Oportunidad (Importe)
