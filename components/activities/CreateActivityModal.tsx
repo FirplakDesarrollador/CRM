@@ -1,13 +1,15 @@
 "use client";
 
 import { useForm } from "react-hook-form";
-import { useEffect, useMemo } from "react";
-import { CalendarClock, ListTodo, Loader2 } from "lucide-react";
+import { CalendarClock, ListTodo, Loader2, Users, Search, X, Video, Plus } from "lucide-react";
 import { useLiveQuery } from "dexie-react-hooks";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { cn } from "@/components/ui/utils";
 import { toInputDate, toInputDateTime } from "@/lib/date-utils";
 import { db, LocalActivityClassification, LocalActivitySubclassification } from "@/lib/db";
 import { syncEngine } from "@/lib/sync";
+import { supabase } from "@/lib/supabase";
+import { DateTimePicker } from "@/components/ui/DateTimePicker";
 
 interface CreateActivityModalProps {
     onClose: () => void;
@@ -19,6 +21,42 @@ interface CreateActivityModalProps {
 
 export function CreateActivityModal({ onClose, onSubmit, opportunities, initialOpportunityId, initialData }: CreateActivityModalProps) {
     const isEditing = !!initialData;
+    const [msConnected, setMsConnected] = useState<boolean>(false);
+    const [isTeamsMeeting, setIsTeamsMeeting] = useState<boolean>(false);
+    const [attendees, setAttendees] = useState<{ id: string; name: string; email: string }[]>([]);
+    const [userSearch, setUserSearch] = useState("");
+    const [searchResults, setSearchResults] = useState<{ id: string; displayName: string; mail?: string; userPrincipalName?: string; jobTitle?: string }[]>([]);
+    const [isSearching, setIsSearching] = useState(false);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
+    // Planner Integration State - Always sync tasks to Planner
+    const [syncToPlanner, setSyncToPlanner] = useState<boolean>(true);
+    const [plannerGroups, setPlannerGroups] = useState<{ id: string; displayName: string }[]>([]);
+    const [plannerPlans, setPlannerPlans] = useState<{ id: string; title: string }[]>([]);
+    const [plannerBuckets, setPlannerBuckets] = useState<{ id: string; name: string }[]>([]);
+    const [selectedGroupId, setSelectedGroupId] = useState<string>("");
+    const [selectedPlanId, setSelectedPlanId] = useState<string>("");
+    const [selectedBucketId, setSelectedBucketId] = useState<string>("");
+    const [loadingPlanner, setLoadingPlanner] = useState<boolean>(false);
+    const [checklist, setChecklist] = useState<string[]>([]);
+    const [newChecklistItem, setNewChecklistItem] = useState("");
+
+    // Check Microsoft Connection
+    useEffect(() => {
+        async function checkMS() {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
+            const { data } = await supabase
+                .from('CRM_MicrosoftTokens')
+                .select('user_id')
+                .eq('user_id', user.id)
+                .maybeSingle();
+
+            setMsConnected(!!data);
+        }
+        checkMS();
+    }, []);
 
     // Load Catalogs
     const classifications = useLiveQuery(() => db.activityClassifications.toArray(), []) || [];
@@ -78,15 +116,232 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         }
     }, [initialData, reset, initialOpportunityId, classifications.length]);
 
-    const handleActualSubmit = (data: any) => {
-        console.log("[CreateActivityModal] Raw Submit Data:", data);
-        // Ensure numbers for IDs (or null if empty)
-        const processed = { ...data };
-        processed.clasificacion_id = (data.clasificacion_id && data.clasificacion_id !== "") ? Number(data.clasificacion_id) : null;
-        processed.subclasificacion_id = (data.subclasificacion_id && data.subclasificacion_id !== "") ? Number(data.subclasificacion_id) : null;
+    // Handle User Search
+    useEffect(() => {
+        const delayDebounceFn = setTimeout(async () => {
+            if (userSearch.length >= 2) {
+                setIsSearching(true);
+                try {
+                    const res = await fetch(`/api/microsoft/users?q=${encodeURIComponent(userSearch)}`);
+                    if (res.ok) {
+                        const data = await res.json();
+                        setSearchResults(data);
+                    }
+                } catch (error) {
+                    console.error("Error searching users:", error);
+                } finally {
+                    setIsSearching(false);
+                }
+            } else {
+                setSearchResults([]);
+            }
+        }, 300);
 
-        console.log("[CreateActivityModal] Processed Submit Data:", processed);
-        onSubmit(processed);
+        return () => clearTimeout(delayDebounceFn);
+    }, [userSearch]);
+
+    const addAttendee = (user: any) => {
+        console.log("[CreateActivityModal] Selecting attendee:", user);
+        if (!attendees.find(a => a.id === user.id)) {
+            const newAttendee = {
+                id: user.id,
+                name: user.displayName,
+                email: user.mail || user.userPrincipalName
+            };
+            console.log("[CreateActivityModal] Adding new attendee:", newAttendee);
+            setAttendees([...attendees, newAttendee]);
+        } else {
+            console.log("[CreateActivityModal] Attendee already in list");
+        }
+        setUserSearch("");
+        setSearchResults([]);
+    };
+
+    const removeAttendee = (id: string) => {
+        setAttendees(attendees.filter(a => a.id !== id));
+    };
+
+    const addChecklistItem = () => {
+        if (newChecklistItem.trim()) {
+            setChecklist([...checklist, newChecklistItem.trim()]);
+            setNewChecklistItem("");
+        }
+    };
+
+    const removeChecklistItem = (index: number) => {
+        setChecklist(checklist.filter((_, i) => i !== index));
+    };
+
+    // Planner: Load Groups when sync is enabled
+    const tipoActividad = watch('tipo_actividad');
+    useEffect(() => {
+        if (syncToPlanner && msConnected && tipoActividad === 'TAREA') {
+            console.log('[Planner] Loading groups... msConnected:', msConnected, 'tipo:', tipoActividad);
+            setLoadingPlanner(true);
+            fetch('/api/microsoft/planner/groups', { credentials: 'include' })
+                .then(res => {
+                    console.log('[Planner] Groups response status:', res.status);
+                    return res.json();
+                })
+                .then(data => {
+                    console.log('[Planner] Groups data received:', data);
+                    const groups = data.groups || [];
+                    setPlannerGroups(groups);
+                    // Auto-select "CRM Ventas" group if it exists
+                    const defaultGroup = groups.find((g: { displayName: string }) => g.displayName === 'CRM Ventas');
+                    if (defaultGroup) {
+                        setSelectedGroupId(defaultGroup.id);
+                    }
+                })
+                .catch(err => console.error('[Planner] Error loading groups:', err))
+                .finally(() => setLoadingPlanner(false));
+        } else {
+            setPlannerGroups([]);
+            setPlannerPlans([]);
+            setPlannerBuckets([]);
+            setSelectedGroupId("");
+            setSelectedPlanId("");
+            setSelectedBucketId("");
+        }
+    }, [syncToPlanner, msConnected, tipoActividad]);
+
+    // Planner: Load Plans when Group is selected
+    useEffect(() => {
+        if (selectedGroupId) {
+            setLoadingPlanner(true);
+            setPlannerPlans([]);
+            setPlannerBuckets([]);
+            setSelectedPlanId("");
+            setSelectedBucketId("");
+            fetch(`/api/microsoft/planner/plans?groupId=${selectedGroupId}`, { credentials: 'include' })
+                .then(res => res.json())
+                .then(data => {
+                    const plans = data.plans || [];
+                    setPlannerPlans(plans);
+                    // Auto-select "CRM Ventas" plan if it exists
+                    const defaultPlan = plans.find((p: { title: string }) => p.title === 'CRM Ventas');
+                    if (defaultPlan) {
+                        setSelectedPlanId(defaultPlan.id);
+                    } else if (plans.length === 1) {
+                        // If only one plan, select it
+                        setSelectedPlanId(plans[0].id);
+                    }
+                })
+                .catch(err => console.error('[Planner] Error loading plans:', err))
+                .finally(() => setLoadingPlanner(false));
+        }
+    }, [selectedGroupId]);
+
+    // Planner: Load Buckets when Plan is selected
+    useEffect(() => {
+        if (selectedPlanId) {
+            setLoadingPlanner(true);
+            setPlannerBuckets([]);
+            setSelectedBucketId("");
+            fetch(`/api/microsoft/planner/buckets?planId=${selectedPlanId}`, { credentials: 'include' })
+                .then(res => res.json())
+                .then(data => {
+                    const buckets = data.buckets || [];
+                    setPlannerBuckets(buckets);
+                    // Auto-select "Proyecto CRM" bucket if it exists
+                    const defaultBucket = buckets.find((b: { name: string }) => b.name === 'Proyecto CRM');
+                    if (defaultBucket) {
+                        setSelectedBucketId(defaultBucket.id);
+                    } else if (buckets.length === 1) {
+                        // If only one bucket, select it
+                        setSelectedBucketId(buckets[0].id);
+                    }
+                })
+                .catch(err => console.error('[Planner] Error loading buckets:', err))
+                .finally(() => setLoadingPlanner(false));
+        }
+    }, [selectedPlanId]);
+
+    const handleActualSubmit = async (data: any) => {
+        setIsSubmitting(true);
+        try {
+            console.log("[CreateActivityModal] Raw Submit Data:", data);
+
+            // 1. Create Teams Meeting if requested
+            let teamsMeetingUrl = null;
+            if (isTeamsMeeting && msConnected && tipo === 'EVENTO') {
+                try {
+                    const res = await fetch('/api/microsoft/calendar/create-event', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            subject: data.asunto,
+                            description: data.descripcion,
+                            start: new Date(data.fecha_inicio).toISOString(),
+                            end: new Date(data.fecha_fin).toISOString(),
+                            attendees: attendees,
+                            isOnlineMeeting: true
+                        })
+                    });
+
+                    if (res.ok) {
+                        const event = await res.json();
+                        teamsMeetingUrl = event.onlineMeeting?.joinUrl || null;
+                        console.log("[CreateActivityModal] Teams Meeting Created:", teamsMeetingUrl);
+                    } else {
+                        const err = await res.json();
+                        console.error("[CreateActivityModal] Failed to create Teams meeting:", err);
+                        // We continue anyway but without the Teams link in the CRM record
+                    }
+                } catch (e) {
+                    console.error("[CreateActivityModal] Teams creation error:", e);
+                }
+            }
+
+            // 2. Create Planner Task if requested
+            let plannerId = null;
+            if (syncToPlanner && msConnected && tipo === 'TAREA' && selectedPlanId && selectedBucketId) {
+                try {
+                    // Map attendees to assigneeIds (IDs are Microsoft User IDs)
+                    const assigneeIds = attendees.map(a => a.id);
+
+                    const res = await fetch('/api/microsoft/planner/tasks', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        credentials: 'include',
+                        body: JSON.stringify({
+                            planId: selectedPlanId,
+                            bucketId: selectedBucketId,
+                            title: data.asunto,
+                            dueDateTime: data.fecha_inicio ? new Date(data.fecha_inicio).toISOString() : undefined,
+                            notes: data.descripcion,
+                            checklist: checklist,
+                            assigneeIds: assigneeIds
+                        })
+                    });
+
+                    if (res.ok) {
+                        const taskResponse = await res.json();
+                        plannerId = taskResponse.task?.id || null;
+                        console.log("[CreateActivityModal] Planner Task Created:", plannerId);
+                    } else {
+                        const err = await res.json();
+                        console.error("[CreateActivityModal] Failed to create Planner task:", err);
+                    }
+                } catch (e) {
+                    console.error("[CreateActivityModal] Planner creation error:", e);
+                }
+            }
+
+            // 3. Process for CRM
+            const processed = {
+                ...data,
+                teams_meeting_url: teamsMeetingUrl,
+                ms_planner_id: plannerId,
+                microsoft_attendees: attendees.length > 0 ? JSON.stringify(attendees) : null
+            };
+            processed.clasificacion_id = (data.clasificacion_id && data.clasificacion_id !== "") ? Number(data.clasificacion_id) : null;
+            processed.subclasificacion_id = (data.subclasificacion_id && data.subclasificacion_id !== "") ? Number(data.subclasificacion_id) : null;
+
+            console.log("[CreateActivityModal] Processed Submit Data:", processed);
+            onSubmit(processed);
+        } finally {
+            setIsSubmitting(false);
+        }
     };
 
     const tipo = watch('tipo_actividad');
@@ -259,28 +514,283 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                         />
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div className="space-y-1">
-                            <label className="text-xs font-bold text-slate-500 uppercase">
-                                {tipo === 'TAREA' ? 'Fecha Vencimiento' : 'Fecha Inicio'} <span className="text-red-500">*</span>
-                            </label>
-                            <input
-                                type={tipo === 'TAREA' ? "date" : "datetime-local"}
-                                {...register('fecha_inicio', { required: true })}
-                                min={tipo === 'TAREA' ? toInputDate(new Date()) : toInputDateTime(new Date())}
-                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                            />
-                        </div>
-                        {tipo === 'EVENTO' && (
-                            <div className="space-y-1">
-                                <label className="text-xs font-bold text-slate-500 uppercase">Fecha Fin</label>
-                                <input
-                                    type="datetime-local"
-                                    {...register('fecha_fin')}
-                                    min={fechaInicio ? fechaInicio : toInputDateTime(new Date())}
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                                />
+                    {/* MICROSOFT INTEGRATION (Teams/Guests for EVENTO, Collaborators/Checklist for TAREA) */}
+                    {msConnected && (
+                        <div className="space-y-4 animate-in fade-in slide-in-from-top-4 duration-300">
+                            {tipo === 'EVENTO' && (
+                                <div className="p-[1px] bg-gradient-to-r from-blue-500 to-indigo-500 rounded-2xl shadow-sm">
+                                    <div className="bg-white rounded-[15px] p-4 flex items-center justify-between">
+                                        <div className="flex items-center gap-3">
+                                            <div className="bg-blue-50 p-2 rounded-xl text-blue-600">
+                                                <Video className="w-5 h-5" />
+                                            </div>
+                                            <div className="space-y-0.5">
+                                                <label className="text-sm font-bold text-slate-900">Reunión de Teams</label>
+                                                <p className="text-[10px] text-slate-500 font-medium">Crea un enlace automático para esta reunión</p>
+                                            </div>
+                                        </div>
+                                        <label className="relative inline-flex items-center cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={isTeamsMeeting}
+                                                onChange={(e) => setIsTeamsMeeting(e.target.checked)}
+                                                className="sr-only peer"
+                                            />
+                                            <div className="w-11 h-6 bg-slate-100 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600 transition-all"></div>
+                                        </label>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* COLLABORATORS / ATTENDEES (Unified search) */}
+                            <div className="space-y-2">
+                                <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2">
+                                    <Users className="w-3.5 h-3.5" />
+                                    {tipo === 'TAREA' ? 'Colaboradores (Tenant Microsoft)' : 'Invitados (Tenant Microsoft)'}
+                                </label>
+                                <div className="relative">
+                                    <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400">
+                                        {isSearching ? <Loader2 className="w-4 h-4 animate-spin text-blue-500" /> : <Search className="w-4 h-4" />}
+                                    </div>
+                                    <input
+                                        type="text"
+                                        value={userSearch}
+                                        onChange={(e) => setUserSearch(e.target.value)}
+                                        placeholder="Buscar por nombre o correo..."
+                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-11 pr-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                                    />
+
+                                    {userSearch.length >= 2 && !isSearching && searchResults.length === 0 && (
+                                        <div className="absolute z-50 left-0 right-0 top-full mt-2 bg-white border border-slate-100 rounded-xl shadow-xl p-4 text-center text-slate-500 text-sm">
+                                            No se encontraron personas con "{userSearch}"
+                                        </div>
+                                    )}
+
+                                    {searchResults.length > 0 && (
+                                        <div className="absolute z-50 left-0 right-0 top-full mt-2 bg-white border border-slate-100 rounded-xl shadow-xl overflow-hidden animate-in fade-in slide-in-from-top-2 max-h-60 overflow-y-auto">
+                                            {searchResults.map((user) => (
+                                                <button
+                                                    key={user.id}
+                                                    type="button"
+                                                    onMouseDown={(e) => {
+                                                        e.preventDefault();
+                                                        addAttendee(user);
+                                                    }}
+                                                    className="w-full px-4 py-3 flex items-start gap-3 hover:bg-slate-50 transition-colors border-b border-slate-50 last:border-0 text-left"
+                                                >
+                                                    <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold shrink-0">
+                                                        {user.displayName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()}
+                                                    </div>
+                                                    <div className="flex flex-col min-w-0">
+                                                        <span className="text-sm font-bold text-slate-900 truncate">{user.displayName}</span>
+                                                        <span className="text-[10px] text-slate-500 font-medium truncate uppercase tracking-wider">
+                                                            {user.jobTitle || 'Usuario del Tenant'}
+                                                        </span>
+                                                        <span className="text-[10px] text-slate-400 truncate">
+                                                            {user.mail || user.userPrincipalName}
+                                                        </span>
+                                                    </div>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* List of selected users */}
+                                <div className="flex flex-wrap gap-2">
+                                    {attendees.map((a) => (
+                                        <div
+                                            key={a.id}
+                                            className="bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 group animate-in zoom-in-50"
+                                        >
+                                            <span className="max-w-[120px] truncate">{a.name}</span>
+                                            <button
+                                                type="button"
+                                                onClick={() => removeAttendee(a.id)}
+                                                className="hover:text-red-500 transition-colors"
+                                            >
+                                                <X className="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
+
+                            {/* PLANNER CHECKLIST (Only for TAREA) */}
+                            {tipo === 'TAREA' && (
+                                <div className="space-y-2 py-2">
+                                    <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2">
+                                        <ListTodo className="w-3.5 h-3.5" /> Actividades (Checklist Planner)
+                                    </label>
+                                    <div className="flex gap-2">
+                                        <input
+                                            type="text"
+                                            value={newChecklistItem}
+                                            onChange={(e) => setNewChecklistItem(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter') {
+                                                    e.preventDefault();
+                                                    addChecklistItem();
+                                                }
+                                            }}
+                                            placeholder="Nueva actividad..."
+                                            className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={addChecklistItem}
+                                            className="bg-emerald-50 text-emerald-600 p-3 rounded-xl hover:bg-emerald-100 transition-colors"
+                                        >
+                                            <Plus className="w-5 h-5" />
+                                        </button>
+                                    </div>
+
+                                    {checklist.length > 0 && (
+                                        <div className="bg-slate-50/50 border border-slate-100 rounded-xl p-2 space-y-1 mt-2">
+                                            {checklist.map((item, index) => (
+                                                <div key={index} className="flex items-center justify-between p-2 bg-white border border-slate-100 rounded-lg group animate-in slide-in-from-left-2 shadow-sm">
+                                                    <div className="flex items-center gap-2">
+                                                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                                        <span className="text-sm text-slate-700">{item}</span>
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => removeChecklistItem(index)}
+                                                        className="text-slate-300 hover:text-red-500 transition-colors p-1"
+                                                    >
+                                                        <X className="w-3.5 h-3.5" />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {tipo === 'TAREA' ? (
+                            <>
+                                <DateTimePicker
+                                    value={fechaInicio || ''}
+                                    onChange={(val) => setValue('fecha_inicio', val)}
+                                    label="Fecha Vencimiento"
+                                    required
+                                    minDate={new Date()}
+                                    showTime={false}
+                                />
+
+                                {/* Planner Sync Section - Always On */}
+                                {msConnected && (
+                                    <div className="col-span-full space-y-3">
+                                        {/* Planner Header */}
+                                        <div className="flex items-center gap-2 p-3 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-xl border border-emerald-200">
+                                            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center">
+                                                <ListTodo className="w-4 h-4 text-white" />
+                                            </div>
+                                            <div>
+                                                <p className="text-xs font-bold text-emerald-700">Sincronización con Planner</p>
+                                                <p className="text-[10px] text-emerald-600">La tarea se creará automáticamente en Microsoft Planner</p>
+                                            </div>
+                                        </div>
+
+                                        {/* Planner Cascade Selectors - Always visible */}
+                                        <div className="space-y-3">
+                                            {/* Group Selector */}
+                                            <div className="space-y-1">
+                                                <label className="text-xs font-bold text-slate-500 uppercase">
+                                                    Grupo <span className="text-red-500">*</span>
+                                                </label>
+                                                <select
+                                                    value={selectedGroupId}
+                                                    onChange={(e) => setSelectedGroupId(e.target.value)}
+                                                    disabled={loadingPlanner}
+                                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                                                >
+                                                    <option value="">
+                                                        {loadingPlanner ? 'Cargando grupos...' : plannerGroups.length === 0 ? 'No hay grupos disponibles' : 'Seleccione un grupo...'}
+                                                    </option>
+                                                    {plannerGroups.map((g) => (
+                                                        <option key={g.id} value={g.id}>{g.displayName}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+
+                                            {/* Plan Selector */}
+                                            {selectedGroupId && (
+                                                <div className="space-y-1">
+                                                    <label className="text-xs font-bold text-slate-500 uppercase">
+                                                        Plan <span className="text-red-500">*</span>
+                                                    </label>
+                                                    <select
+                                                        value={selectedPlanId}
+                                                        onChange={(e) => setSelectedPlanId(e.target.value)}
+                                                        disabled={loadingPlanner}
+                                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                                                    >
+                                                        <option value="">
+                                                            {loadingPlanner ? 'Cargando planes...' : plannerPlans.length === 0 ? 'No hay planes en este grupo' : 'Seleccione un plan...'}
+                                                        </option>
+                                                        {plannerPlans.map((p) => (
+                                                            <option key={p.id} value={p.id}>{p.title}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                            )}
+
+                                            {/* Bucket Selector */}
+                                            {selectedPlanId && (
+                                                <div className="space-y-1">
+                                                    <label className="text-xs font-bold text-slate-500 uppercase">
+                                                        Bucket <span className="text-red-500">*</span>
+                                                    </label>
+                                                    <select
+                                                        value={selectedBucketId}
+                                                        onChange={(e) => setSelectedBucketId(e.target.value)}
+                                                        disabled={loadingPlanner}
+                                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                                                    >
+                                                        <option value="">
+                                                            {loadingPlanner ? 'Cargando buckets...' : plannerBuckets.length === 0 ? 'No hay buckets en este plan' : 'Seleccione un bucket...'}
+                                                        </option>
+                                                        {plannerBuckets.map((b) => (
+                                                            <option key={b.id} value={b.id}>{b.name}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                            )}
+
+                                            {/* Planner Selection Summary */}
+                                            {selectedBucketId && (
+                                                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3">
+                                                    <p className="text-xs text-emerald-700 font-medium">
+                                                        ✓ La tarea se creará en Planner automáticamente
+                                                    </p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+                            </>
+                        ) : (
+                            <>
+                                <DateTimePicker
+                                    value={fechaInicio || ''}
+                                    onChange={(val) => setValue('fecha_inicio', val)}
+                                    label="Fecha Inicio"
+                                    required
+                                    minDate={new Date()}
+                                    showTime={true}
+                                />
+                                <DateTimePicker
+                                    value={watch('fecha_fin') || ''}
+                                    onChange={(val) => setValue('fecha_fin', val)}
+                                    label="Fecha Fin"
+                                    minDate={fechaInicio ? new Date(fechaInicio) : new Date()}
+                                    showTime={true}
+                                />
+                            </>
                         )}
                     </div>
 
@@ -289,9 +799,13 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                         <select
                             {...register('opportunity_id')}
                             disabled={!!initialOpportunityId}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all appearance-none disabled:bg-slate-100 disabled:text-slate-500"
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all disabled:bg-slate-100 disabled:text-slate-500"
                         >
-                            <option value="">Seleccione una oportunidad...</option>
+                            <option value="">
+                                {!opportunities || opportunities.length === 0
+                                    ? 'No hay oportunidades disponibles'
+                                    : 'Seleccione una oportunidad...'}
+                            </option>
                             {opportunities?.map((opp: any) => (
                                 <option key={opp.id} value={opp.id}>{opp.nombre}</option>
                             ))}
@@ -299,7 +813,6 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                     </div>
 
                     <div className="space-y-1">
-                        <label className="text-xs font-bold text-slate-500 uppercase">Descripción</label>
                         <textarea
                             {...register('descripcion')}
                             rows={3}
@@ -318,15 +831,17 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                         </button>
                         <button
                             type="submit"
+                            disabled={isSubmitting}
                             className={cn(
-                                "flex-1 text-white px-4 py-3 rounded-xl font-bold shadow-lg transition-colors",
-                                tipo === 'TAREA' ? "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200" : "bg-blue-600 hover:bg-blue-700 shadow-blue-200"
+                                "flex-1 text-white px-4 py-3 rounded-xl font-bold shadow-lg transition-colors flex items-center justify-center gap-2",
+                                isSubmitting ? "bg-slate-400 opacity-70" : (tipo === 'TAREA' ? "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200" : "bg-blue-600 hover:bg-blue-700 shadow-blue-200")
                             )}
                         >
-                            {isEditing
-                                ? 'Guardar Cambios'
-                                : (tipo === 'TAREA' ? 'Crear Tarea' : 'Agendar Evento')
-                            }
+                            {isSubmitting ? (
+                                <><Loader2 className="w-5 h-5 animate-spin" /> Procesando...</>
+                            ) : (
+                                isEditing ? 'Guardar Cambios' : (tipo === 'TAREA' ? 'Crear Tarea' : 'Agendar Evento')
+                            )}
                         </button>
                     </div>
                 </form>

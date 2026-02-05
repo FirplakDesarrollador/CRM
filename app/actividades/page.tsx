@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState, useMemo } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useActivities, LocalActivity } from '@/lib/hooks/useActivities';
-import { useOpportunities } from '@/lib/hooks/useOpportunities';
+import { useOpportunitiesServer } from '@/lib/hooks/useOpportunitiesServer';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
 import { syncEngine } from '@/lib/sync';
@@ -31,7 +31,12 @@ import { CreateActivityModal } from '@/components/activities/CreateActivityModal
 function ActivitiesContent() {
     const searchParams = useSearchParams();
     const { activities, createActivity, updateActivity, toggleComplete } = useActivities();
-    const { opportunities } = useOpportunities();
+    const { data: opportunities, setUserFilter } = useOpportunitiesServer({ pageSize: 100 });
+
+    // Load all opportunities for the dropdown, not just user's own
+    useEffect(() => {
+        setUserFilter('all');
+    }, [setUserFilter]);
 
     // Catalogs
     const classifications = useLiveQuery(() => db.activityClassifications.toArray(), []) || [];
