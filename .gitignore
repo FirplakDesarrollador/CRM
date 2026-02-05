@@ -47,7 +47,4 @@ credentials.json
 token.json
 
 .env.local
-
-# Large files
-*.xlsx
-lint_results.json
+.env
