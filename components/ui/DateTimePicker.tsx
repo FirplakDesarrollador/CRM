@@ -183,7 +183,7 @@ export function DateTimePicker({
                     setStep('date');
                 }}
                 className={cn(
-                    "w-full bg-gradient-to-br from-slate-50 to-white",
+                    "w-full bg-linear-to-br from-slate-50 to-white",
                     "border-2 border-slate-200 rounded-xl px-3 py-2.5",
                     "flex items-center gap-2",
                     "focus:outline-none focus:border-blue-400",
@@ -194,7 +194,7 @@ export function DateTimePicker({
             >
                 <div className={cn(
                     "w-8 h-8 rounded-lg flex items-center justify-center shrink-0",
-                    "bg-gradient-to-br from-blue-500 to-indigo-600 text-white"
+                    "bg-linear-to-br from-blue-500 to-indigo-600 text-white"
                 )}>
                     <Calendar className="w-3.5 h-3.5" />
                 </div>
@@ -208,13 +208,13 @@ export function DateTimePicker({
 
             {/* Modal Overlay */}
             {isOpen && (
-                <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm animate-in fade-in duration-150">
+                <div className="fixed inset-0 z-200 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm animate-in fade-in duration-150">
                     <div
                         className="bg-white rounded-3xl shadow-2xl w-full max-w-[320px] overflow-hidden animate-in zoom-in-95 duration-200"
                         onClick={(e) => e.stopPropagation()}
                     >
                         {/* Header */}
-                        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-5 py-4 text-white flex items-center justify-between">
+                        <div className="bg-linear-to-r from-blue-600 to-indigo-600 px-5 py-4 text-white flex items-center justify-between">
                             <div className="text-base font-semibold">
                                 {step === 'date' ? 'Seleccionar fecha' : 'Seleccionar hora'}
                             </div>
@@ -280,7 +280,7 @@ export function DateTimePicker({
                                                 className={cn(
                                                     "aspect-square rounded-xl text-sm font-semibold transition-all",
                                                     isSelected
-                                                        ? "bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-lg"
+                                                        ? "bg-linear-to-br from-blue-500 to-indigo-600 text-white shadow-lg"
                                                         : isTodayDate
                                                             ? "bg-blue-100 text-blue-700 font-bold"
                                                             : isCurrentMonth
@@ -477,7 +477,7 @@ export function DateTimePicker({
                                 className={cn(
                                     "flex-1 py-3 text-sm font-bold text-white rounded-xl transition-all",
                                     selectedDate
-                                        ? "bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-lg shadow-blue-200"
+                                        ? "bg-linear-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-lg shadow-blue-200"
                                         : "bg-slate-300 cursor-not-allowed"
                                 )}
                             >

@@ -46,13 +46,38 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Microsoft account not connected' }, { status: 400 });
         }
 
-        console.log('[API Planner Tasks] Creating task in Planner...');
+        // ALWAYS add the current user (creator) to assignees, plus any collaborators selected
+        let finalAssigneeIds = [...(assigneeIds || [])];
+        try {
+            console.log('[API Planner Tasks] Fetching current user Microsoft ID to add as assignee...');
+            const meResponse = await fetch('https://graph.microsoft.com/v1.0/me', {
+                headers: { 'Authorization': `Bearer ${tokens.access_token}` }
+            });
+
+            if (meResponse.ok) {
+                const meData = await meResponse.json();
+                if (meData.id) {
+                    // Add creator at the beginning if not already in the list
+                    if (!finalAssigneeIds.includes(meData.id)) {
+                        finalAssigneeIds.unshift(meData.id);
+                        console.log('[API Planner Tasks] Added creator as assignee:', meData.displayName, meData.id);
+                    }
+                }
+            } else {
+                console.warn('[API Planner Tasks] Could not fetch current user Microsoft ID');
+            }
+        } catch (meError) {
+            console.error('[API Planner Tasks] Error fetching current user:', meError);
+            // Continue with just the provided assignees
+        }
+
+        console.log('[API Planner Tasks] Creating task in Planner with assignees:', finalAssigneeIds.length);
         const task = await createPlannerTask(tokens.access_token, {
             planId,
             bucketId,
             title,
             dueDateTime,
-            assigneeIds,
+            assigneeIds: finalAssigneeIds,
             notes,
             checklist
         });

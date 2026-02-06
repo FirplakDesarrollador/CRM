@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useState, useMemo } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { useActivities, LocalActivity } from '@/lib/hooks/useActivities';
 import { useOpportunitiesServer } from '@/lib/hooks/useOpportunitiesServer';
 import { useLiveQuery } from 'dexie-react-hooks';
@@ -30,6 +30,7 @@ import { CreateActivityModal } from '@/components/activities/CreateActivityModal
 
 function ActivitiesContent() {
     const searchParams = useSearchParams();
+    const router = useRouter();
     const { activities, createActivity, updateActivity, toggleComplete } = useActivities();
     const { data: opportunities, setUserFilter } = useOpportunitiesServer({ pageSize: 100 });
 
@@ -571,6 +572,8 @@ function ActivitiesContent() {
                     onClose={() => {
                         setIsModalOpen(false);
                         setSelectedActivity(null);
+                        // Clear URL parameter to prevent modal from reopening
+                        router.replace('/actividades', { scroll: false });
                     }}
                     onSubmit={async (data: any) => {
                         console.log("[ActivitiesPage] Modal Submitted Data:", data);

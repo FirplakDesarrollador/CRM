@@ -25,7 +25,8 @@ export default function OpportunitiesPage() {
         refresh,
         setChannelFilter,
         setSegmentFilter,
-        setPhaseFilter
+        setPhaseFilter,
+        setStatusFilter
     } = useOpportunitiesServer({ pageSize: 20 });
 
     const [selectedAccountOwnerId, setSelectedAccountOwnerId] = useState<string | null>(null);
@@ -127,10 +128,11 @@ export default function OpportunitiesPage() {
                 {/* Advanced Hierarchical Filters */}
                 <div className="pb-2">
                     <OpportunityFilters
-                        onFilterChange={({ channelId, segmentId, phaseId }) => {
+                        onFilterChange={({ channelId, segmentId, phaseId, statusFilter }) => {
                             setChannelFilter(channelId);
                             setSegmentFilter(segmentId);
                             setPhaseFilter(phaseId);
+                            setStatusFilter(statusFilter);
                         }}
                     />
                 </div>

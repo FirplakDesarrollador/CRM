@@ -20,6 +20,8 @@ export type OpportunityServer = {
     estado_data?: { nombre: string } | null; // Joined data
 };
 
+type StatusFilter = 'all' | 'open' | 'won' | 'lost';
+
 type UseOpportunitiesServerProps = {
     pageSize?: number;
     initialStatus?: string;
@@ -41,6 +43,12 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
     const [channelFilter, setChannelFilter] = useState<string | null>(null);
     const [segmentFilter, setSegmentFilter] = useState<number | null>(null);
     const [phaseFilter, setPhaseFilter] = useState<number | null>(null);
+    const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+
+    // Cache for closed phase IDs (won and lost)
+    const [wonPhaseIds, setWonPhaseIds] = useState<number[]>([]);
+    const [lostPhaseIds, setLostPhaseIds] = useState<number[]>([]);
+    const [closedPhaseIds, setClosedPhaseIds] = useState<number[]>([]);
 
     // User Context
     const { userRole } = useSyncStore();
@@ -50,6 +58,35 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
         syncEngine.getCurrentUser().then(({ data: { user } }) => {
             if (user) setCurrentUserId(user?.id);
         });
+    }, []);
+
+    // Load closed phase IDs on mount
+    useEffect(() => {
+        const loadClosedPhases = async () => {
+            const { data: phases } = await supabase
+                .from('CRM_FasesOportunidad')
+                .select('id, nombre')
+                .eq('is_active', true);
+
+            if (phases) {
+                const won: number[] = [];
+                const lost: number[] = [];
+
+                phases.forEach(p => {
+                    const nombre = p.nombre.toLowerCase();
+                    if (nombre.includes('ganada')) {
+                        won.push(p.id);
+                    } else if (nombre.includes('perdida')) {
+                        lost.push(p.id);
+                    }
+                });
+
+                setWonPhaseIds(won);
+                setLostPhaseIds(lost);
+                setClosedPhaseIds([...won, ...lost]);
+            }
+        };
+        loadClosedPhases();
     }, []);
 
     const fetchOpportunities = useCallback(async (isLoadMore = false) => {
@@ -105,6 +142,16 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                 query = query.eq('fase_id', phaseFilter);
             }
 
+            // Status Filter (won/lost/open)
+            if (statusFilter === 'won' && wonPhaseIds.length > 0) {
+                query = query.in('fase_id', wonPhaseIds);
+            } else if (statusFilter === 'lost' && lostPhaseIds.length > 0) {
+                query = query.in('fase_id', lostPhaseIds);
+            } else if (statusFilter === 'open' && closedPhaseIds.length > 0) {
+                // Exclude closed phases
+                query = query.not('fase_id', 'in', `(${closedPhaseIds.join(',')})`);
+            }
+
             if (accountOwnerId) {
                 // Filtramos por el dueño de la oportunidad (owner_user_id)
                 query = query.eq('owner_user_id', accountOwnerId);
@@ -151,13 +198,13 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
         } finally {
             setLoading(false);
         }
-    }, [currentUserId, pageSize, userFilter, searchTerm, accountOwnerId, userRole, page, channelFilter, segmentFilter, phaseFilter]);
+    }, [currentUserId, pageSize, userFilter, searchTerm, accountOwnerId, userRole, page, channelFilter, segmentFilter, phaseFilter, statusFilter, wonPhaseIds, lostPhaseIds, closedPhaseIds]);
 
     // Initial Fetch & Filter Fetch
     useEffect(() => {
         // Reset page when filters change
         fetchOpportunities(false);
-    }, [userFilter, searchTerm, accountOwnerId, currentUserId, channelFilter, segmentFilter, phaseFilter]);
+    }, [userFilter, searchTerm, accountOwnerId, currentUserId, channelFilter, segmentFilter, phaseFilter, statusFilter, wonPhaseIds, lostPhaseIds, closedPhaseIds]);
 
     const loadMore = () => {
         if (!loading && hasMore) {
@@ -179,6 +226,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
         setChannelFilter,
         setSegmentFilter,
         setPhaseFilter,
+        setStatusFilter,
 
         refresh: () => fetchOpportunities(false)
     };
