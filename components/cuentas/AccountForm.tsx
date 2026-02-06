@@ -241,17 +241,54 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
         try {
             const formData = data;
 
-            // PRE-VALIDATION: Check for duplicate NIT if it's a new PARENT account
-            if (!account?.id && !formData.is_child) {
-                const { data: existing, error: checkError } = await supabase
-                    .from('CRM_Cuentas')
-                    .select('id, nombre')
-                    .eq('nit_base', formData.nit_base)
-                    .is('id_cuenta_principal', null)
-                    .single();
+            // PRE-VALIDATION: Check for duplicates (Name, NIT, Phone, Email)
+            // Only checks against SERVER (Supabase) to ensure global uniqueness.
+            // Excludes current account ID if editing.
 
-                if (existing) {
-                    setNitError(`El NIT ${formData.nit_base} ya pertenece a la cuenta: ${existing.nombre}`);
+            const checkDuplicates = async () => {
+                let query = supabase
+                    .from('CRM_Cuentas')
+                    .select('id, nombre, nit_base, telefono, email')
+                    .or(`nombre.eq.${formData.nombre},nit_base.eq.${formData.nit_base}${formData.telefono ? `,telefono.eq.${formData.telefono}` : ''}${formData.email ? `,email.eq.${formData.email}` : ''}`);
+
+                if (account?.id) {
+                    query = query.neq('id', account.id);
+                }
+
+                // If it's a child account, we might be less strict about NIT (inherits), 
+                // but NAME should still be unique presumably? 
+                // The requirement says "duplicates in: Account Name, NIT, Phone, Email".
+                // We'll apply it broadly.
+
+                const { data: duplicates, error: checkError } = await query;
+
+                if (checkError) {
+                    console.error("Error checking duplicates:", checkError);
+                    // Decide if we block or proceed cautiously. Ideally block or warn?
+                    // Let's not block completely on network error, or alert user?
+                    // For now, allow proceed but log.
+                    return null;
+                }
+                return duplicates;
+            };
+
+            const duplicates = await checkDuplicates();
+
+            if (duplicates && duplicates.length > 0) {
+                // Find specific conflicts
+                const nameConflict = duplicates.find(d => d.nombre.toLowerCase() === formData.nombre.toLowerCase());
+                const nitConflict = duplicates.find(d => d.nit_base === formData.nit_base);
+                const phoneConflict = formData.telefono ? duplicates.find(d => d.telefono === formData.telefono) : null;
+                const emailConflict = formData.email ? duplicates.find(d => d.email === formData.email) : null;
+
+                let errorMessage = "";
+                if (nameConflict) errorMessage += `\n- El nombre "${formData.nombre}" ya existe.`;
+                if (nitConflict && (!formData.is_child)) errorMessage += `\n- El NIT "${formData.nit_base}" ya existe.`; // Allow duplicate NIT for child accounts? Form logic below handles inheritance, but requirement says "NIT". Usually branches share NIT. If is_child, we skip NIT check or let it pass? Code below sets NIT from parent. Let's strictly block invalid NIT usage for PARENTS.
+                if (phoneConflict) errorMessage += `\n- El teléfono "${formData.telefono}" ya existe.`;
+                if (emailConflict) errorMessage += `\n- El email "${formData.email}" ya existe.`;
+
+                if (errorMessage) {
+                    alert(`No se puede guardar. Se encontraron registros duplicados:${errorMessage}`);
                     setIsSubmitting(false);
                     return;
                 }

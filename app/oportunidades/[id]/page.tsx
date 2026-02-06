@@ -6,7 +6,7 @@ import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { FileText, Plus, AlertCircle, Check, Trash2, Loader2, Truck, Package, Building, ChevronRight, TrendingUp } from "lucide-react";
 import Link from "next/link";
-import { cn } from "@/components/ui/utils";
+import { cn } from "@/lib/utils";
 import { db } from "@/lib/db";
 import { ProbabilityDonut } from "@/components/ui/ProbabilityDonut";
 import { syncEngine } from "@/lib/sync";
@@ -25,6 +25,7 @@ import { CreateActivityModal } from "@/components/activities/CreateActivityModal
 import { supabase } from "@/lib/supabase";
 import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
 import { useSyncStore } from "@/lib/stores/useSyncStore";
+import { LossReasonModal } from "@/components/oportunidades/LossReasonModal";
 
 export default function OpportunityDetailPage() {
     const params = useParams();
@@ -192,6 +193,7 @@ export default function OpportunityDetailPage() {
                 variant="danger"
                 isLoading={isDeleting}
             />
+
         </div>
     );
 }
@@ -203,6 +205,10 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     const [localClosingDate, setLocalClosingDate] = useState(toInputDate(opportunity.fecha_cierre_estimada));
     const [isSaving, setIsSaving] = useState(false);
     const [isSavingDate, setIsSavingDate] = useState(false);
+
+    // Filter Logic
+    const [isLossReasonModalOpen, setIsLossReasonModalOpen] = useState(false);
+    const [pendingPhaseId, setPendingPhaseId] = useState<number | null>(null);
 
     // Segments Logic
     const [segments, setSegments] = useState<any[]>([]);
@@ -278,7 +284,43 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     );
 
     const handlePhaseChange = async (phaseId: number) => {
-        await updateOpportunity(opportunity.id, { fase_id: phaseId });
+        const targetPhase = phases?.find(p => p.id === phaseId);
+
+        // Check if target is "Cerrada Perdida"
+        const normalizedName = targetPhase?.nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") || "";
+
+        if (normalizedName.includes('perdida')) {
+            setPendingPhaseId(phaseId);
+            setIsLossReasonModalOpen(true);
+            return;
+        }
+
+        // Check if target is "Cerrada Ganada"
+        if (normalizedName.includes('ganada')) {
+            await updateOpportunity(opportunity.id, {
+                fase_id: phaseId,
+                estado_id: 2 // Explicitly set to Won status
+            });
+            return;
+        }
+
+        // Default: just update phase, reset estado to Open if coming from a closed state
+        await updateOpportunity(opportunity.id, {
+            fase_id: phaseId,
+            estado_id: 1 // Reset to Open status when moving to any other phase
+        });
+    };
+
+    const confirmLossReason = async (reasonId: number) => {
+        if (pendingPhaseId) {
+            await updateOpportunity(opportunity.id, {
+                fase_id: pendingPhaseId,
+                razon_perdida_id: reasonId,
+                estado_id: 3 // Explicitly set to Lost status ID (usually 3)
+            });
+            setIsLossReasonModalOpen(false);
+            setPendingPhaseId(null);
+        }
     };
 
     if (!account) {
@@ -307,12 +349,16 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                 ) : (
                     <div className="overflow-x-auto pb-16">
                         <div className="relative pt-16 min-w-[800px] px-2">
-                            {/* Connecting Line */}
-                            <div className="absolute top-19 left-0 w-full h-1 bg-slate-100 rounded-full z-0" />
+                            {/* Connecting Line - Extends to the start of the bifurcation */}
+                            <div
+                                className="absolute top-19 left-0 h-1 bg-slate-100 rounded-full z-0"
+                                style={{ width: 'calc(100% - 292px)' }}
+                            />
 
                             <div className="flex justify-between items-start relative z-10 w-full">
                                 {phases.map((phase, index) => {
-                                    const isFinal = phase.nombre.toLowerCase().includes('cerrada') || phase.nombre.toLowerCase().includes('ganada') || phase.nombre.toLowerCase().includes('perdida');
+                                    const normalizedPhaseName = phase.nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                                    const isFinal = normalizedPhaseName.includes('cerrada') || normalizedPhaseName.includes('ganada') || normalizedPhaseName.includes('perdida');
                                     if (isFinal) return null; // Skip final phases in main loop
 
                                     const isCompleted = currentPhaseIndex > index;
@@ -347,14 +393,30 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                 })}
 
                                 {/* Bifurcation for Final Phases */}
-                                <div className="ml-10 relative -mt-10 h-28 w-48 shrink-0">
-                                    {/* The "Y" Split Bracket Lines */}
+                                <div className="relative h-28 w-[292px] shrink-0" style={{ marginTop: '-34px' }}>
+                                    {/* Curved SVG Lines for Bifurcation */}
+                                    <svg className="absolute left-0 top-0 w-full h-full pointer-events-none z-0">
+                                        {/* Main path splitting - Y=48 aligns with horizontal line (top-19 = 76px, container at 64px - 32px margin = 32px, so 76-32=44 → use 48 for visual alignment) */}
+                                        <path
+                                            d="M 0 48 C 30 48, 50 16, 90 16"
+                                            fill="none"
+                                            stroke="#f1f5f9"
+                                            strokeWidth="4"
+                                            strokeLinecap="round"
+                                        />
+                                        <path
+                                            d="M 0 48 C 30 48, 50 96, 90 96"
+                                            fill="none"
+                                            stroke="#f1f5f9"
+                                            strokeWidth="4"
+                                            strokeLinecap="round"
+                                        />
+                                    </svg>
 
-                                    <div className="absolute left-0 top-[22%] bottom-[22%] w-1 bg-slate-100" /> {/* Vertical bar */}
-                                    <div className="absolute left-0 top-[22%] w-4 h-1 bg-slate-100" /> {/* Top branch */}
-                                    <div className="absolute left-0 bottom-[22%] w-4 h-1 bg-slate-100" /> {/* Bottom branch */}
-
-                                    {phases.filter(p => p.nombre.toLowerCase().includes('cerrada') || p.nombre.toLowerCase().includes('ganada') || p.nombre.toLowerCase().includes('perdida')).map((phase) => {
+                                    {phases.filter(p => {
+                                        const normalized = p.nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                                        return normalized.includes('cerrada') || normalized.includes('ganada') || normalized.includes('perdida');
+                                    }).map((phase) => {
                                         const isWon = phase.nombre.toLowerCase().includes('ganada');
                                         const isActive = opportunity.fase_id === phase.id;
 
@@ -362,9 +424,10 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                             <button
                                                 key={phase.id}
                                                 onClick={() => handlePhaseChange(phase.id)}
-                                                style={{ top: isWon ? '22%' : '78%' }}
+                                                // Align buttons with the ends of the SVG paths (Y=16 and Y=96)
+                                                style={{ top: isWon ? '16px' : '96px', transform: 'translateY(-50%)' }}
                                                 className={cn(
-                                                    "absolute left-4 -translate-y-1/2 flex items-center gap-2 px-3 py-2 rounded-full text-[10px] font-bold uppercase tracking-wider border transition-all z-10 whitespace-nowrap",
+                                                    "absolute left-[88px] flex items-center gap-2 px-3 py-2 rounded-full text-[10px] font-bold uppercase tracking-wider border transition-all z-10 whitespace-nowrap",
                                                     isActive
                                                         ? (isWon ? "bg-green-100 text-green-700 border-green-200 shadow-sm ring-2 ring-green-500/20" : "bg-red-100 text-red-700 border-red-200 shadow-sm ring-2 ring-red-500/20")
                                                         : "bg-white border-slate-200 text-slate-400 hover:border-slate-300 hover:bg-slate-50"
@@ -406,7 +469,11 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                 <p className="text-xs text-slate-400 mt-1">Calculado según fase actual</p>
                             </div>
                             <ProbabilityDonut
-                                percentage={opportunity?.probability || (opportunity?.fase_id ? phases?.find(p => p.id === opportunity.fase_id)?.probability : 0) || 0}
+                                percentage={
+                                    opportunity.estado_id === 2 ? 100 : // Cerrada Ganada = 100%
+                                        opportunity.estado_id === 3 ? 0 :   // Cerrada Perdida = 0%
+                                            opportunity?.probability || (opportunity?.fase_id ? phases?.find(p => p.id === opportunity.fase_id)?.probability : 0) || 0
+                                }
                                 size={64}
                                 strokeWidth={6}
                             />
@@ -594,6 +661,14 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                 </Link>
             </div>
 
+            <LossReasonModal
+                isOpen={isLossReasonModalOpen}
+                onClose={() => {
+                    setIsLossReasonModalOpen(false);
+                    setPendingPhaseId(null);
+                }}
+                onConfirm={confirmLossReason}
+            />
         </div>
     );
 }

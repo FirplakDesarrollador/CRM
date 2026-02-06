@@ -540,7 +540,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                     {msConnected && (
                         <div className="space-y-4 animate-in fade-in slide-in-from-top-4 duration-300">
                             {tipo === 'EVENTO' && (
-                                <div className="p-[1px] bg-linear-to-r from-blue-500 to-indigo-500 rounded-2xl shadow-sm">
+                                <div className="p-px bg-linear-to-r from-blue-500 to-indigo-500 rounded-2xl shadow-sm">
                                     <div className="bg-white rounded-[15px] p-4 flex items-center justify-between">
                                         <div className="flex items-center gap-3">
                                             <div className="bg-blue-50 p-2 rounded-xl text-blue-600">

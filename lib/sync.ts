@@ -408,7 +408,8 @@ export class SyncEngine {
                         nombre: f.nombre,
                         orden: f.orden,
                         is_active: f.is_active,
-                        canal_id: f.canal_id
+                        canal_id: f.canal_id,
+                        probability: f.probability ?? 0
                     })));
                     console.log(`[Sync] Pulled ${phases.length} phases.`);
                 }
