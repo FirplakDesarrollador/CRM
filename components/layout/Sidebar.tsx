@@ -3,7 +3,7 @@
 import React from "react";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { cn } from "@/components/ui/utils";
 import { FirplakLogo, FirplakIsotipo } from "./FirplakLogo";
 import { SyncStatus } from "./SyncStatus";
@@ -11,13 +11,11 @@ import { supabase } from "@/lib/supabase";
 import { useSyncStore } from "@/lib/stores/useSyncStore";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
-import { PermissionGuard } from "@/components/auth/PermissionGuard";
 import {
     Home,
     Briefcase,
     Building2,
     Calendar,
-    FileText,
     Files,
     Settings,
     Users,
@@ -26,6 +24,7 @@ import {
     ChevronLeft,
     ChevronRight,
     UserCircle,
+    DollarSign,
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -35,13 +34,11 @@ const NAV_ITEMS = [
     { label: "Contactos", href: "/contactos", icon: Users },
     { label: "Actividades", href: "/actividades", icon: Calendar },
     { label: "Pedidos", href: "/pedidos", icon: Truck },
+    { label: "Comisiones", href: "/comisiones", icon: DollarSign },
     { label: "Archivos", href: "/archivos", icon: Files },
     { label: "Usuarios", href: "/usuarios", icon: UserCircle, requiredRole: 'ADMIN' },
     { label: "Configuración", href: "/configuracion", icon: Settings },
 ];
-
-// Admin-only navigation items
-const ADMIN_NAV_ITEMS = [];
 
 export interface SidebarProps {
     isCollapsed: boolean;
@@ -50,7 +47,6 @@ export interface SidebarProps {
 
 export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar }: SidebarProps) {
     const pathname = usePathname();
-    const router = useRouter();
     const { userRole, setUserRole } = useSyncStore();
     const { user, role, isLoading } = useCurrentUser();
     const [showLogoutConfirm, setShowLogoutConfirm] = React.useState(false);
@@ -64,6 +60,19 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
             else setUserRole('SALES');
         }
     }, [role, isLoading, setUserRole]);
+
+    // PERF FIX: Memoize filtered nav items instead of recalculating on every render
+    const visibleNavItems = React.useMemo(() => {
+        return NAV_ITEMS.filter(item => {
+            if (item.href === '/usuarios' && userRole !== 'ADMIN') return false;
+            if (userRole === 'ADMIN') return true;
+            if (user?.allowed_modules && user.allowed_modules.length > 0) {
+                return user.allowed_modules.includes(item.href);
+            }
+            if (item.requiredRole && item.requiredRole !== userRole) return false;
+            return true;
+        });
+    }, [userRole, user?.allowed_modules]);
 
     const handleLogout = async () => {
         setIsLoggingOut(true);
@@ -118,7 +127,7 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
                 {!isCollapsed && (
                     <div className="w-full mt-3 pt-3 border-t border-slate-200/60">
                         <p className="text-xs text-slate-400 text-center font-semibold uppercase tracking-wider">
-                            Versión 1.0.7.5
+                            Versión 1.0.7.6
                         </p>
                     </div>
                 )}
@@ -137,25 +146,7 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
 
             {/* Navigation Section */}
             <nav className="flex-1 p-4 space-y-1.5 overflow-y-auto overflow-x-hidden">
-                {NAV_ITEMS.filter(item => {
-                    // STRICT: Users module is ADMIN only
-                    // This overrides any allowlist configuration
-                    if (item.href === '/usuarios' && userRole !== 'ADMIN') return false;
-
-                    // Admins see everything by default
-                    if (userRole === 'ADMIN') return true;
-
-                    // Dynamic Config: If defined, strictly follow the allowed list
-                    // This allows granting "Admin-only" modules to other roles if strictly configured
-                    if (user?.allowed_modules && user.allowed_modules.length > 0) {
-                        return user.allowed_modules.includes(item.href);
-                    }
-
-                    // Fallback to Role Default limits
-                    if (item.requiredRole && item.requiredRole !== userRole) return false;
-
-                    return true;
-                }).map((item) => {
+                {visibleNavItems.map((item) => {
                     const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
                     return (
                         <Link

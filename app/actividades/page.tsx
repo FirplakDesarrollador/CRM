@@ -7,7 +7,6 @@ import { useOpportunitiesServer } from '@/lib/hooks/useOpportunitiesServer';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
 import { syncEngine } from '@/lib/sync';
-import { parseColombiaDate } from '@/lib/date-utils';
 import {
     Calendar as CalendarIcon,
     ChevronLeft,
@@ -18,9 +17,7 @@ import {
     Circle,
     Building2,
     CalendarDays,
-    Search,
     ListTodo,
-    CalendarClock,
     Filter,
     Loader2
 } from 'lucide-react';
@@ -117,26 +114,44 @@ function ActivitiesContent() {
         return subclassifications.filter(s => s.clasificacion_id === Number(filterClassification));
     }, [subclassifications, filterClassification]);
 
-    // Format activities for display
-    const filteredActivities = activities?.filter(act => {
-        // 1. Date View Filter
+    // PERF FIX: Apply global filters once, then derive views from the result
+    const globallyFilteredActivities = useMemo(() => {
+        if (!activities) return [];
+        return activities.filter(act => {
+            if (filterType && act.tipo_actividad !== filterType) return false;
+            if (filterClassification && act.clasificacion_id != filterClassification) return false;
+            if (filterSubclassification && act.subclasificacion_id != filterSubclassification) return false;
+            return true;
+        });
+    }, [activities, filterType, filterClassification, filterSubclassification]);
+
+    // For agenda/all views: filter by selected date + sort
+    const filteredActivities = useMemo(() => {
+        let result = globallyFilteredActivities;
         if (view !== 'all') {
-            const actDate = new Date(act.fecha_inicio);
-            const matchesDate = (
-                actDate.getDate() === selectedDate.getDate() &&
-                actDate.getMonth() === selectedDate.getMonth() &&
-                actDate.getFullYear() === selectedDate.getFullYear()
-            );
-            if (!matchesDate) return false;
+            const sd = selectedDate.getDate();
+            const sm = selectedDate.getMonth();
+            const sy = selectedDate.getFullYear();
+            result = result.filter(act => {
+                const actDate = new Date(act.fecha_inicio);
+                return actDate.getDate() === sd && actDate.getMonth() === sm && actDate.getFullYear() === sy;
+            });
         }
+        return result.sort((a, b) => new Date(a.fecha_inicio).getTime() - new Date(b.fecha_inicio).getTime());
+    }, [globallyFilteredActivities, view, selectedDate]);
 
-        // 2. Explicit Filters
-        if (filterType && act.tipo_actividad !== filterType) return false;
-        if (filterClassification && act.clasificacion_id != filterClassification) return false;
-        if (filterSubclassification && act.subclasificacion_id != filterSubclassification) return false;
-
-        return true;
-    })?.sort((a, b) => new Date(a.fecha_inicio).getTime() - new Date(b.fecha_inicio).getTime());
+    // PERF FIX: Pre-group activities by day key for month view (computed once, not 31x)
+    const activitiesByDay = useMemo(() => {
+        const map = new Map<string, LocalActivity[]>();
+        globallyFilteredActivities.forEach(act => {
+            const d = new Date(act.fecha_inicio);
+            const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+            const arr = map.get(key);
+            if (arr) arr.push(act);
+            else map.set(key, [act]);
+        });
+        return map;
+    }, [globallyFilteredActivities]);
 
     return (
         <div className="flex flex-col h-[calc(100vh-2rem)] space-y-4">
@@ -300,10 +315,6 @@ function ActivitiesContent() {
                                         // Safety check
                                         if (!act) return null;
 
-                                        if (act.clasificacion_id) {
-                                            console.log(`[Activity ${act.id}] clasificacion_id type: ${typeof act.clasificacion_id}, value: ${act.clasificacion_id}`);
-                                        }
-
                                         const actDate = new Date(act.fecha_inicio);
                                         actDate.setHours(0, 0, 0, 0);
                                         const isOverdue = !act.is_completed && actDate < today;
@@ -445,15 +456,8 @@ function ActivitiesContent() {
                                         for (let i = 1; i <= lastDay.getDate(); i++) {
                                             const currentDate = new Date(year, month, i);
 
-                                            const dayActivities = activities?.filter(a => {
-                                                // Apply global filters
-                                                if (filterType && a.tipo_actividad !== filterType) return false;
-                                                if (filterClassification && a.clasificacion_id !== Number(filterClassification)) return false;
-                                                if (filterSubclassification && a.subclasificacion_id !== Number(filterSubclassification)) return false;
-
-                                                const d = new Date(a.fecha_inicio);
-                                                return d.getDate() === i && d.getMonth() === month && d.getFullYear() === year;
-                                            }) || [];
+                                            // PERF FIX: O(1) Map lookup instead of filtering all activities per day cell
+                                            const dayActivities = activitiesByDay.get(`${year}-${month}-${i}`) || [];
 
                                             const isToday = new Date().toDateString() === currentDate.toDateString();
                                             const isSelected = selectedDate.getDate() === i && selectedDate.getMonth() === month;
@@ -493,26 +497,43 @@ function ActivitiesContent() {
 
                                                     {/* Activity Preview */}
                                                     <div className="flex-1 overflow-hidden space-y-0.5">
-                                                        {dayActivities.slice(0, 2).map(act => {
+                                                        {dayActivities.slice(0, 3).map(act => {
                                                             const isOverdueAct = !act.is_completed && new Date(act.fecha_inicio).setHours(0, 0, 0, 0) < new Date().setHours(0, 0, 0, 0);
                                                             return (
-                                                                <div key={act.id} className={cn(
-                                                                    "text-[10px] px-1.5 py-0.5 rounded truncate font-medium border-l-2",
-                                                                    act.is_completed
-                                                                        ? "bg-slate-50 text-slate-400 border-slate-300 line-through"
-                                                                        : isOverdueAct
-                                                                            ? "bg-red-50 text-red-700 border-red-400"
-                                                                            : act.tipo_actividad === 'TAREA'
-                                                                                ? "bg-emerald-50 text-emerald-700 border-emerald-400"
-                                                                                : "bg-blue-50 text-blue-700 border-blue-400"
-                                                                )}>
-                                                                    {act.asunto}
+                                                                <div key={act.id} className="flex gap-1 group/act">
+                                                                    <div
+                                                                        className={cn(
+                                                                            "text-[9px] px-1 py-0.5 rounded truncate font-medium border-l-2 flex-1",
+                                                                            act.is_completed
+                                                                                ? "bg-slate-50 text-slate-400 border-slate-300 line-through"
+                                                                                : isOverdueAct
+                                                                                    ? "bg-red-50 text-red-700 border-red-400"
+                                                                                    : act.tipo_actividad === 'TAREA'
+                                                                                        ? "bg-emerald-50 text-emerald-700 border-emerald-400"
+                                                                                        : "bg-blue-50 text-blue-700 border-blue-400"
+                                                                        )}
+                                                                        title={act.asunto}
+                                                                    >
+                                                                        {act.asunto}
+                                                                    </div>
+                                                                    <button
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation();
+                                                                            toggleComplete(act.id, !act.is_completed);
+                                                                        }}
+                                                                        className={cn(
+                                                                            "p-0.5 rounded-md transition-all sm:opacity-0 sm:group-hover/act:opacity-100",
+                                                                            act.is_completed ? "text-emerald-500 bg-emerald-50" : "text-slate-300 hover:text-blue-500 hover:bg-blue-50"
+                                                                        )}
+                                                                    >
+                                                                        <CheckCircle2 className="w-3 h-3" />
+                                                                    </button>
                                                                 </div>
                                                             );
                                                         })}
-                                                        {dayActivities.length > 2 && (
+                                                        {dayActivities.length > 3 && (
                                                             <div className="text-[9px] text-slate-400 font-medium pl-1">
-                                                                +{dayActivities.length - 2} más
+                                                                +{dayActivities.length - 3} más
                                                             </div>
                                                         )}
                                                     </div>
@@ -520,37 +541,55 @@ function ActivitiesContent() {
                                                     {/* Hover Tooltip */}
                                                     {dayActivities.length > 0 && (
                                                         <div className={cn(
-                                                            "absolute left-1/2 -translate-x-1/2 z-50 w-56 bg-white rounded-lg shadow-2xl border border-slate-200 p-3 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 pointer-events-none",
+                                                            "absolute left-1/2 -translate-x-1/2 z-50 w-56 bg-white rounded-lg shadow-2xl border border-slate-200 p-3 opacity-0 invisible group-hover/day:opacity-100 group-hover/day:visible transition-all duration-200 pointer-events-auto cursor-default",
                                                             i > 15 ? "bottom-full mb-2" : "top-full mt-1"
-                                                        )}>
+                                                        )}
+                                                            onClick={(e) => e.stopPropagation()}
+                                                        >
                                                             <div className="text-xs font-bold text-slate-900 mb-2 pb-2 border-b border-slate-100 flex justify-between items-center">
                                                                 <span>{currentDate.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'short' })}</span>
                                                                 <span className="text-slate-400 font-normal text-[10px]">({dayActivities.length})</span>
                                                             </div>
-                                                            {dayActivities.map(act => {
-                                                                const isOverdueAct = !act.is_completed && new Date(act.fecha_inicio).setHours(0, 0, 0, 0) < new Date().setHours(0, 0, 0, 0);
-                                                                const cName = classifications.find(c => String(c.id) === String(act.clasificacion_id))?.nombre;
+                                                            <div className="space-y-1.5 max-h-[250px] overflow-y-auto pr-1">
+                                                                {dayActivities.map(act => {
+                                                                    const isOverdueAct = !act.is_completed && new Date(act.fecha_inicio).setHours(0, 0, 0, 0) < new Date().setHours(0, 0, 0, 0);
+                                                                    const cName = classifications.find(c => String(c.id) === String(act.clasificacion_id))?.nombre;
 
-                                                                return (
-                                                                    <div key={act.id} className={cn(
-                                                                        "text-[11px] p-1.5 rounded border-l-2",
-                                                                        act.is_completed
-                                                                            ? "bg-slate-50 text-slate-400 border-slate-300"
-                                                                            : isOverdueAct
-                                                                                ? "bg-red-50 text-red-800 border-red-400"
-                                                                                : act.tipo_actividad === 'TAREA'
-                                                                                    ? "bg-emerald-50 text-emerald-800 border-emerald-400"
-                                                                                    : "bg-blue-50 text-blue-800 border-blue-400"
-                                                                    )}>
-                                                                        <div className="font-medium truncate">{act.asunto}</div>
-                                                                        {cName && <div className="text-[9px] font-bold text-slate-500 uppercase mt-0.5">{cName}</div>}
-                                                                        <div className="text-[10px] opacity-70 mt-0.5">
-                                                                            {new Date(act.fecha_inicio).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: true })}
-                                                                            {act.is_completed && ' • Completada'}
+                                                                    return (
+                                                                        <div key={act.id} className={cn(
+                                                                            "relative group/tip flex items-center gap-2 p-1.5 rounded border-l-2 transition-all hover:bg-slate-50",
+                                                                            act.is_completed
+                                                                                ? "bg-slate-50/50 text-slate-400 border-slate-300"
+                                                                                : isOverdueAct
+                                                                                    ? "bg-red-50 text-red-800 border-red-400"
+                                                                                    : act.tipo_actividad === 'TAREA'
+                                                                                        ? "bg-emerald-50 text-emerald-800 border-emerald-400"
+                                                                                        : "bg-blue-50 text-blue-800 border-blue-400"
+                                                                        )}>
+                                                                            <div className="flex-1 min-w-0">
+                                                                                <div className="font-medium truncate">{act.asunto}</div>
+                                                                                {cName && <div className="text-[9px] font-bold text-slate-500 uppercase mt-0.5">{cName}</div>}
+                                                                                <div className="text-[10px] opacity-70 mt-0.5">
+                                                                                    {new Date(act.fecha_inicio).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: true })}
+                                                                                </div>
+                                                                            </div>
+                                                                            <button
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    toggleComplete(act.id, !act.is_completed);
+                                                                                }}
+                                                                                className={cn(
+                                                                                    "p-1 rounded-md transition-all sm:opacity-0 sm:group-hover/tip:opacity-100 shrink-0",
+                                                                                    act.is_completed ? "text-emerald-500 bg-emerald-100" : "text-slate-300 hover:text-blue-600 hover:bg-blue-100"
+                                                                                )}
+                                                                                title={act.is_completed ? "Marcar como pendiente" : "Marcar como completada"}
+                                                                            >
+                                                                                <CheckCircle2 className="w-4 h-4" />
+                                                                            </button>
                                                                         </div>
-                                                                    </div>
-                                                                );
-                                                            })}
+                                                                    );
+                                                                })}
+                                                            </div>
                                                         </div>
                                                     )}
                                                 </div>

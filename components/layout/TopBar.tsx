@@ -1,41 +1,29 @@
 import { useSyncStore } from "@/lib/stores/useSyncStore";
 import { cn } from "@/components/ui/utils";
 import { Bell, RefreshCw, AlertCircle, CheckCircle2 } from "lucide-react";
-import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { useMemo } from "react";
 // Re-export NotificationList to ensure HMR picks it up
 import { Notifications } from "./Notifications";
 import { GlobalSearch } from "./GlobalSearch";
 import { FirplakIsotipo } from "./FirplakLogo";
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 
 export function TopBar() {
     const { isSyncing, pendingCount, error: syncError } = useSyncStore();
-    const [initials, setInitials] = useState("...");
+    const { user } = useCurrentUser();
 
-    useEffect(() => {
-        const fetchUser = async () => {
-            try {
-                const { data: { user } } = await supabase.auth.getUser();
-                if (user) {
-                    const name = user.user_metadata?.full_name || user.email || "";
-                    const parts = name.split(/[.\s@]/).filter(Boolean);
-                    let userInitials = "";
-                    if (parts.length >= 2) {
-                        userInitials = (parts[0][0] + parts[1][0]).toUpperCase();
-                    } else if (parts.length === 1) {
-                        userInitials = parts[0].substring(0, 2).toUpperCase();
-                    }
-                    setInitials(userInitials || "??");
-                }
-            } catch (err: any) {
-                // Silently ignore network errors (offline mode)
-                if (!err.message?.includes('Failed to fetch')) {
-                    console.error('TopBar: Error getting user:', err);
-                }
-            }
-        };
-        fetchUser();
-    }, []);
+    // Derive initials from Zustand store (no network call needed)
+    const initials = useMemo(() => {
+        if (!user) return "...";
+        const name = user.full_name || user.email || "";
+        const parts = name.split(/[.\s@]/).filter(Boolean);
+        if (parts.length >= 2) {
+            return (parts[0][0] + parts[1][0]).toUpperCase();
+        } else if (parts.length === 1) {
+            return parts[0].substring(0, 2).toUpperCase();
+        }
+        return "??";
+    }, [user]);
 
     return (
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 sticky top-0 z-30">

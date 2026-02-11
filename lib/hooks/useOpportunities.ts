@@ -70,7 +70,7 @@ export function useOpportunities() {
 
     const createOpportunity = async (data: any) => {
         const id = uuidv4();
-        const { items, ...oppData } = data;
+        const { items, collaborators, ...oppData } = data;
 
         // Fetch current user for ownership
         const { data: { user } } = await syncEngine.getCurrentUser();
@@ -93,6 +93,27 @@ export function useOpportunities() {
         };
         await db.opportunities.add(newOpp);
         await syncEngine.queueMutation('CRM_Oportunidades', id, sanitizeOpportunityForSync(newOpp));
+
+        // Save Collaborators (Defensive)
+        if (collaborators && collaborators.length > 0) {
+            try {
+                const collabEntries = collaborators.map((c: any) => ({
+                    id: uuidv4(),
+                    oportunidad_id: id,
+                    usuario_id: c.usuario_id,
+                    porcentaje: c.porcentaje,
+                    rol: c.rol || 'COLABORADOR',
+                    created_at: new Date().toISOString()
+                }));
+
+                await db.opportunityCollaborators.bulkAdd(collabEntries);
+                for (const col of collabEntries) {
+                    await syncEngine.queueMutation('CRM_Oportunidades_Colaboradores', col.id, col);
+                }
+            } catch (err) {
+                console.warn("Could not save collaborators locally or queue mutation (table might be missing locally):", err);
+            }
+        }
 
         // If items are present, create an initial quote
         if (items && items.length > 0) {

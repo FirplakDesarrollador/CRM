@@ -1,6 +1,6 @@
 {
   "name": "crm-app",
-  "version": "1.0.7.5",
+  "version": "1.0.7.6",
   "private": true,
   "scripts": {
     "dev": "next dev --webpack",
@@ -26,11 +26,14 @@
     "dexie": "^4.2.1",
     "dexie-react-hooks": "^4.2.0",
     "dotenv": "^17.2.3",
+    "echarts": "^6.0.0",
+    "echarts-for-react": "^3.0.6",
     "lucide-react": "^0.562.0",
     "next": "16.1.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-hook-form": "^7.70.0",
+    "recharts": "^3.7.0",
     "tailwind-merge": "^3.4.0",
     "uuid": "^13.0.0",
     "xlsx": "^0.18.5",

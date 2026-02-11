@@ -448,23 +448,21 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                         </button>
                     </div>
 
-                    {/* Completion Toggle (Only for TAREAS) */}
-                    {tipo === 'TAREA' && (
-                        <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 flex items-center justify-between animate-in slide-in-from-top-2 duration-200">
-                            <div className="space-y-0.5">
-                                <label className="text-xs font-bold text-slate-900 uppercase">Tarea Finalizada</label>
-                                <p className="text-[10px] text-slate-500">Marcar como completada</p>
-                            </div>
-                            <label className="relative inline-flex items-center cursor-pointer">
-                                <input
-                                    type="checkbox"
-                                    {...register('is_completed')}
-                                    className="sr-only peer"
-                                />
-                                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
-                            </label>
+                    {/* Completion Toggle (Available for all types) */}
+                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 flex items-center justify-between animate-in slide-in-from-top-2 duration-200">
+                        <div className="space-y-0.5">
+                            <label className="text-xs font-bold text-slate-900 uppercase">Actividad Finalizada</label>
+                            <p className="text-[10px] text-slate-500">Marcar como completada</p>
                         </div>
-                    )}
+                        <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                                type="checkbox"
+                                {...register('is_completed')}
+                                className="sr-only peer"
+                            />
+                            <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                        </label>
+                    </div>
 
                     {/* CLASSIFICATION SELECTORS */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
