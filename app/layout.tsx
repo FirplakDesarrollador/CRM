@@ -18,13 +18,6 @@ export const metadata: Metadata = {
   title: "CRM FIRPLAK",
   description: "PWA Offline-First CRM",
   manifest: "/manifest.json",
-  themeColor: "#254153",
-  viewport: {
-    width: "device-width",
-    initialScale: 1,
-    maximumScale: 1,
-    userScalable: false,
-  },
   icons: {
     icon: [
       { url: "/isotipo.svg", type: "image/svg+xml" },
@@ -32,6 +25,14 @@ export const metadata: Metadata = {
     ],
     apple: "/apple-touch-icon.png",
   },
+};
+
+export const viewport = {
+  themeColor: "#254153",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
 };
 
 export default function RootLayout({

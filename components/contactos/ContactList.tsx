@@ -83,47 +83,61 @@ export function ContactList({ accountId }: ContactListProps) {
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {filteredContacts.map(contact => (
-                        <div key={contact.id} className="p-4 border rounded-lg bg-white dark:bg-slate-900 shadow-sm relative group hover:border-blue-300 transition-colors">
-                            <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div key={contact.id} className="group p-5 border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-2xl shadow-sm relative hover:shadow-lg hover:border-[#254153]/20 transition-all duration-300 flex flex-col h-full">
+                            <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
                                 <button
                                     onClick={() => handleEdit(contact)}
-                                    className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"
+                                    className="p-2 text-blue-600 hover:bg-blue-600 hover:text-white bg-blue-50 rounded-xl transition-all shadow-sm"
                                     title="Editar"
                                 >
-                                    <Edit2 size={16} />
+                                    <Edit2 size={14} />
                                 </button>
                                 <button
                                     onClick={() => {
                                         if (confirm('¿Eliminar contacto?')) deleteContact(contact.id);
                                     }}
-                                    className="p-1.5 text-red-600 hover:bg-red-50 rounded"
+                                    className="p-2 text-red-600 hover:bg-red-600 hover:text-white bg-red-50 rounded-xl transition-all shadow-sm"
                                     title="Eliminar"
                                 >
-                                    <Trash2 size={16} />
+                                    <Trash2 size={14} />
                                 </button>
                             </div>
 
-                            <div className="flex flex-col gap-1">
-                                <div className="flex items-center gap-2 pr-16">
-                                    <span className="font-bold text-gray-900 dark:text-gray-100 truncate" title={contact.nombre}>{contact.nombre}</span>
-                                    {contact.es_principal && (
-                                        <span className="bg-green-100 text-green-800 text-[10px] px-2 py-0.5 rounded-full font-bold uppercase">Principal</span>
-                                    )}
+                            <div className="flex flex-col gap-3 flex-1">
+                                <div className="space-y-1 pr-16">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="font-extrabold text-slate-900 dark:text-slate-100 truncate" title={contact.nombre}>
+                                            {contact.nombre}
+                                        </span>
+                                        {contact.es_principal && (
+                                            <span className="bg-emerald-50 text-emerald-700 text-[9px] px-2 py-0.5 rounded-full font-black uppercase tracking-wider border border-emerald-100">
+                                                Principal
+                                            </span>
+                                        )}
+                                    </div>
+                                    <span className="text-xs font-bold text-slate-500 dark:text-slate-400 leading-tight uppercase tracking-tight">
+                                        {contact.cargo || "Sin cargo registrado"}
+                                    </span>
                                 </div>
-                                <span className="text-sm text-gray-500 dark:text-gray-400">{contact.cargo || "Sin cargo"}</span>
 
-                                <div className="mt-3 text-sm space-y-1.5 pt-3 border-t border-gray-100 dark:border-gray-800">
+                                <div className="mt-auto space-y-2.5 pt-4 border-t border-slate-50 dark:border-slate-800">
                                     {contact.email && (
-                                        <div className="flex items-center gap-2 text-gray-600 dark:text-gray-300">
-                                            <Mail size={14} className="text-gray-400" />
-                                            <a href={`mailto:${contact.email}`} className="hover:underline truncate" title={contact.email}>{contact.email}</a>
-                                        </div>
+                                        <a
+                                            href={`mailto:${contact.email}`}
+                                            className="flex items-center gap-2.5 text-slate-600 dark:text-slate-300 hover:text-[#254153] transition-colors group/link"
+                                        >
+                                            <Mail size={13} className="text-slate-400 group-hover/link:text-blue-500 shrink-0" />
+                                            <span className="text-sm font-medium truncate" title={contact.email}>{contact.email}</span>
+                                        </a>
                                     )}
                                     {contact.telefono && (
-                                        <div className="flex items-center gap-2 text-gray-600 dark:text-gray-300">
-                                            <Phone size={14} className="text-gray-400" />
-                                            <a href={`tel:${contact.telefono}`} className="hover:underline">{contact.telefono}</a>
-                                        </div>
+                                        <a
+                                            href={`tel:${contact.telefono}`}
+                                            className="flex items-center gap-2.5 text-slate-600 dark:text-slate-300 hover:text-[#254153] transition-colors group/link"
+                                        >
+                                            <Phone size={13} className="text-slate-400 group-hover/link:text-emerald-500 shrink-0" />
+                                            <span className="text-sm font-medium">{contact.telefono}</span>
+                                        </a>
                                     )}
                                 </div>
                             </div>
