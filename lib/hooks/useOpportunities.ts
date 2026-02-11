@@ -60,6 +60,7 @@ function sanitizeOpportunityForSync(opp: any) {
     if (sanitized.ciudad_id !== undefined) sanitized.ciudad_id = sanitized.ciudad_id ? Number(sanitized.ciudad_id) : null;
     if (sanitized.estado_id !== undefined) sanitized.estado_id = sanitized.estado_id ? Number(sanitized.estado_id) : 1;
     if (sanitized.fase_id !== undefined) sanitized.fase_id = sanitized.fase_id ? Number(sanitized.fase_id) : 1;
+    if (sanitized.razon_perdida_id !== undefined) sanitized.razon_perdida_id = sanitized.razon_perdida_id ? Number(sanitized.razon_perdida_id) : null;
 
     return sanitized;
 }
@@ -209,6 +210,7 @@ export function useOpportunities() {
             segmento_id: updates.segmento_id !== undefined ? (updates.segmento_id ? Number(updates.segmento_id) : null) : undefined,
             departamento_id: updates.departamento_id !== undefined ? (updates.departamento_id ? Number(updates.departamento_id) : null) : undefined,
             ciudad_id: updates.ciudad_id !== undefined ? (updates.ciudad_id ? Number(updates.ciudad_id) : null) : undefined,
+            razon_perdida_id: updates.razon_perdida_id !== undefined ? (updates.razon_perdida_id ? Number(updates.razon_perdida_id) : null) : undefined,
         };
 
         // Remove undefined fields to avoid overwriting with undefined

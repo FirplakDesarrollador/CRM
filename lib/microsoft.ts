@@ -436,14 +436,20 @@ export async function createPlannerTask(accessToken: string, taskDetails: {
     }
 
     // Add assignments if provided (assignees)
+    // Note: User IDs from People API may include tenant suffix (userId@tenantId)
+    // Planner expects just the userId, so we strip the tenant suffix
     if (taskDetails.assigneeIds && taskDetails.assigneeIds.length > 0) {
         task.assignments = {};
-        for (const userId of taskDetails.assigneeIds) {
+        for (const rawUserId of taskDetails.assigneeIds) {
+            // Strip tenant ID if present (format: userId@tenantId -> userId)
+            const userId = rawUserId.includes('@') ? rawUserId.split('@')[0] : rawUserId;
+            // Assignment requires @odata.type and orderHint
             task.assignments[userId] = {
-                '@odata.type': '#microsoft.graph.plannerAssignment',
-                orderHint: ' !'
+                "@odata.type": "#microsoft.graph.plannerAssignment",
+                "orderHint": " !"
             };
         }
+        console.log('[Microsoft] Task assignments:', JSON.stringify(task.assignments));
     }
 
     // Create the task
