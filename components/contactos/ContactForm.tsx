@@ -1,8 +1,9 @@
 
 import { useContacts } from "@/lib/hooks/useContacts";
-import { LocalContact } from "@/lib/db";
+import { db, LocalContact } from "@/lib/db";
 import { useForm } from "react-hook-form";
 import { useEffect } from "react";
+import { supabase } from "@/lib/supabase";
 import { ContactImportButton } from "./ContactImportButton";
 import { ParsedContact } from "@/lib/vcard";
 
@@ -78,6 +79,51 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel }:
 
     const onSubmit = async (data: LocalContact) => {
         try {
+            // Check for duplicates
+            const checkDuplicates = async () => {
+                // Build OR query components
+                const checks = [];
+                if (data.email) checks.push(`email.eq.${data.email}`);
+                if (data.telefono) checks.push(`telefono.eq.${data.telefono}`);
+                if (data.nombre) checks.push(`nombre.eq.${data.nombre}`); // Global name check per requirement
+
+                if (checks.length === 0) return null;
+
+                let query = supabase
+                    .from('CRM_Contactos')
+                    .select('id, nombre, email, telefono')
+                    .or(checks.join(','));
+
+                if (existingContact?.id) {
+                    query = query.neq('id', existingContact.id);
+                }
+
+                const { data: duplicates, error } = await query;
+                if (error) {
+                    console.error("Error checking contact duplicates:", error);
+                    return null;
+                }
+                return duplicates;
+            };
+
+            const duplicates = await checkDuplicates();
+
+            if (duplicates && duplicates.length > 0) {
+                const nameConflict = duplicates.find((d: any) => d.nombre.toLowerCase() === data.nombre.toLowerCase());
+                const emailConflict = data.email ? duplicates.find((d: any) => d.email?.toLowerCase() === data.email?.toLowerCase()) : null;
+                const phoneConflict = data.telefono ? duplicates.find((d: any) => d.telefono === data.telefono) : null;
+
+                let errorMessage = "";
+                if (nameConflict) errorMessage += `\n- El nombre "${data.nombre}" ya existe.`;
+                if (emailConflict) errorMessage += `\n- El email "${data.email}" ya existe.`;
+                if (phoneConflict) errorMessage += `\n- El teléfono "${data.telefono}" ya existe.`;
+
+                if (errorMessage) {
+                    alert(`No se puede guardar. Se encontraron contactos duplicados:${errorMessage}`);
+                    return;
+                }
+            }
+
             if (existingContact) {
                 await updateContact(existingContact.id, data);
             } else {

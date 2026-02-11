@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
-import { Filter, X } from "lucide-react";
+import { Filter, X, ChevronDown, Check, CircleDot, Trophy, XCircle } from "lucide-react";
 import { cn } from "@/components/ui/utils";
 
 type Channel = {
@@ -24,13 +24,18 @@ type Phase = {
     id: number;
     nombre: string;
     canal_id: string;
+    probability?: number;
 };
+
+// Status filter type - includes both open stages and closed states
+type StatusFilter = 'all' | 'open' | 'won' | 'lost';
 
 interface OpportunityFiltersProps {
     onFilterChange: (filters: {
         channelId: string | null;
         segmentId: number | null;
         phaseId: number | null;
+        statusFilter: StatusFilter;
     }) => void;
 }
 
@@ -44,6 +49,7 @@ export function OpportunityFilters({ onFilterChange }: OpportunityFiltersProps) 
     const [selectedChannel, setSelectedChannel] = useState<string | null>(null);
     const [selectedSegment, setSelectedSegment] = useState<number | null>(null);
     const [selectedPhase, setSelectedPhase] = useState<number | null>(null);
+    const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
 
     const [loadingMetadata, setLoadingMetadata] = useState(true);
 
@@ -51,13 +57,8 @@ export function OpportunityFilters({ onFilterChange }: OpportunityFiltersProps) 
     useEffect(() => {
         const loadMetadata = async () => {
             try {
-                // Fetch Channels (Distinct from Fases or predefined)
-                // We'll infer channels from Fases or define them if they are static.
-                // Assuming we can get 'CRM_Subclasificaciones' distinct 'canal_id' or similar.
-
-                // Let's fetch all relevant metadata once
                 const [phasesRes, subRes, segRes] = await Promise.all([
-                    supabase.from('CRM_FasesOportunidad').select('id, nombre, canal_id').eq('is_active', true),
+                    supabase.from('CRM_FasesOportunidad').select('id, nombre, canal_id, probability').eq('is_active', true),
                     supabase.from('CRM_Subclasificaciones').select('*'),
                     supabase.from('CRM_Segmentos').select('*')
                 ]);
@@ -68,8 +69,15 @@ export function OpportunityFilters({ onFilterChange }: OpportunityFiltersProps) 
 
                 // Extract unique channels from phases
                 const uniqueChannels = Array.from(new Set(phasesRes.data?.map(p => p.canal_id))).filter(Boolean);
-                // Create basic channel objects (could be improved if we have a channels table)
-                setChannels(uniqueChannels.map(c => ({ id: c, nombre: c })));
+                // Map channels with friendly names
+                const channelNames: Record<string, string> = {
+                    'OBRAS_INT': 'Obras Internacional',
+                    'OBRAS_NAC': 'Obras Nacional',
+                    'DIST_INT': 'Distribución Internacional',
+                    'DIST_NAC': 'Distribución Nacional',
+                    'PROPIO': 'Canal Propio'
+                };
+                setChannels(uniqueChannels.map(c => ({ id: c, nombre: channelNames[c] || c })));
 
             } catch (err) {
                 console.error("Error loading filter metadata", err);
@@ -85,7 +93,6 @@ export function OpportunityFilters({ onFilterChange }: OpportunityFiltersProps) 
     const availableSegments = useMemo(() => {
         if (!selectedChannel) return [];
 
-        // Channel -> Subclass -> Segment
         const classIds = subclasses
             .filter(s => s.canal_id === selectedChannel)
             .map(s => s.id);
@@ -93,22 +100,46 @@ export function OpportunityFilters({ onFilterChange }: OpportunityFiltersProps) 
         return segments.filter(seg => classIds.includes(seg.subclasificacion_id));
     }, [selectedChannel, subclasses, segments]);
 
+    // Get phases for selected channel, excluding closed phases for the phase dropdown
+    // (closed phases are handled via statusFilter)
     const availablePhases = useMemo(() => {
         if (!selectedChannel) return [];
-        return phases.filter(p => p.canal_id === selectedChannel);
+        return phases
+            .filter(p => p.canal_id === selectedChannel)
+            .filter(p => {
+                const nombre = p.nombre.toLowerCase();
+                // Exclude closed phases from the phase dropdown
+                return !nombre.includes('cerrada');
+            });
     }, [selectedChannel, phases]);
+
+    // Handle Status Filter Change
+    const handleStatusChange = (status: StatusFilter) => {
+        setStatusFilter(status);
+        // When changing status filter, reset phase selection if not compatible
+        if (status === 'won' || status === 'lost') {
+            setSelectedPhase(null);
+        }
+        onFilterChange({
+            channelId: selectedChannel,
+            segmentId: selectedSegment,
+            phaseId: null,
+            statusFilter: status
+        });
+    };
 
     // Handle Changes
     const handleChannelChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
         const val = e.target.value || null;
         setSelectedChannel(val);
-        setSelectedSegment(null); // Reset child
-        setSelectedPhase(null); // Reset child
+        setSelectedSegment(null);
+        setSelectedPhase(null);
 
         onFilterChange({
             channelId: val,
             segmentId: null,
-            phaseId: null
+            phaseId: null,
+            statusFilter
         });
     };
 
@@ -118,17 +149,23 @@ export function OpportunityFilters({ onFilterChange }: OpportunityFiltersProps) 
         onFilterChange({
             channelId: selectedChannel,
             segmentId: val,
-            phaseId: selectedPhase
+            phaseId: selectedPhase,
+            statusFilter
         });
     };
 
     const handlePhaseChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
         const val = e.target.value ? Number(e.target.value) : null;
         setSelectedPhase(val);
+        // When selecting a specific phase, set status to all or open
+        if (val) {
+            setStatusFilter('open');
+        }
         onFilterChange({
             channelId: selectedChannel,
             segmentId: selectedSegment,
-            phaseId: val
+            phaseId: val,
+            statusFilter: val ? 'open' : statusFilter
         });
     };
 
@@ -136,19 +173,75 @@ export function OpportunityFilters({ onFilterChange }: OpportunityFiltersProps) 
         setSelectedChannel(null);
         setSelectedSegment(null);
         setSelectedPhase(null);
-        onFilterChange({ channelId: null, segmentId: null, phaseId: null });
+        setStatusFilter('all');
+        onFilterChange({ channelId: null, segmentId: null, phaseId: null, statusFilter: 'all' });
     };
+
+    const hasActiveFilters = selectedChannel || selectedSegment || selectedPhase || statusFilter !== 'all';
 
     if (loadingMetadata) return <div className="text-xs text-slate-400">Cargando filtros...</div>;
 
     return (
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-3">
+            {/* Status Filter Pills - Quick access to closed states */}
+            <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
+                <button
+                    onClick={() => handleStatusChange('all')}
+                    className={cn(
+                        "px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5",
+                        statusFilter === 'all'
+                            ? "bg-white text-slate-800 shadow-sm"
+                            : "text-slate-500 hover:text-slate-700"
+                    )}
+                >
+                    <CircleDot className="w-3 h-3" />
+                    Todas
+                </button>
+                <button
+                    onClick={() => handleStatusChange('open')}
+                    className={cn(
+                        "px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5",
+                        statusFilter === 'open'
+                            ? "bg-white text-blue-600 shadow-sm"
+                            : "text-slate-500 hover:text-slate-700"
+                    )}
+                >
+                    <CircleDot className="w-3 h-3" />
+                    Abiertas
+                </button>
+                <button
+                    onClick={() => handleStatusChange('won')}
+                    className={cn(
+                        "px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5",
+                        statusFilter === 'won'
+                            ? "bg-emerald-500 text-white shadow-sm"
+                            : "text-slate-500 hover:text-emerald-600"
+                    )}
+                >
+                    <Trophy className="w-3 h-3" />
+                    Ganadas
+                </button>
+                <button
+                    onClick={() => handleStatusChange('lost')}
+                    className={cn(
+                        "px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5",
+                        statusFilter === 'lost'
+                            ? "bg-red-500 text-white shadow-sm"
+                            : "text-slate-500 hover:text-red-600"
+                    )}
+                >
+                    <XCircle className="w-3 h-3" />
+                    Perdidas
+                </button>
+            </div>
+
+            {/* Hierarchical Filters */}
             <div className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 bg-white shadow-sm">
                 <Filter className="w-4 h-4 text-slate-400" />
 
                 {/* Channel Select */}
                 <select
-                    className="text-sm bg-transparent border-none focus:ring-0 cursor-pointer text-slate-700 font-medium max-w-[140px]"
+                    className="text-sm bg-transparent border-none focus:ring-0 cursor-pointer text-slate-700 font-medium max-w-[180px]"
                     value={selectedChannel || ""}
                     onChange={handleChannelChange}
                 >
@@ -160,50 +253,58 @@ export function OpportunityFilters({ onFilterChange }: OpportunityFiltersProps) 
 
                 {/* Separator if Channel Selected */}
                 {selectedChannel && (
-                    <span className="text-slate-300">|</span>
-                )}
+                    <>
+                        <span className="text-slate-300">|</span>
 
-                {/* Segment Select */}
-                {selectedChannel && (
-                    <select
-                        className="text-sm bg-transparent border-none focus:ring-0 cursor-pointer text-slate-700 max-w-[140px]"
-                        value={selectedSegment || ""}
-                        onChange={handleSegmentChange}
-                    >
-                        <option value="">Todos los Segmentos</option>
-                        {availableSegments.map(s => (
-                            <option key={s.id} value={s.id}>{s.nombre}</option>
-                        ))}
-                    </select>
-                )}
+                        {/* Segment Select */}
+                        <select
+                            className="text-sm bg-transparent border-none focus:ring-0 cursor-pointer text-slate-700 max-w-[160px]"
+                            value={selectedSegment || ""}
+                            onChange={handleSegmentChange}
+                        >
+                            <option value="">Todos los Segmentos</option>
+                            {availableSegments.map(s => (
+                                <option key={s.id} value={s.id}>{s.nombre}</option>
+                            ))}
+                        </select>
 
-                {/* Separator if Channel Selected */}
-                {selectedChannel && (
-                    <span className="text-slate-300">|</span>
-                )}
+                        <span className="text-slate-300">|</span>
 
-                {/* Phase Select */}
-                {selectedChannel && (
-                    <select
-                        className="text-sm bg-transparent border-none focus:ring-0 cursor-pointer text-slate-700 max-w-[140px]"
-                        value={selectedPhase || ""}
-                        onChange={handlePhaseChange}
-                    >
-                        <option value="">Todas las Fases</option>
-                        {availablePhases.map(p => (
-                            <option key={p.id} value={p.id}>{p.nombre}</option>
-                        ))}
-                    </select>
+                        {/* Phase Select - Only show when status is 'all' or 'open' */}
+                        {(statusFilter === 'all' || statusFilter === 'open') && (
+                            <select
+                                className="text-sm bg-transparent border-none focus:ring-0 cursor-pointer text-slate-700 max-w-[160px]"
+                                value={selectedPhase || ""}
+                                onChange={handlePhaseChange}
+                            >
+                                <option value="">Todas las Etapas</option>
+                                {availablePhases.map(p => (
+                                    <option key={p.id} value={p.id}>{p.nombre}</option>
+                                ))}
+                            </select>
+                        )}
+
+                        {/* Show closed status badge when won/lost selected */}
+                        {(statusFilter === 'won' || statusFilter === 'lost') && (
+                            <span className={cn(
+                                "px-2 py-0.5 rounded text-xs font-medium",
+                                statusFilter === 'won' ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"
+                            )}>
+                                {statusFilter === 'won' ? 'Cerrada Ganada' : 'Cerrada Perdida'}
+                            </span>
+                        )}
+                    </>
                 )}
             </div>
 
-            {(selectedChannel || selectedSegment || selectedPhase) && (
+            {/* Clear Button */}
+            {hasActiveFilters && (
                 <button
                     onClick={clearFilters}
-                    className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1"
+                    className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1 px-2 py-1 rounded hover:bg-red-50 transition-colors"
                 >
                     <X className="w-3 h-3" />
-                    Limpiar
+                    Limpiar filtros
                 </button>
             )}
         </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useForm } from "react-hook-form";
-import { CalendarClock, ListTodo, Loader2, Users, Search, X, Video, Plus } from "lucide-react";
+import { CalendarClock, ListTodo, Loader2, Users, Search, X, Video, Plus, CheckCircle2, AlertCircle } from "lucide-react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { cn } from "@/components/ui/utils";
@@ -40,6 +40,13 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
     const [loadingPlanner, setLoadingPlanner] = useState<boolean>(false);
     const [checklist, setChecklist] = useState<string[]>([]);
     const [newChecklistItem, setNewChecklistItem] = useState("");
+
+    // Sync Feedback State
+    const [syncFeedback, setSyncFeedback] = useState<{
+        planner?: 'success' | 'error' | null;
+        teams?: 'success' | 'error' | null;
+        message?: string;
+    }>({});
 
     // Check Microsoft Connection
     useEffect(() => {
@@ -259,6 +266,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
 
     const handleActualSubmit = async (data: any) => {
         setIsSubmitting(true);
+        setSyncFeedback({}); // Reset feedback
         try {
             console.log("[CreateActivityModal] Raw Submit Data:", data);
 
@@ -282,18 +290,21 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                         const event = await res.json();
                         teamsMeetingUrl = event.onlineMeeting?.joinUrl || null;
                         console.log("[CreateActivityModal] Teams Meeting Created:", teamsMeetingUrl);
+                        setSyncFeedback(prev => ({ ...prev, teams: 'success' }));
                     } else {
                         const err = await res.json();
                         console.error("[CreateActivityModal] Failed to create Teams meeting:", err);
-                        // We continue anyway but without the Teams link in the CRM record
+                        setSyncFeedback(prev => ({ ...prev, teams: 'error', message: err.error || 'Error creando reunión Teams' }));
                     }
                 } catch (e) {
                     console.error("[CreateActivityModal] Teams creation error:", e);
+                    setSyncFeedback(prev => ({ ...prev, teams: 'error', message: 'Error de conexión con Teams' }));
                 }
             }
 
             // 2. Create Planner Task if requested
             let plannerId = null;
+            let plannerSuccess = false;
             if (syncToPlanner && msConnected && tipo === 'TAREA' && selectedPlanId && selectedBucketId) {
                 try {
                     // Map attendees to assigneeIds (IDs are Microsoft User IDs)
@@ -317,13 +328,17 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                     if (res.ok) {
                         const taskResponse = await res.json();
                         plannerId = taskResponse.task?.id || null;
+                        plannerSuccess = !!plannerId;
                         console.log("[CreateActivityModal] Planner Task Created:", plannerId);
+                        setSyncFeedback(prev => ({ ...prev, planner: 'success' }));
                     } else {
                         const err = await res.json();
                         console.error("[CreateActivityModal] Failed to create Planner task:", err);
+                        setSyncFeedback(prev => ({ ...prev, planner: 'error', message: err.error || 'Error creando tarea en Planner' }));
                     }
                 } catch (e) {
                     console.error("[CreateActivityModal] Planner creation error:", e);
+                    setSyncFeedback(prev => ({ ...prev, planner: 'error', message: 'Error de conexión con Planner' }));
                 }
             }
 
@@ -338,11 +353,18 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
             processed.subclasificacion_id = (data.subclasificacion_id && data.subclasificacion_id !== "") ? Number(data.subclasificacion_id) : null;
 
             console.log("[CreateActivityModal] Processed Submit Data:", processed);
+
+            // Show brief success feedback before closing
+            if (plannerSuccess || teamsMeetingUrl) {
+                await new Promise(resolve => setTimeout(resolve, 800)); // Brief delay to show feedback
+            }
+
             onSubmit(processed);
         } finally {
             setIsSubmitting(false);
         }
     };
+
 
     const tipo = watch('tipo_actividad');
     const fechaInicio = watch('fecha_inicio');
@@ -518,7 +540,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                     {msConnected && (
                         <div className="space-y-4 animate-in fade-in slide-in-from-top-4 duration-300">
                             {tipo === 'EVENTO' && (
-                                <div className="p-[1px] bg-gradient-to-r from-blue-500 to-indigo-500 rounded-2xl shadow-sm">
+                                <div className="p-px bg-linear-to-r from-blue-500 to-indigo-500 rounded-2xl shadow-sm">
                                     <div className="bg-white rounded-[15px] p-4 flex items-center justify-between">
                                         <div className="flex items-center gap-3">
                                             <div className="bg-blue-50 p-2 rounded-xl text-blue-600">
@@ -685,8 +707,8 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                 {msConnected && (
                                     <div className="col-span-full space-y-3">
                                         {/* Planner Header */}
-                                        <div className="flex items-center gap-2 p-3 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-xl border border-emerald-200">
-                                            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center">
+                                        <div className="flex items-center gap-2 p-3 bg-linear-to-r from-emerald-50 to-teal-50 rounded-xl border border-emerald-200">
+                                            <div className="w-8 h-8 rounded-lg bg-linear-to-br from-emerald-500 to-teal-600 flex items-center justify-center">
                                                 <ListTodo className="w-4 h-4 text-white" />
                                             </div>
                                             <div>
@@ -820,6 +842,36 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                             placeholder="Notas adicionales..."
                         />
                     </div>
+
+                    {/* Sync Feedback Display */}
+                    {(syncFeedback.planner || syncFeedback.teams) && (
+                        <div className="bg-slate-50 rounded-xl p-3 border border-slate-200 space-y-2 animate-in slide-in-from-top-2 duration-200">
+                            {syncFeedback.planner === 'success' && (
+                                <div className="flex items-center gap-2 text-emerald-600">
+                                    <CheckCircle2 className="w-5 h-5" />
+                                    <span className="text-sm font-medium">✓ Tarea creada en Microsoft Planner</span>
+                                </div>
+                            )}
+                            {syncFeedback.planner === 'error' && (
+                                <div className="flex items-center gap-2 text-red-600">
+                                    <AlertCircle className="w-5 h-5" />
+                                    <span className="text-sm font-medium">Error sincronizando con Planner</span>
+                                </div>
+                            )}
+                            {syncFeedback.teams === 'success' && (
+                                <div className="flex items-center gap-2 text-blue-600">
+                                    <CheckCircle2 className="w-5 h-5" />
+                                    <span className="text-sm font-medium">✓ Reunión creada en Teams</span>
+                                </div>
+                            )}
+                            {syncFeedback.teams === 'error' && (
+                                <div className="flex items-center gap-2 text-red-600">
+                                    <AlertCircle className="w-5 h-5" />
+                                    <span className="text-sm font-medium">Error creando reunión Teams</span>
+                                </div>
+                            )}
+                        </div>
+                    )}
 
                     <div className="flex gap-3 pt-6 mt-auto border-t border-slate-100 bg-white shrink-0 sticky bottom-0">
                         <button

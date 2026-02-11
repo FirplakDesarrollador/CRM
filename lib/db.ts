@@ -161,6 +161,7 @@ export interface LocalOportunidad {
     created_at?: string;
     updated_at?: string;
     probability?: number; // New field
+    razon_perdida_id?: number | null; // New field for Closed Lost
 }
 
 export class CRMFirplakDB extends Dexie {
@@ -182,6 +183,7 @@ export class CRMFirplakDB extends Dexie {
     cities!: Table<LocalCiudad, number>;
     activityClassifications!: Table<LocalActivityClassification, number>;
     activitySubclassifications!: Table<LocalActivitySubclassification, number>;
+    lossReasons!: Table<LocalLossReason, number>;
 
     constructor() {
         super('CRMFirplakDB');
@@ -200,7 +202,8 @@ export class CRMFirplakDB extends Dexie {
             departments: 'id, nombre',
             cities: 'id, departamento_id, nombre',
             activityClassifications: 'id, tipo_actividad',
-            activitySubclassifications: 'id, clasificacion_id'
+            activitySubclassifications: 'id, clasificacion_id',
+            lossReasons: 'id' // New table
         });
     }
 }
@@ -232,6 +235,12 @@ export interface LocalActivitySubclassification {
     id: number;
     nombre: string;
     clasificacion_id: number;
+}
+
+export interface LocalLossReason {
+    id: number;
+    descripcion: string;
+    is_active: boolean;
 }
 
 export const db = new CRMFirplakDB();
