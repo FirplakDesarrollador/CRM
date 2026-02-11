@@ -32,6 +32,10 @@ const withPWA = withPWAInit({
     },
     workboxOptions: {
         disableDevLogs: true,
+        additionalManifestEntries: [
+            { url: "/offline", revision: Date.now().toString() },
+            { url: "/", revision: Date.now().toString() },
+        ],
         runtimeCaching: [
             {
                 urlPattern: /^https:\/\/fonts\.(?:gstatic)\.com\/.*/i,
@@ -73,7 +77,7 @@ const withPWA = withPWAInit({
                     cacheName: "static-image-assets",
                     expiration: {
                         maxEntries: 64,
-                        maxAgeSeconds: 24 * 60 * 60, // 24 hours
+                        maxAgeSeconds: 30 * 24 * 60 * 60, // 30 days
                     },
                 },
             },
@@ -138,7 +142,7 @@ const withPWA = withPWAInit({
             },
             {
                 urlPattern: /.*/i,
-                handler: "NetworkFirst",
+                handler: "StaleWhileRevalidate",
                 options: {
                     cacheName: "others",
                     expiration: {
