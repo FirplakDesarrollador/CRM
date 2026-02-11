@@ -123,15 +123,22 @@ export default function ContactsPage() {
 
     // --- VIEW: Global List ---
     return (
-        <div className="p-6 space-y-6">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                <h1 className="text-3xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                    <User size={30} />
-                    Contactos
-                </h1>
+        <div className="p-6 max-w-7xl mx-auto space-y-8">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+                <div className="flex items-center gap-4">
+                    <div className="bg-[#254153] p-3 rounded-2xl text-white shadow-lg shadow-[#254153]/20">
+                        <User size={32} />
+                    </div>
+                    <div>
+                        <h1 className="text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+                            Contactos
+                        </h1>
+                        <p className="text-slate-500 font-medium">Gestiona tu red de contactos y clientes</p>
+                    </div>
+                </div>
                 <button
                     onClick={() => setIsCreating(true)}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 shadow-sm"
+                    className="w-full md:w-auto px-6 py-3 bg-[#254153] text-white rounded-xl hover:bg-[#1a2f3d] flex items-center justify-center gap-2 shadow-xl shadow-[#254153]/10 transition-all hover:scale-[1.02] active:scale-[0.98] font-bold"
                 >
                     <Plus size={20} />
                     Nuevo Contacto
@@ -139,51 +146,67 @@ export default function ContactsPage() {
             </div>
 
             {/* Search Bar */}
-            <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
+            <div className="relative group">
+                <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400 group-focus-within:text-[#254153] transition-colors" size={20} />
                 <input
                     type="text"
                     placeholder="Buscar por nombre, cuenta o email..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full pl-10 pr-4 py-3 border rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 bg-white dark:bg-slate-900 dark:border-slate-700"
+                    className="w-full pl-12 pr-4 py-4 border border-slate-200 rounded-2xl shadow-sm focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] bg-white dark:bg-slate-900 dark:border-slate-800 transition-all outline-none text-slate-700 dark:text-slate-200 font-medium placeholder:text-slate-400"
                 />
             </div>
 
             {/* List */}
             {(!filteredContacts || filteredContacts.length === 0) ? (
-                <div className="text-center py-12 text-gray-500 bg-gray-50 dark:bg-slate-800/50 rounded-lg border border-dashed border-gray-300 dark:border-slate-700">
-                    {searchTerm ? "No se encontraron contactos que coincidan con tu búsqueda." : "No hay contactos registrados aún."}
+                <div className="flex flex-col items-center justify-center py-20 text-slate-400 bg-slate-50/50 dark:bg-slate-800/20 rounded-3xl border-2 border-dashed border-slate-200 dark:border-slate-800">
+                    <div className="bg-white dark:bg-slate-800 p-4 rounded-full shadow-sm mb-4">
+                        <User size={40} className="text-slate-300" />
+                    </div>
+                    <p className="text-lg font-bold text-slate-600 dark:text-slate-400">
+                        {searchTerm ? "No se encontraron coincidencias" : "No hay contactos registrados"}
+                    </p>
+                    <p className="text-sm">{searchTerm ? "Prueba con otros términos de búsqueda" : "Empieza por añadir tu primer contacto"}</p>
                 </div>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {filteredContacts.map(contact => {
                         const accountName = accountMap.get(contact.account_id);
                         return (
-                            <div key={contact.id} className="p-4 border rounded-lg bg-white dark:bg-slate-900 shadow-sm relative hover:shadow-md transition-shadow">
-                                <div className="absolute top-2 right-2 flex gap-1">
+                            <div key={contact.id} className="group bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm hover:shadow-xl hover:shadow-slate-200/50 dark:hover:shadow-none transition-all duration-300 relative flex flex-col h-full">
+                                {/* Actions Overlay */}
+                                <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
                                     <button
                                         onClick={() => handleEdit(contact)}
-                                        className="p-1.5 text-blue-600 hover:bg-blue-50 rounded bg-blue-50/50"
+                                        className="p-2 text-blue-600 bg-blue-50 hover:bg-blue-600 hover:text-white rounded-xl transition-all shadow-sm"
                                         title="Editar"
                                     >
                                         <Edit2 size={16} />
                                     </button>
                                     <button
                                         onClick={() => setContactToDelete(contact)}
-                                        className="p-1.5 text-red-600 hover:bg-red-50 rounded bg-red-50/50"
+                                        className="p-2 text-red-600 bg-red-50 hover:bg-red-600 hover:text-white rounded-xl transition-all shadow-sm"
                                         title="Eliminar"
                                     >
                                         <Trash2 size={16} />
                                     </button>
                                 </div>
 
-                                <div className="flex flex-col gap-1 pr-16">
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <span className="font-bold text-lg text-gray-900 dark:text-gray-100 truncate">{contact.nombre}</span>
-                                        {contact.es_principal && (
-                                            <span className="bg-green-100 text-green-800 text-[10px] px-2 py-0.5 rounded-full font-medium border border-green-200">Principal</span>
-                                        )}
+                                <div className="flex flex-col gap-4 flex-1">
+                                    <div className="space-y-1 pr-16">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            <span className="font-extrabold text-xl text-slate-900 dark:text-slate-50 leading-tight">
+                                                {contact.nombre}
+                                            </span>
+                                            {contact.es_principal && (
+                                                <span className="bg-emerald-50 text-emerald-700 text-[10px] px-2.5 py-1 rounded-full font-black uppercase tracking-wider border border-emerald-100">
+                                                    Principal
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400 font-bold text-xs uppercase tracking-tight">
+                                            <span className="truncate">{contact.cargo || "Sin cargo registrado"}</span>
+                                        </div>
                                     </div>
 
                                     {/* Account Link */}
@@ -192,20 +215,29 @@ export default function ContactsPage() {
                                         <span className="font-medium">{accountName || 'Cuenta Desconocida'}</span>
                                     </div>
 
-                                    <span className="text-sm text-gray-500 dark:text-gray-400 mb-2 truncate">{contact.cargo || "Sin cargo"}</span>
-
-                                    <div className="mt-auto pt-3 border-t text-sm space-y-1.5">
+                                    {/* Contact Details */}
+                                    <div className="space-y-3 mt-auto pt-4 border-t border-slate-50 dark:border-slate-800">
                                         {contact.email && (
-                                            <div className="flex items-center gap-2 text-gray-600 dark:text-gray-300">
-                                                <Mail size={14} className="shrink-0" />
-                                                <a href={`mailto:${contact.email}`} className="hover:underline truncate">{contact.email}</a>
-                                            </div>
+                                            <a
+                                                href={`mailto:${contact.email}`}
+                                                className="flex items-center gap-3 text-slate-600 dark:text-slate-300 hover:text-[#254153] transition-colors group/link"
+                                            >
+                                                <div className="bg-slate-100 dark:bg-slate-800 p-2 rounded-lg group-hover/link:bg-blue-50 transition-colors">
+                                                    <Mail size={14} className="text-slate-400 group-hover/link:text-blue-500" />
+                                                </div>
+                                                <span className="text-sm font-medium truncate">{contact.email}</span>
+                                            </a>
                                         )}
                                         {contact.telefono && (
-                                            <div className="flex items-center gap-2 text-gray-600 dark:text-gray-300">
-                                                <Phone size={14} className="shrink-0" />
-                                                <a href={`tel:${contact.telefono}`} className="hover:underline">{contact.telefono}</a>
-                                            </div>
+                                            <a
+                                                href={`tel:${contact.telefono}`}
+                                                className="flex items-center gap-3 text-slate-600 dark:text-slate-300 hover:text-[#254153] transition-colors group/link"
+                                            >
+                                                <div className="bg-slate-100 dark:bg-slate-800 p-2 rounded-lg group-hover/link:bg-emerald-50 transition-colors">
+                                                    <Phone size={14} className="text-slate-400 group-hover/link:text-emerald-500" />
+                                                </div>
+                                                <span className="text-sm font-medium">{contact.telefono}</span>
+                                            </a>
                                         )}
                                     </div>
                                 </div>
