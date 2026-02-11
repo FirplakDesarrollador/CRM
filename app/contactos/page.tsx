@@ -2,7 +2,7 @@
 
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, LocalContact } from "@/lib/db";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { ContactForm } from "@/components/contactos/ContactForm";
 import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
 import { Edit2, Trash2, Phone, Mail, User, Building, Search, Plus } from "lucide-react";
@@ -36,18 +36,27 @@ export default function ContactsPage() {
         }
     };
 
-    // Derived: Filter contacts
-    const filteredContacts = contacts?.filter(contact => {
-        const term = searchTerm.toLowerCase();
-        const account = accounts?.find(a => a.id === contact.account_id);
-        const accountName = account?.nombre.toLowerCase() || "";
+    // PERF FIX: Build account lookup Map once (O(m)) instead of .find() per contact (O(n*m))
+    const accountMap = useMemo(() => {
+        const map = new Map<string, string>();
+        accounts?.forEach(a => map.set(a.id, a.nombre));
+        return map;
+    }, [accounts]);
 
-        return (
-            contact.nombre.toLowerCase().includes(term) ||
-            accountName.includes(term) ||
-            (contact.email && contact.email.toLowerCase().includes(term))
-        );
-    });
+    // Derived: Filter contacts using Map lookup (O(n) instead of O(n*m))
+    const filteredContacts = useMemo(() => {
+        if (!contacts) return undefined;
+        const term = searchTerm.toLowerCase();
+        if (!term) return contacts;
+        return contacts.filter(contact => {
+            const accountName = accountMap.get(contact.account_id)?.toLowerCase() || "";
+            return (
+                contact.nombre.toLowerCase().includes(term) ||
+                accountName.includes(term) ||
+                (contact.email && contact.email.toLowerCase().includes(term))
+            );
+        });
+    }, [contacts, searchTerm, accountMap]);
 
     // Handle Edit
     const handleEdit = (contact: LocalContact) => {
@@ -149,7 +158,7 @@ export default function ContactsPage() {
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {filteredContacts.map(contact => {
-                        const account = accounts?.find(a => a.id === contact.account_id);
+                        const accountName = accountMap.get(contact.account_id);
                         return (
                             <div key={contact.id} className="p-4 border rounded-lg bg-white dark:bg-slate-900 shadow-sm relative hover:shadow-md transition-shadow">
                                 <div className="absolute top-2 right-2 flex gap-1">
@@ -180,7 +189,7 @@ export default function ContactsPage() {
                                     {/* Account Link */}
                                     <div className="flex items-center gap-1.5 text-sm text-blue-600 dark:text-blue-400 mb-2 bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded w-fit">
                                         <Building size={14} />
-                                        <span className="font-medium">{account?.nombre || 'Cuenta Desconocida'}</span>
+                                        <span className="font-medium">{accountName || 'Cuenta Desconocida'}</span>
                                     </div>
 
                                     <span className="text-sm text-gray-500 dark:text-gray-400 mb-2 truncate">{contact.cargo || "Sin cargo"}</span>

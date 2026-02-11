@@ -14,6 +14,7 @@ import { Trash2, PlusCircle, Search, Loader2 } from "lucide-react";
 import { db } from "@/lib/db";
 import { useLiveQuery } from "dexie-react-hooks";
 import { cn } from "@/components/ui/utils";
+import { CollaboratorSelector, CollaboratorEntry } from "@/components/oportunidades/CollaboratorSelector";
 
 const STEP_LABELS = ["Cuenta", "Datos del Negocio", "Productos", "Equipo"];
 
@@ -57,6 +58,7 @@ export default function CreateOpportunityWizard() {
 
     const [phasesLoading, setPhasesLoading] = useState(false);
     const [phasesError, setPhasesError] = useState<string | null>(null);
+    const [collaborators, setCollaborators] = useState<CollaboratorEntry[]>([]);
 
     useEffect(() => {
         // Fetch all segments (small table, safe to fetch all)
@@ -354,7 +356,8 @@ export default function CreateOpportunityWizard() {
                 ...data,
                 departamento_id: data.departamento_id ? Number(data.departamento_id) : null,
                 ciudad_id: data.ciudad_id ? Number(data.ciudad_id) : null,
-                segmento_id: data.segmento_id ? Number(data.segmento_id) : null
+                segmento_id: data.segmento_id ? Number(data.segmento_id) : null,
+                collaborators: collaborators
             };
 
             // Maintain legacy 'ciudad' string for list views
@@ -712,15 +715,17 @@ export default function CreateOpportunityWizard() {
                     </div>
                 )}
 
+
+
                 {/* STEP 4: TEAM */}
                 {step === 3 && (
                     <div className="space-y-4">
                         <h2 className="text-lg font-semibold">Asignación</h2>
                         <p className="text-sm text-slate-500">Tú serás el propietario (Owner) por defecto.</p>
-                        {/* Here we would add Collaborator multiselect */}
-                        <div className="p-4 bg-slate-50 rounded text-sm text-slate-500 italic">
-                            Selección de colaboradores próximamente...
-                        </div>
+                        <CollaboratorSelector
+                            value={collaborators}
+                            onChange={setCollaborators}
+                        />
                     </div>
                 )}
 

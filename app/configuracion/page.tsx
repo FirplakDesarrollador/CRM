@@ -14,7 +14,8 @@ import {
     CheckCircle2,
     HardDrive,
     LogOut,
-    Target
+    Target,
+    DollarSign
 } from 'lucide-react';
 import { useState, useEffect, Dispatch, SetStateAction, Suspense } from 'react';
 import { useRouter } from 'next/navigation';
@@ -669,6 +670,28 @@ function ConfigPageContent() {
                     >
                         <Target className="w-4 h-4" />
                         Configurar Metas
+                    </button>
+                </div>
+            )}
+
+            {/* Commissions Configuration - Admin Only */}
+            {role === 'ADMIN' && (
+                <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="flex items-center gap-4">
+                        <div className="bg-emerald-100 p-3 rounded-2xl text-emerald-600">
+                            <DollarSign className="w-6 h-6" />
+                        </div>
+                        <div>
+                            <h3 className="font-bold text-slate-900 text-lg">Comisiones y Bonos</h3>
+                            <p className="text-sm text-slate-500">Configurar reglas de comisiones y bonificaciones por recaudo</p>
+                        </div>
+                    </div>
+                    <button
+                        onClick={() => router.push('/configuracion/comisiones')}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-xl text-sm font-bold shadow-md shadow-emerald-100 transition-all flex items-center justify-center gap-2"
+                    >
+                        <DollarSign className="w-4 h-4" />
+                        Configurar Comisiones
                     </button>
                 </div>
             )}

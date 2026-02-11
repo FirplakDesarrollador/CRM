@@ -5,11 +5,10 @@ import { MobileNav } from "./MobileNav";
 import { TopBar } from "./TopBar";
 import { OfflineBanner } from "./OfflineBanner";
 import { useSyncStore } from "@/lib/stores/useSyncStore";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { syncEngine } from "@/lib/sync";
 import { usePathname } from "next/navigation";
 import { LoadingOverlay } from "@/components/ui/LoadingOverlay";
-import { cn } from "@/components/ui/utils";
 import { supabase } from "@/lib/supabase";
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
@@ -69,22 +68,44 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         };
     }, [setOnline]);
 
-    // Trigger sync on app initialization (pull + push)
-    // PERF OPTIMIZATION: Only sync once per session to avoid repeated network calls
-    useEffect(() => {
-        if (!isLoginPage) {
-            // Check if we already synced this session
-            const hasInitialSync = sessionStorage.getItem('crm_initialSyncDone');
-            if (hasInitialSync) {
-                return;
-            }
+    // PERF FIX: Removed the navigation click interceptor and popstate listener.
+    // They set isNavigating=true which triggered the LoadingOverlay (backdrop-blur-md)
+    // on EVERY link click, adding ~50-100ms GPU cost per navigation.
+    // Navigation feedback is now handled by app/loading.tsx (Suspense boundary)
+    // which renders a lightweight progress bar instead.
 
-            syncEngine.triggerSync();
-            sessionStorage.setItem('crm_initialSyncDone', 'true');
-        }
+    // Sync: initial + periodic (5 min) + visibility change (user returns to tab)
+    useEffect(() => {
+        if (isLoginPage) return;
+
+        // 1. Initial sync on mount
+        syncEngine.triggerSync();
+
+        // 2. Periodic sync every 5 minutes
+        const intervalId = setInterval(() => {
+            if (navigator.onLine) {
+                syncEngine.triggerSync();
+            }
+        }, 5 * 60 * 1000);
+
+        // 3. Sync when user returns to tab
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible' && navigator.onLine) {
+                syncEngine.triggerSync();
+            }
+        };
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
+        return () => {
+            clearInterval(intervalId);
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
     }, [isLoginPage]);
 
     const [isCollapsed, setIsCollapsed] = useState(false);
+
+    // PERF FIX: Stable callback reference prevents Sidebar (React.memo) from re-rendering
+    const toggleSidebar = useCallback(() => setIsCollapsed(prev => !prev), []);
 
     if (isLoginPage) {
         return <>{children}</>;
@@ -94,7 +115,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         <div className="flex h-screen bg-slate-50 overflow-hidden">
             <LoadingOverlay />
             {/* Sidebar (Desktop) */}
-            <Sidebar isCollapsed={isCollapsed} toggleSidebar={() => setIsCollapsed(!isCollapsed)} />
+            <Sidebar isCollapsed={isCollapsed} toggleSidebar={toggleSidebar} />
 
             {/* Main Content Area */}
             <div className="flex-1 flex flex-col relative h-full overflow-hidden">

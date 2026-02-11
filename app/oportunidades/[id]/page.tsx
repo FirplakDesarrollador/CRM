@@ -26,6 +26,8 @@ import { supabase } from "@/lib/supabase";
 import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
 import { useSyncStore } from "@/lib/stores/useSyncStore";
 import { LossReasonModal } from "@/components/oportunidades/LossReasonModal";
+import { CollaboratorsTab } from "@/components/oportunidades/CollaboratorsTab";
+import { DollarSign } from "lucide-react";
 
 export default function OpportunityDetailPage() {
     const params = useParams();
@@ -48,18 +50,33 @@ export default function OpportunityDetailPage() {
                 console.log(`[JIT Sync] Opportunity ${id} not found locally. Fetching from server...`);
                 setIsFetchingServer(true);
                 try {
-                    const { data, error } = await supabase
+                    // Fetch Opportunity
+                    const { data: oppData, error: oppError } = await supabase
                         .from('CRM_Oportunidades')
                         .select('*')
                         .eq('id', id)
                         .single();
 
-                    if (data && !error) {
+                    if (oppData && !oppError) {
                         console.log(`[JIT Sync] Found opportunity on server. Saving locally...`);
-                        await db.opportunities.put(data);
-                        // Dexie liveQuery will pick it up automatically
-                    } else if (error) {
-                        console.warn(`[JIT Sync] Opportunity not found on server either:`, error.message);
+                        await db.opportunities.put(oppData);
+
+                        // Fetch Collaborators (Defensive)
+                        try {
+                            const { data: collabs, error: collabsError } = await supabase
+                                .from('CRM_Oportunidades_Colaboradores')
+                                .select('*')
+                                .eq('oportunidad_id', id);
+
+                            if (collabs && !collabsError) {
+                                await db.opportunityCollaborators.bulkPut(collabs);
+                            }
+                        } catch (err) {
+                            console.warn("Could not fetch collaborators from server (table might be missing):", err);
+                        }
+
+                    } else if (oppError) {
+                        console.warn(`[JIT Sync] Opportunity not found on server either:`, oppError.message);
                         setServerOpportunity('NOT_FOUND');
                     }
                 } catch (err) {
@@ -73,7 +90,7 @@ export default function OpportunityDetailPage() {
         fetchFromServer();
     }, [id, opportunity, opportunities, isFetchingServer, serverOpportunity]);
 
-    const [activeTab, setActiveTab] = useState<'resumen' | 'cotizaciones' | 'productos' | 'actividades'>('resumen');
+    const [activeTab, setActiveTab] = useState<'resumen' | 'colaboradores' | 'cotizaciones' | 'productos' | 'actividades'>('resumen');
 
     // Modal state for delete confirmation
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -149,7 +166,7 @@ export default function OpportunityDetailPage() {
 
                 {/* Sub-Tabs Nav */}
                 <div className="flex space-x-6 border-b border-slate-200 mb-6">
-                    {['resumen', 'cotizaciones', 'productos', 'actividades'].map(tab => (
+                    {['resumen', 'colaboradores', 'cotizaciones', 'productos', 'actividades'].map(tab => (
                         <button
                             key={tab}
                             onClick={() => setActiveTab(tab as any)}
@@ -168,6 +185,10 @@ export default function OpportunityDetailPage() {
                 {/* Content */}
                 {activeTab === 'cotizaciones' && (
                     <QuotesTab opportunityId={id} currency={opportunity.currency_id || 'COP'} />
+                )}
+
+                {activeTab === 'colaboradores' && (
+                    <CollaboratorsTab opportunityId={id} />
                 )}
 
                 {activeTab === 'productos' && (
@@ -447,6 +468,11 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                     </div>
                 )}
             </div>
+
+            {/* Commission Badge - Only shown for Won opportunities */}
+            {opportunity.estado_id === 2 && (
+                <CommissionBadge opportunityId={opportunity.id} />
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {/* Business Info Card */}
@@ -1143,6 +1169,66 @@ function ActivitiesTab({ opportunityId }: { opportunityId: string }) {
                     initialData={selectedActivity}
                 />
             )}
+        </div>
+    );
+}
+
+function CommissionBadge({ opportunityId }: { opportunityId: string }) {
+    const [total, setTotal] = useState<number | null>(null);
+    const [currency, setCurrency] = useState('COP');
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchCommission = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('CRM_ComisionLedger')
+                    .select('monto_comision, currency_id, tipo_evento')
+                    .eq('oportunidad_id', opportunityId);
+
+                if (error || !data || data.length === 0) {
+                    setLoading(false);
+                    return;
+                }
+
+                let sum = 0;
+                for (const entry of data) {
+                    sum += Number(entry.monto_comision) || 0;
+                }
+                setTotal(sum);
+                setCurrency(data[0].currency_id || 'COP');
+            } catch {
+                // silently fail
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchCommission();
+    }, [opportunityId]);
+
+    if (loading || total === null) return null;
+
+    const formatted = new Intl.NumberFormat('es-CO', {
+        style: 'currency',
+        currency: currency,
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+    }).format(total);
+
+    return (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+                <div className="p-2 bg-emerald-100 text-emerald-600 rounded-xl">
+                    <DollarSign className="w-5 h-5" />
+                </div>
+                <div>
+                    <p className="text-xs font-bold text-emerald-600 uppercase tracking-wider">Comision Devengada</p>
+                    <p className="text-lg font-bold text-emerald-800">{formatted}</p>
+                </div>
+            </div>
+            <Link href="/comisiones/ledger" className="text-xs font-bold text-emerald-700 hover:underline">
+                Ver detalle
+            </Link>
         </div>
     );
 }
