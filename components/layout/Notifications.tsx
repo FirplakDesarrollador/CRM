@@ -1,6 +1,7 @@
 "use client";
 
 import { useNotifications, NotificationItem } from "@/lib/hooks/useNotifications";
+import { useActivities } from "@/lib/hooks/useActivities";
 import { cn } from "@/components/ui/utils";
 import NextLink from "next/link";
 import {
@@ -12,21 +13,15 @@ import {
 } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 
-export function Notifications() {
+/**
+ * PERF FIX: Extracted into a separate component so that useNotifications()
+ * (which triggers useLiveQuery on activities, opportunities, and accounts)
+ * is ONLY mounted when the dropdown is open. Previously, all 3 IndexedDB
+ * queries ran on every page navigation just to show the badge dot.
+ */
+function NotificationContent({ onClose }: { onClose: () => void }) {
     const { notifications, count } = useNotifications();
-    const [isOpen, setIsOpen] = useState(false);
-    const containerRef = useRef<HTMLDivElement>(null);
-
-    // Close on click outside
-    useEffect(() => {
-        const handleClickOutside = (event: MouseEvent) => {
-            if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-                setIsOpen(false);
-            }
-        };
-        document.addEventListener("mousedown", handleClickOutside);
-        return () => document.removeEventListener("mousedown", handleClickOutside);
-    }, []);
+    const { toggleComplete } = useActivities();
 
     const getIcon = (type: NotificationItem['type']) => {
         switch (type) {
@@ -59,42 +54,32 @@ export function Notifications() {
     };
 
     return (
-        <div className="relative" ref={containerRef}>
-            <button
-                onClick={() => setIsOpen(!isOpen)}
-                className="relative p-2 text-slate-500 hover:bg-slate-100 rounded-full transition-colors"
-                title="Notificaciones"
-            >
-                <Bell className="w-5 h-5" />
-                {count > 0 && (
-                    <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border border-white animate-pulse"></span>
-                )}
-            </button>
+        <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white rounded-2xl shadow-xl border border-slate-200 z-50 overflow-hidden transform origin-top-right transition-all">
+            <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
+                <h3 className="font-bold text-slate-900">Notificaciones</h3>
+                <span className="text-xs font-medium text-slate-500 bg-white px-2 py-1 rounded-full border border-slate-200">
+                    {count} Pendientes
+                </span>
+            </div>
 
-            {isOpen && (
-                <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white rounded-2xl shadow-xl border border-slate-200 z-50 overflow-hidden transform origin-top-right transition-all">
-                    <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
-                        <h3 className="font-bold text-slate-900">Notificaciones</h3>
-                        <span className="text-xs font-medium text-slate-500 bg-white px-2 py-1 rounded-full border border-slate-200">
-                            {count} Pendientes
-                        </span>
+            <div className="max-h-[60vh] overflow-y-auto p-2 space-y-1">
+                {notifications.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-8 text-slate-400">
+                        <CheckCircle2 className="w-12 h-12 mb-2 text-slate-200" />
+                        <p className="text-sm font-medium">Estas al dia</p>
+                        <p className="text-xs">No hay nuevas alertas</p>
                     </div>
+                ) : (
+                    notifications.map((item) => {
+                        const isActivity = item.type === 'ACTIVITY_OVERDUE' || item.type === 'ACTIVITY_TODAY';
 
-                    <div className="max-h-[60vh] overflow-y-auto p-2 space-y-1">
-                        {notifications.length === 0 ? (
-                            <div className="flex flex-col items-center justify-center py-8 text-slate-400">
-                                <CheckCircle2 className="w-12 h-12 mb-2 text-slate-200" />
-                                <p className="text-sm font-medium">Estás al día</p>
-                                <p className="text-xs">No hay nuevas alertas</p>
-                            </div>
-                        ) : (
-                            notifications.map((item) => (
+                        return (
+                            <div key={item.id} className="relative">
                                 <NextLink
-                                    key={item.id}
                                     href={item.link || '#'}
-                                    onClick={() => setIsOpen(false)}
+                                    onClick={onClose}
                                     className={cn(
-                                        "flex items-start gap-3 p-3 rounded-xl transition-all group",
+                                        "flex items-start gap-3 p-3 rounded-xl transition-all group pr-12",
                                         getBgColor(item.type)
                                     )}
                                 >
@@ -115,11 +100,58 @@ export function Notifications() {
                                         </p>
                                     </div>
                                 </NextLink>
-                            ))
-                        )}
-                    </div>
-                </div>
-            )}
+                                {isActivity && item.entityId && (
+                                    <button
+                                        onClick={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            toggleComplete(item.entityId!, true);
+                                        }}
+                                        className="absolute right-3 top-1/2 -translate-y-1/2 p-2 text-slate-300 hover:text-emerald-500 hover:bg-white rounded-lg transition-all shadow-sm sm:opacity-0 sm:group-hover:opacity-100"
+                                        title="Marcar como completada"
+                                    >
+                                        <CheckCircle2 className="w-5 h-5" />
+                                    </button>
+                                )}
+                            </div>
+                        );
+                    })
+                )}
+            </div>
+        </div>
+    );
+}
+
+export function Notifications() {
+    const [isOpen, setIsOpen] = useState(false);
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    // Close on click outside - only attach listener when open
+    useEffect(() => {
+        if (!isOpen) return;
+        const handleClickOutside = (event: MouseEvent) => {
+            if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+                setIsOpen(false);
+            }
+        };
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, [isOpen]);
+
+    return (
+        <div className="relative" ref={containerRef}>
+            <button
+                onClick={() => setIsOpen(!isOpen)}
+                className="relative p-2 text-slate-500 hover:bg-slate-100 rounded-full transition-colors"
+                title="Notificaciones"
+            >
+                <Bell className="w-5 h-5" />
+            </button>
+
+            {/* PERF: Only mount NotificationContent when open. This defers ALL
+                IndexedDB queries (activities, opportunities, accounts) until
+                the user clicks the bell icon instead of running on every navigation. */}
+            {isOpen && <NotificationContent onClose={() => setIsOpen(false)} />}
         </div>
     );
 }

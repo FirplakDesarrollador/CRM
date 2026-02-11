@@ -1,7 +1,7 @@
 "use client";
 
 import { useOpportunitiesServer } from "@/lib/hooks/useOpportunitiesServer";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Plus, Search, Filter, Briefcase, User } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/components/ui/utils";
@@ -42,12 +42,23 @@ export default function OpportunitiesPage() {
         return () => clearTimeout(timer);
     }, [inputValue, setSearchTerm]);
 
-    // Handle Tab Change
-    const handleTabChange = (newTab: 'mine' | 'collab' | 'team') => {
+    // PERF FIX: Stable callback references
+    const handleTabChange = useCallback((newTab: 'mine' | 'collab' | 'team') => {
         setTab(newTab);
         setUserFilter(newTab === 'team' ? 'team' : 'mine');
-        // 'collab' not fully implemented in server hook yet, defaults to mine or custom logic
-    };
+    }, [setUserFilter]);
+
+    const handleUserSelect = useCallback((userId: string | null) => {
+        setSelectedAccountOwnerId(userId);
+        setAccountOwnerId(userId);
+    }, [setAccountOwnerId]);
+
+    const handleFilterChange = useCallback(({ channelId, segmentId, phaseId, statusFilter }: { channelId: string | null; segmentId: number | null; phaseId: number | null; statusFilter: any }) => {
+        setChannelFilter(channelId);
+        setSegmentFilter(segmentId);
+        setPhaseFilter(phaseId);
+        setStatusFilter(statusFilter);
+    }, [setChannelFilter, setSegmentFilter, setPhaseFilter, setStatusFilter]);
 
     return (
         <div className="space-y-4">
@@ -88,7 +99,6 @@ export default function OpportunitiesPage() {
                         >
                             En las que colaboro
                         </button>
-
                         {userRole === 'ADMIN' && (
                             <button
                                 onClick={() => handleTabChange('team')}
@@ -106,10 +116,7 @@ export default function OpportunitiesPage() {
                     <div className="flex gap-2 w-full md:w-auto items-center">
                         <UserPickerFilter
                             selectedUserId={selectedAccountOwnerId}
-                            onUserSelect={(userId) => {
-                                setSelectedAccountOwnerId(userId);
-                                setAccountOwnerId(userId);
-                            }}
+                            onUserSelect={handleUserSelect}
                         />
 
                         <div className="relative flex-1 max-w-md w-full">
@@ -128,12 +135,7 @@ export default function OpportunitiesPage() {
                 {/* Advanced Hierarchical Filters */}
                 <div className="pb-2">
                     <OpportunityFilters
-                        onFilterChange={({ channelId, segmentId, phaseId, statusFilter }) => {
-                            setChannelFilter(channelId);
-                            setSegmentFilter(segmentId);
-                            setPhaseFilter(phaseId);
-                            setStatusFilter(statusFilter);
-                        }}
+                        onFilterChange={handleFilterChange}
                     />
                 </div>
             </div>

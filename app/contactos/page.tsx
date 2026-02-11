@@ -2,7 +2,7 @@
 
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, LocalContact } from "@/lib/db";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { ContactForm } from "@/components/contactos/ContactForm";
 import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
 import { Edit2, Trash2, Phone, Mail, User, Building, Search, Plus } from "lucide-react";
@@ -36,18 +36,27 @@ export default function ContactsPage() {
         }
     };
 
-    // Derived: Filter contacts
-    const filteredContacts = contacts?.filter(contact => {
-        const term = searchTerm.toLowerCase();
-        const account = accounts?.find(a => a.id === contact.account_id);
-        const accountName = account?.nombre.toLowerCase() || "";
+    // PERF FIX: Build account lookup Map once (O(m)) instead of .find() per contact (O(n*m))
+    const accountMap = useMemo(() => {
+        const map = new Map<string, string>();
+        accounts?.forEach(a => map.set(a.id, a.nombre));
+        return map;
+    }, [accounts]);
 
-        return (
-            contact.nombre.toLowerCase().includes(term) ||
-            accountName.includes(term) ||
-            (contact.email && contact.email.toLowerCase().includes(term))
-        );
-    });
+    // Derived: Filter contacts using Map lookup (O(n) instead of O(n*m))
+    const filteredContacts = useMemo(() => {
+        if (!contacts) return undefined;
+        const term = searchTerm.toLowerCase();
+        if (!term) return contacts;
+        return contacts.filter(contact => {
+            const accountName = accountMap.get(contact.account_id)?.toLowerCase() || "";
+            return (
+                contact.nombre.toLowerCase().includes(term) ||
+                accountName.includes(term) ||
+                (contact.email && contact.email.toLowerCase().includes(term))
+            );
+        });
+    }, [contacts, searchTerm, accountMap]);
 
     // Handle Edit
     const handleEdit = (contact: LocalContact) => {
@@ -162,7 +171,7 @@ export default function ContactsPage() {
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {filteredContacts.map(contact => {
-                        const account = accounts?.find(a => a.id === contact.account_id);
+                        const accountName = accountMap.get(contact.account_id);
                         return (
                             <div key={contact.id} className="group bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm hover:shadow-xl hover:shadow-slate-200/50 dark:hover:shadow-none transition-all duration-300 relative flex flex-col h-full">
                                 {/* Actions Overlay */}
@@ -200,12 +209,10 @@ export default function ContactsPage() {
                                         </div>
                                     </div>
 
-                                    {/* Account Section */}
-                                    <div className="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-100 dark:border-slate-800 group-hover:border-[#254153]/20 transition-colors">
-                                        <div className="flex items-center gap-2 text-sm text-[#254153] dark:text-blue-400 font-extrabold">
-                                            <Building size={16} className="shrink-0" />
-                                            <span className="truncate">{account?.nombre || 'Sin cuenta vinculada'}</span>
-                                        </div>
+                                    {/* Account Link */}
+                                    <div className="flex items-center gap-1.5 text-sm text-blue-600 dark:text-blue-400 mb-2 bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded w-fit">
+                                        <Building size={14} />
+                                        <span className="font-medium">{accountName || 'Cuenta Desconocida'}</span>
                                     </div>
 
                                     {/* Contact Details */}

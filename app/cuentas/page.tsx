@@ -3,7 +3,7 @@
 import { useAccountsServer, AccountServer } from "@/lib/hooks/useAccountsServer";
 import { AccountForm } from "@/components/cuentas/AccountForm";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { Plus, Search, Building, Users, Pencil, Filter, Medal, Trash2 } from "lucide-react";
 import { UserPickerFilter } from "@/components/cuentas/UserPickerFilter";
@@ -26,6 +26,12 @@ function AccountsContent() {
     const { isAdmin } = useCurrentUser();
 
     const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+
+    // PERF FIX: Stable callback reference
+    const handleUserSelect = useCallback((userId: string | null) => {
+        setSelectedUserId(userId);
+        setAssignedUserId(userId);
+    }, [setAssignedUserId]);
 
     const [showCreate, setShowCreate] = useState(false);
     const [editingAccount, setEditingAccount] = useState<any>(null);
@@ -116,10 +122,7 @@ function AccountsContent() {
                 <div className="flex flex-wrap md:flex-nowrap gap-2 w-full md:w-auto items-center">
                     <UserPickerFilter
                         selectedUserId={selectedUserId}
-                        onUserSelect={(userId) => {
-                            setSelectedUserId(userId);
-                            setAssignedUserId(userId);
-                        }}
+                        onUserSelect={handleUserSelect}
                     />
 
                     <div className="relative flex-1 md:w-64">
