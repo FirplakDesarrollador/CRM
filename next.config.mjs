@@ -35,6 +35,13 @@ const withPWA = withPWAInit({
         additionalManifestEntries: [
             { url: "/offline", revision: Date.now().toString() },
             { url: "/", revision: Date.now().toString() },
+            { url: "/login", revision: Date.now().toString() },
+            { url: "/contactos", revision: Date.now().toString() },
+            { url: "/actividades", revision: Date.now().toString() },
+            { url: "/cuentas", revision: Date.now().toString() },
+            { url: "/oportunidades", revision: Date.now().toString() },
+            { url: "/pedidos", revision: Date.now().toString() },
+            { url: "/configuracion", revision: Date.now().toString() },
         ],
         runtimeCaching: [
             {
