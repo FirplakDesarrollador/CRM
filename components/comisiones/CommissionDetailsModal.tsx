@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, Calendar, DollarSign, TrendingUp, History } from 'lucide-react';
+import { X, Calendar, DollarSign, TrendingUp, History, Award, Target } from 'lucide-react';
 import { useVendorCommissions } from '@/lib/hooks/useVendorCommissions';
 // function formatCurrency is defined below
 
@@ -23,8 +23,8 @@ type CommissionDetailsModalProps = {
 };
 
 export function CommissionDetailsModal({ vendedorId, vendedorName, dateFrom, dateTo, onClose }: CommissionDetailsModalProps) {
-    const { historical, potential, loading, error } = useVendorCommissions(vendedorId, dateFrom, dateTo);
-    const [activeTab, setActiveTab] = useState<'historical' | 'potential'>('historical');
+    const { historical, potential, bonuses, loading, error } = useVendorCommissions(vendedorId, dateFrom, dateTo);
+    const [activeTab, setActiveTab] = useState<'historical' | 'potential' | 'bonuses'>('historical');
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -65,6 +65,16 @@ export function CommissionDetailsModal({ vendedorId, vendedorName, dateFrom, dat
                     >
                         <TrendingUp className="w-4 h-4" />
                         Proyección (Potencial)
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('bonuses')}
+                        className={`py-3 text-sm font-semibold border-b-2 transition-colors flex items-center gap-2 ${activeTab === 'bonuses'
+                            ? 'border-emerald-600 text-emerald-700'
+                            : 'border-transparent text-slate-500 hover:text-slate-700'
+                            }`}
+                    >
+                        <Award className="w-4 h-4" />
+                        Bonos ({bonuses.length})
                     </button>
                 </div>
 
@@ -199,6 +209,78 @@ export function CommissionDetailsModal({ vendedorId, vendedorName, dateFrom, dat
                                             </tbody>
                                         </table>
                                     </div>
+                                </div>
+                            )}
+
+                            {activeTab === 'bonuses' && (
+                                <div className="space-y-4">
+                                    <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-4 text-emerald-800 text-sm mb-4 flex items-start gap-2">
+                                        <Target className="w-4 h-4 mt-0.5 shrink-0" />
+                                        <p>
+                                            Bonos activos para este vendedor. Se otorgan al alcanzar la <strong>meta de recaudo</strong> en el periodo.
+                                        </p>
+                                    </div>
+
+                                    {bonuses.length === 0 ? (
+                                        <div className="bg-white rounded-xl border border-slate-200 p-8 text-center text-slate-400 italic">
+                                            No hay reglas de bono activas para este vendedor.
+                                        </div>
+                                    ) : (
+                                        <div className="grid gap-4">
+                                            {bonuses.map(bonus => (
+                                                <div key={bonus.id} className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+                                                    <div className="flex items-center justify-between mb-3">
+                                                        <div className="flex items-center gap-2">
+                                                            <Award className={`w-5 h-5 ${bonus.progreso_pct >= 100 ? 'text-emerald-500' : 'text-amber-500'}`} />
+                                                            <h4 className="font-bold text-slate-800">{bonus.nombre}</h4>
+                                                            {bonus.is_global && (
+                                                                <span className="text-xs bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full">Global</span>
+                                                            )}
+                                                        </div>
+                                                        <span className="text-xs font-semibold bg-slate-100 text-slate-600 px-2 py-1 rounded-lg">
+                                                            {bonus.periodo}
+                                                        </span>
+                                                    </div>
+
+                                                    {/* Progress bar */}
+                                                    <div className="mb-3">
+                                                        <div className="flex justify-between text-xs text-slate-500 mb-1">
+                                                            <span>Recaudado: {new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(bonus.recaudado)}</span>
+                                                            <span>Meta: {new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(bonus.meta_recaudo)}</span>
+                                                        </div>
+                                                        <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
+                                                            <div
+                                                                className={`h-full rounded-full transition-all duration-500 ${bonus.progreso_pct >= 100
+                                                                        ? 'bg-emerald-500'
+                                                                        : bonus.progreso_pct >= 70
+                                                                            ? 'bg-amber-400'
+                                                                            : 'bg-slate-300'
+                                                                    }`}
+                                                                style={{ width: `${bonus.progreso_pct}%` }}
+                                                            />
+                                                        </div>
+                                                        <div className="text-right text-xs font-bold mt-1" style={{ color: bonus.progreso_pct >= 100 ? '#10b981' : bonus.progreso_pct >= 70 ? '#f59e0b' : '#94a3b8' }}>
+                                                            {bonus.progreso_pct.toFixed(1)}%
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Bonus amount */}
+                                                    <div className={`flex items-center justify-between rounded-lg p-3 ${bonus.progreso_pct >= 100 ? 'bg-emerald-50 border border-emerald-200' : 'bg-slate-50 border border-slate-200'}`}>
+                                                        <span className="text-sm text-slate-600">Bono al cumplir meta:</span>
+                                                        <span className={`text-lg font-bold ${bonus.progreso_pct >= 100 ? 'text-emerald-600' : 'text-slate-700'}`}>
+                                                            {new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(bonus.monto_bono)}
+                                                        </span>
+                                                    </div>
+
+                                                    {bonus.progreso_pct >= 100 && (
+                                                        <div className="mt-2 text-center text-sm font-bold text-emerald-600">
+                                                            ✅ Meta alcanzada — Bono elegible
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </>

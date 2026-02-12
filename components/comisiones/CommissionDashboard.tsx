@@ -2,8 +2,9 @@
 
 import { useState } from 'react';
 import { useCommissionDashboard, VendedorSummary } from '@/lib/hooks/useCommissionDashboard';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { Loader2, TrendingUp, DollarSign, Clock, CheckCircle2 } from 'lucide-react';
-import { CommissionDetailsModal } from './CommissionDetailsModal'; // Assuming this path for the new component
+import { CommissionDetailsModal } from './CommissionDetailsModal';
 
 function formatCurrency(amount: number): string {
     return new Intl.NumberFormat('es-CO', {
@@ -17,6 +18,8 @@ function formatCurrency(amount: number): string {
 
 export function CommissionDashboard() {
     const { summary, vendedorBreakdown, loading, error, setDateFrom, setDateTo } = useCommissionDashboard();
+    const { role } = useCurrentUser();
+    const isVendedor = role === 'VENDEDOR';
     const [selectedVendor, setSelectedVendor] = useState<{ id: string; name: string } | null>(null);
 
     return (
@@ -94,8 +97,8 @@ export function CommissionDashboard() {
                         />
                     </div>
 
-                    {/* Vendedor Breakdown */}
-                    {vendedorBreakdown.length > 0 && (
+                    {/* Vendedor Breakdown - hidden for VENDEDOR role */}
+                    {!isVendedor && vendedorBreakdown.length > 0 && (
                         <>
                             <div className="flex items-center justify-between pt-4">
                                 <h3 className="font-bold text-slate-900 border-l-4 border-[#254153] pl-3">
