@@ -3,20 +3,32 @@
 import { useState, useEffect } from "react";
 import { useSalesFunnel, SalesFunnelFilters } from "@/lib/hooks/useSalesFunnel";
 import { formatCurrency } from "@/lib/utils";
-import { Loader2, TrendingUp, AlertCircle, ChevronRight, BarChart2 } from "lucide-react";
+import { Loader2, TrendingUp, AlertCircle, ChevronRight, BarChart2, RefreshCw } from "lucide-react";
 import ReactECharts from "echarts-for-react";
+import { useSyncStore } from "@/lib/stores/useSyncStore";
+import { syncEngine } from "@/lib/sync";
 
 interface SalesFunnelTileProps {
     filters?: SalesFunnelFilters;
 }
 
 export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
-    const { data, isLoading, error } = useSalesFunnel(filters);
+    const { data, isLoading, error, mutate } = useSalesFunnel(filters);
     const [mounted, setMounted] = useState(false);
+    const { lastSyncTime, isSyncing } = useSyncStore();
+    const [isRefreshing, setIsRefreshing] = useState(false);
 
     useEffect(() => {
         setMounted(true);
     }, []);
+
+    const handleRefresh = async () => {
+        setIsRefreshing(true);
+        // Trigger a full sync and then revalidate the funnel data
+        await syncEngine.triggerSync();
+        await mutate();
+        setIsRefreshing(false);
+    };
 
     if (!mounted) return null;
 
@@ -40,6 +52,12 @@ export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
                     </div>
                     <p className="text-sm font-semibold">Error al cargar datos</p>
                     <p className="text-xs text-red-400 max-w-[240px] text-center">{error}</p>
+                    <button
+                        onClick={() => mutate()}
+                        className="text-xs font-bold text-slate-600 hover:text-slate-800 underline mt-2"
+                    >
+                        Reintentar
+                    </button>
                 </div>
             </div>
         );
@@ -47,12 +65,20 @@ export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
 
     if (!data || data.length === 0) {
         return (
-            <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 h-[480px] flex items-center justify-center">
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 h-[480px] flex items-center justify-center relative">
+                <button
+                    onClick={handleRefresh}
+                    disabled={isSyncing || isRefreshing}
+                    className="absolute top-4 right-4 p-2 hover:bg-slate-50 rounded-full transition-colors"
+                >
+                    <RefreshCw className={`w-4 h-4 text-slate-400 ${isSyncing || isRefreshing ? 'animate-spin' : ''}`} />
+                </button>
                 <div className="flex flex-col items-center gap-3 text-slate-400">
                     <div className="w-12 h-12 rounded-xl bg-slate-50 flex items-center justify-center">
                         <TrendingUp className="w-6 h-6 opacity-50" />
                     </div>
                     <p className="text-sm font-medium">No hay datos para estos filtros</p>
+                    <p className="text-xs text-slate-300">Intenta sincronizar nuevamente</p>
                 </div>
             </div>
         );
@@ -79,19 +105,23 @@ export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
 
     // ECharts Funnel Option
     const option = {
+        textStyle: {
+            fontFamily: 'var(--font-geist-sans), sans-serif'
+        },
         tooltip: {
             trigger: 'item',
             backgroundColor: '#254153',
             borderWidth: 0,
             padding: 12,
-            textStyle: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
+            textStyle: { color: '#fff', fontSize: 12, fontWeight: 'bold', fontFamily: 'var(--font-geist-sans), sans-serif' },
             formatter: (params: any) => {
                 const { name, value, data } = params;
-                const pct = totalPipeline > 0 ? ((value / totalPipeline) * 100).toFixed(1) : "0";
+                const actualValue = data.actualValue;
+                const pct = totalPipeline > 0 ? ((actualValue / totalPipeline) * 100).toFixed(1) : "0";
                 return `
-                    <div style="font-family: inherit;">
+                    <div style="font-family: var(--font-geist-sans), sans-serif;">
                         <div style="text-transform: uppercase; font-size: 10px; letter-spacing: 0.1em; opacity: 0.7; margin-bottom: 4px;">${name}</div>
-                        <div style="font-size: 14px;">${formatCurrency(value)}</div>
+                        <div style="font-size: 14px;">${formatCurrency(actualValue)}</div>
                         <div style="font-size: 10px; margin-top: 4px; opacity: 0.8;">${data.count} Opportunities • ${pct}% Share</div>
                     </div>
                 `;
@@ -106,16 +136,16 @@ export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
                 bottom: 30,
                 width: '70%',
                 min: 0,
-                max: maxAmount,
-                minSize: '10%',
+                max: maxAmount || 1, // Avoid division by zero if no data
+                minSize: '20%', // Fix for "needle" shape on small top values
                 maxSize: '100%',
-                sort: 'none', // We keep the order of phases
+                sort: 'none', // Preservation of stage order
                 gap: 4,
                 label: {
                     show: true,
                     position: 'right',
                     formatter: (params: any) => {
-                        return `{name|${params.name}}\n{val|${formatCurrency(params.value)}}`;
+                        return `{name|${params.name}}\n{val|${formatCurrency(params.data.actualValue)}}`;
                     },
                     rich: {
                         name: {
@@ -123,12 +153,14 @@ export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
                             fontWeight: 900,
                             color: '#94a3b8',
                             padding: [0, 0, 4, 0],
-                            textTransform: 'uppercase'
+                            textTransform: 'uppercase',
+                            fontFamily: 'var(--font-geist-sans), sans-serif'
                         },
                         val: {
                             fontSize: 12,
                             fontWeight: 'bold',
-                            color: '#1e293b'
+                            color: '#1e293b',
+                            fontFamily: 'var(--font-geist-sans), sans-serif'
                         }
                     }
                 },
@@ -155,9 +187,13 @@ export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
                     }
                 },
                 data: groupedData.map(item => ({
-                    value: item.total_amount,
+                    value: item.total_amount, // Use real amount for exact proportionality
+                    actualValue: item.total_amount,
                     name: item.fase_nombre,
-                    itemStyle: { color: item.color },
+                    itemStyle: {
+                        color: item.total_amount === 0 ? '#e2e8f0' : item.color,
+                        opacity: item.total_amount === 0 ? 0.4 : 0.9
+                    },
                     count: item.count
                 }))
             }
@@ -165,7 +201,24 @@ export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
     };
 
     return (
-        <div className="bg-white rounded-2xl p-8 shadow-sm border border-slate-100 h-full flex flex-col transition-all duration-300">
+        <div className="bg-white rounded-2xl p-8 shadow-sm border border-slate-100 h-full flex flex-col transition-all duration-300 relative group">
+            {/* Sync Control (Top Right) */}
+            <div className="absolute top-6 right-6 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                {lastSyncTime && (
+                    <span className="text-[10px] text-slate-400 font-medium">
+                        Actualizado: {new Date(lastSyncTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                )}
+                <button
+                    onClick={handleRefresh}
+                    disabled={isSyncing || isRefreshing}
+                    className="p-2 hover:bg-slate-50 rounded-full text-slate-400 hover:text-[#254153] transition-colors"
+                    title="Forzar sincronización de datos"
+                >
+                    <RefreshCw className={`w-4 h-4 ${isSyncing || isRefreshing ? 'animate-spin text-[#254153]' : ''}`} />
+                </button>
+            </div>
+
             {/* Header */}
             <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-4">
@@ -180,7 +233,7 @@ export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
                         </div>
                     </div>
                 </div>
-                <div className="flex flex-col items-end">
+                <div className="flex flex-col items-end mr-8"> {/* mr-8 to avoid overlapping with sync button */}
                     <p className="text-3xl font-black text-[#254153] tracking-tighter tabular-nums">
                         {formatCurrency(totalPipeline)}
                     </p>

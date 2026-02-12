@@ -5,13 +5,13 @@ import { useState, useEffect, useCallback } from "react";
 import { Plus, Search, Filter, Briefcase, User } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/components/ui/utils";
-import { useSyncStore } from "@/lib/stores/useSyncStore";
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { UserPickerFilter } from "@/components/cuentas/UserPickerFilter";
 import { OpportunityFilters } from "@/components/oportunidades/OpportunityFilters";
 import { formatColombiaDate, isDateOverdue } from "@/lib/date-utils";
 
 export default function OpportunitiesPage() {
-    const { userRole } = useSyncStore();
+    const { role: userRole } = useCurrentUser();
 
     // Server Side Hook
     const {
@@ -24,6 +24,7 @@ export default function OpportunitiesPage() {
         setAccountOwnerId,
         refresh,
         setChannelFilter,
+        setSubclassificationFilter,
         setSegmentFilter,
         setPhaseFilter,
         setStatusFilter
@@ -53,12 +54,13 @@ export default function OpportunitiesPage() {
         setAccountOwnerId(userId);
     }, [setAccountOwnerId]);
 
-    const handleFilterChange = useCallback(({ channelId, segmentId, phaseId, statusFilter }: { channelId: string | null; segmentId: number | null; phaseId: number | null; statusFilter: any }) => {
+    const handleFilterChange = useCallback(({ channelId, subclassificationId, segmentId, phaseId, statusFilter }: { channelId: string | null; subclassificationId: number | null; segmentId: number | null; phaseId: number | null; statusFilter: any }) => {
         setChannelFilter(channelId);
+        setSubclassificationFilter(subclassificationId);
         setSegmentFilter(segmentId);
         setPhaseFilter(phaseId);
         setStatusFilter(statusFilter);
-    }, [setChannelFilter, setSegmentFilter, setPhaseFilter, setStatusFilter]);
+    }, [setChannelFilter, setSubclassificationFilter, setSegmentFilter, setPhaseFilter, setStatusFilter]);
 
     return (
         <div className="space-y-4">

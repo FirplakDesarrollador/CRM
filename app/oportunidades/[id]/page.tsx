@@ -4,7 +4,7 @@ import { useOpportunities, useQuotes, useQuoteItems } from "@/lib/hooks/useOppor
 import { DetailHeader } from "@/components/ui/DetailHeader";
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { FileText, Plus, AlertCircle, Check, Trash2, Loader2, Truck, Package, Building, ChevronRight, TrendingUp } from "lucide-react";
+import { FileText, Plus, AlertCircle, Check, Trash2, Loader2, Truck, Package, Building, ChevronRight, TrendingUp, User } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { db } from "@/lib/db";
@@ -24,9 +24,10 @@ import { useActivities, LocalActivity } from "@/lib/hooks/useActivities";
 import { CreateActivityModal } from "@/components/activities/CreateActivityModal";
 import { supabase } from "@/lib/supabase";
 import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
-import { useSyncStore } from "@/lib/stores/useSyncStore";
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { LossReasonModal } from "@/components/oportunidades/LossReasonModal";
 import { CollaboratorsTab } from "@/components/oportunidades/CollaboratorsTab";
+import { AssignedTab } from "@/components/oportunidades/AssignedTab";
 import { DollarSign } from "lucide-react";
 
 export default function OpportunityDetailPage() {
@@ -34,7 +35,7 @@ export default function OpportunityDetailPage() {
     const router = useRouter();
     const id = params.id as string;
     const { opportunities, deleteOpportunity } = useOpportunities();
-    const { userRole } = useSyncStore();
+    const { role: userRole } = useCurrentUser();
 
     const phases = useLiveQuery(() => db.phases.toArray());
     const phaseMap = new Map(phases?.map(p => [p.id, p.nombre]));
@@ -90,7 +91,7 @@ export default function OpportunityDetailPage() {
         fetchFromServer();
     }, [id, opportunity, opportunities, isFetchingServer, serverOpportunity]);
 
-    const [activeTab, setActiveTab] = useState<'resumen' | 'colaboradores' | 'cotizaciones' | 'productos' | 'actividades'>('resumen');
+    const [activeTab, setActiveTab] = useState<'resumen' | 'colaboradores' | 'cotizaciones' | 'productos' | 'actividades' | 'asignado'>('resumen');
 
     // Modal state for delete confirmation
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -153,7 +154,7 @@ export default function OpportunityDetailPage() {
                 }
                 backHref="/oportunidades"
                 actions={[
-                    ...(userRole === 'ADMIN' || userRole === 'COORDINATOR' ? [{
+                    ...(userRole === 'ADMIN' || userRole === 'COORDINADOR' ? [{
                         label: "Eliminar Oportunidad",
                         icon: Trash2,
                         variant: 'danger' as const,
@@ -165,8 +166,15 @@ export default function OpportunityDetailPage() {
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
 
                 {/* Sub-Tabs Nav */}
-                <div className="flex space-x-6 border-b border-slate-200 mb-6">
-                    {['resumen', 'colaboradores', 'cotizaciones', 'productos', 'actividades'].map(tab => (
+                <div className="flex space-x-6 border-b border-slate-200 mb-6 w-full overflow-x-auto">
+                    {[
+                        'resumen',
+                        'colaboradores',
+                        'cotizaciones',
+                        'productos',
+                        'actividades',
+                        ...(userRole === 'ADMIN' || userRole === 'COORDINADOR' ? ['asignado'] : [])
+                    ].map(tab => (
                         <button
                             key={tab}
                             onClick={() => setActiveTab(tab as any)}
@@ -202,6 +210,10 @@ export default function OpportunityDetailPage() {
                 {activeTab === 'actividades' && (
                     <ActivitiesTab opportunityId={id} />
                 )}
+
+                {(userRole === 'ADMIN' || userRole === 'COORDINADOR') && activeTab === 'asignado' && (
+                    <AssignedTab opportunityId={id} currentOwnerId={opportunity.owner_user_id || null} />
+                )}
             </div>
 
             <ConfirmationModal
@@ -230,6 +242,20 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     // Filter Logic
     const [isLossReasonModalOpen, setIsLossReasonModalOpen] = useState(false);
     const [pendingPhaseId, setPendingPhaseId] = useState<number | null>(null);
+    const [ownerSellerName, setOwnerSellerName] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (opportunity?.owner_user_id) {
+            supabase
+                .from('CRM_Usuarios')
+                .select('full_name')
+                .eq('id', opportunity.owner_user_id)
+                .single()
+                .then(({ data }) => {
+                    if (data?.full_name) setOwnerSellerName(data.full_name);
+                });
+        }
+    }, [opportunity?.owner_user_id]);
 
     // Segments Logic
     const [segments, setSegments] = useState<any[]>([]);
@@ -640,51 +666,64 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                         </div>
                     </div>
                 </div>
-            </div>
 
-            {/* Account Card */}
-            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-blue-300 transition-all flex flex-col justify-between">
-                <div>
-                    <div className="flex items-center gap-3 mb-4">
-                        <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
-                            <Building className="w-6 h-6" />
+                {/* Account Card */}
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-blue-300 transition-all flex flex-col justify-between">
+                    <div>
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
+                                <Building className="w-6 h-6" />
+                            </div>
+                            <div>
+                                <h3 className="font-bold text-slate-900 text-lg">Información del Cliente</h3>
+                                <p className="text-xs text-slate-500">Datos principales de la cuenta</p>
+                            </div>
                         </div>
-                        <div>
-                            <h3 className="font-bold text-slate-900 text-lg">Información del Cliente</h3>
-                            <p className="text-xs text-slate-500">Datos principales de la cuenta</p>
+
+                        <div className="space-y-3">
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Nombre / Razón Social</label>
+                                <p className="text-slate-900 font-medium">{account.nombre}</p>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">NIT</label>
+                                    <p className="text-slate-700">{account.nit || 'No registrado'}</p>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Teléfono</label>
+                                    <p className="text-slate-700">{account.telefono || 'No registrado'}</p>
+                                </div>
+                            </div>
+                            {account.direccion && (
+                                <div>
+                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Dirección</label>
+                                    <p className="text-slate-700">{account.direccion} {account.ciudad && `• ${account.ciudad}`}</p>
+                                </div>
+                            )}
                         </div>
                     </div>
 
-                    <div className="space-y-3">
-                        <div>
-                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Nombre / Razón Social</label>
-                            <p className="text-slate-900 font-medium">{account.nombre}</p>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">NIT</label>
-                                <p className="text-slate-700">{account.nit || 'No registrado'}</p>
-                            </div>
-                            <div>
-                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Teléfono</label>
-                                <p className="text-slate-700">{account.telefono || 'No registrado'}</p>
-                            </div>
-                        </div>
-                        {account.direccion && (
-                            <div>
-                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Dirección</label>
-                                <p className="text-slate-700">{account.direccion} {account.ciudad && `• ${account.ciudad}`}</p>
-                            </div>
-                        )}
-                    </div>
+                    <Link
+                        href={`/cuentas?id=${account.id}`}
+                        className="mt-6 w-full py-2 bg-slate-50 hover:bg-blue-50 text-blue-600 text-sm font-bold rounded-xl border border-slate-100 hover:border-blue-200 text-center transition-all flex items-center justify-center gap-2"
+                    >
+                        Ver detalles en Cuentas <ChevronRight className="w-4 h-4" />
+                    </Link>
                 </div>
 
-                <Link
-                    href={`/cuentas?id=${account.id}`}
-                    className="mt-6 w-full py-2 bg-slate-50 hover:bg-blue-50 text-blue-600 text-sm font-bold rounded-xl border border-slate-100 hover:border-blue-200 text-center transition-all flex items-center justify-center gap-2"
-                >
-                    Ver detalles en Cuentas <ChevronRight className="w-4 h-4" />
-                </Link>
+                {/* Seller Card (New) */}
+                {ownerSellerName && (
+                    <div className="md:col-span-2 bg-slate-50 p-4 rounded-2xl border border-slate-200 flex items-center gap-4">
+                        <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-sm text-blue-600">
+                            <User className="w-6 h-6" />
+                        </div>
+                        <div>
+                            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Vendedor Asignado</p>
+                            <p className="text-lg font-bold text-slate-900">{ownerSellerName}</p>
+                        </div>
+                    </div>
+                )}
             </div>
 
             <LossReasonModal

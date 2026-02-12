@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { syncEngine } from '@/lib/sync';
-import { useSyncStore } from '@/lib/stores/useSyncStore';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 
 export type OpportunityServer = {
     id: string;
@@ -40,6 +40,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
 
     // New Hierarchical Filters
     const [channelFilter, setChannelFilter] = useState<string | null>(null);
+    const [subclassificationFilter, setSubclassificationFilter] = useState<number | null>(null);
     const [segmentFilter, setSegmentFilter] = useState<number | null>(null);
     const [phaseFilter, setPhaseFilter] = useState<number | null>(null);
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -49,9 +50,10 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
     const lostPhaseIdsRef = useRef<number[]>([]);
     const closedPhaseIdsRef = useRef<number[]>([]);
     const phasesLoadedRef = useRef(false);
+    const [phasesReady, setPhasesReady] = useState(false); // State to trigger re-render
 
-    // User Context
-    const { userRole } = useSyncStore();
+    // User Context - uses useCurrentUser to respect viewMode
+    const { role: userRole } = useCurrentUser();
     const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
     // PERF FIX: Use ref for page to avoid including it in useCallback deps
@@ -89,6 +91,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                 lostPhaseIdsRef.current = lost;
                 closedPhaseIdsRef.current = [...won, ...lost];
                 phasesLoadedRef.current = true;
+                setPhasesReady(true); // Trigger re-render to enable fetching
             }
         };
         loadClosedPhases();
@@ -100,6 +103,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
     // a cascade of refetches when they resolve after initial load.
     const fetchOpportunities = useCallback(async (isLoadMore = false) => {
         if (!currentUserId) return; // Wait for user
+        if (!phasesLoadedRef.current) return; // Wait for phases to load
 
         setLoading(true);
         try {
@@ -109,7 +113,8 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
             const to = from + pageSize - 1;
 
             // Dynamically build select to support filtering on account
-            const accountRelation = channelFilter ? 'account:CRM_Cuentas!inner(nombre, canal_id)' : 'account:CRM_Cuentas(nombre, canal_id)';
+            const useInnerJoin = channelFilter || subclassificationFilter;
+            const accountRelation = useInnerJoin ? 'account:CRM_Cuentas!inner(nombre, canal_id, subclasificacion_id)' : 'account:CRM_Cuentas(nombre, canal_id, subclasificacion_id)';
 
             let query = supabase
                 .from('CRM_Oportunidades')
@@ -138,6 +143,10 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
             // Hierarchical Filters
             if (channelFilter) {
                 query = query.eq('account.canal_id', channelFilter);
+            }
+
+            if (subclassificationFilter) {
+                query = query.eq('account.subclasificacion_id', subclassificationFilter);
             }
 
             if (segmentFilter) {
@@ -201,7 +210,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
         } finally {
             setLoading(false);
         }
-    }, [currentUserId, pageSize, userFilter, searchTerm, accountOwnerId, userRole, channelFilter, segmentFilter, phaseFilter, statusFilter]);
+    }, [currentUserId, pageSize, userFilter, searchTerm, accountOwnerId, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, phasesReady]);
 
     // Initial Fetch & Filter Fetch - no longer depends on phase IDs (read from refs)
     useEffect(() => {
@@ -226,6 +235,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
 
         // New Filter Setters
         setChannelFilter,
+        setSubclassificationFilter,
         setSegmentFilter,
         setPhaseFilter,
         setStatusFilter,

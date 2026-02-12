@@ -22,12 +22,24 @@ export type PotentialCommissionItem = {
     amount: number;
     pct_applied: number;
     estimated_commission: number;
-    rule_name: string; // "Regla Vendedor", "Regla Cliente", "General", etc.
+    rule_name: string;
+};
+
+export type BonusProgress = {
+    id: string;
+    nombre: string;
+    periodo: string;
+    meta_recaudo: number;
+    monto_bono: number;
+    recaudado: number;
+    progreso_pct: number;
+    is_global: boolean;
 };
 
 export function useVendorCommissions(vendedorId: string | null, dateFrom: string | null, dateTo: string | null) {
     const [historical, setHistorical] = useState<HistoricalCommission[]>([]);
     const [potential, setPotential] = useState<PotentialCommissionItem[]>([]);
+    const [bonuses, setBonuses] = useState<BonusProgress[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -266,8 +278,55 @@ export function useVendorCommissions(vendedorId: string | null, dateFrom: string
             });
             // Sort potential by amount desc
             mappedPotential.sort((a, b) => b.estimated_commission - a.estimated_commission);
-
             setPotential(mappedPotential);
+
+            // 4. Fetch Bonus Rules & Progress
+            try {
+                const { data: bonusRules } = await supabase
+                    .from('CRM_ReglasBono')
+                    .select('id, nombre, periodo, meta_recaudo, monto_bono, vendedor_id')
+                    .eq('is_active', true);
+
+                if (bonusRules && bonusRules.length > 0) {
+                    // Filter: rules for this vendor OR global (vendedor_id is null)
+                    const applicable = bonusRules.filter(
+                        r => !r.vendedor_id || r.vendedor_id === vendedorId
+                    );
+
+                    // Calculate recaudo: sum of PAGADA events for this vendor
+                    let recaudoQuery = supabase
+                        .from('CRM_ComisionLedger')
+                        .select('base_amount')
+                        .eq('vendedor_id', vendedorId)
+                        .eq('tipo_evento', 'PAGADA');
+
+                    if (dateFrom) recaudoQuery = recaudoQuery.gte('created_at', dateFrom);
+                    if (dateTo) recaudoQuery = recaudoQuery.lte('created_at', dateTo + 'T23:59:59Z');
+
+                    const { data: pagos } = await recaudoQuery;
+                    const totalRecaudado = (pagos || []).reduce((sum, p) => sum + (Number(p.base_amount) || 0), 0);
+
+                    const bonusProgress: BonusProgress[] = applicable.map(rule => {
+                        const meta = Number(rule.meta_recaudo) || 0;
+                        return {
+                            id: rule.id,
+                            nombre: rule.nombre,
+                            periodo: rule.periodo,
+                            meta_recaudo: meta,
+                            monto_bono: Number(rule.monto_bono) || 0,
+                            recaudado: totalRecaudado,
+                            progreso_pct: meta > 0 ? Math.min(100, (totalRecaudado / meta) * 100) : 0,
+                            is_global: !rule.vendedor_id,
+                        };
+                    });
+                    setBonuses(bonusProgress);
+                } else {
+                    setBonuses([]);
+                }
+            } catch (bonusErr) {
+                console.warn('Could not fetch bonus rules:', bonusErr);
+                setBonuses([]);
+            }
 
         } catch (err: any) {
             console.error("Error fetching vendor details:", err);
@@ -283,5 +342,5 @@ export function useVendorCommissions(vendedorId: string | null, dateFrom: string
         }
     }, [fetchData, vendedorId]);
 
-    return { historical, potential, loading, error };
+    return { historical, potential, bonuses, loading, error };
 }

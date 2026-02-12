@@ -15,7 +15,8 @@ import {
     HardDrive,
     LogOut,
     Target,
-    DollarSign
+    DollarSign,
+    Bell
 } from 'lucide-react';
 import { useState, useEffect, Dispatch, SetStateAction, Suspense } from 'react';
 import { useRouter } from 'next/navigation';
@@ -674,29 +675,29 @@ function ConfigPageContent() {
                 </div>
             )}
 
-            {/* Commissions Configuration - Admin Only */}
-            {role === 'ADMIN' && (
+
+            {/* Notifications Configuration - Admin/Coordinator */}
+            {(role === 'ADMIN' || role === 'COORDINADOR') && (
                 <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div className="flex items-center gap-4">
-                        <div className="bg-emerald-100 p-3 rounded-2xl text-emerald-600">
-                            <DollarSign className="w-6 h-6" />
+                        <div className="bg-blue-100 p-3 rounded-2xl text-blue-600">
+                            <Bell className="w-6 h-6" />
                         </div>
                         <div>
-                            <h3 className="font-bold text-slate-900 text-lg">Comisiones y Bonos</h3>
-                            <p className="text-sm text-slate-500">Configurar reglas de comisiones y bonificaciones por recaudo</p>
+                            <h3 className="font-bold text-slate-900 text-lg">Notificaciones</h3>
+                            <p className="text-sm text-slate-500">Configurar alertas automáticas y reglas de notificación</p>
                         </div>
                     </div>
                     <button
-                        onClick={() => router.push('/configuracion/comisiones')}
-                        className="bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-xl text-sm font-bold shadow-md shadow-emerald-100 transition-all flex items-center justify-center gap-2"
+                        onClick={() => router.push('/configuracion/notificaciones')}
+                        className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl text-sm font-bold shadow-md shadow-blue-100 transition-all flex items-center justify-center gap-2"
                     >
-                        <DollarSign className="w-4 h-4" />
-                        Configurar Comisiones
+                        <Bell className="w-4 h-4" />
+                        Configurar Reglas
                     </button>
                 </div>
             )}
 
-            <AdminSettings setModalConfig={setModalConfig} />
 
             <ConfirmationModal
                 isOpen={modalConfig.isOpen}
@@ -734,107 +735,6 @@ function StatRow({ label, value, icon: Icon }: StatRowProps) {
     );
 }
 
-function AdminSettings({ setModalConfig }: { setModalConfig: Dispatch<SetStateAction<ModalConfig>> }) {
-    const { config, isAdmin, updateConfig, isLoading } = useConfig();
-    const [minValue, setMinValue] = useState("");
-    const [minInactiveDays, setMinInactiveDays] = useState("");
-    const [isSaving, setIsSaving] = useState(false);
-
-    useEffect(() => {
-        if (config.min_premium_order_value) {
-            setMinValue(config.min_premium_order_value);
-        }
-        if (config.inactive_account_days) {
-            setMinInactiveDays(config.inactive_account_days);
-        } else {
-            setMinInactiveDays('90'); // default
-        }
-    }, [config]);
-
-    if (isLoading) return null;
-    if (!isAdmin) return null;
-
-    const handleSave = async () => {
-        setIsSaving(true);
-        const p1 = updateConfig('min_premium_order_value', minValue);
-        const p2 = updateConfig('inactive_account_days', minInactiveDays);
-        await Promise.all([p1, p2]);
-        setModalConfig({
-            isOpen: true,
-            title: "Configuración Guardada",
-            message: "Los parámetros globales han sido actualizados correctamente.",
-            confirmLabel: "Aceptar",
-            onConfirm: () => setModalConfig(prev => ({ ...prev, isOpen: false })),
-            variant: "info"
-        });
-        setIsSaving(false);
-    };
-
-    return (
-        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden p-6 space-y-6">
-            <div className="flex items-center gap-2">
-                <div className="bg-purple-100 p-2 rounded-lg text-purple-600">
-                    <Settings className="w-5 h-5" />
-                </div>
-                <div>
-                    <h3 className="font-bold text-slate-900 text-lg">Configuración de Administrador</h3>
-                    <p className="text-sm text-slate-500">Parámetros globales del sistema</p>
-                </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Min Premium Order */}
-                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                    <label className="block text-sm font-bold text-slate-700 mb-2">
-                        Pedido Mínimo Cliente Premium (COP)
-                    </label>
-                    <p className="text-xs text-slate-500 mb-3">
-                        Valor mínimo requerido en cotizaciones para clientes marcados como Premium. Si no se cumple, no podrán generar pedido.
-                    </p>
-                    <input
-                        type="number"
-                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-slate-900 mb-2"
-                        value={minValue}
-                        onChange={(e) => setMinValue(e.target.value)}
-                    />
-                </div>
-
-                {/* Inactive Client Alert */}
-                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                    <label className="block text-sm font-bold text-slate-700 mb-2">
-                        Alerta Inactividad Cliente (Días)
-                    </label>
-                    <p className="text-xs text-slate-500 mb-3">
-                        Días sin interacción (actividades u oportunidades) para considerar un cliente como inactivo y generar alerta.
-                    </p>
-                    <input
-                        type="number"
-                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-slate-900 mb-2"
-                        value={minInactiveDays}
-                        onChange={(e) => setMinInactiveDays(e.target.value)}
-                    />
-                </div>
-            </div>
-
-            <div className="flex justify-end">
-                <button
-                    onClick={handleSave}
-                    disabled={isSaving}
-                    className="bg-purple-600 text-white px-6 py-2 rounded-xl text-sm font-bold hover:bg-purple-700 disabled:opacity-50 shadow-md shadow-purple-200 flex items-center gap-2"
-                >
-                    {isSaving ? (
-                        <>Guardando...</>
-                    ) : (
-                        <>
-                            <CheckCircle2 className="w-4 h-4" />
-                            Guardar Cambios
-                        </>
-                    )}
-                </button>
-            </div>
-        </div>
-    );
-}
 
 export default function ConfigPage() {
     return (
