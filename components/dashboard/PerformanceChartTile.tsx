@@ -1,19 +1,8 @@
 "use client";
 
 import React from "react";
-import {
-    AreaChart,
-    Area,
-    XAxis,
-    YAxis,
-    CartesianGrid,
-    Tooltip,
-    ResponsiveContainer,
-    BarChart,
-    Bar,
-    Cell,
-} from "recharts";
-import { TrendingUp, ArrowUpRight, DollarSign } from "lucide-react";
+import ReactECharts from "echarts-for-react";
+import { TrendingUp, ArrowUpRight } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 
 const MOCK_DATA = [
@@ -25,24 +14,61 @@ const MOCK_DATA = [
     { name: "Jun", value: 67000000, opportunities: 25 },
 ];
 
-const CustomTooltip = ({ active, payload, label }: any) => {
-    if (active && payload && payload.length) {
-        return (
-            <div className="bg-white p-4 shadow-xl border border-slate-100 rounded-xl">
-                <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-2">{label}</p>
-                <p className="text-sm font-bold text-[#254153]">
-                    {formatCurrency(payload[0].value)}
-                </p>
-                <p className="text-[10px] text-slate-500 mt-1">
-                    {payload[0].payload.opportunities} Oportunidades
-                </p>
-            </div>
-        );
-    }
-    return null;
-};
-
 export function PerformanceChartTile() {
+    const option = {
+        tooltip: {
+            trigger: "axis",
+            backgroundColor: "#fff",
+            borderColor: "#f1f5f9",
+            borderWidth: 1,
+            padding: 16,
+            textStyle: { color: "#254153", fontSize: 12 },
+            formatter: (params: any) => {
+                const p = params[0];
+                const item = MOCK_DATA[p.dataIndex];
+                return `
+                    <div style="font-family: inherit;">
+                        <div style="text-transform: uppercase; font-size: 10px; font-weight: 900; letter-spacing: 0.1em; color: #94a3b8; margin-bottom: 8px;">${p.name}</div>
+                        <div style="font-size: 14px; font-weight: 700; color: #254153;">${formatCurrency(p.value)}</div>
+                        <div style="font-size: 10px; color: #64748b; margin-top: 4px;">${item.opportunities} Oportunidades</div>
+                    </div>
+                `;
+            },
+            axisPointer: {
+                lineStyle: { color: "#254153", width: 1, type: "dashed" },
+            },
+        },
+        grid: { top: 10, right: 10, bottom: 30, left: 10 },
+        xAxis: {
+            type: "category",
+            data: MOCK_DATA.map((d) => d.name),
+            axisLine: { show: false },
+            axisTick: { show: false },
+            axisLabel: { fontSize: 10, fontWeight: 700, color: "#94a3b8", margin: 10 },
+        },
+        yAxis: { type: "value", show: false },
+        series: [
+            {
+                type: "line",
+                data: MOCK_DATA.map((d) => d.value),
+                smooth: true,
+                symbol: "none",
+                lineStyle: { width: 3, color: "#254153" },
+                areaStyle: {
+                    color: {
+                        type: "linear",
+                        x: 0, y: 0, x2: 0, y2: 1,
+                        colorStops: [
+                            { offset: 0, color: "rgba(37, 65, 83, 0.1)" },
+                            { offset: 1, color: "rgba(37, 65, 83, 0)" },
+                        ],
+                    },
+                },
+                animationDuration: 1500,
+            },
+        ],
+    };
+
     return (
         <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 h-full flex flex-col min-h-[400px]">
             <div className="flex items-center justify-between mb-8">
@@ -63,39 +89,12 @@ export function PerformanceChartTile() {
                 </div>
             </div>
 
-            <div className="flex-1 w-full -ml-4">
-                <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={MOCK_DATA} margin={{ top: 10, right: 10, left: 10, bottom: 0 }}>
-                        <defs>
-                            <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#254153" stopOpacity={0.1} />
-                                <stop offset="95%" stopColor="#254153" stopOpacity={0} />
-                            </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                        <XAxis
-                            dataKey="name"
-                            axisLine={false}
-                            tickLine={false}
-                            tick={{ fontSize: 10, fontWeight: 700, fill: "#94a3b8" }}
-                            dy={10}
-                        />
-                        <YAxis
-                            hide
-                            domain={['dataMin - 5000000', 'dataMax + 5000000']}
-                        />
-                        <Tooltip content={<CustomTooltip />} cursor={{ stroke: '#254153', strokeWidth: 1, strokeDasharray: '4 4' }} />
-                        <Area
-                            type="monotone"
-                            dataKey="value"
-                            stroke="#254153"
-                            strokeWidth={3}
-                            fillOpacity={1}
-                            fill="url(#colorValue)"
-                            animationDuration={1500}
-                        />
-                    </AreaChart>
-                </ResponsiveContainer>
+            <div className="flex-1 w-full">
+                <ReactECharts
+                    option={option}
+                    style={{ height: "100%", width: "100%" }}
+                    opts={{ renderer: "svg" }}
+                />
             </div>
 
             <div className="mt-6 pt-6 border-t border-slate-50 flex items-center justify-between">

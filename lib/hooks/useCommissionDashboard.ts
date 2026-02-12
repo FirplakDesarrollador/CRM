@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { syncEngine } from '@/lib/sync';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 
 export type CommissionSummary = {
     total_devengada: number;
@@ -35,6 +36,8 @@ export function useCommissionDashboard() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+    const { role } = useCurrentUser();
+    const isVendedor = role === 'VENDEDOR';
 
     // Period filter
     const [dateFrom, setDateFrom] = useState<string | null>(null);
@@ -52,18 +55,22 @@ export function useCommissionDashboard() {
         setLoading(true);
         setError(null);
         try {
-            // 1. Fetch all active users (Vendedores/Coordinadores) to ensure everyone is listed
-            // We assume anyone in CRM_Usuarios is relevant, or filter by specific roles if needed.
-            // For now, getting all active users is safer to match "show all users".
-            const { data: allUsers, error: usersError } = await supabase
+            // 1. Fetch users: VENDEDOR sees only self, others see all
+            let usersQuery = supabase
                 .from('CRM_Usuarios')
                 .select('id, full_name, role')
-                .eq('is_active', true)
-                .in('role', ['VENDEDOR', 'COORDINADOR', 'ADMIN']); // Include relevant roles
+                .eq('is_active', true);
 
+            if (isVendedor) {
+                usersQuery = usersQuery.eq('id', currentUserId!);
+            } else {
+                usersQuery = usersQuery.in('role', ['VENDEDOR', 'COORDINADOR', 'ADMIN']);
+            }
+
+            const { data: allUsers, error: usersError } = await usersQuery;
             if (usersError) throw new Error(`Users Error: ${usersError.message}`);
 
-            // 2. Fetch Ledger entries (History)
+            // 2. Fetch Ledger entries: VENDEDOR sees only own entries
             let query = supabase
                 .from('CRM_ComisionLedger')
                 .select(`
@@ -72,18 +79,20 @@ export function useCommissionDashboard() {
                     vendedor_id
                 `);
 
+            if (isVendedor) query = query.eq('vendedor_id', currentUserId!);
             if (dateFrom) query = query.gte('created_at', dateFrom);
             if (dateTo) query = query.lte('created_at', dateTo + 'T23:59:59Z');
 
             const { data: entries, error: ledgerError } = await query;
             if (ledgerError) throw new Error(`Ledger Error: ${ledgerError.message}`);
 
-            // 3. Fetch Open Opportunities (Future / Potential)
-            // Status 1 = Open
+            // 3. Fetch Open Opportunities: VENDEDOR sees only own
             let oppsQuery = supabase
                 .from('CRM_Oportunidades')
                 .select('id, owner_user_id, amount, account_id, account:CRM_Cuentas!account_id (canal_id)')
                 .eq('estado_id', 1);
+
+            if (isVendedor) oppsQuery = oppsQuery.eq('owner_user_id', currentUserId!);
 
             // If filtering by date, we might filter opportunities created in that date? 
             // Or usually Potential shows ALL currently open? 
@@ -324,7 +333,7 @@ export function useCommissionDashboard() {
         } finally {
             setLoading(false);
         }
-    }, [currentUserId, dateFrom, dateTo]);
+    }, [currentUserId, dateFrom, dateTo, isVendedor]);
 
     useEffect(() => {
         fetchDashboard();

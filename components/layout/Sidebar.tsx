@@ -61,18 +61,18 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
         }
     }, [role, isLoading, setUserRole]);
 
-    // PERF FIX: Memoize filtered nav items instead of recalculating on every render
+    // Filter nav items using effective role (respects viewMode)
     const visibleNavItems = React.useMemo(() => {
         return NAV_ITEMS.filter(item => {
-            if (item.href === '/usuarios' && userRole !== 'ADMIN') return false;
-            if (userRole === 'ADMIN') return true;
+            if (item.href === '/usuarios' && role !== 'ADMIN') return false;
+            if (role === 'ADMIN') return true;
             if (user?.allowed_modules && user.allowed_modules.length > 0) {
                 return user.allowed_modules.includes(item.href);
             }
-            if (item.requiredRole && item.requiredRole !== userRole) return false;
+            if (item.requiredRole && item.requiredRole !== role) return false;
             return true;
         });
-    }, [userRole, user?.allowed_modules]);
+    }, [role, user?.allowed_modules]);
 
     const handleLogout = async () => {
         setIsLoggingOut(true);
@@ -127,7 +127,7 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
                 {!isCollapsed && (
                     <div className="w-full mt-3 pt-3 border-t border-slate-200/60">
                         <p className="text-xs text-slate-400 text-center font-semibold uppercase tracking-wider">
-                            Versión 1.0.7.6
+                            Versión 1.0.7.7
                         </p>
                     </div>
                 )}

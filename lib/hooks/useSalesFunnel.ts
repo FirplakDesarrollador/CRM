@@ -1,6 +1,7 @@
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, LocalOportunidad, LocalFase } from "@/lib/db";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { useState, useCallback } from "react";
 
 export interface FunnelStage {
     fase_id: number;
@@ -20,9 +21,16 @@ export interface SalesFunnelFilters {
 
 export function useSalesFunnel(filters?: SalesFunnelFilters) {
     const { user, role, isLoading: userLoading } = useCurrentUser();
+    const [revision, setRevision] = useState(0);
+
+    const mutate = useCallback(async () => {
+        setRevision(prev => prev + 1);
+    }, []);
 
     const data = useLiveQuery(async () => {
         if (!user) return [];
+        // Depend on revision to trigger re-run
+        const _rev = revision;
 
         // 1. Get all relevant phases
         const allPhases = await db.phases.toArray();
@@ -42,7 +50,6 @@ export function useSalesFunnel(filters?: SalesFunnelFilters) {
             if (role === 'ADMIN') hasPermission = true;
             else if (role === 'COORDINADOR') {
                 const isOwner = o.owner_user_id === user.id;
-                const coordinated = false; // Need to implement coordinator check if possible locally
                 // For now assume all synced opps for coordinator are visible due to RLS sync logic
                 hasPermission = true;
             } else if (role === 'VENDEDOR') {
@@ -77,13 +84,21 @@ export function useSalesFunnel(filters?: SalesFunnelFilters) {
 
             // Assign colors based on order
             let color = '#64748b';
+
+            // Custom colors from implementation plan (approximate to screenshot)
+            // 1: Indigo/Blue
+            // 2: Violet/Purple
+            // 3: Pink
+            // 4: Rose/Red
+            // 5: Orange/Amber
+            // 6: Emerald/Green
             switch (phase.orden) {
-                case 1: color = '#6366f1'; break; // Indigo
-                case 2: color = '#8b5cf6'; break; // Violet
-                case 3: color = '#ec4899'; break; // Pink
-                case 4: color = '#f43f5e'; break; // Rose
-                case 5: color = '#f97316'; break; // Orange
-                case 6: color = '#10b981'; break; // Emerald
+                case 1: color = '#6366f1'; break;
+                case 2: color = '#8b5cf6'; break;
+                case 3: color = '#ec4899'; break;
+                case 4: color = '#f43f5e'; break;
+                case 5: color = '#f97316'; break;
+                case 6: color = '#10b981'; break;
             }
 
             return {
@@ -97,11 +112,12 @@ export function useSalesFunnel(filters?: SalesFunnelFilters) {
         });
 
         return aggregated;
-    }, [user, role, filters?.canal_id, filters?.advisor_id, filters?.subclasificacion_id]);
+    }, [user, role, filters?.canal_id, filters?.advisor_id, filters?.subclasificacion_id, filters?.nivel_premium, revision]);
 
     return {
         data: data || [],
         isLoading: userLoading || data === undefined,
-        error: null
+        error: null,
+        mutate
     };
 }
