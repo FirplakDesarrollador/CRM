@@ -19,15 +19,22 @@ import {
     Bell
 } from 'lucide-react';
 import { useState, useEffect, Dispatch, SetStateAction, Suspense } from 'react';
-import { useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { cn } from '@/components/ui/utils';
 import { supabase } from '@/lib/supabase';
 import { useConfig } from '@/lib/hooks/useConfig';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
-import { PriceListUploader } from '@/components/config/PriceListUploader';
+const PriceListUploader = dynamic(() => import('@/components/config/PriceListUploader').then(mod => mod.PriceListUploader), {
+    loading: () => <div className="animate-pulse bg-slate-100 h-20 rounded-2xl" />,
+    ssr: false
+});
+
+const ActivityClassificationManager = dynamic(() => import('@/components/config/ActivityClassificationManager').then(mod => mod.ActivityClassificationManager), {
+    loading: () => <div className="animate-pulse bg-slate-100 h-20 rounded-2xl" />,
+    ssr: false
+});
 import { ConfirmationModal } from '@/components/ui/ConfirmationModal';
-import { ActivityClassificationManager } from '@/components/config/ActivityClassificationManager';
-import { useSearchParams } from 'next/navigation';
 import packageJson from '../../package.json';
 
 const CRM_VERSION = packageJson.version;
@@ -739,10 +746,17 @@ function StatRow({ label, value, icon: Icon }: StatRowProps) {
 export default function ConfigPage() {
     return (
         <Suspense fallback={
-            <div className="flex items-center justify-center min-h-screen bg-slate-50">
-                <div className="flex flex-col items-center gap-4">
-                    <div className="w-10 h-10 border-4 border-[#254153] border-t-transparent rounded-full animate-spin"></div>
-                    <p className="text-slate-500 font-medium">Cargando configuración...</p>
+            <div className="p-6 max-w-5xl mx-auto space-y-6">
+                <div className="animate-pulse flex items-center gap-4 mb-8">
+                    <div className="bg-slate-200 w-14 h-14 rounded-2xl" />
+                    <div className="space-y-2">
+                        <div className="bg-slate-200 h-8 w-48 rounded" />
+                        <div className="bg-slate-200 h-4 w-64 rounded" />
+                    </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="md:col-span-2 bg-slate-100 h-96 rounded-3xl" />
+                    <div className="bg-slate-100 h-96 rounded-3xl" />
                 </div>
             </div>
         }>
