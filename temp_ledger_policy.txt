@@ -1,0 +1,1 @@
+﻿CREATE POLICY "Allow insert to authenticated users" ON "CRM_ComisionLedger" FOR INSERT TO authenticated WITH CHECK (true);

@@ -13,6 +13,8 @@ import AccountContactsTab from "./AccountContactsTab";
 import AccountOpportunitiesTab from "./AccountOpportunitiesTab";
 import { Briefcase } from "lucide-react";
 import { cn } from "@/components/ui/utils";
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { AccountAssignedTab } from "./AccountAssignedTab";
 
 // Schema
 const accountSchema = z.object({
@@ -42,7 +44,9 @@ interface AccountFormProps {
 
 export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) {
     const { createAccount, updateAccount } = useAccounts();
+    const { role: userRole } = useCurrentUser();
     const [parents, setParents] = useState<any[]>([]);
+    const [activeTab, setActiveTab] = useState<'info' | 'contacts' | 'opportunities' | 'assigned'>('info');
 
     // Live Query for Subclassifications from local DB
     const subclassifications = useLiveQuery(() => db.subclasificaciones.toArray()) || [];
@@ -132,7 +136,7 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
     }, []);
 
     // Tab State
-    const [activeTab, setActiveTab] = useState<'info' | 'contacts' | 'opportunities'>('info');
+    // Tab State moved to top
 
     const {
         register,
@@ -379,6 +383,20 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                         Oportunidades
                     </button>
                 )}
+
+                {account?.id && (userRole === 'ADMIN' || userRole === 'COORDINADOR') && (
+                    <button
+                        type="button"
+                        onClick={() => setActiveTab('assigned')}
+                        className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'assigned'
+                            ? "border-blue-600 text-blue-600"
+                            : "border-transparent text-gray-500 hover:text-gray-700"
+                            }`}
+                    >
+                        <User size={16} />
+                        Asignado
+                    </button>
+                )}
             </div>
 
             {activeTab === 'info' ? (
@@ -390,12 +408,6 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                             <label className="text-sm font-medium">Nombre de Cuenta</label>
                             <input {...register("nombre")} className="w-full border p-2 rounded" placeholder="Ej. Constructora XYZ" />
                             {errors.nombre && <span className="text-red-500 text-xs">{errors.nombre.message}</span>}
-                            {assignedUserName && (
-                                <p className="text-xs text-slate-500 flex items-center gap-1 mt-1">
-                                    <User size={12} className="text-slate-400" />
-                                    Usuario asignado: <span className="font-semibold text-slate-700">{assignedUserName}</span>
-                                </p>
-                            )}
                         </div>
 
                         {/* Hierarchy Switch */}
@@ -619,6 +631,18 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                         </div>
                     </div>
 
+                    {assignedUserName && (
+                        <div className="mt-4 p-3 bg-slate-50 rounded-lg border border-slate-100 flex items-center gap-3">
+                            <div className="p-2 bg-white rounded-full border border-slate-200 shadow-sm text-blue-600">
+                                <User size={16} />
+                            </div>
+                            <div>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider leading-none">Vendedor Asignado</p>
+                                <p className="text-sm font-bold text-slate-700 mt-1">{assignedUserName}</p>
+                            </div>
+                        </div>
+                    )}
+
                     <div className="flex justify-end gap-2 pt-4">
                         <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">
                             Cancelar
@@ -637,6 +661,15 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             ) : activeTab === 'contacts' ? (
                 <div className="p-4">
                     {account?.id && <AccountContactsTab accountId={account.id} />}
+                    <div className="flex justify-end pt-4 border-t mt-4">
+                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">
+                            Cerrar
+                        </button>
+                    </div>
+                </div>
+            ) : activeTab === 'assigned' ? (
+                <div className="p-4">
+                    {account?.id && <AccountAssignedTab accountId={account.id} currentOwnerId={account.created_by || null} />}
                     <div className="flex justify-end pt-4 border-t mt-4">
                         <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">
                             Cerrar

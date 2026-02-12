@@ -160,8 +160,9 @@ export interface LocalOportunidad {
     departamento_id?: number | null;
     created_at?: string;
     updated_at?: string;
-    probability?: number; // New field
-    razon_perdida_id?: number | null; // New field for Closed Lost
+    probability?: number;
+    razon_perdida_id?: number | null;
+    is_deleted?: boolean;
 }
 
 export class CRMFirplakDB extends Dexie {
@@ -184,10 +185,11 @@ export class CRMFirplakDB extends Dexie {
     activityClassifications!: Table<LocalActivityClassification, number>;
     activitySubclassifications!: Table<LocalActivitySubclassification, number>;
     lossReasons!: Table<LocalLossReason, number>;
+    opportunityCollaborators!: Table<LocalOpportunityCollaborator, string>; // New table
 
     constructor() {
         super('CRMFirplakDB');
-        this.version(7).stores({
+        this.version(8).stores({
             outbox: 'id, entity_type, status, field_timestamp',
             fileQueue: 'id, status',
             accounts: 'id, nit, nombre',
@@ -203,9 +205,21 @@ export class CRMFirplakDB extends Dexie {
             cities: 'id, departamento_id, nombre',
             activityClassifications: 'id, tipo_actividad',
             activitySubclassifications: 'id, clasificacion_id',
-            lossReasons: 'id' // New table
+            lossReasons: 'id',
+            opportunityCollaborators: 'id, oportunidad_id, usuario_id' // New table
         });
     }
+}
+
+export interface LocalOpportunityCollaborator {
+    id: string;
+    oportunidad_id: string;
+    usuario_id: string;
+    porcentaje: number;
+    rol: string;
+    created_at?: string;
+    synced_at?: string;
+    is_deleted?: boolean;
 }
 
 export interface LocalActivity {

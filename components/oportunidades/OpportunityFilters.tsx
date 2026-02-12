@@ -33,6 +33,7 @@ type StatusFilter = 'all' | 'open' | 'won' | 'lost';
 interface OpportunityFiltersProps {
     onFilterChange: (filters: {
         channelId: string | null;
+        subclassificationId: number | null;
         segmentId: number | null;
         phaseId: number | null;
         statusFilter: StatusFilter;
@@ -47,6 +48,7 @@ export function OpportunityFilters({ onFilterChange }: OpportunityFiltersProps) 
 
     // Selection state
     const [selectedChannel, setSelectedChannel] = useState<string | null>(null);
+    const [selectedSubclass, setSelectedSubclass] = useState<number | null>(null);
     const [selectedSegment, setSelectedSegment] = useState<number | null>(null);
     const [selectedPhase, setSelectedPhase] = useState<number | null>(null);
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -57,9 +59,10 @@ export function OpportunityFilters({ onFilterChange }: OpportunityFiltersProps) 
     useEffect(() => {
         const loadMetadata = async () => {
             try {
-                const [phasesRes, subRes, segRes] = await Promise.all([
+                const [phasesRes, chanRes, subRes, segRes] = await Promise.all([
                     supabase.from('CRM_FasesOportunidad').select('id, nombre, canal_id, probability').eq('is_active', true),
-                    supabase.from('CRM_Subclasificaciones').select('*'),
+                    supabase.from('CRM_Canales').select('id, nombre').order('nombre'),
+                    supabase.from('CRM_Subclasificacion').select('*'),
                     supabase.from('CRM_Segmentos').select('*')
                 ]);
 
@@ -67,17 +70,20 @@ export function OpportunityFilters({ onFilterChange }: OpportunityFiltersProps) 
                 if (subRes.data) setSubclasses(subRes.data);
                 if (segRes.data) setSegments(segRes.data);
 
-                // Extract unique channels from phases
-                const uniqueChannels = Array.from(new Set(phasesRes.data?.map(p => p.canal_id))).filter(Boolean);
-                // Map channels with friendly names
-                const channelNames: Record<string, string> = {
-                    'OBRAS_INT': 'Obras Internacional',
-                    'OBRAS_NAC': 'Obras Nacional',
-                    'DIST_INT': 'Distribución Internacional',
-                    'DIST_NAC': 'Distribución Nacional',
-                    'PROPIO': 'Canal Propio'
-                };
-                setChannels(uniqueChannels.map(c => ({ id: c, nombre: channelNames[c] || c })));
+                if (chanRes.data && chanRes.data.length > 0) {
+                    setChannels(chanRes.data);
+                } else {
+                    // Fallback to extraction sequence if CRM_Canales is empty
+                    const uniqueChannels = Array.from(new Set(phasesRes.data?.map(p => p.canal_id))).filter(Boolean);
+                    const channelNames: Record<string, string> = {
+                        'OBRAS_INT': 'Obras Internacional',
+                        'OBRAS_NAC': 'Obras Nacional',
+                        'DIST_INT': 'Distribución Internacional',
+                        'DIST_NAC': 'Distribución Nacional',
+                        'PROPIO': 'Canal Propio'
+                    };
+                    setChannels(uniqueChannels.map(c => ({ id: c, nombre: channelNames[c] || c })));
+                }
 
             } catch (err) {
                 console.error("Error loading filter metadata", err);
@@ -90,15 +96,15 @@ export function OpportunityFilters({ onFilterChange }: OpportunityFiltersProps) 
     }, []);
 
     // Derived options based on selection
-    const availableSegments = useMemo(() => {
+    const availableSubclasses = useMemo(() => {
         if (!selectedChannel) return [];
+        return subclasses.filter(s => s.canal_id === selectedChannel);
+    }, [selectedChannel, subclasses]);
 
-        const classIds = subclasses
-            .filter(s => s.canal_id === selectedChannel)
-            .map(s => s.id);
-
-        return segments.filter(seg => classIds.includes(seg.subclasificacion_id));
-    }, [selectedChannel, subclasses, segments]);
+    const availableSegments = useMemo(() => {
+        if (!selectedSubclass) return [];
+        return segments.filter(seg => seg.subclasificacion_id === selectedSubclass);
+    }, [selectedSubclass, segments]);
 
     // Get phases for selected channel, excluding closed phases for the phase dropdown
     // (closed phases are handled via statusFilter)
@@ -122,6 +128,7 @@ export function OpportunityFilters({ onFilterChange }: OpportunityFiltersProps) 
         }
         onFilterChange({
             channelId: selectedChannel,
+            subclassificationId: selectedSubclass,
             segmentId: selectedSegment,
             phaseId: null,
             statusFilter: status
@@ -132,13 +139,29 @@ export function OpportunityFilters({ onFilterChange }: OpportunityFiltersProps) 
     const handleChannelChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
         const val = e.target.value || null;
         setSelectedChannel(val);
+        setSelectedSubclass(null);
         setSelectedSegment(null);
         setSelectedPhase(null);
 
         onFilterChange({
             channelId: val,
+            subclassificationId: null,
             segmentId: null,
             phaseId: null,
+            statusFilter
+        });
+    };
+
+    const handleSubclassChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+        const val = e.target.value ? Number(e.target.value) : null;
+        setSelectedSubclass(val);
+        setSelectedSegment(null);
+
+        onFilterChange({
+            channelId: selectedChannel,
+            subclassificationId: val,
+            segmentId: null,
+            phaseId: selectedPhase,
             statusFilter
         });
     };
@@ -148,6 +171,7 @@ export function OpportunityFilters({ onFilterChange }: OpportunityFiltersProps) 
         setSelectedSegment(val);
         onFilterChange({
             channelId: selectedChannel,
+            subclassificationId: selectedSubclass,
             segmentId: val,
             phaseId: selectedPhase,
             statusFilter
@@ -163,6 +187,7 @@ export function OpportunityFilters({ onFilterChange }: OpportunityFiltersProps) 
         }
         onFilterChange({
             channelId: selectedChannel,
+            subclassificationId: selectedSubclass,
             segmentId: selectedSegment,
             phaseId: val,
             statusFilter: val ? 'open' : statusFilter
@@ -171,13 +196,14 @@ export function OpportunityFilters({ onFilterChange }: OpportunityFiltersProps) 
 
     const clearFilters = () => {
         setSelectedChannel(null);
+        setSelectedSubclass(null);
         setSelectedSegment(null);
         setSelectedPhase(null);
         setStatusFilter('all');
-        onFilterChange({ channelId: null, segmentId: null, phaseId: null, statusFilter: 'all' });
+        onFilterChange({ channelId: null, subclassificationId: null, segmentId: null, phaseId: null, statusFilter: 'all' });
     };
 
-    const hasActiveFilters = selectedChannel || selectedSegment || selectedPhase || statusFilter !== 'all';
+    const hasActiveFilters = selectedChannel || selectedSubclass || selectedSegment || selectedPhase || statusFilter !== 'all';
 
     if (loadingMetadata) return <div className="text-xs text-slate-400">Cargando filtros...</div>;
 
@@ -254,6 +280,20 @@ export function OpportunityFilters({ onFilterChange }: OpportunityFiltersProps) 
                 {/* Separator if Channel Selected */}
                 {selectedChannel && (
                     <>
+                        <span className="text-slate-300">|</span>
+
+                        {/* Subclassification Select */}
+                        <select
+                            className="text-sm bg-transparent border-none focus:ring-0 cursor-pointer text-slate-700 max-w-[160px]"
+                            value={selectedSubclass || ""}
+                            onChange={handleSubclassChange}
+                        >
+                            <option value="">Todos los Tipos</option>
+                            {availableSubclasses.map(s => (
+                                <option key={s.id} value={s.id}>{s.nombre}</option>
+                            ))}
+                        </select>
+
                         <span className="text-slate-300">|</span>
 
                         {/* Segment Select */}

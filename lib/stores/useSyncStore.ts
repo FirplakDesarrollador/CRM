@@ -8,6 +8,7 @@ interface SyncState {
     lastSyncTime: string | null;
     error: string | null;
     isPaused: boolean;
+    isNavigating: boolean;
     userRole: 'SALES' | 'COORDINATOR' | 'ADMIN';
 
     setOnline: (status: boolean) => void;
@@ -17,6 +18,7 @@ interface SyncState {
     setPendingCount: (count: number) => void;
     setLastSyncTime: (time: string) => void;
     setError: (error: string | null) => void;
+    setNavigating: (isNavigating: boolean) => void;
     setUserRole: (role: 'SALES' | 'COORDINATOR' | 'ADMIN') => void;
 }
 
@@ -28,6 +30,7 @@ export const useSyncStore = create<SyncState>((set) => ({
     lastSyncTime: null,
     error: null,
     isPaused: false,
+    isNavigating: false,
     userRole: 'ADMIN',
 
     setOnline: (status) => set({ isOnline: status }),
@@ -37,5 +40,6 @@ export const useSyncStore = create<SyncState>((set) => ({
     setPendingCount: (pendingCount) => set({ pendingCount }),
     setLastSyncTime: (lastSyncTime) => set({ lastSyncTime }),
     setError: (error) => set({ error }),
+    setNavigating: (isNavigating) => set({ isNavigating }),
     setUserRole: (role) => set({ userRole: role }),
 }));

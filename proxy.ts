@@ -89,34 +89,26 @@ export async function proxy(request: NextRequest) {
         }
     )
 
-    // Try to get the current user
-    const { data: { user }, error: userError } = await supabase.auth.getUser()
-
-    console.log("[Middleware]", pathname, "| User:", user?.email || "NONE", "| Error:", userError?.message || "OK");
+    // PERF FIX: Use getSession() instead of getUser()
+    // getUser() makes an HTTP call to Supabase servers (~200ms per navigation)
+    // getSession() validates the JWT locally (~1ms) - sufficient for route protection
+    // Actual data security is enforced by RLS on Supabase, not middleware
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession()
 
     // Handle network errors (offline mode) - Allow access if has cookies
-    if (userError && isNetworkError(userError)) {
-        console.log("[Middleware] Network error - checking local session cookies");
-
-        const hasSession = hasLocalSession(request);
-        if (hasSession) {
-            console.log("[Middleware] Offline mode allowed - has local session cookies");
+    if (sessionError && isNetworkError(sessionError)) {
+        const hasLocalSessionCookies = hasLocalSession(request);
+        if (hasLocalSessionCookies) {
             return response;
         }
 
-        // No cookies, redirect to login
-        console.log("[Middleware] No local session, redirecting to /login");
         const url = request.nextUrl.clone();
         url.pathname = '/login';
         return NextResponse.redirect(url);
     }
 
-    // NO USER = NOT AUTHENTICATED (regardless of cookies)
-    // This is the key fix: if getUser() returns null, the session is invalid
-    if (!user) {
-        console.log("[Middleware] No valid user session, redirecting to /login");
-
-        // Clear any stale auth cookies to prevent loops
+    // NO SESSION = NOT AUTHENTICATED
+    if (!session) {
         const redirectUrl = request.nextUrl.clone();
         redirectUrl.pathname = '/login';
         const redirectResponse = NextResponse.redirect(redirectUrl);
