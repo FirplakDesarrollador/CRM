@@ -25,6 +25,7 @@ export function useAccounts() {
             ...sanitizedData,
             id,
             created_by: user?.id,
+            owner_user_id: user?.id,
             updated_at: new Date().toISOString()
         };
         await db.accounts.add(newAccount as LocalCuenta);

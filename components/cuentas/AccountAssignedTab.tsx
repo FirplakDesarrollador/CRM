@@ -58,8 +58,8 @@ export function AccountAssignedTab({ accountId, currentOwnerId }: AccountAssigne
         setSuccessMessage(null);
 
         try {
-            // Accounts use 'created_by' as the owner field based on current schema
-            await updateAccount(accountId, { created_by: selectedUserId });
+            // Accounts now use 'owner_user_id' as the owner field
+            await updateAccount(accountId, { owner_user_id: selectedUserId });
             setSuccessMessage("Cuenta reasignada correctamente.");
             setTimeout(() => setSuccessMessage(null), 3000);
         } catch (error) {

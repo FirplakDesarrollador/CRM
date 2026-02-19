@@ -97,17 +97,26 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
 
     // Fetch assigned user name if exists
     useEffect(() => {
-        // If it's already in the object (from server join), use it
+        // 1. Try owner_name from server join (new field)
+        if ((account as any)?.owner_name) {
+            setAssignedUserName((account as any).owner_name);
+            return;
+        }
+
+        // 2. Fallback: creator_name (legacy)
         if ((account as any)?.creator_name) {
             setAssignedUserName((account as any).creator_name);
             return;
         }
 
-        if (account?.created_by) {
+        // 3. Fetch manually using owner_user_id or created_by
+        const ownerId = (account as any)?.owner_user_id || account?.created_by;
+
+        if (ownerId) {
             supabase
                 .from('CRM_Usuarios')
                 .select('full_name')
-                .eq('id', account.created_by)
+                .eq('id', ownerId)
                 .single()
                 .then(({ data }) => {
                     if (data?.full_name) {
@@ -119,7 +128,7 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
         } else {
             setAssignedUserName(null);
         }
-    }, [account?.created_by, (account as any)?.creator_name]);
+    }, [account?.created_by, (account as any)?.creator_name, (account as any)?.owner_user_id, (account as any)?.owner_name]);
 
     // Fetch potential parents (server-side lite fetch)
     useEffect(() => {
@@ -669,7 +678,7 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                 </div>
             ) : activeTab === 'assigned' ? (
                 <div className="p-4">
-                    {account?.id && <AccountAssignedTab accountId={account.id} currentOwnerId={account.created_by || null} />}
+                    {account?.id && <AccountAssignedTab accountId={account.id} currentOwnerId={(account as any).owner_user_id || account.created_by || null} />}
                     <div className="flex justify-end pt-4 border-t mt-4">
                         <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">
                             Cerrar
