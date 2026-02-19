@@ -127,7 +127,7 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
                 {!isCollapsed && (
                     <div className="w-full mt-3 pt-3 border-t border-slate-200/60">
                         <p className="text-xs text-slate-400 text-center font-semibold uppercase tracking-wider">
-                            Versión 1.0.7.7
+                            Versión 1.0.7.8
                         </p>
                     </div>
                 )}

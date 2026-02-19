@@ -23,6 +23,7 @@ export interface LocalCuenta {
     nit: string;
     nit_base?: string;
     id_cuenta_principal?: string | null;
+    owner_user_id?: string; // Nuevo campo propietario
     canal_id: string; // Nuevo campo obligatorio
     subclasificacion_id?: number | null; // Nuevo campo opcional
     es_premium?: boolean;
@@ -192,7 +193,7 @@ export class CRMFirplakDB extends Dexie {
         this.version(8).stores({
             outbox: 'id, entity_type, status, field_timestamp',
             fileQueue: 'id, status',
-            accounts: 'id, nit, nombre',
+            accounts: 'id, nit, nombre, owner_user_id',
             opportunities: 'id, account_id, owner_user_id', // Simplified index
             contacts: 'id, account_id, email',
             quotes: 'id, opportunity_id, status, es_pedido',

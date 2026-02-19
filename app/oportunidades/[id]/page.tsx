@@ -322,11 +322,20 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
         fetchAccountFromServer();
     }, [opportunity.account_id, account, isFetchingAccount]);
 
-    // Fetch Phases for Channel
+    // Fetch Phases for Channel (with deduplication by orden in case of DB integrity issues)
     const phases = useLiveQuery(
-        () => account?.canal_id
-            ? db.phases.where('canal_id').equals(account.canal_id).sortBy('orden')
-            : [],
+        async () => {
+            if (!account?.canal_id) return [];
+            const raw = await db.phases.where('canal_id').equals(account.canal_id).sortBy('orden');
+            // Deduplicate by orden, keeping the entry with the lowest id
+            const seen = new Map<number, typeof raw[0]>();
+            for (const phase of raw) {
+                if (!seen.has(phase.orden)) {
+                    seen.set(phase.orden, phase);
+                }
+            }
+            return Array.from(seen.values()).sort((a, b) => a.orden - b.orden);
+        },
         [account?.canal_id]
     );
 

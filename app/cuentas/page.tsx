@@ -5,7 +5,7 @@ import { AccountForm } from "@/components/cuentas/AccountForm";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
-import { Plus, Search, Building, Users, Pencil, Filter, Medal, Trash2 } from "lucide-react";
+import { Plus, Search, Building, Users, User, Pencil, Filter, Medal, Trash2 } from "lucide-react";
 import { UserPickerFilter } from "@/components/cuentas/UserPickerFilter";
 import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
@@ -241,7 +241,10 @@ function AccountsContent() {
 
                                     <div className="flex items-center text-xs text-slate-400 gap-3 border-t pt-3 mt-1">
                                         <span className="flex items-center gap-1">
-                                            <Users className="w-3 h-3" /> {acc.contact_count || 0} Contactos
+                                            <Users className="w-3 h-3" /> {acc.contact_count || 0}
+                                        </span>
+                                        <span className="flex items-center gap-1" title="Propietario">
+                                            <User className="w-3 h-3" /> {(acc as any).owner_name || (acc as any).creator_name || "Sin asignar"}
                                         </span>
                                         <span>
                                             {acc.ciudad || "Sin ciudad"}

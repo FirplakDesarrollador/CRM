@@ -16,7 +16,9 @@ export type AccountServer = {
     direccion: string | null;
     ciudad: string | null;
     created_by: string | null;
+    owner_user_id?: string | null;
     creator_name?: string | null;
+    owner_name?: string | null;
     updated_at: string;
     contact_count?: number;
 };
@@ -73,6 +75,8 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                     departamento_id,
                     ciudad_id,
                     created_by,
+                    created_at,
+                    owner_user_id,
                     updated_at,
                     contacts:CRM_Contactos(count)
                 `, { count: 'exact' })
@@ -83,7 +87,12 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
             }
 
             if (assignedUserId) {
-                query = query.eq('created_by', assignedUserId);
+                // Filter by OWNER ID now, not just creator
+                // But let's support both or transition?
+                // Request says "detect the id of the seller who owns".
+                // So filters should probably use owner_user_id.
+                // For backward compat, owner_user_id defaults to created_by, so safe to use owner_user_id.
+                query = query.eq('owner_user_id', assignedUserId);
             }
 
             // Order
@@ -98,9 +107,27 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
 
             console.log(`[useAccountsServer] Fetched ${result?.length} accounts. Order: updated_at DESC`, result?.slice(0, 3));
 
+            // Collect unique owner IDs to resolve names
+            const ownerIds = [...new Set(
+                (result as any[]).map(item => item.owner_user_id || item.created_by).filter(Boolean)
+            )];
+
+            // Fetch owner names from CRM_Usuarios
+            let ownerMap: Record<string, string> = {};
+            if (ownerIds.length > 0) {
+                const { data: usuarios } = await supabase
+                    .from('CRM_Usuarios')
+                    .select('id, full_name')
+                    .in('id', ownerIds);
+                if (usuarios) {
+                    ownerMap = Object.fromEntries(usuarios.map(u => [u.id, u.full_name || '']));
+                }
+            }
+
             const flattenedResults = (result as any[]).map(item => ({
                 ...item,
-                creator_name: item.creator?.full_name || null,
+                owner_name: ownerMap[item.owner_user_id] || ownerMap[item.created_by] || null,
+                creator_name: ownerMap[item.created_by] || null,
                 contact_count: item.contacts?.[0]?.count || 0
             }));
 

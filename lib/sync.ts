@@ -249,6 +249,88 @@ export class SyncEngine {
             }
         }
 
+        // 3.3b Proactive Fix: Filter out non-existent fields for CRM_Actividades
+        // After migration 20260218_add_activities_ms_columns.sql, all known fields are now valid.
+        // This block is kept as a safety net for future unknown fields.
+        if (batches['CRM_Actividades']) {
+            const invalidFieldsForActividades: string[] = []; // Add field names here if needed in future
+            if (invalidFieldsForActividades.length > 0) {
+                batches['CRM_Actividades'] = batches['CRM_Actividades'].filter(update => {
+                    if (invalidFieldsForActividades.includes(update.field)) {
+                        console.warn(`[Sync] Filtering out invalid field '${update.field}' from CRM_Actividades batch`);
+                        db.outbox.filter(i => i.entity_id === update.id && i.field_name === update.field && i.entity_type === 'CRM_Actividades')
+                            .delete()
+                            .catch(e => console.error("[Sync] Failed to delete filtered item from outbox", e));
+                        return false;
+                    }
+                    return true;
+                });
+            }
+
+            // 3.3c SELF-HEALING: Validate opportunity_id FK for Activities
+            // If the referenced opportunity doesn't exist on the server, set opportunity_id to null
+            // to avoid "violates foreign key constraint fk_crmact_opp" errors.
+            const actUpdates = batches['CRM_Actividades'];
+            const oppIdsFromActivities = new Set<string>();
+            actUpdates.forEach(u => {
+                if (u.field === 'opportunity_id' && u.value && typeof u.value === 'string') {
+                    oppIdsFromActivities.add(u.value);
+                }
+            });
+
+            // Also check local DB for activities that have opportunity_id but it's not in the batch
+            const actEntityIds = Array.from(new Set(actUpdates.map(u => u.id)));
+            for (const actId of actEntityIds) {
+                const hasOppInBatch = actUpdates.some(u => u.id === actId && u.field === 'opportunity_id');
+                if (!hasOppInBatch) {
+                    try {
+                        const localAct = await db.activities.get(actId);
+                        if (localAct?.opportunity_id) oppIdsFromActivities.add(localAct.opportunity_id);
+                    } catch (e) { /* ignore */ }
+                }
+            }
+
+            if (oppIdsFromActivities.size > 0) {
+                try {
+                    const oppIdsToCheck = Array.from(oppIdsFromActivities);
+                    const { data: existingOpps, error: oppCheckErr } = await supabase
+                        .from('CRM_Oportunidades')
+                        .select('id')
+                        .in('id', oppIdsToCheck);
+
+                    if (!oppCheckErr && existingOpps) {
+                        const foundOppIds = new Set(existingOpps.map(o => o.id));
+                        const missingOppIds = oppIdsToCheck.filter(id => !foundOppIds.has(id));
+
+                        if (missingOppIds.length > 0) {
+                            console.warn(`[Sync] Self-healing: Found ${missingOppIds.length} missing opportunities referenced by activities:`, missingOppIds);
+
+                            // Nullify opportunity_id in the batch for activities referencing missing opportunities
+                            for (const update of actUpdates) {
+                                if (update.field === 'opportunity_id' && missingOppIds.includes(update.value)) {
+                                    console.log(`[Sync] Nullifying opportunity_id for activity ${update.id} (missing opp: ${update.value})`);
+                                    update.value = null;
+                                }
+                            }
+
+                            // Also update local Dexie to avoid re-queuing with bad FK
+                            for (const actId of actEntityIds) {
+                                try {
+                                    const localAct = await db.activities.get(actId);
+                                    if (localAct?.opportunity_id && missingOppIds.includes(localAct.opportunity_id)) {
+                                        await db.activities.update(actId, { opportunity_id: undefined });
+                                        console.log(`[Sync] Updated local activity ${actId}: cleared opportunity_id`);
+                                    }
+                                } catch (e) { /* ignore */ }
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[Sync] Failed to validate opportunity FKs for activities:', e);
+                }
+            }
+        }
+
         if (batches['CRM_Oportunidades']) {
             const updates = batches['CRM_Oportunidades'];
 
