@@ -412,7 +412,7 @@ export class SyncEngine {
                             if (localAccount) {
                                 console.log(`[Sync] Re-queueing missing local account: ${missingId}`);
                                 const fieldsToSync: (keyof typeof localAccount)[] =
-                                    ['nombre', 'nit', 'nit_base', 'canal_id', 'telefono', 'direccion', 'ciudad_id', 'departamento_id', 'created_by', 'created_at', 'updated_at'];
+                                    ['nombre', 'nit', 'nit_base', 'canal_id', 'telefono', 'direccion', 'pais_id', 'departamento_id', 'ciudad_id', 'created_by', 'created_at', 'updated_at'];
 
                                 const newOutboxItems: any[] = [];
                                 fieldsToSync.forEach(field => {
@@ -441,100 +441,12 @@ export class SyncEngine {
         }
 
 
-        // 4. SPECIAL HANDLING: Bypass RPC for CRM_Oportunidades_Colaboradores (Schema mismatch workaround)
+        // 4. Extract CRM_Oportunidades_Colaboradores to process AFTER main tables
+        let collabUpdatesPending: any[] | null = null;
         if (batches['CRM_Oportunidades_Colaboradores']) {
-            console.log('[Sync] Bypassing RPC for CRM_Oportunidades_Colaboradores...');
-            const collabUpdates = batches['CRM_Oportunidades_Colaboradores'];
+            console.log('[Sync] Extracting CRM_Oportunidades_Colaboradores to process after main tables...');
+            collabUpdatesPending = batches['CRM_Oportunidades_Colaboradores'];
             delete batches['CRM_Oportunidades_Colaboradores']; // Remove from main RPC loop
-
-            // Group by ID to form rows
-            const rowsMap = new Map<string, any>();
-            collabUpdates.forEach(u => {
-                if (!rowsMap.has(u.id)) rowsMap.set(u.id, {});
-                const row = rowsMap.get(u.id);
-                // Skip invalid fields here explicitly
-                if (!['created_at', 'updated_at'].includes(u.field)) {
-                    row[u.field] = u.value;
-                }
-                row.id = u.id;
-            });
-
-            const rows = Array.from(rowsMap.values());
-
-            // Enrichment: Ensure all required fields exist for new/missing server rows
-            // This is critical for CRM_Oportunidades_Colaboradores because it has NOT NULL and CHECK constraints.
-            if (rows.length > 0) {
-                const isValidUUID = (id: any) => typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
-
-                for (let i = rows.length - 1; i >= 0; i--) {
-                    const row = rows[i];
-                    try {
-                        const localItem = await db.opportunityCollaborators.get(row.id);
-                        if (localItem) {
-                            if (!row.oportunidad_id) row.oportunidad_id = localItem.oportunidad_id;
-                            if (!row.usuario_id) row.usuario_id = localItem.usuario_id;
-                            if (row.porcentaje === undefined) row.porcentaje = localItem.porcentaje;
-                            if (!row.rol) row.rol = localItem.rol;
-
-                            // Proactive Fix: Some items might have percentage 0 or null causing constraint violations
-                            if (row.porcentaje === null || row.porcentaje === undefined || row.porcentaje <= 0) {
-                                console.warn(`[Sync] Repairing invalid percentage ${row.porcentaje} for collab ${row.id}`);
-                                row.porcentaje = 0.01; // Minimum valid percentage
-                            }
-                        }
-
-                        // CRITICAL: Validate UUIDs to prevent infinite 400 loops
-                        if (!isValidUUID(row.usuario_id) || !isValidUUID(row.oportunidad_id)) {
-                            console.error(`[Sync] Invalid UUIDs for collaborator sync. User: ${row.usuario_id}, Opp: ${row.oportunidad_id}. Row:`, row);
-
-                            // Remove this row from the batch to prevent failure
-                            rows.splice(i, 1);
-
-                            // Delete the Bad Item from Outbox to stop the loop
-                            const badItems = pending.filter(p => p.entity_id === row.id && p.entity_type === 'CRM_Oportunidades_Colaboradores');
-                            if (badItems.length > 0) {
-                                console.warn(`[Sync] Deleting ${badItems.length} malformed collaborator items from outbox to break loop.`);
-                                await db.outbox.bulkDelete(badItems.map(b => b.id));
-                            }
-                        }
-
-                    } catch (e) {
-                        console.error("[Sync] Error preparing collaborator row:", e);
-                    }
-                }
-            }
-
-            if (rows.length > 0) {
-                console.log('[Sync] Bypass Rows Preview:', JSON.stringify(rows, null, 2));
-                try {
-                    const { error } = await supabase.from('CRM_Oportunidades_Colaboradores').upsert(rows);
-
-                    if (!error) {
-                        const rowIds = rows.map(r => r.id);
-                        const idsToDelete = pending
-                            .filter(p => p.entity_type === 'CRM_Oportunidades_Colaboradores' && rowIds.includes(p.entity_id))
-                            .map(p => p.id);
-
-                        if (idsToDelete.length > 0) {
-                            await db.outbox.bulkDelete(idsToDelete);
-                        }
-                        console.log(`[Sync] Bypassed RPC for Collaborators. Synced ${rows.length} rows.`);
-                    } else {
-                        console.error('[Sync] Collaborator bypass failed:', error);
-                        // Mark as failed in outbox
-                        const idsToFail = collabUpdates.map(u => pending.find(p => p.entity_id === u.id && p.field_name === u.field && p.entity_type === 'CRM_Oportunidades_Colaboradores')?.id).filter(Boolean) as string[];
-                        if (idsToFail.length > 0) {
-                            await db.outbox.where('id').anyOf(idsToFail).modify({
-                                status: 'FAILED',
-                                error: error.message,
-                                retry_count: 1 // Increment? Or just set?
-                            });
-                        }
-                    }
-                } catch (e: any) {
-                    console.error('[Sync] Collaborator bypass exception:', e);
-                }
-            }
         }
 
         const sortedTables = Object.entries(batches).sort(([tableA], [tableB]) => {
@@ -584,6 +496,13 @@ export class SyncEngine {
                         await db.transaction('rw', db.outbox, async () => {
                             for (const item of itemsToFail) {
                                 console.warn(`[Sync] Push failed for ${table}.${item.field_name}: ${result.message}`);
+
+                                // SELF-HEALING: Duplicate Account NIT scenario
+                                if (table === 'CRM_Cuentas' && result.message.includes('idx_crmcuentas_nit_base_root')) {
+                                    console.warn(`[Sync] Intercepted duplicated account (NIT base). Triggering identity resolution for ID ${result.id}...`);
+                                    setTimeout(() => this.resolveDuplicateAccount(result.id), 100);
+                                }
+
                                 await db.outbox.update(item.id, {
                                     status: 'FAILED',
                                     error: result.message,
@@ -611,6 +530,195 @@ export class SyncEngine {
                 break;
             }
         }
+
+        // 5. SPECIAL HANDLING: Bypass RPC for CRM_Oportunidades_Colaboradores
+        // We process this AFTER the main table loops so that new parent opportunities
+        // have already been synced to Supabase, solving FK constraint errors.
+        if (collabUpdatesPending) {
+            console.log('[Sync] Bypassing RPC for CRM_Oportunidades_Colaboradores (running after main tables)...');
+            const collabUpdates = collabUpdatesPending;
+
+            // Group by ID to form rows
+            const rowsMap = new Map<string, any>();
+            collabUpdates.forEach(u => {
+                if (!rowsMap.has(u.id)) rowsMap.set(u.id, {});
+                const row = rowsMap.get(u.id);
+                // Skip invalid fields here explicitly
+                if (!['created_at', 'updated_at'].includes(u.field)) {
+                    row[u.field] = u.value;
+                }
+                row.id = u.id;
+            });
+
+            const rows = Array.from(rowsMap.values());
+
+            // Enrichment: Ensure all required fields exist for new/missing server rows
+            if (rows.length > 0) {
+                const isValidUUID = (id: any) => typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
+                for (let i = rows.length - 1; i >= 0; i--) {
+                    const row = rows[i];
+                    try {
+                        const localItem = await db.opportunityCollaborators.get(row.id);
+                        if (localItem) {
+                            if (!row.oportunidad_id) row.oportunidad_id = localItem.oportunidad_id;
+                            if (!row.usuario_id) row.usuario_id = localItem.usuario_id;
+                            if (row.porcentaje === undefined) row.porcentaje = localItem.porcentaje;
+                            if (!row.rol) row.rol = localItem.rol;
+
+                            // Proactive Fix: Some items might have percentage 0 or null causing constraint violations
+                            if (row.porcentaje === null || row.porcentaje === undefined || row.porcentaje <= 0) {
+                                console.warn(`[Sync] Repairing invalid percentage ${row.porcentaje} for collab ${row.id}`);
+                                row.porcentaje = 0.01; // Minimum valid percentage
+                            }
+                        }
+
+                        // CRITICAL: Validate UUIDs to prevent infinite 400 loops
+                        if (!isValidUUID(row.usuario_id) || !isValidUUID(row.oportunidad_id)) {
+                            console.error(`[Sync] Invalid UUIDs for collaborator sync. User: ${row.usuario_id}, Opp: ${row.oportunidad_id}. Row:`, row);
+
+                            // Remove this row from the batch to prevent failure
+                            rows.splice(i, 1);
+
+                            // Delete the Bad Item from Outbox to stop the loop
+                            const badItems = pending.filter(p => p.entity_id === row.id && p.entity_type === 'CRM_Oportunidades_Colaboradores');
+                            if (badItems.length > 0) {
+                                console.warn(`[Sync] Deleting ${badItems.length} malformed collaborator items from outbox to break loop.`);
+                                await db.outbox.bulkDelete(badItems.map(b => b.id));
+                            }
+                        }
+
+                    } catch (e) {
+                        console.error("[Sync] Error preparing collaborator row:", e);
+                    }
+                }
+            }
+
+            if (rows.length > 0) {
+                // Self-healing: Ensure parent opportunity exists on server
+                const oppIdsToCheck = Array.from(new Set(rows.map(r => r.oportunidad_id))).filter(Boolean);
+                if (oppIdsToCheck.length > 0) {
+                    const { data: existingOpps, error: oppCheckError } = await supabase
+                        .from('CRM_Oportunidades')
+                        .select('id')
+                        .in('id', oppIdsToCheck);
+
+                    if (!oppCheckError && existingOpps) {
+                        const validOppIds = new Set(existingOpps.map(o => o.id));
+                        for (let i = rows.length - 1; i >= 0; i--) {
+                            if (!validOppIds.has(rows[i].oportunidad_id)) {
+                                console.warn(`[Sync-Heal] Deleting orphaned collaborator for non-existent Opportunity: ${rows[i].oportunidad_id}`);
+                                const badItems = pending.filter(p => p.entity_id === rows[i].id && p.entity_type === 'CRM_Oportunidades_Colaboradores');
+                                if (badItems.length > 0) {
+                                    await db.outbox.bulkDelete(badItems.map(b => b.id));
+                                }
+                                rows.splice(i, 1);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (rows.length > 0) {
+                console.log('[Sync] Bypass Rows Preview:', JSON.stringify(rows, null, 2));
+                try {
+                    const { error } = await supabase.from('CRM_Oportunidades_Colaboradores').upsert(rows);
+
+                    if (!error) {
+                        const rowIds = rows.map(r => r.id);
+                        const idsToDelete = pending
+                            .filter(p => p.entity_type === 'CRM_Oportunidades_Colaboradores' && rowIds.includes(p.entity_id))
+                            .map(p => p.id);
+
+                        if (idsToDelete.length > 0) {
+                            await db.outbox.bulkDelete(idsToDelete);
+                        }
+                        console.log(`[Sync] Bypassed RPC for Collaborators. Synced ${rows.length} rows.`);
+                    } else {
+                        console.error('[Sync] Collaborator bypass failed:', error);
+                        // Mark as failed in outbox
+                        const idsToFail = collabUpdates.map(u => pending.find(p => p.entity_id === u.id && p.field_name === u.field && p.entity_type === 'CRM_Oportunidades_Colaboradores')?.id).filter(Boolean) as string[];
+                        if (idsToFail.length > 0) {
+                            await db.outbox.where('id').anyOf(idsToFail).modify({
+                                status: 'FAILED',
+                                error: error.message,
+                                retry_count: 1 // Increment? Or just set?
+                            });
+                        }
+                    }
+                } catch (e: any) {
+                    console.error('[Sync] Collaborator bypass exception:', e);
+                }
+            }
+        }
+    }
+
+    /**
+     * SELF-HEALING: Resolves issues where an account is created locally but already exists on Supabase.
+     */
+    private async resolveDuplicateAccount(badAccountId: string) {
+        try {
+            console.log(`[Sync-Heal] Starting resolution for duplicated account: ${badAccountId}`);
+            // 1. Get the local account to find the NIT
+            const localAcc = await db.accounts.get(badAccountId);
+            if (!localAcc || !localAcc.nit_base) return;
+
+            // 2. Fetch the REAL account ID from Supabase
+            const { data: realAccounts, error } = await supabase
+                .from('CRM_Cuentas')
+                .select('id')
+                .eq('nit_base', localAcc.nit_base)
+                .is('id_cuenta_principal', null)
+                .limit(1);
+
+            if (error || !realAccounts || realAccounts.length === 0) {
+                console.warn(`[Sync-Heal] Could not find real account on server with nit_base ${localAcc.nit_base}`);
+                return;
+            }
+
+            const realAccountId = realAccounts[0].id;
+            console.log(`[Sync-Heal] Found matching real account ID on server: ${realAccountId}. Repairing local references...`);
+
+            // 3. Repair Outbox Items
+            // Delete all outbox items related to the BAD account itself
+            const badAccountOutboxItems = await db.outbox.where('entity_id').equals(badAccountId).and(i => i.entity_type === 'CRM_Cuentas').toArray();
+            await db.outbox.bulkDelete(badAccountOutboxItems.map(i => i.id));
+
+            // Find all opportunities in Dexie that point to the BAD account and update them
+            const opportunitiesToFix = await db.opportunities.where('account_id').equals(badAccountId).toArray();
+            for (const opp of opportunitiesToFix) {
+                await db.opportunities.update(opp.id, { account_id: realAccountId });
+            }
+
+            // Find outbox items referencing the bad account ID and update them to the real ID
+            const outboxOpportunities = await db.outbox
+                .where('field_name').equals('account_id')
+                .and(i => i.new_value === badAccountId)
+                .toArray();
+
+            for (const item of outboxOpportunities) {
+                await db.outbox.update(item.id, { new_value: realAccountId, status: 'PENDING', error: undefined, retry_count: 0 });
+            }
+
+            // Reset related dependent items that failed due to cascaded FK errors, so they try again
+            const failedOutboxItems = await db.outbox
+                .where('status').equals('FAILED')
+                .toArray();
+
+            for (const item of failedOutboxItems) {
+                if (['CRM_Oportunidades', 'CRM_Cotizaciones', 'CRM_CotizacionItems', 'CRM_Oportunidades_Colaboradores'].includes(item.entity_type)) {
+                    await db.outbox.update(item.id, { status: 'PENDING', retry_count: 0, error: undefined });
+                }
+            }
+
+            // Delete the bad account from local DEXIE to prevent UI rendering it
+            await db.accounts.delete(badAccountId);
+
+            console.log(`[Sync-Heal] Repaired duplicate account. Triggering sync again.`);
+            this.triggerSync();
+        } catch (e) {
+            console.error(`[Sync-Heal] Error resolving duplicate account:`, e);
+        }
     }
 
     /**
@@ -619,20 +727,22 @@ export class SyncEngine {
      */
     private async pullChanges(_user: any) {
         console.log('[Sync] Pulling data from server...');
+        const lastSync = useSyncStore.getState().lastSyncTime;
 
         try {
             // Pull Accounts (CRM_Cuentas)
-            // PERF OPTIMIZATION: Disable full sync.
-            /*
-            // Pull Accounts (CRM_Cuentas)
-            // PERF OPTIMIZATION: Full sync enabled to ensure filter consistency
-            const { data: accounts, error: accountsError } = await supabase
+            // PERF OPTIMIZATION: Incremental sync based on lastSyncTime
+            let accountsQuery = supabase
                 .from('CRM_Cuentas')
                 .select('*')
                 .eq('is_deleted', false);
-    
+
+            if (lastSync) accountsQuery = accountsQuery.gte('updated_at', lastSync);
+
+            const { data: accounts, error: accountsError } = await accountsQuery;
+
             if (accountsError) throw accountsError;
-    
+
             if (accounts && accounts.length > 0) {
                 const pendingAccountIds = new Set(
                     (await db.outbox
@@ -641,16 +751,16 @@ export class SyncEngine {
                         .toArray()
                     ).map(item => item.entity_id)
                 );
-    
+
                 let mergedCount = 0;
                 let skippedCount = 0;
-    
+
                 for (const a of accounts) {
                     if (pendingAccountIds.has(a.id)) {
                         skippedCount++;
                         continue;
                     }
-    
+
                     await db.accounts.put({
                         id: a.id,
                         nombre: a.nombre,
@@ -661,6 +771,9 @@ export class SyncEngine {
                         es_premium: a.es_premium ?? false,
                         telefono: a.telefono,
                         direccion: a.direccion,
+                        pais_id: a.pais_id,
+                        departamento_id: a.departamento_id,
+                        ciudad_id: a.ciudad_id,
                         ciudad: a.ciudad,
                         created_by: a.created_by,
                         updated_by: a.updated_by,
@@ -669,6 +782,27 @@ export class SyncEngine {
                     mergedCount++;
                 }
                 console.log(`[Sync] Merged ${mergedCount} accounts (${skippedCount} with pending changes skipped).`);
+            }
+
+            // CLEANUP: Remove locally-cached accounts that were deleted on the server
+            try {
+                let deletedQuery = supabase
+                    .from('CRM_Cuentas')
+                    .select('id')
+                    .eq('is_deleted', true)
+                    .limit(10000);
+
+                if (lastSync) deletedQuery = deletedQuery.gte('updated_at', lastSync);
+
+                const { data: deletedAccounts, error: delError } = await deletedQuery;
+
+                if (!delError && deletedAccounts && deletedAccounts.length > 0) {
+                    const deletedIds = deletedAccounts.map(a => a.id);
+                    await db.accounts.bulkDelete(deletedIds);
+                    console.log(`[Sync] Cleaned up ${deletedIds.length} deleted accounts from local cache.`);
+                }
+            } catch (cleanErr) {
+                console.warn('[Sync] Failed to clean up deleted accounts:', cleanErr);
             }
 
             // Pull Phases (CRM_FasesOportunidad)
@@ -806,6 +940,7 @@ export class SyncEngine {
                 if (deps && deps.length > 0) {
                     const mapped = deps.map((d: any) => ({
                         id: d.id,
+                        pais_id: d.pais_id,
                         nombre: d.nombre
                     }));
                     await db.transaction('rw', db.departments, async () => {
@@ -816,6 +951,29 @@ export class SyncEngine {
                 }
             } catch (depErr: any) {
                 console.error('[Sync] Failed to pull departments:', depErr.message);
+            }
+
+            // Pull Countries (CRM_Paises)
+            try {
+                const { data: countries, error: countriesError } = await supabase
+                    .from('CRM_Paises')
+                    .select('*');
+
+                if (countriesError) throw countriesError;
+
+                if (countries && countries.length > 0) {
+                    const mapped = countries.map((c: any) => ({
+                        id: c.id,
+                        nombre: c.nombre
+                    }));
+                    await db.transaction('rw', db.countries, async () => {
+                        await db.countries.clear();
+                        await db.countries.bulkPut(mapped);
+                    });
+                    console.log(`[Sync] Pulled ${countries.length} countries.`);
+                }
+            } catch (countryErr: any) {
+                console.error('[Sync] Failed to pull countries:', countryErr.message);
             }
 
             // Pull Cities (CRM_Ciudades)
@@ -843,14 +1001,18 @@ export class SyncEngine {
             }
 
             // Pull Contacts (CRM_Contactos) - SMART MERGE
-            // PERF OPTIMIZATION: Full sync enabled
-            const { data: contacts, error: contactsError } = await supabase
+            // PERF OPTIMIZATION: Incremental sync enabled
+            let contactsQuery = supabase
                 .from('CRM_Contactos')
                 .select('*')
                 .eq('is_deleted', false);
-    
+
+            if (lastSync) contactsQuery = contactsQuery.gte('updated_at', lastSync);
+
+            const { data: contacts, error: contactsError } = await contactsQuery;
+
             if (contactsError) throw contactsError;
-    
+
             if (contacts && contacts.length > 0) {
                 const pendingContactIds = new Set(
                     (await db.outbox
@@ -859,10 +1021,10 @@ export class SyncEngine {
                         .toArray()
                     ).map(item => item.entity_id)
                 );
-    
+
                 let mergedCount = 0;
                 let skippedCount = 0;
-    
+
                 for (const c of contacts) {
                     if (pendingContactIds.has(c.id)) {
                         skippedCount++;
@@ -886,20 +1048,24 @@ export class SyncEngine {
             }
 
             // Pull Opportunities (CRM_Oportunidades) - SMART MERGE
-            // PERF OPTIMIZATION: Full sync enabled
+            // PERF OPTIMIZATION: Incremental sync enabled
             console.log('[Sync] Starting Opportunity Pull...');
-            const { data: opportunities, error: oppsError } = await supabase
+            let oppsQuery = supabase
                 .from('CRM_Oportunidades')
                 .select('*')
                 .eq('is_deleted', false);
-    
+
+            if (lastSync) oppsQuery = oppsQuery.gte('updated_at', lastSync);
+
+            const { data: opportunities, error: oppsError } = await oppsQuery;
+
             if (oppsError) {
                 console.error('[Sync] Error pulling opportunities:', oppsError);
                 throw oppsError;
             }
 
             console.log(`[Sync] Pulled ${opportunities?.length || 0} opportunities from server.`);
-    
+
             if (opportunities && opportunities.length > 0) {
                 const pendingOppIds = new Set(
                     (await db.outbox
@@ -908,16 +1074,19 @@ export class SyncEngine {
                         .toArray()
                     ).map(item => item.entity_id)
                 );
-    
+
                 let mergedCount = 0;
                 let skippedCount = 0;
-    
+
                 for (const opp of opportunities) {
                     if (pendingOppIds.has(opp.id)) {
                         skippedCount++;
                         continue;
                     }
-                    await db.opportunities.put(opp);
+                    await db.opportunities.put({
+                        ...opp,
+                        pais_id: opp.pais_id // Explicit mapping to be safe
+                    });
                     mergedCount++;
                 }
                 console.log(`[Sync] Merged ${mergedCount} opportunities (${skippedCount} with pending changes skipped).`);
@@ -1033,8 +1202,6 @@ export class SyncEngine {
             // Pull Activities (CRM_Actividades) - SMART MERGE with incremental sync
             // Re-enabled to ensure activities persist across browser sessions
             try {
-                const lastSync = useSyncStore.getState().lastSyncTime;
-
                 let query = supabase
                     .from('CRM_Actividades')
                     .select('*')

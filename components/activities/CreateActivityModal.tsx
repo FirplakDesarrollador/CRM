@@ -21,6 +21,24 @@ interface CreateActivityModalProps {
 
 export function CreateActivityModal({ onClose, onSubmit, opportunities, initialOpportunityId, initialData }: CreateActivityModalProps) {
     const isEditing = !!initialData;
+    const { register, handleSubmit, watch, setValue, reset } = useForm({
+        defaultValues: {
+            asunto: initialData?.asunto || '',
+            descripcion: initialData?.descripcion || '',
+            tipo_actividad: (initialData?.tipo_actividad || 'EVENTO') as 'TAREA' | 'EVENTO',
+            clasificacion_id: initialData?.clasificacion_id ? String(initialData.clasificacion_id) : "",
+            subclasificacion_id: initialData?.subclasificacion_id ? String(initialData.subclasificacion_id) : "",
+            fecha_inicio: initialData?.fecha_inicio
+                ? (initialData.tipo_actividad === 'TAREA' ? toInputDate(initialData.fecha_inicio) : toInputDateTime(initialData.fecha_inicio))
+                : (initialData?.tipo_actividad === 'TAREA' ? toInputDate(new Date()) : toInputDateTime(new Date())),
+            fecha_fin: initialData?.fecha_fin
+                ? toInputDateTime(initialData.fecha_fin)
+                : toInputDateTime(new Date(Date.now() + 3600000)),
+            opportunity_id: initialData?.opportunity_id || initialOpportunityId || '',
+            is_completed: !!initialData?.is_completed
+        }
+    });
+
     const [msConnected, setMsConnected] = useState<boolean>(false);
     const [isTeamsMeeting, setIsTeamsMeeting] = useState<boolean>(false);
     const [attendees, setAttendees] = useState<{ id: string; name: string; email: string }[]>([]);
@@ -40,6 +58,9 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
     const [loadingPlanner, setLoadingPlanner] = useState<boolean>(false);
     const [checklist, setChecklist] = useState<string[]>([]);
     const [newChecklistItem, setNewChecklistItem] = useState("");
+
+    // Planner Status Sync State
+    const [isSyncingPlanner, setIsSyncingPlanner] = useState<boolean>(false);
 
     // Sync Feedback State
     const [syncFeedback, setSyncFeedback] = useState<{
@@ -65,6 +86,36 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         checkMS();
     }, []);
 
+    useEffect(() => {
+        async function syncPlannerStatus() {
+            if (!initialData || !initialData.ms_planner_id || initialData.is_completed) return;
+
+            setIsSyncingPlanner(true);
+            try {
+                const res = await fetch(`/api/microsoft/planner/tasks/${initialData.ms_planner_id}`, { credentials: 'include' });
+                if (res.ok) {
+                    const taskData = await res.json();
+
+                    if (taskData.percentComplete === 100) {
+                        console.log(`[CreateActivityModal] Task ${initialData.ms_planner_id} marked 100% in Planner, auto-completing locally.`);
+                        setValue('is_completed', true);
+
+                        // We do an early auto-save if they just open and it's 100%. 
+                        const updatedData = { ...initialData, is_completed: true };
+                        onSubmit(updatedData);
+                    }
+                } else {
+                    console.error("[CreateActivityModal] Failed to sync planner status:", await res.text());
+                }
+            } catch (err) {
+                console.error("[CreateActivityModal] Error fetching planner task:", err);
+            } finally {
+                setIsSyncingPlanner(false);
+            }
+        }
+        syncPlannerStatus();
+    }, [initialData, setValue, onSubmit]); // Fixed dependencies
+
     // Load Catalogs
     const classifications = useLiveQuery(() => db.activityClassifications.toArray(), []) || [];
     const subclassifications = useLiveQuery(() => db.activitySubclassifications.toArray(), []) || [];
@@ -82,23 +133,6 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
     console.log("[CreateActivityModal] clasificacion_id:", initialData?.clasificacion_id, "type:", typeof initialData?.clasificacion_id);
     console.log("[CreateActivityModal] Available classifications:", classifications.length);
 
-    const { register, handleSubmit, watch, setValue, reset } = useForm({
-        defaultValues: {
-            asunto: initialData?.asunto || '',
-            descripcion: initialData?.descripcion || '',
-            tipo_actividad: (initialData?.tipo_actividad || 'EVENTO') as 'TAREA' | 'EVENTO',
-            clasificacion_id: initialData?.clasificacion_id ? String(initialData.clasificacion_id) : "",
-            subclasificacion_id: initialData?.subclasificacion_id ? String(initialData.subclasificacion_id) : "",
-            fecha_inicio: initialData?.fecha_inicio
-                ? (initialData.tipo_actividad === 'TAREA' ? toInputDate(initialData.fecha_inicio) : toInputDateTime(initialData.fecha_inicio))
-                : (initialData?.tipo_actividad === 'TAREA' ? toInputDate(new Date()) : toInputDateTime(new Date())),
-            fecha_fin: initialData?.fecha_fin
-                ? toInputDateTime(initialData.fecha_fin)
-                : toInputDateTime(new Date(Date.now() + 3600000)),
-            opportunity_id: initialData?.opportunity_id || initialOpportunityId || '',
-            is_completed: !!initialData?.is_completed
-        }
-    });
 
     // Force form reset when initialData changes OR when classifications finish loading
     // This fixes the timing issue where the select options don't exist yet when form resets
@@ -416,6 +450,12 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                     })}
                     className="p-4 md:p-6 space-y-4 overflow-y-auto flex-1 overscroll-contain pb-6"
                 >
+                    {isSyncingPlanner && (
+                        <div className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-xl text-xs font-bold animate-in fade-in slide-in-from-top-2">
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            Sincronizando estado con Microsoft Planner...
+                        </div>
+                    )}
                     {/* Activity Type Selector */}
                     <div className="flex bg-slate-100 p-1 rounded-xl">
                         <button

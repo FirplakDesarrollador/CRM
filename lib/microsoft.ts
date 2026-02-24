@@ -157,6 +157,36 @@ export async function getMicrosoftTokens(userId: string, supabaseClient = supaba
     };
 }
 
+export async function getPlannerTaskDetails(accessToken: string, taskId: string) {
+    if (!accessToken) {
+        throw new Error('Access token is required');
+    }
+
+    try {
+        console.log(`[Microsoft API] Fetching task ${taskId}...`);
+
+        const response = await fetch(`https://graph.microsoft.com/v1.0/planner/tasks/${taskId}`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Accept': 'application/json',
+            }
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('[Microsoft API] Error response from Graph API /planner/tasks:', response.status, errorText);
+            throw new Error(`Graph API returned ${response.status}: ${errorText}`);
+        }
+
+        const task = await response.json();
+        return task;
+    } catch (error) {
+        console.error('[Microsoft API] Failed to fetch planner task:', error);
+        throw error;
+    }
+}
+
 /**
  * Search for users in the Microsoft tenant using the People API
  * This is the same API that Microsoft Teams uses for user search
@@ -530,3 +560,4 @@ export async function createPlannerTask(accessToken: string, taskDetails: {
 
     return createdTask;
 }
+

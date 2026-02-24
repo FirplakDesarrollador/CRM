@@ -48,3 +48,46 @@ token.json
 
 .env.local
 .env
+
+# Playwright
+node_modules/
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/
+
+# MCP and Agent folders
+/n8n-mcp/
+/.agents/
+/.claude/
+
+# Temporary and log files
+*.log
+*.txt
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!phases.json
+!*.config.json
+!deno.json
+!deno.jsonc
+
+# SQL Dumps and temporary scripts
+*.sql
+temp_*.ts
+temp_*.tsx
+temp_*.txt
+/schema_dump.sql
+
+# Excel and data files
+*.xlsx
+*.csv
+!public/**/*.csv
+
+# Directories
+/execution/
+/test-results/
+/tests/
+

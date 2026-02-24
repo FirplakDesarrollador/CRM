@@ -83,7 +83,7 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                 .eq('is_deleted', false);
 
             if (searchTerm) {
-                query = query.or(`nombre.ilike.%${searchTerm}%,nit.ilike.%${searchTerm}%`);
+                query = query.or(`nombre.ilike.%${searchTerm}%,nit_base.ilike.%${searchTerm}%`);
             }
 
             if (assignedUserId) {

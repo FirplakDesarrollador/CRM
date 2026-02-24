@@ -74,6 +74,11 @@ export function useActivities(opportunityId?: string) {
             opportunity_id: data.opportunity_id || undefined,
             clasificacion_id: data.clasificacion_id || null,
             subclasificacion_id: data.subclasificacion_id || null,
+            // Microsoft integration fields
+            ms_planner_id: data.ms_planner_id || null,
+            ms_event_id: data.ms_event_id || null,
+            teams_meeting_url: data.teams_meeting_url || null,
+            Tarea_planner: data.Tarea_planner || null,
             updated_at: new Date().toISOString()
         };
 
