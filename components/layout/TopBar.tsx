@@ -26,7 +26,7 @@ export function TopBar() {
     }, [user]);
 
     return (
-        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 sticky top-0 z-30">
+        <header data-testid="topbar" className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 sticky top-0 z-30">
             {/* Mobile Title (Sidebar hidden) */}
             <div className="md:hidden flex items-center gap-2.5">
                 <div className="w-9 h-9 bg-linear-to-br from-[#254153] to-[#1a2f3d] rounded-lg flex items-center justify-center shadow-md p-1.5 text-white">
@@ -40,7 +40,7 @@ export function TopBar() {
 
             <div className="flex items-center gap-4">
                 {/* Sync Status Badge */}
-                <div className="flex items-center gap-2 text-xs font-medium">
+                <div data-testid="topbar-sync-status" className="flex items-center gap-2 text-xs font-medium">
                     {isSyncing ? (
                         <span className="flex items-center text-blue-600 gap-1 bg-blue-50 px-2 py-1 rounded-full">
                             <RefreshCw className="w-3 h-3 animate-spin" />
@@ -66,7 +66,7 @@ export function TopBar() {
 
                 <Notifications />
 
-                <div className="w-8 h-8 bg-linear-to-br from-blue-600 to-cyan-500 rounded-full flex items-center justify-center text-xs font-bold text-white shadow-sm">
+                <div data-testid="topbar-user-avatar" className="w-8 h-8 bg-linear-to-br from-blue-600 to-cyan-500 rounded-full flex items-center justify-center text-xs font-bold text-white shadow-sm">
                     {initials}
                 </div>
             </div>

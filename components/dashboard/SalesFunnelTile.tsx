@@ -102,6 +102,7 @@ export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
     }, [] as typeof data).sort((a, b) => a.orden - b.orden);
 
     const maxAmount = Math.max(...groupedData.map(d => d.total_amount));
+    const logMax = Math.log10(maxAmount + 1);
 
     // ECharts Funnel Option
     const option = {
@@ -132,12 +133,12 @@ export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
                 name: 'Funnel',
                 type: 'funnel',
                 left: '10%',
-                top: 30,
-                bottom: 30,
+                top: 40,
+                bottom: 20,
                 width: '70%',
                 min: 0,
-                max: maxAmount || 1, // Avoid division by zero if no data
-                minSize: '20%', // Fix for "needle" shape on small top values
+                max: logMax || 1,
+                minSize: '2%', // Significant reduction to allow visibility of smaller stages without clamping
                 maxSize: '100%',
                 sort: 'none', // Preservation of stage order
                 gap: 4,
@@ -187,7 +188,9 @@ export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
                     }
                 },
                 data: groupedData.map(item => ({
-                    value: item.total_amount, // Use real amount for exact proportionality
+                    // Using log scale for the 'value' which determines the width
+                    // this allows stages with $1M to still be visible alongside stages with $100B
+                    value: Math.log10(item.total_amount + 1),
                     actualValue: item.total_amount,
                     name: item.fase_nombre,
                     itemStyle: {
@@ -250,6 +253,7 @@ export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
                     option={option}
                     style={{ height: '100%', width: '100%' }}
                     opts={{ renderer: 'svg' }}
+                    notMerge={true}
                 />
             </div>
         </div>

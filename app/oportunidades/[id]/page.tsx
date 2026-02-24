@@ -236,8 +236,14 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     const { quotes } = useQuotes(opportunity.id);
     const [localAmount, setLocalAmount] = useState(opportunity.amount || 0);
     const [localClosingDate, setLocalClosingDate] = useState(toInputDate(opportunity.fecha_cierre_estimada));
+    const [localOrigen, setLocalOrigen] = useState(opportunity.origen_oportunidad || "");
+    const [localUrlOrigen, setLocalUrlOrigen] = useState(opportunity.url_origen || "");
+    const [localFuente, setLocalFuente] = useState(opportunity.fuente_conversion || "");
     const [isSaving, setIsSaving] = useState(false);
     const [isSavingDate, setIsSavingDate] = useState(false);
+    const [isSavingOrigen, setIsSavingOrigen] = useState(false);
+    const [isSavingUrl, setIsSavingUrl] = useState(false);
+    const [isSavingFuente, setIsSavingFuente] = useState(false);
 
     // Filter Logic
     const [isLossReasonModalOpen, setIsLossReasonModalOpen] = useState(false);
@@ -266,7 +272,10 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     useEffect(() => {
         setLocalSegmentId(opportunity.segmento_id ? String(opportunity.segmento_id) : "");
         setLocalClosingDate(toInputDate(opportunity.fecha_cierre_estimada));
-    }, [opportunity.segmento_id, opportunity.fecha_cierre_estimada]);
+        setLocalOrigen(opportunity.origen_oportunidad || "");
+        setLocalUrlOrigen(opportunity.url_origen || "");
+        setLocalFuente(opportunity.fuente_conversion || "");
+    }, [opportunity.segmento_id, opportunity.fecha_cierre_estimada, opportunity.origen_oportunidad, opportunity.url_origen, opportunity.fuente_conversion]);
 
     useEffect(() => {
         const fetchSegments = async () => {
@@ -671,6 +680,82 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                             opportunity.estado_id === 3 ? 'Perdida' :
                                                 opportunity.estado_id === 4 ? 'Cancelada' : 'Abierta'
                                 )}
+                            </div>
+                        </div>
+
+                        {/* Orígenes Section */}
+                        <div className="pt-4 border-t border-slate-100 space-y-4">
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Origen de la Oportunidad</label>
+                                <div className="relative group">
+                                    <input
+                                        type="text"
+                                        value={localOrigen}
+                                        onChange={(e) => setLocalOrigen(e.target.value)}
+                                        onBlur={async () => {
+                                            if (localOrigen !== opportunity.origen_oportunidad) {
+                                                setIsSavingOrigen(true);
+                                                await updateOpportunity(opportunity.id, { origen_oportunidad: localOrigen });
+                                                setIsSavingOrigen(false);
+                                            }
+                                        }}
+                                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none placeholder:text-slate-400"
+                                        placeholder="Ej: Llamada, Evento..."
+                                    />
+                                    {isSavingOrigen && (
+                                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                            <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">URL Origen</label>
+                                <div className="relative group">
+                                    <input
+                                        type="text"
+                                        value={localUrlOrigen}
+                                        onChange={(e) => setLocalUrlOrigen(e.target.value)}
+                                        onBlur={async () => {
+                                            if (localUrlOrigen !== opportunity.url_origen) {
+                                                setIsSavingUrl(true);
+                                                await updateOpportunity(opportunity.id, { url_origen: localUrlOrigen });
+                                                setIsSavingUrl(false);
+                                            }
+                                        }}
+                                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none placeholder:text-slate-400"
+                                        placeholder="https://..."
+                                    />
+                                    {isSavingUrl && (
+                                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                            <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Fuente de Conversión</label>
+                                <div className="relative group">
+                                    <input
+                                        type="text"
+                                        value={localFuente}
+                                        onChange={(e) => setLocalFuente(e.target.value)}
+                                        onBlur={async () => {
+                                            if (localFuente !== opportunity.fuente_conversion) {
+                                                setIsSavingFuente(true);
+                                                await updateOpportunity(opportunity.id, { fuente_conversion: localFuente });
+                                                setIsSavingFuente(false);
+                                            }
+                                        }}
+                                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none placeholder:text-slate-400"
+                                        placeholder="Ej: Google Ads, Referido..."
+                                    />
+                                    {isSavingFuente && (
+                                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                            <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     </div>
