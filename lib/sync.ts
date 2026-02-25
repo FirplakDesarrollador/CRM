@@ -364,6 +364,87 @@ export class SyncEngine {
                         }
                     }
                 }
+
+                if (metadataChange && metadataChange.value && metadataChange.value.pending_calendar) {
+                    console.log(`[Sync] Found offline activity with pending Calendar creation: ${actId}`);
+                    try {
+                        const localAct = await db.activities.get(actId);
+                        const titleField = changes.find(c => c.field === 'asunto');
+                        const title = titleField ? titleField.value : (localAct?.asunto || 'Nuevo Evento (CRM)');
+                        const descField = changes.find(c => c.field === 'descripcion');
+                        const desc = descField ? descField.value : localAct?.descripcion;
+                        const startField = changes.find(c => c.field === 'fecha_inicio');
+                        const start = startField ? startField.value : localAct?.fecha_inicio;
+                        const endField = changes.find(c => c.field === 'fecha_fin');
+                        const end = endField ? endField.value : localAct?.fecha_fin;
+
+                        const meta = metadataChange.value;
+
+                        // Proceed to call our internal POST endpoint
+                        const res = await fetch('/api/microsoft/calendar/create-event', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                subject: title,
+                                description: desc,
+                                start: start,
+                                end: end,
+                                attendees: meta.assigneeIds ? meta.assigneeIds.map((a: string) => ({ email: a, name: a })) : [],
+                                isOnlineMeeting: !!meta.isOnlineMeeting
+                            })
+                        });
+
+                        if (res.ok) {
+                            const eventResponse = await res.json();
+                            const newEventId = eventResponse.id;
+                            const teamsUrl = eventResponse.onlineMeeting?.joinUrl;
+                            console.log(`[Sync] Successfully late-created Calendar event ${newEventId} for ${actId}`);
+
+                            // Remove pending_calendar from metadata before sending to Supabase
+                            const newMeta = { ...meta };
+                            delete newMeta.pending_calendar;
+                            metadataChange.value = newMeta;
+
+                            // Inject ms_event_id update into the batch
+                            const eventChange = changes.find(c => c.field === 'ms_event_id');
+                            if (eventChange) {
+                                eventChange.value = newEventId;
+                            } else {
+                                actUpdates.push({
+                                    id: actId,
+                                    field: 'ms_event_id',
+                                    value: newEventId,
+                                    timestamp: new Date().toISOString()
+                                });
+                            }
+
+                            if (teamsUrl) {
+                                const teamsChange = changes.find(c => c.field === 'teams_meeting_url');
+                                if (teamsChange) {
+                                    teamsChange.value = teamsUrl;
+                                } else {
+                                    actUpdates.push({
+                                        id: actId,
+                                        field: 'teams_meeting_url',
+                                        value: teamsUrl,
+                                        timestamp: new Date().toISOString()
+                                    });
+                                }
+                            }
+
+                            // Also update local copy
+                            await db.activities.update(actId, {
+                                ms_event_id: newEventId,
+                                teams_meeting_url: teamsUrl || localAct?.teams_meeting_url,
+                                _sync_metadata: newMeta
+                            });
+                        } else {
+                            console.error(`[Sync] Failed to late-create Calendar event error:`, await res.text());
+                        }
+                    } catch (e) {
+                        console.error(`[Sync] Exception during late Calendar creation:`, e);
+                    }
+                }
             }
         }
 

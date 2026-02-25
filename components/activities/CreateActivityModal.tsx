@@ -93,8 +93,8 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
     }, []);
 
     useEffect(() => {
-        async function syncPlannerStatus() {
-            if (!initialData || !initialData.ms_planner_id || initialData.is_completed) return;
+        async function syncPlannerBidirectional() {
+            if (!initialData || !initialData.ms_planner_id) return;
 
             setIsSyncingPlanner(true);
             try {
@@ -102,16 +102,78 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                 if (res.ok) {
                     const taskData = await res.json();
 
-                    if (taskData.percentComplete === 100) {
-                        console.log(`[CreateActivityModal] Task ${initialData.ms_planner_id} marked 100% in Planner, auto-completing locally.`);
-                        setValue('is_completed', true);
+                    const crmDateStr = initialData.updated_at || initialData.created_at;
+                    const crmModifiedDate = crmDateStr ? new Date(crmDateStr).getTime() : 0;
 
-                        // We do an early auto-save if they just open and it's 100%. 
-                        const updatedData = { ...initialData, is_completed: true };
-                        onSubmit(updatedData);
+                    const taskModifiedDate = taskData.lastModifiedDateTime ? new Date(taskData.lastModifiedDateTime).getTime() : 0;
+                    const detailsModifiedDate = taskData.details?.lastModifiedDateTime ? new Date(taskData.details.lastModifiedDateTime).getTime() : 0;
+                    const plannerModifiedDate = Math.max(taskModifiedDate, detailsModifiedDate);
+
+                    const isPlannerNewer = plannerModifiedDate > (crmModifiedDate + 10000); // 10s leeway
+                    const isCrmNewer = crmModifiedDate > (plannerModifiedDate + 10000);
+
+                    if (isPlannerNewer) {
+                        console.log(`[CreateActivityModal] Planner is newer. Syncing to UI...`);
+                        setValue('asunto', taskData.title, { shouldDirty: true });
+                        if (taskData.details?.description) {
+                            setValue('descripcion', taskData.details.description, { shouldDirty: true });
+                        }
+                        const isCompleted = taskData.percentComplete === 100;
+                        setValue('is_completed', isCompleted, { shouldDirty: true });
+
+                        if (taskData.details?.checklist) {
+                            const plannerChecklist = Object.values(taskData.details.checklist).map((item: any) => item.title);
+                            setChecklist(plannerChecklist);
+                        }
+
+                        if (taskData.resolvedAssignees && taskData.resolvedAssignees.length > 0) {
+                            setAttendees(taskData.resolvedAssignees);
+                        }
+
+                        // Si está completado en planner, lo disparamos localmente enseguida para no bloquear.
+                        if (isCompleted && !initialData.is_completed) {
+                            onSubmit({
+                                ...initialData,
+                                is_completed: true,
+                                asunto: taskData.title,
+                                descripcion: taskData.details?.description || ''
+                            });
+                        }
+                    } else if (isCrmNewer) {
+                        console.log(`[CreateActivityModal] CRM is newer. Pushing recent edits to Planner...`);
+                        // Attendees shouldn't be overridden with empty state if we didn't load them yet.
+                        // Wait for full submit to push complex changes, but simple status/title can be pushed here
+                        try {
+                            await fetch(`/api/microsoft/planner/tasks/${initialData.ms_planner_id}`, {
+                                method: 'PATCH',
+                                headers: { 'Content-Type': 'application/json' },
+                                credentials: 'include',
+                                body: JSON.stringify({
+                                    title: initialData.asunto,
+                                    percentComplete: initialData.is_completed ? 100 : 0,
+                                    notes: initialData.descripcion
+                                })
+                            });
+                        } catch (e) { }
+
+                        // Still load checklist / attendees for UI so they aren't lost from CRM form
+                        if (taskData.details?.checklist) {
+                            setChecklist(Object.values(taskData.details.checklist).map((item: any) => item.title));
+                        }
+                        if (taskData.resolvedAssignees && taskData.resolvedAssignees.length > 0) {
+                            setAttendees(taskData.resolvedAssignees);
+                        }
+                    } else {
+                        // Same timestamps. Just populate UI details
+                        if (taskData.details?.checklist) {
+                            setChecklist(Object.values(taskData.details.checklist).map((item: any) => item.title));
+                        }
+                        if (taskData.resolvedAssignees && taskData.resolvedAssignees.length > 0) {
+                            setAttendees(taskData.resolvedAssignees);
+                        }
                     }
                 } else {
-                    console.error("[CreateActivityModal] Failed to sync planner status:", await res.text());
+                    console.error("[CreateActivityModal] Failed to sync planner bidirectional status:", await res.text());
                 }
             } catch (err) {
                 console.error("[CreateActivityModal] Error fetching planner task:", err);
@@ -119,7 +181,88 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                 setIsSyncingPlanner(false);
             }
         }
-        syncPlannerStatus();
+
+        async function syncEventBidirectional() {
+            if (!initialData || !initialData.ms_event_id || initialData.tipo_actividad !== 'EVENTO') return;
+
+            setIsSyncingPlanner(true); // Reusing the same loading state for simplicity
+            try {
+                const res = await fetch(`/api/microsoft/calendar/events/${initialData.ms_event_id}`, { credentials: 'include' });
+                if (res.ok) {
+                    const eventData = await res.json();
+
+                    const crmDateStr = initialData.updated_at || initialData.created_at;
+                    const crmModifiedDate = crmDateStr ? new Date(crmDateStr).getTime() : 0;
+
+                    const eventModifiedDate = eventData.lastModifiedDateTime ? new Date(eventData.lastModifiedDateTime).getTime() : 0;
+
+                    const isEventNewer = eventModifiedDate > (crmModifiedDate + 10000); // 10s leeway
+                    const isCrmNewer = crmModifiedDate > (eventModifiedDate + 10000);
+
+                    if (isEventNewer) {
+                        console.log(`[CreateActivityModal] Calendar Event is newer. Syncing to UI...`);
+                        setValue('asunto', eventData.subject, { shouldDirty: true });
+                        if (eventData.body?.content) {
+                            setValue('descripcion', eventData.bodyPreview || eventData.body.content.replace(/<[^>]+>/g, ''), { shouldDirty: true });
+                        }
+
+                        if (eventData.attendees && eventData.attendees.length > 0) {
+                            setAttendees(eventData.attendees.map((a: any) => ({
+                                id: a.emailAddress.address,
+                                name: a.emailAddress.name,
+                                email: a.emailAddress.address
+                            })));
+                        }
+                    } else if (isCrmNewer) {
+                        console.log(`[CreateActivityModal] CRM is newer. Pushing recent edits to Calendar...`);
+                        try {
+                            const updatePayload: any = {
+                                subject: initialData.asunto,
+                            };
+                            if (initialData.fecha_inicio) updatePayload.start = new Date(initialData.fecha_inicio).toISOString();
+                            if (initialData.fecha_fin) updatePayload.end = new Date(initialData.fecha_fin).toISOString();
+
+                            await fetch(`/api/microsoft/calendar/events/${initialData.ms_event_id}`, {
+                                method: 'PATCH',
+                                headers: { 'Content-Type': 'application/json' },
+                                credentials: 'include',
+                                body: JSON.stringify(updatePayload)
+                            });
+                        } catch (e) { }
+
+                        // Load attendees
+                        if (eventData.attendees && eventData.attendees.length > 0) {
+                            setAttendees(eventData.attendees.map((a: any) => ({
+                                id: a.emailAddress.address,
+                                name: a.emailAddress.name,
+                                email: a.emailAddress.address
+                            })));
+                        }
+                    } else {
+                        // Load attendees
+                        if (eventData.attendees && eventData.attendees.length > 0) {
+                            setAttendees(eventData.attendees.map((a: any) => ({
+                                id: a.emailAddress.address,
+                                name: a.emailAddress.name,
+                                email: a.emailAddress.address
+                            })));
+                        }
+                    }
+                } else {
+                    console.error("[CreateActivityModal] Failed to sync event bidirectional status:", await res.text());
+                }
+            } catch (err) {
+                console.error("[CreateActivityModal] Error fetching event task:", err);
+            } finally {
+                setIsSyncingPlanner(false);
+            }
+        }
+
+        if (initialData?.tipo_actividad === 'TAREA') {
+            syncPlannerBidirectional();
+        } else if (initialData?.tipo_actividad === 'EVENTO') {
+            syncEventBidirectional();
+        }
     }, [initialData, setValue, onSubmit]); // Fixed dependencies
 
     // Load Catalogs
@@ -310,82 +453,155 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         try {
             console.log("[CreateActivityModal] Raw Submit Data:", data);
 
-            // 1. Create Teams Meeting if requested
-            let teamsMeetingUrl = null;
-            if (isTeamsMeeting && msConnected && tipo === 'EVENTO') {
+            // 1. Create or Update Calendar Event
+            let eventId = initialData?.ms_event_id || null;
+            let teamsMeetingUrl = initialData?.teams_meeting_url || null;
+            let calendarSuccess = false;
+
+            if (msConnected && tipo === 'EVENTO') {
                 try {
-                    const res = await fetch('/api/microsoft/calendar/create-event', {
-                        method: 'POST',
-                        body: JSON.stringify({
-                            subject: data.asunto,
-                            description: data.descripcion,
-                            start: new Date(data.fecha_inicio).toISOString(),
-                            end: new Date(data.fecha_fin).toISOString(),
-                            attendees: attendees,
-                            isOnlineMeeting: true
-                        })
-                    });
+                    const eventPayload = {
+                        subject: data.asunto,
+                        description: data.descripcion,
+                        start: new Date(data.fecha_inicio).toISOString(),
+                        end: new Date(data.fecha_fin).toISOString(),
+                        attendees: attendees,
+                        isOnlineMeeting: isTeamsMeeting
+                    };
 
-                    if (res.ok) {
-                        const event = await res.json();
-                        teamsMeetingUrl = event.onlineMeeting?.joinUrl || null;
-                        console.log("[CreateActivityModal] Teams Meeting Created:", teamsMeetingUrl);
-                        setSyncFeedback(prev => ({ ...prev, teams: 'success' }));
-                    } else {
-                        const err = await res.json();
-                        console.error("[CreateActivityModal] Failed to create Teams meeting:", err);
-                        setSyncFeedback(prev => ({ ...prev, teams: 'error', message: err.error || 'Error creando reunión Teams' }));
-                    }
-                } catch (e) {
-                    console.error("[CreateActivityModal] Teams creation error:", e);
-                    setSyncFeedback(prev => ({ ...prev, teams: 'error', message: 'Error de conexión con Teams' }));
-                }
-            }
+                    if (eventId) {
+                        // UPDATE EXISTING EVENT
+                        const res = await fetch(`/api/microsoft/calendar/events/${eventId}`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'include',
+                            body: JSON.stringify(eventPayload)
+                        });
 
-            // 2. Create Planner Task if requested
-            let plannerId = null;
-            let plannerSuccess = false;
-            if (syncToPlanner && msConnected && tipo === 'TAREA' && selectedPlanId && selectedBucketId) {
-                try {
-                    // Map attendees to assigneeIds (IDs are Microsoft User IDs)
-                    const assigneeIds = attendees.map(a => a.id);
-
-                    const res = await fetch('/api/microsoft/planner/tasks', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        credentials: 'include',
-                        body: JSON.stringify({
-                            planId: selectedPlanId,
-                            bucketId: selectedBucketId,
-                            title: data.asunto,
-                            dueDateTime: data.fecha_inicio ? new Date(data.fecha_inicio).toISOString() : undefined,
-                            notes: data.descripcion,
-                            checklist: checklist,
-                            assigneeIds: assigneeIds
-                        })
-                    });
-
-                    if (res.ok) {
-                        const taskResponse = await res.json();
-                        plannerId = taskResponse.task?.id || null;
-                        plannerSuccess = !!plannerId;
-                        console.log("[CreateActivityModal] Planner Task Created:", plannerId);
-                        setSyncFeedback(prev => ({ ...prev, planner: 'success' }));
-                    } else {
-                        const err = await res.json();
-                        console.error("[CreateActivityModal] Failed to create Planner task:", err);
-
-                        // OFFLINE / AUTO-SYNC FIX
-                        if (!navigator.onLine || res.status >= 500) {
-                            console.log("[CreateActivityModal] Queuing Planner sync for later due to connection error.");
-                            setSyncFeedback(prev => ({ ...prev, planner: 'error', message: 'Guardado local. Se sincronizará con Planner luego.' }));
+                        if (res.ok) {
+                            calendarSuccess = true;
+                            const updatedEvent = await res.json();
+                            teamsMeetingUrl = updatedEvent.onlineMeeting?.joinUrl || teamsMeetingUrl;
+                            console.log("[CreateActivityModal] Event Updated:", eventId);
+                            setSyncFeedback(prev => ({ ...prev, teams: 'success' }));
                         } else {
-                            setSyncFeedback(prev => ({ ...prev, planner: 'error', message: err.error || 'Error creando tarea en Planner' }));
+                            const err = await res.json();
+                            console.error("[CreateActivityModal] Failed to update Event:", err);
+                            if (!navigator.onLine || res.status >= 500) {
+                                console.log("[CreateActivityModal] Queuing Event sync for later.");
+                                setSyncFeedback(prev => ({ ...prev, teams: 'error', message: 'Guardado local. Se sincronizará luego.' }));
+                            } else {
+                                setSyncFeedback(prev => ({ ...prev, teams: 'error', message: err.error || 'Error actualizando Evento' }));
+                            }
+                        }
+
+                    } else {
+                        // CREATE NEW EVENT
+                        const res = await fetch('/api/microsoft/calendar/create-event', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(eventPayload)
+                        });
+
+                        if (res.ok) {
+                            const event = await res.json();
+                            eventId = event.id;
+                            teamsMeetingUrl = event.onlineMeeting?.joinUrl || null;
+                            calendarSuccess = !!eventId;
+                            console.log("[CreateActivityModal] Event Created:", eventId);
+                            setSyncFeedback(prev => ({ ...prev, teams: 'success' }));
+                        } else {
+                            const err = await res.json();
+                            console.error("[CreateActivityModal] Failed to create Event:", err);
+                            if (!navigator.onLine || res.status >= 500) {
+                                console.log("[CreateActivityModal] Queuing Event sync for later.");
+                                setSyncFeedback(prev => ({ ...prev, teams: 'error', message: 'Guardado local. Se sincronizará luego.' }));
+                            } else {
+                                setSyncFeedback(prev => ({ ...prev, teams: 'error', message: err.error || 'Error creando Evento' }));
+                            }
                         }
                     }
                 } catch (e) {
-                    console.error("[CreateActivityModal] Planner creation error:", e);
-                    // OFFLINE / AUTO-SYNC FIX
+                    console.error("[CreateActivityModal] Event creation/update error:", e);
+                    setSyncFeedback(prev => ({ ...prev, teams: 'error', message: 'Guardado local. Se sincronizará luego.' }));
+                }
+            }
+
+            // 2. Create or Update Planner Task
+            let plannerId = initialData?.ms_planner_id || null;
+            let plannerSuccess = false;
+
+            if (msConnected && tipo === 'TAREA') {
+                try {
+                    const assigneeIds = attendees.map(a => a.id);
+
+                    if (plannerId) {
+                        // --- UPDATE EXISTING PLANNER TASK ---
+                        const res = await fetch(`/api/microsoft/planner/tasks/${plannerId}`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'include',
+                            body: JSON.stringify({
+                                title: data.asunto,
+                                dueDateTime: data.fecha_inicio ? new Date(data.fecha_inicio).toISOString() : undefined,
+                                notes: data.descripcion,
+                                percentComplete: data.is_completed ? 100 : 0,
+                                checklist: checklist,
+                                assigneeIds: assigneeIds
+                            })
+                        });
+
+                        if (res.ok) {
+                            plannerSuccess = true;
+                            console.log("[CreateActivityModal] Planner Task Updated:", plannerId);
+                            setSyncFeedback(prev => ({ ...prev, planner: 'success' }));
+                        } else {
+                            const err = await res.json();
+                            console.error("[CreateActivityModal] Failed to update Planner task:", err);
+                            if (!navigator.onLine || res.status >= 500) {
+                                console.log("[CreateActivityModal] Queuing Planner sync for later due to connection error.");
+                                setSyncFeedback(prev => ({ ...prev, planner: 'error', message: 'Guardado local. Se sincronizará con Planner luego.' }));
+                            } else {
+                                setSyncFeedback(prev => ({ ...prev, planner: 'error', message: err.error || 'Error actualizando tarea en Planner' }));
+                            }
+                        }
+                    } else if (syncToPlanner && selectedPlanId && selectedBucketId) {
+                        // --- CREATE NEW PLANNER TASK ---
+                        const res = await fetch('/api/microsoft/planner/tasks', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'include',
+                            body: JSON.stringify({
+                                planId: selectedPlanId,
+                                bucketId: selectedBucketId,
+                                title: data.asunto,
+                                dueDateTime: data.fecha_inicio ? new Date(data.fecha_inicio).toISOString() : undefined,
+                                notes: data.descripcion,
+                                checklist: checklist,
+                                assigneeIds: assigneeIds
+                            })
+                        });
+
+                        if (res.ok) {
+                            const taskResponse = await res.json();
+                            plannerId = taskResponse.task?.id || null;
+                            plannerSuccess = !!plannerId;
+                            console.log("[CreateActivityModal] Planner Task Created:", plannerId);
+                            setSyncFeedback(prev => ({ ...prev, planner: 'success' }));
+                        } else {
+                            const err = await res.json();
+                            console.error("[CreateActivityModal] Failed to create Planner task:", err);
+
+                            if (!navigator.onLine || res.status >= 500) {
+                                console.log("[CreateActivityModal] Queuing Planner sync for later due to connection error.");
+                                setSyncFeedback(prev => ({ ...prev, planner: 'error', message: 'Guardado local. Se sincronizará con Planner luego.' }));
+                            } else {
+                                setSyncFeedback(prev => ({ ...prev, planner: 'error', message: err.error || 'Error creando tarea en Planner' }));
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error("[CreateActivityModal] Planner creation/update error:", e);
                     console.log("[CreateActivityModal] Queuing Planner sync for later due to network error.");
                     setSyncFeedback(prev => ({ ...prev, planner: 'error', message: 'Guardado local. Se sincronizará con Planner luego.' }));
                 }
@@ -396,6 +612,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                 ...data,
                 teams_meeting_url: teamsMeetingUrl,
                 ms_planner_id: plannerId,
+                ms_event_id: eventId,
                 microsoft_attendees: attendees.length > 0 ? JSON.stringify(attendees) : null,
                 _sync_metadata: {} as any
             };
@@ -409,6 +626,13 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                 // In case plan/bucket load failed, keep the intent explicitly
                 processed._sync_metadata.planId = selectedPlanId || null;
                 processed._sync_metadata.bucketId = selectedBucketId || null;
+            }
+
+            // If Calendar sync was requested but failed/offline, queue it
+            if (tipo === 'EVENTO' && !eventId) {
+                processed._sync_metadata.pending_calendar = true;
+                processed._sync_metadata.assigneeIds = attendees.map(a => a.id);
+                processed._sync_metadata.isOnlineMeeting = isTeamsMeeting;
             }
 
             processed.clasificacion_id = (data.clasificacion_id && data.clasificacion_id !== "") ? Number(data.clasificacion_id) : null;
@@ -452,10 +676,26 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                     if (!res.ok) {
                         const errText = await res.text();
                         console.error("[CreateActivityModal] Failed to delete from Planner:", res.status, errText);
-                        // Optional: we proceed with local deletion even if MS Planner fails.
                     }
                 } catch (err) {
                     console.error("[CreateActivityModal] Network error deleting from Planner:", err);
+                }
+            }
+
+            // Delete from Calendar if needed and connected
+            if (initialData.ms_event_id && msConnected && navigator.onLine) {
+                try {
+                    const res = await fetch(`/api/microsoft/calendar/events/${initialData.ms_event_id}`, {
+                        method: 'DELETE',
+                        credentials: 'include'
+                    });
+
+                    if (!res.ok) {
+                        const errText = await res.text();
+                        console.error("[CreateActivityModal] Failed to delete from Calendar:", res.status, errText);
+                    }
+                } catch (err) {
+                    console.error("[CreateActivityModal] Network error deleting from Calendar:", err);
                 }
             }
 
