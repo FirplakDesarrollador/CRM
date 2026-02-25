@@ -600,3 +600,49 @@ export async function deletePlannerTask(accessToken: string, taskId: string) {
         throw error;
     }
 }
+
+/**
+ * Update a task in Microsoft Planner
+ */
+export async function updatePlannerTask(accessToken: string, taskId: string, updateData: any) {
+    if (!accessToken) throw new Error('Access token is required');
+
+    console.log(`[Microsoft API] Updating Planner task ${taskId} with data:`, updateData);
+
+    try {
+        const taskDetails = await getPlannerTaskDetails(accessToken, taskId);
+        const etag = taskDetails['@odata.etag'];
+
+        if (!etag) {
+            throw new Error(`Could not find E-Tag for task ${taskId}`);
+        }
+
+        const response = await fetch(`https://graph.microsoft.com/v1.0/planner/tasks/${taskId}`, {
+            method: 'PATCH',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': 'application/json',
+                'If-Match': etag
+            },
+            body: JSON.stringify(updateData)
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('[Microsoft API] Error updating planner task:', response.status, errorText);
+            throw new Error(`Graph API returned ${response.status}: ${errorText}`);
+        }
+
+        // 204 No Content is usually returned for successful PATCH
+        let updatedTask = {};
+        if (response.status !== 204) {
+            updatedTask = await response.json();
+        }
+
+        console.log(`[Microsoft API] Successfully updated Planner task ${taskId}`);
+        return updatedTask;
+    } catch (error) {
+        console.error('[Microsoft API] Failed to update planner task:', error);
+        throw error;
+    }
+}

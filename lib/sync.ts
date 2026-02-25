@@ -330,6 +330,40 @@ export class SyncEngine {
                         console.error(`[Sync] Exception during late Planner creation:`, e);
                     }
                 }
+
+                // NEW: Sync completion updates to Planner 
+                // This ensures if user checks/unchecks the task offline or online, 
+                // it queues the update and fires it against MS Microsoft Graph here.
+                const completedChange = changes.find(c => c.field === 'is_completed');
+                if (completedChange) {
+                    let msPlannerId = changes.find(c => c.field === 'ms_planner_id')?.value;
+                    if (!msPlannerId) {
+                        try {
+                            const localAct = await db.activities.get(actId);
+                            msPlannerId = localAct?.ms_planner_id;
+                        } catch (e) { }
+                    }
+
+                    if (msPlannerId && msPlannerId !== 'ERROR') {
+                        console.log(`[Sync] Found completion status change, syncing to Planner task ${msPlannerId}...`);
+                        try {
+                            const percentComplete = completedChange.value ? 100 : 0;
+                            const res = await fetch(`/api/microsoft/planner/tasks/${msPlannerId}`, {
+                                method: 'PATCH',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ percentComplete })
+                            });
+                            if (!res.ok) {
+                                console.error(`[Sync] Failed to update Planner completion status:`, await res.text());
+                            } else {
+                                console.log(`[Sync] Successfully updated Planner completion status for ${msPlannerId}`);
+                            }
+                        } catch (e) {
+                            console.error(`[Sync] Exception updating Planner completion status:`, e);
+                            // Do not throw, allow Supabase sync to proceed
+                        }
+                    }
+                }
             }
         }
 
