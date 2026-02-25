@@ -7,6 +7,8 @@ import { useOpportunitiesServer } from '@/lib/hooks/useOpportunitiesServer';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
 import { syncEngine } from '@/lib/sync';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
+import { hasPermission } from '@/lib/permissions';
 import {
     Calendar as CalendarIcon,
     ChevronLeft,
@@ -31,6 +33,18 @@ function ActivitiesContent() {
     const router = useRouter();
     const { activities, createActivity, updateActivity, toggleComplete } = useActivities();
     const { data: opportunities, setUserFilter } = useOpportunitiesServer({ pageSize: 100 });
+    const { user, role } = useCurrentUser();
+    const canViewAll = hasPermission(role, 'view_all_activities');
+
+    // Load collaborators to know which opportunities the user collaborates in
+    const userCollaborations = useLiveQuery(
+        () => user ? db.opportunityCollaborators.where('usuario_id').equals(user.id).toArray() : [],
+        [user]
+    ) || [];
+
+    const collaborativeOppIds = useMemo(() => {
+        return new Set(userCollaborations.map(c => c.oportunidad_id));
+    }, [userCollaborations]);
 
     // Load all opportunities for the dropdown, not just user's own
     useEffect(() => {
@@ -121,6 +135,15 @@ function ActivitiesContent() {
         if (!activities) return [];
         const lowerQuery = searchQuery.toLowerCase();
         return activities.filter(act => {
+            // Apply role-based filtering: VENDEDOR and similar roles only see their own activities or those of opportunities they collaborate on
+            if (!canViewAll && user) {
+                const isOwner = act.user_id === user.id;
+                const isCollaborator = act.opportunity_id ? collaborativeOppIds.has(act.opportunity_id) : false;
+                if (!isOwner && !isCollaborator) {
+                    return false;
+                }
+            }
+
             if (filterType && act.tipo_actividad !== filterType) return false;
             if (filterClassification && act.clasificacion_id != filterClassification) return false;
             if (filterSubclassification && act.subclasificacion_id != filterSubclassification) return false;
@@ -134,7 +157,7 @@ function ActivitiesContent() {
 
             return true;
         });
-    }, [activities, filterType, filterClassification, filterSubclassification, searchQuery]);
+    }, [activities, filterType, filterClassification, filterSubclassification, searchQuery, canViewAll, user, collaborativeOppIds]);
 
     // For agenda/all views: filter by selected date + sort
     const filteredActivities = useMemo(() => {

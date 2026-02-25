@@ -79,6 +79,8 @@ export function useActivities(opportunityId?: string) {
             ms_event_id: data.ms_event_id || null,
             teams_meeting_url: data.teams_meeting_url || null,
             Tarea_planner: data.Tarea_planner || null,
+            // Capture any sync metadata passed from UI (like pending_planner)
+            _sync_metadata: (data as any)._sync_metadata || {},
             updated_at: new Date().toISOString()
         };
 

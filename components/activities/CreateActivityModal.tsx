@@ -368,11 +368,20 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                     } else {
                         const err = await res.json();
                         console.error("[CreateActivityModal] Failed to create Planner task:", err);
-                        setSyncFeedback(prev => ({ ...prev, planner: 'error', message: err.error || 'Error creando tarea en Planner' }));
+
+                        // OFFLINE / AUTO-SYNC FIX
+                        if (!navigator.onLine || res.status >= 500) {
+                            console.log("[CreateActivityModal] Queuing Planner sync for later due to connection error.");
+                            setSyncFeedback(prev => ({ ...prev, planner: 'error', message: 'Guardado local. Se sincronizará con Planner luego.' }));
+                        } else {
+                            setSyncFeedback(prev => ({ ...prev, planner: 'error', message: err.error || 'Error creando tarea en Planner' }));
+                        }
                     }
                 } catch (e) {
                     console.error("[CreateActivityModal] Planner creation error:", e);
-                    setSyncFeedback(prev => ({ ...prev, planner: 'error', message: 'Error de conexión con Planner' }));
+                    // OFFLINE / AUTO-SYNC FIX
+                    console.log("[CreateActivityModal] Queuing Planner sync for later due to network error.");
+                    setSyncFeedback(prev => ({ ...prev, planner: 'error', message: 'Guardado local. Se sincronizará con Planner luego.' }));
                 }
             }
 
@@ -381,8 +390,21 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                 ...data,
                 teams_meeting_url: teamsMeetingUrl,
                 ms_planner_id: plannerId,
-                microsoft_attendees: attendees.length > 0 ? JSON.stringify(attendees) : null
+                microsoft_attendees: attendees.length > 0 ? JSON.stringify(attendees) : null,
+                _sync_metadata: {} as any
             };
+
+            // If Planner sync was requested but failed/offline, queue it
+            if (syncToPlanner && tipo === 'TAREA' && !plannerId) {
+                processed._sync_metadata.pending_planner = true;
+                processed._sync_metadata.checklist = checklist;
+                // Add attendees to metadata for Planner
+                processed._sync_metadata.assigneeIds = attendees.map(a => a.id);
+                // In case plan/bucket load failed, keep the intent explicitly
+                processed._sync_metadata.planId = selectedPlanId || null;
+                processed._sync_metadata.bucketId = selectedBucketId || null;
+            }
+
             processed.clasificacion_id = (data.clasificacion_id && data.clasificacion_id !== "") ? Number(data.clasificacion_id) : null;
             processed.subclasificacion_id = (data.subclasificacion_id && data.subclasificacion_id !== "") ? Number(data.subclasificacion_id) : null;
 
