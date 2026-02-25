@@ -1,15 +1,16 @@
 "use client";
 
 import { useForm } from "react-hook-form";
-import { CalendarClock, ListTodo, Loader2, Users, Search, X, Video, Plus, CheckCircle2, AlertCircle } from "lucide-react";
+import { CalendarClock, ListTodo, Loader2, Users, Search, X, Video, Plus, CheckCircle2, AlertCircle, MoreVertical, Trash2 } from "lucide-react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { cn } from "@/components/ui/utils";
 import { toInputDate, toInputDateTime } from "@/lib/date-utils";
 import { db, LocalActivityClassification, LocalActivitySubclassification } from "@/lib/db";
 import { syncEngine } from "@/lib/sync";
 import { supabase } from "@/lib/supabase";
 import { DateTimePicker } from "@/components/ui/DateTimePicker";
+import { useActivities } from "@/lib/hooks/useActivities";
 
 interface CreateActivityModalProps {
     onClose: () => void;
@@ -58,6 +59,11 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
     const [loadingPlanner, setLoadingPlanner] = useState<boolean>(false);
     const [checklist, setChecklist] = useState<string[]>([]);
     const [newChecklistItem, setNewChecklistItem] = useState("");
+
+    // Deletion State
+    const [isDeleting, setIsDeleting] = useState(false);
+    const [showMenu, setShowMenu] = useState(false);
+    const { deleteActivity } = useActivities(initialOpportunityId);
 
     // Planner Status Sync State
     const [isSyncingPlanner, setIsSyncingPlanner] = useState<boolean>(false);
@@ -428,6 +434,42 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         }
     };
 
+    const handleDelete = async () => {
+        if (!initialData?.id) return;
+        const confirmDelete = window.confirm("¿Estás seguro de que deseas eliminar definitivamente esta actividad? Esta acción no se puede deshacer.");
+        if (!confirmDelete) return;
+
+        setIsDeleting(true);
+        try {
+            // Delete from Planner if needed and connected
+            if (initialData.ms_planner_id && msConnected && navigator.onLine) {
+                try {
+                    const res = await fetch(`/api/microsoft/planner/tasks/${initialData.ms_planner_id}`, {
+                        method: 'DELETE',
+                        credentials: 'include'
+                    });
+
+                    if (!res.ok) {
+                        const errText = await res.text();
+                        console.error("[CreateActivityModal] Failed to delete from Planner:", res.status, errText);
+                        // Optional: we proceed with local deletion even if MS Planner fails.
+                    }
+                } catch (err) {
+                    console.error("[CreateActivityModal] Network error deleting from Planner:", err);
+                }
+            }
+
+            await deleteActivity(initialData.id);
+            onClose();
+        } catch (e: any) {
+            console.error("[CreateActivityModal] Deletion error:", e);
+            alert(`Error al eliminar la actividad: ${e.message}`);
+        } finally {
+            setIsDeleting(false);
+            setShowMenu(false);
+        }
+    };
+
     const tipo = watch('tipo_actividad');
     const fechaInicio = watch('fecha_inicio');
     const selectedClasificacionId = watch('clasificacion_id');
@@ -469,7 +511,39 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
             <div className="bg-white rounded-2xl md:rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col max-h-[95vh] md:max-h-[90vh]">
                 <div className="p-6 border-b border-slate-100 flex justify-between items-center shrink-0">
                     <h2 className="text-xl font-bold text-slate-900">{isEditing ? 'Editar Actividad' : 'Programar Actividad'}</h2>
-                    <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-2xl">&times;</button>
+
+                    <div className="flex items-center gap-1">
+                        {isEditing && (
+                            <div className="relative">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowMenu(!showMenu)}
+                                    className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors"
+                                    title="Más opciones"
+                                >
+                                    <MoreVertical className="w-5 h-5" />
+                                </button>
+
+                                {showMenu && (
+                                    <>
+                                        <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
+                                        <div className="absolute right-0 mt-1 w-48 bg-white rounded-xl shadow-lg border border-slate-100 py-1 z-20 animate-in fade-in slide-in-from-top-2">
+                                            <button
+                                                type="button"
+                                                onClick={handleDelete}
+                                                disabled={isDeleting}
+                                                className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 disabled:opacity-50"
+                                            >
+                                                {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                                                {isDeleting ? 'Eliminando...' : 'Eliminar Actividad'}
+                                            </button>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+                        )}
+                        <button onClick={onClose} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors text-2xl leading-none">&times;</button>
+                    </div>
                 </div>
 
                 <form

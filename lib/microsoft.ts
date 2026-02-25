@@ -561,3 +561,42 @@ export async function createPlannerTask(accessToken: string, taskDetails: {
     return createdTask;
 }
 
+/**
+ * Delete a task in Microsoft Planner
+ */
+export async function deletePlannerTask(accessToken: string, taskId: string) {
+    if (!accessToken) throw new Error('Access token is required');
+
+    console.log(`[Microsoft API] Deleting Planner task ${taskId}...`);
+
+    try {
+        // Planner requires an E-Tag (If-Match header) to delete a task.
+        // We must fetch the task first to get its current E-Tag.
+        const taskDetails = await getPlannerTaskDetails(accessToken, taskId);
+        const etag = taskDetails['@odata.etag'];
+
+        if (!etag) {
+            throw new Error(`Could not find E-Tag for task ${taskId}`);
+        }
+
+        const response = await fetch(`https://graph.microsoft.com/v1.0/planner/tasks/${taskId}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'If-Match': etag
+            }
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('[Microsoft API] Error deleting planner task:', response.status, errorText);
+            throw new Error(`Graph API returned ${response.status}: ${errorText}`);
+        }
+
+        console.log(`[Microsoft API] Successfully deleted Planner task ${taskId}`);
+        return true;
+    } catch (error) {
+        console.error('[Microsoft API] Failed to delete planner task:', error);
+        throw error;
+    }
+}
