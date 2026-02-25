@@ -415,12 +415,18 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                 await new Promise(resolve => setTimeout(resolve, 800)); // Brief delay to show feedback
             }
 
+            if (plannerSuccess || teamsMeetingUrl) {
+                await new Promise(resolve => setTimeout(resolve, 800)); // Brief delay to show feedback
+            }
+
             onSubmit(processed);
+        } catch (e: any) {
+            console.error("[CreateActivityModal] Uncaught error in submit:", e);
+            alert(`Error interno: ${e.message}`);
         } finally {
             setIsSubmitting(false);
         }
     };
-
 
     const tipo = watch('tipo_actividad');
     const fechaInicio = watch('fecha_inicio');
@@ -469,6 +475,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                 <form
                     onSubmit={handleSubmit(handleActualSubmit, (errors) => {
                         console.error("[CreateActivityModal] Validation Errors:", errors);
+                        alert(`Errores de validación: ${Object.keys(errors).join(', ')}. Revisa los campos obligatorios.`);
                     })}
                     className="p-4 md:p-6 space-y-4 overflow-y-auto flex-1 overscroll-contain pb-6"
                 >
