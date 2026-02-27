@@ -157,6 +157,77 @@ export async function getMicrosoftTokens(userId: string, supabaseClient = supaba
     };
 }
 
+export async function getPlannerTaskDetails(accessToken: string, taskId: string) {
+    if (!accessToken) {
+        throw new Error('Access token is required');
+    }
+
+    try {
+        console.log(`[Microsoft API] Fetching task ${taskId}...`);
+
+        const response = await fetch(`https://graph.microsoft.com/v1.0/planner/tasks/${taskId}`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Accept': 'application/json',
+            }
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('[Microsoft API] Error response from Graph API /planner/tasks:', response.status, errorText);
+            throw new Error(`Graph API returned ${response.status}: ${errorText}`);
+        }
+
+        const task = await response.json();
+
+        // Fetch details (description, checklist)
+        try {
+            const detailsResponse = await fetch(`https://graph.microsoft.com/v1.0/planner/tasks/${taskId}/details`, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'Accept': 'application/json',
+                }
+            });
+            if (detailsResponse.ok) {
+                const details = await detailsResponse.json();
+                task.details = details;
+            }
+        } catch (err) {
+            console.warn('[Microsoft API] Error fetching task details:', err);
+        }
+
+        // Fetch user info for assignments to populate attendees
+        try {
+            const assigneeIds = task.assignments ? Object.keys(task.assignments) : [];
+            if (assigneeIds.length > 0) {
+                // To avoid URL limits, we could filter by id or fetch each. There are usually few assignees.
+                const userResponses = await Promise.all(assigneeIds.map(id =>
+                    fetch(`https://graph.microsoft.com/v1.0/users/${id}?$select=id,displayName,mail,userPrincipalName`, {
+                        headers: { 'Authorization': `Bearer ${accessToken}` }
+                    }).then(res => res.ok ? res.json() : null)
+                ));
+                task.resolvedAssignees = userResponses.filter(u => u !== null).map(u => ({
+                    id: u.id,
+                    name: u.displayName,
+                    email: u.mail || u.userPrincipalName
+                }));
+            } else {
+                task.resolvedAssignees = [];
+            }
+        } catch (err) {
+            console.warn('[Microsoft API] Error fetching assignees:', err);
+            task.resolvedAssignees = [];
+        }
+
+        return task;
+    } catch (error) {
+        console.error('[Microsoft API] Failed to fetch planner task:', error);
+        throw error;
+    }
+}
+
 /**
  * Search for users in the Microsoft tenant using the People API
  * This is the same API that Microsoft Teams uses for user search
@@ -529,4 +600,330 @@ export async function createPlannerTask(accessToken: string, taskDetails: {
     }
 
     return createdTask;
+}
+
+/**
+ * Delete a task in Microsoft Planner
+ */
+export async function deletePlannerTask(accessToken: string, taskId: string) {
+    if (!accessToken) throw new Error('Access token is required');
+
+    console.log(`[Microsoft API] Deleting Planner task ${taskId}...`);
+
+    try {
+        // Planner requires an E-Tag (If-Match header) to delete a task.
+        // We must fetch the task first to get its current E-Tag.
+        const taskDetails = await getPlannerTaskDetails(accessToken, taskId);
+        const etag = taskDetails['@odata.etag'];
+
+        if (!etag) {
+            throw new Error(`Could not find E-Tag for task ${taskId}`);
+        }
+
+        const response = await fetch(`https://graph.microsoft.com/v1.0/planner/tasks/${taskId}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'If-Match': etag
+            }
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('[Microsoft API] Error deleting planner task:', response.status, errorText);
+            throw new Error(`Graph API returned ${response.status}: ${errorText}`);
+        }
+
+        console.log(`[Microsoft API] Successfully deleted Planner task ${taskId}`);
+        return true;
+    } catch (error) {
+        console.error('[Microsoft API] Failed to delete planner task:', error);
+        throw error;
+    }
+}
+
+/**
+ * Update a task in Microsoft Planner
+ */
+export async function updatePlannerTask(accessToken: string, taskId: string, updateData: any) {
+    if (!accessToken) throw new Error('Access token is required');
+
+    console.log(`[Microsoft API] Updating Planner task ${taskId} with data:`, updateData);
+
+    try {
+        const taskDetails = await getPlannerTaskDetails(accessToken, taskId);
+        const etag = taskDetails['@odata.etag'];
+
+        if (!etag) {
+            throw new Error(`Could not find E-Tag for task ${taskId}`);
+        }
+
+        // Separate core task properties from detail properties
+        const taskUpdate: any = {};
+        if (updateData.title !== undefined) taskUpdate.title = updateData.title;
+        if (updateData.percentComplete !== undefined) taskUpdate.percentComplete = updateData.percentComplete;
+        if (updateData.dueDateTime !== undefined) taskUpdate.dueDateTime = updateData.dueDateTime;
+
+        if (updateData.assigneeIds && updateData.assigneeIds.length > 0) {
+            taskUpdate.assignments = {};
+            for (const rawUserId of updateData.assigneeIds) {
+                const userId = rawUserId.includes('@') ? rawUserId.split('@')[0] : rawUserId;
+                taskUpdate.assignments[userId] = {
+                    "@odata.type": "#microsoft.graph.plannerAssignment",
+                    "orderHint": " !"
+                };
+            }
+        } else if (updateData.assigneeIds && updateData.assigneeIds.length === 0) {
+            // Need to remove all assignments?
+            // To remove an assignment, you send it with null values or delete from the dict.
+            // Better to just not touch if empty unless explicitly managing it.
+        }
+
+        // 1. Update Core Task Properties
+        if (Object.keys(taskUpdate).length > 0) {
+            const response = await fetch(`https://graph.microsoft.com/v1.0/planner/tasks/${taskId}`, {
+                method: 'PATCH',
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'Content-Type': 'application/json',
+                    'If-Match': etag
+                },
+                body: JSON.stringify(taskUpdate)
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                console.error('[Microsoft API] Error updating planner task:', response.status, errorText);
+                throw new Error(`Graph API returned ${response.status}: ${errorText}`);
+            }
+        }
+
+        // 2. Update Details (Notes, Checklist)
+        if (updateData.notes !== undefined || updateData.checklist) {
+            try {
+                // We need the details E-tag
+                const detailsResponse = await fetch(`https://graph.microsoft.com/v1.0/planner/tasks/${taskId}/details`, {
+                    headers: { 'Authorization': `Bearer ${accessToken}` }
+                });
+
+                if (detailsResponse.ok) {
+                    const details = await detailsResponse.json();
+                    const detailsEtag = details['@odata.etag'];
+                    const existingChecklist = details.checklist || {};
+
+                    const detailsUpdate: any = {};
+                    if (updateData.notes !== undefined) detailsUpdate.description = updateData.notes;
+
+                    if (updateData.checklist) {
+                        detailsUpdate.checklist = {};
+
+                        // Map of existing items by title
+                        const existingByTitle = new Map<string, { id: string, isChecked: boolean }>();
+                        for (const [key, val] of Object.entries<any>(existingChecklist)) {
+                            existingByTitle.set(val.title, { id: key, isChecked: val.isChecked });
+                        }
+
+                        updateData.checklist.forEach((itemTitle: string, index: number) => {
+                            const existing = existingByTitle.get(itemTitle);
+                            if (existing) {
+                                // Keep it, remove from map so we don't delete it
+                                existingByTitle.delete(itemTitle);
+                            } else {
+                                // Create new
+                                const itemId = `item_${index}_${Math.random().toString(36).substring(7)}`;
+                                detailsUpdate.checklist[itemId] = {
+                                    '@odata.type': '#microsoft.graph.plannerChecklistItem',
+                                    title: itemTitle,
+                                    isChecked: false,
+                                    orderHint: ' !'
+                                };
+                            }
+                        });
+
+                        // Now everything left in existingByTitle should be deleted
+                        for (const { id } of existingByTitle.values()) {
+                            detailsUpdate.checklist[id] = null;
+                        }
+                    }
+
+                    if (Object.keys(detailsUpdate).length > 0) {
+                        await fetch(`https://graph.microsoft.com/v1.0/planner/tasks/${taskId}/details`, {
+                            method: 'PATCH',
+                            headers: {
+                                'Authorization': `Bearer ${accessToken}`,
+                                'Content-Type': 'application/json',
+                                'If-Match': detailsEtag
+                            },
+                            body: JSON.stringify(detailsUpdate)
+                        });
+                        console.log('[Microsoft API] Updated Planner task details (notes/checklist)');
+                    }
+                }
+            } catch (err) {
+                console.warn('[Microsoft API] Failed to update task details:', err);
+            }
+        }
+
+        console.log(`[Microsoft API] Successfully updated Planner task ${taskId}`);
+        return { success: true };
+    } catch (error) {
+        console.error('[Microsoft API] Failed to update planner task:', error);
+        throw error;
+    }
+}
+
+/**
+ * Get a calendar event in Microsoft Graph
+ */
+export async function getMicrosoftEvent(accessToken: string, eventId: string) {
+    if (!accessToken) throw new Error('Access token is required');
+
+    console.log(`[Microsoft API] Fetching event ${eventId}...`);
+
+    const response = await fetch(`https://graph.microsoft.com/v1.0/me/events/${eventId}`, {
+        method: 'GET',
+        headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Accept': 'application/json',
+        }
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[Microsoft API] Error getting event:', response.status, errorText);
+        const error: any = new Error(`Graph API returned ${response.status}: ${errorText}`);
+        error.status = response.status;
+        throw error;
+    }
+
+    return response.json();
+}
+
+/**
+ * Update a calendar event in Microsoft Graph
+ */
+export async function updateMicrosoftEvent(accessToken: string, eventId: string, eventDetails: {
+    subject?: string;
+    body?: string;
+    start?: string;
+    end?: string;
+    attendees?: { email: string; name: string }[];
+    isOnlineMeeting?: boolean;
+}) {
+    if (!accessToken) throw new Error('Access token is required');
+
+    console.log(`[Microsoft API] Updating event ${eventId}...`);
+
+    const updateBody: any = {};
+    if (eventDetails.subject !== undefined) updateBody.subject = eventDetails.subject;
+    if (eventDetails.body !== undefined) {
+        updateBody.body = {
+            contentType: 'HTML',
+            content: eventDetails.body
+        };
+    }
+    if (eventDetails.start !== undefined) {
+        updateBody.start = {
+            dateTime: eventDetails.start,
+            timeZone: 'UTC'
+        };
+    }
+    if (eventDetails.end !== undefined) {
+        updateBody.end = {
+            dateTime: eventDetails.end,
+            timeZone: 'UTC'
+        };
+    }
+    if (eventDetails.attendees !== undefined) {
+        updateBody.attendees = eventDetails.attendees.map(a => ({
+            emailAddress: {
+                address: a.email,
+                name: a.name
+            },
+            type: 'required'
+        }));
+    }
+    if (eventDetails.isOnlineMeeting !== undefined) {
+        updateBody.isOnlineMeeting = eventDetails.isOnlineMeeting;
+        updateBody.onlineMeetingProvider = eventDetails.isOnlineMeeting ? 'teamsForBusiness' : undefined;
+    }
+
+    const response = await fetch(`https://graph.microsoft.com/v1.0/me/events/${eventId}`, {
+        method: 'PATCH',
+        headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(updateBody)
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[Microsoft API] Error updating event:', response.status, errorText);
+        throw new Error(`Graph API returned ${response.status}: ${errorText}`);
+    }
+
+    return response.json();
+}
+
+/**
+ * Delete a calendar event in Microsoft Graph
+ */
+export async function deleteMicrosoftEvent(accessToken: string, eventId: string) {
+    if (!accessToken) throw new Error('Access token is required');
+
+    console.log(`[Microsoft API] Deleting event ${eventId}...`);
+
+    const response = await fetch(`https://graph.microsoft.com/v1.0/me/events/${eventId}`, {
+        method: 'DELETE',
+        headers: {
+            'Authorization': `Bearer ${accessToken}`
+        }
+    });
+
+    if (!response.ok && response.status !== 204) {
+        const errorText = await response.text();
+        console.error('[Microsoft API] Error deleting event:', response.status, errorText);
+        throw new Error(`Graph API returned ${response.status}: ${errorText}`);
+    }
+
+    return true;
+}
+
+/**
+ * Find an event in Microsoft Graph by subject and start time (to prevent duplicates)
+ */
+export async function findMicrosoftEvent(accessToken: string, subject: string, startTime: string) {
+    if (!accessToken) throw new Error('Access token is required');
+
+    // Convert startTime to ISO and use it for range filtering (within 2 minutes tolerance)
+    const start = new Date(startTime);
+    const rangeStart = new Date(start.getTime() - 120000).toISOString(); // 2 mins before
+    const rangeEnd = new Date(start.getTime() + 120000).toISOString();   // 2 mins after
+
+    // Filter by exact subject and fuzzy start time
+    const queryParams = new URLSearchParams({
+        '$filter': `subject eq '${subject.replace(/'/g, "''")}' and start/dateTime ge '${rangeStart}' and start/dateTime le '${rangeEnd}'`,
+        '$select': 'id,subject,start,onlineMeeting'
+    });
+
+    const url = `https://graph.microsoft.com/v1.0/me/events?${queryParams.toString()}`;
+    console.log(`[Microsoft API] Searching for existing event: ${url}`);
+
+    const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Accept': 'application/json'
+        }
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[Microsoft API] Error searching event:', response.status, errorText);
+        return null; // Don't throw, just return no match
+    }
+
+    const data = await response.json();
+    return data.value && data.value.length > 0 ? data.value[0] : null;
 }

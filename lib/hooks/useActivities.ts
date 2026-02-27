@@ -39,16 +39,39 @@ export function useActivities(opportunityId?: string) {
         [opportunityId]
     );
 
+    // Allowlist of columns that actually exist in CRM_Actividades on Supabase.
+    // See migration: 20260218_add_activities_ms_columns.sql for the full schema.
+    const DB_COLUMNS = new Set([
+        'id', 'user_id', 'opportunity_id', 'tipo_actividad_id', 'asunto', 'descripcion',
+        'fecha_inicio', 'fecha_fin', 'ms_planner_id', 'ms_event_id', 'created_at', 'updated_at',
+        'is_completed', '_sync_metadata', 'created_by', 'updated_by', 'is_deleted',
+        'tipo_actividad', 'clasificacion_id', 'subclasificacion_id', 'Tarea_planner',
+        'teams_meeting_url', 'microsoft_attendees'
+    ]);
+
     const createActivity = async (data: Partial<LocalActivity>) => {
         let userId: string | null = null;
 
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            userId = user?.id || null;
-        } catch {
+            if (!navigator.onLine) {
+                // Instantly fallback to cache if offline
+                userId = localStorage.getItem('cachedUserId');
+            } else {
+                const { data: { user }, error } = await supabase.auth.getUser();
+                if (error || !user) {
+                    userId = localStorage.getItem('cachedUserId');
+                } else {
+                    userId = user.id;
+                    localStorage.setItem('cachedUserId', user.id); // Refresh cache
+                }
+            }
+        } catch (e) {
             // Offline - try to get cached user ID from localStorage
-            const cachedUser = localStorage.getItem('cachedUserId');
-            if (cachedUser) userId = cachedUser;
+            userId = localStorage.getItem('cachedUserId');
+        }
+
+        if (!userId) {
+            userId = localStorage.getItem('cachedUserId');
         }
 
         if (!userId) throw new Error("No authenticated user (even offline)");
@@ -64,6 +87,13 @@ export function useActivities(opportunityId?: string) {
             opportunity_id: data.opportunity_id || undefined,
             clasificacion_id: data.clasificacion_id || null,
             subclasificacion_id: data.subclasificacion_id || null,
+            // Microsoft integration fields
+            ms_planner_id: data.ms_planner_id || null,
+            ms_event_id: data.ms_event_id || null,
+            teams_meeting_url: data.teams_meeting_url || null,
+            Tarea_planner: data.Tarea_planner || null,
+            // Capture any sync metadata passed from UI (like pending_planner)
+            _sync_metadata: (data as any)._sync_metadata || {},
             updated_at: new Date().toISOString()
         };
 
@@ -85,12 +115,20 @@ export function useActivities(opportunityId?: string) {
         const updated_at = new Date().toISOString();
 
         // Process dates to handle timezone correctly
-        const changes = {
+        const rawChanges = {
             ...data,
             updated_at,
             ...(data.fecha_inicio && { fecha_inicio: toISODateString(data.fecha_inicio) }),
             ...(data.fecha_fin && { fecha_fin: toISODateString(data.fecha_fin) })
         };
+
+        // Strip any fields that don't exist in CRM_Actividades (e.g. microsoft_attendees)
+        // to prevent sync errors when Supabase rejects unknown columns.
+        const changes = Object.fromEntries(
+            Object.entries(rawChanges).filter(([key]) => DB_COLUMNS.has(key))
+        );
+
+        console.log("[useActivities] Sanitized changes for sync:", changes);
 
         await db.activities.update(id, changes);
         await syncEngine.queueMutation('CRM_Actividades', id, changes);
@@ -100,6 +138,18 @@ export function useActivities(opportunityId?: string) {
         const updated_at = new Date().toISOString();
         await db.activities.update(id, { is_completed: isCompleted, updated_at });
         await syncEngine.queueMutation('CRM_Actividades', id, { is_completed: isCompleted, updated_at });
+
+        // If completed, also mark related notifications as read in the background
+        if (isCompleted) {
+            supabase
+                .from('CRM_Notifications')
+                .update({ is_read: true })
+                .eq('entity_id', id)
+                .eq('type', 'ACTIVITY_OVERDUE')
+                .then(({ error }) => {
+                    if (error) console.error("[useActivities] Error marking notifications as read:", error);
+                });
+        }
     };
 
     const deleteActivity = async (id: string) => {

@@ -33,7 +33,8 @@ export default function Home() {
     canal_id: null,
     advisor_id: null,
     subclasificacion_id: null,
-    nivel_premium: null
+    nivel_premium: null,
+    search_query: null
   });
 
   // Filtered Data Sets
@@ -50,6 +51,13 @@ export default function Home() {
       if (filters.subclasificacion_id && acc?.subclasificacion_id !== filters.subclasificacion_id) return false;
       if (filters.nivel_premium && acc?.nivel_premium !== filters.nivel_premium) return false;
 
+      if (filters.search_query) {
+        const query = filters.search_query.toLowerCase();
+        const oppNameMatch = o.nombre?.toLowerCase().includes(query) || false;
+        const accNameMatch = acc?.nombre?.toLowerCase().includes(query) || false;
+        if (!oppNameMatch && !accNameMatch) return false;
+      }
+
       return true;
     });
 
@@ -57,8 +65,13 @@ export default function Home() {
       if (filters.canal_id && a.canal_id !== filters.canal_id) return false;
       if (filters.subclasificacion_id && a.subclasificacion_id !== filters.subclasificacion_id) return false;
       if (filters.nivel_premium && a.nivel_premium !== filters.nivel_premium) return false;
-      // Note: advisor filter on accounts usually means who created it or who owns it
-      if (filters.advisor_id && a.created_by !== filters.advisor_id) return false;
+      if (filters.advisor_id && a.owner_user_id !== filters.advisor_id) return false;
+
+      if (filters.search_query) {
+        const query = filters.search_query.toLowerCase();
+        if (!a.nombre?.toLowerCase().includes(query)) return false;
+      }
+
       return true;
     });
 

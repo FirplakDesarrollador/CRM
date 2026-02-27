@@ -1,6 +1,6 @@
 {
   "name": "crm-app",
-  "version": "1.0.7.7",
+  "version": "1.0.8.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -40,6 +40,8 @@
     "zustand": "^5.0.9"
   },
   "devDependencies": {
+    "@n8n-as-code/transformer": "^0.2.2",
+    "@playwright/test": "^1.58.2",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

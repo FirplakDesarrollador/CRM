@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { syncEngine } from '@/lib/sync';
+import { db } from '@/lib/db';
 
 export type AccountServer = {
     id: string;
@@ -16,7 +17,9 @@ export type AccountServer = {
     direccion: string | null;
     ciudad: string | null;
     created_by: string | null;
+    owner_user_id?: string | null;
     creator_name?: string | null;
+    owner_name?: string | null;
     updated_at: string;
     contact_count?: number;
 };
@@ -55,6 +58,58 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
             const from = (currentPage - 1) * pageSize;
             const to = from + pageSize - 1;
 
+            if (!navigator.onLine) {
+                console.log("[useAccountsServer] Device is offline. Falling back to local Dexie database...");
+                let localAccounts = await db.accounts.toArray();
+
+                // Filtering
+                if (searchTerm) {
+                    const lowerSearch = searchTerm.toLowerCase();
+                    localAccounts = localAccounts.filter(a =>
+                        a.nombre.toLowerCase().includes(lowerSearch) ||
+                        (a.nit_base && a.nit_base.toLowerCase().includes(lowerSearch))
+                    );
+                }
+
+                if (assignedUserId) {
+                    localAccounts = localAccounts.filter(a => a.owner_user_id === assignedUserId || a.created_by === assignedUserId);
+                }
+
+                // Sorting
+                localAccounts.sort((a, b) => {
+                    const dateA = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+                    const dateB = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+                    return dateB - dateA; // DESC
+                });
+
+                const totalCount = localAccounts.length;
+                const paginatedAccounts = localAccounts.slice(from, to + 1);
+
+                const flattenedResults = paginatedAccounts.map(item => ({
+                    ...item,
+                    owner_name: 'Usuario Offline',
+                    creator_name: 'Usuario Offline',
+                    contact_count: 0
+                }));
+
+                if (isLoadMore) {
+                    setData(prev => {
+                        const existingIds = new Set(prev.map(i => i.id));
+                        const newItems = flattenedResults.filter(i => !existingIds.has(i.id));
+                        return [...prev, ...newItems] as any;
+                    });
+                    setPage(currentPage);
+                    pageRef.current = currentPage;
+                } else {
+                    setData(flattenedResults as any);
+                    setPage(1);
+                    pageRef.current = 1;
+                }
+                setCount(totalCount);
+                setHasMore(from + paginatedAccounts.length < totalCount);
+                return;
+            }
+
             let query = supabase
                 .from('CRM_Cuentas')
                 .select(`
@@ -73,17 +128,24 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                     departamento_id,
                     ciudad_id,
                     created_by,
+                    created_at,
+                    owner_user_id,
                     updated_at,
                     contacts:CRM_Contactos(count)
                 `, { count: 'exact' })
                 .eq('is_deleted', false);
 
             if (searchTerm) {
-                query = query.or(`nombre.ilike.%${searchTerm}%,nit.ilike.%${searchTerm}%`);
+                query = query.or(`nombre.ilike.%${searchTerm}%,nit_base.ilike.%${searchTerm}%`);
             }
 
             if (assignedUserId) {
-                query = query.eq('created_by', assignedUserId);
+                // Filter by OWNER ID now, not just creator
+                // But let's support both or transition?
+                // Request says "detect the id of the seller who owns".
+                // So filters should probably use owner_user_id.
+                // For backward compat, owner_user_id defaults to created_by, so safe to use owner_user_id.
+                query = query.eq('owner_user_id', assignedUserId);
             }
 
             // Order
@@ -98,9 +160,27 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
 
             console.log(`[useAccountsServer] Fetched ${result?.length} accounts. Order: updated_at DESC`, result?.slice(0, 3));
 
+            // Collect unique owner IDs to resolve names
+            const ownerIds = [...new Set(
+                (result as any[]).map(item => item.owner_user_id || item.created_by).filter(Boolean)
+            )];
+
+            // Fetch owner names from CRM_Usuarios
+            let ownerMap: Record<string, string> = {};
+            if (ownerIds.length > 0) {
+                const { data: usuarios } = await supabase
+                    .from('CRM_Usuarios')
+                    .select('id, full_name')
+                    .in('id', ownerIds);
+                if (usuarios) {
+                    ownerMap = Object.fromEntries(usuarios.map(u => [u.id, u.full_name || '']));
+                }
+            }
+
             const flattenedResults = (result as any[]).map(item => ({
                 ...item,
-                creator_name: item.creator?.full_name || null,
+                owner_name: ownerMap[item.owner_user_id] || ownerMap[item.created_by] || null,
+                creator_name: ownerMap[item.created_by] || null,
                 contact_count: item.contacts?.[0]?.count || 0
             }));
 

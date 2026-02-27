@@ -7,6 +7,8 @@ import { useOpportunitiesServer } from '@/lib/hooks/useOpportunitiesServer';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
 import { syncEngine } from '@/lib/sync';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
+import { hasPermission } from '@/lib/permissions';
 import {
     Calendar as CalendarIcon,
     ChevronLeft,
@@ -19,7 +21,8 @@ import {
     CalendarDays,
     ListTodo,
     Filter,
-    Loader2
+    Loader2,
+    Search
 } from 'lucide-react';
 
 import { cn } from '@/components/ui/utils';
@@ -30,6 +33,18 @@ function ActivitiesContent() {
     const router = useRouter();
     const { activities, createActivity, updateActivity, toggleComplete } = useActivities();
     const { data: opportunities, setUserFilter } = useOpportunitiesServer({ pageSize: 100 });
+    const { user, role } = useCurrentUser();
+    const canViewAll = hasPermission(role, 'view_all_activities');
+
+    // Load collaborators to know which opportunities the user collaborates in
+    const userCollaborations = useLiveQuery(
+        () => user ? db.opportunityCollaborators.where('usuario_id').equals(user.id).toArray() : [],
+        [user]
+    ) || [];
+
+    const collaborativeOppIds = useMemo(() => {
+        return new Set(userCollaborations.map(c => c.oportunidad_id));
+    }, [userCollaborations]);
 
     // Load all opportunities for the dropdown, not just user's own
     useEffect(() => {
@@ -54,6 +69,7 @@ function ActivitiesContent() {
     const [selectedActivity, setSelectedActivity] = useState<LocalActivity | null>(null);
 
     // Filters
+    const [searchQuery, setSearchQuery] = useState("");
     const [filterType, setFilterType] = useState<string>("");
     const [filterClassification, setFilterClassification] = useState<string>("");
     const [filterSubclassification, setFilterSubclassification] = useState<string>("");
@@ -117,13 +133,31 @@ function ActivitiesContent() {
     // PERF FIX: Apply global filters once, then derive views from the result
     const globallyFilteredActivities = useMemo(() => {
         if (!activities) return [];
+        const lowerQuery = searchQuery.toLowerCase();
         return activities.filter(act => {
+            // Apply role-based filtering: VENDEDOR and similar roles only see their own activities or those of opportunities they collaborate on
+            if (!canViewAll && user) {
+                const isOwner = act.user_id === user.id;
+                const isCollaborator = act.opportunity_id ? collaborativeOppIds.has(act.opportunity_id) : false;
+                if (!isOwner && !isCollaborator) {
+                    return false;
+                }
+            }
+
             if (filterType && act.tipo_actividad !== filterType) return false;
             if (filterClassification && act.clasificacion_id != filterClassification) return false;
             if (filterSubclassification && act.subclasificacion_id != filterSubclassification) return false;
+
+            if (searchQuery) {
+                const searchMatch =
+                    act.asunto?.toLowerCase().includes(lowerQuery) ||
+                    act.descripcion?.toLowerCase().includes(lowerQuery);
+                if (!searchMatch) return false;
+            }
+
             return true;
         });
-    }, [activities, filterType, filterClassification, filterSubclassification]);
+    }, [activities, filterType, filterClassification, filterSubclassification, searchQuery, canViewAll, user, collaborativeOppIds]);
 
     // For agenda/all views: filter by selected date + sort
     const filteredActivities = useMemo(() => {
@@ -154,7 +188,7 @@ function ActivitiesContent() {
     }, [globallyFilteredActivities]);
 
     return (
-        <div className="flex flex-col h-[calc(100vh-2rem)] space-y-4">
+        <div data-testid="activities-page" className="flex flex-col h-[calc(100vh-2rem)] space-y-4">
             {/* Header */}
             <header className="flex flex-col md:flex-row md:items-center justify-between p-6 bg-white rounded-2xl border border-slate-200 shadow-sm gap-4">
                 <div className="flex items-center gap-4">
@@ -168,12 +202,26 @@ function ActivitiesContent() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
+                    {/* Search Input */}
+                    <div className="relative">
+                        <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                            type="text"
+                            data-testid="activities-search"
+                            placeholder="Buscar..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="bg-white border text-slate-600 border-slate-200 font-semibold text-sm rounded-xl pl-9 pr-4 py-2 w-full sm:w-48 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                        />
+                    </div>
+
                     {/* Filters */}
                     <div className="flex bg-slate-50 p-1 rounded-xl border border-slate-100 items-center">
                         <div className="px-2 text-slate-400">
                             {classifications.length === 0 ? <Loader2 className="w-4 h-4 animate-spin" /> : <Filter className="w-4 h-4" />}
                         </div>
                         <select
+                            data-testid="activities-filter-type"
                             value={filterType}
                             onChange={(e) => setFilterType(e.target.value)}
                             className="bg-transparent text-sm font-semibold text-slate-600 focus:outline-none p-1.5"
@@ -226,6 +274,7 @@ function ActivitiesContent() {
                     </div>
 
                     <button
+                        data-testid="activities-create-button"
                         onClick={() => setIsModalOpen(true)}
                         className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-blue-200 transition-all hover:scale-105 active:scale-95 ml-auto md:ml-0"
                     >
@@ -253,6 +302,7 @@ function ActivitiesContent() {
                             {view !== 'all' && (
                                 <div className="flex items-center gap-4 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-100">
                                     <button
+                                        data-testid="activities-page-prev"
                                         onClick={handlePrev}
                                         className="p-1 hover:bg-white hover:shadow-sm rounded-lg text-slate-400 hover:text-blue-600 transition-all"
                                     >
@@ -265,6 +315,7 @@ function ActivitiesContent() {
                                         }
                                     </span>
                                     <button
+                                        data-testid="activities-page-next"
                                         onClick={handleNext}
                                         className="p-1 hover:bg-white hover:shadow-sm rounded-lg text-slate-400 hover:text-blue-600 transition-all"
                                     >
@@ -307,7 +358,7 @@ function ActivitiesContent() {
                     <div className="flex-1 overflow-y-auto p-6 bg-slate-50/50">
                         {view === 'agenda' || view === 'all' ? (
                             filteredActivities && filteredActivities.length > 0 ? (
-                                <div className="space-y-4">
+                                <div data-testid="activities-list" className="space-y-4">
                                     {filteredActivities.map((act) => {
                                         const opp = opportunities?.find(o => o.id === act.opportunity_id);
                                         const today = new Date();
@@ -421,7 +472,7 @@ function ActivitiesContent() {
                                     })}
                                 </div>
                             ) : (
-                                <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-4">
+                                <div data-testid="activities-empty-state" className="flex flex-col items-center justify-center h-full text-slate-400 gap-4">
                                     <div className="bg-slate-50 p-6 rounded-full">
                                         <Clock className="w-12 h-12 text-slate-200" />
                                     </div>

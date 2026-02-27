@@ -48,6 +48,11 @@ export default function OpportunityDetailPage() {
     useEffect(() => {
         const fetchFromServer = async () => {
             if (opportunities && !opportunity && !isFetchingServer && !serverOpportunity) {
+                if (!navigator.onLine) {
+                    console.warn(`[JIT Sync] Offline: Cannot fetch opportunity ${id}`);
+                    setServerOpportunity('NOT_FOUND');
+                    return;
+                }
                 console.log(`[JIT Sync] Opportunity ${id} not found locally. Fetching from server...`);
                 setIsFetchingServer(true);
                 try {
@@ -82,6 +87,7 @@ export default function OpportunityDetailPage() {
                     }
                 } catch (err) {
                     console.error(`[JIT Sync] Error fetching opportunity:`, err);
+                    setServerOpportunity('NOT_FOUND');
                 } finally {
                     setIsFetchingServer(false);
                 }
@@ -236,8 +242,14 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     const { quotes } = useQuotes(opportunity.id);
     const [localAmount, setLocalAmount] = useState(opportunity.amount || 0);
     const [localClosingDate, setLocalClosingDate] = useState(toInputDate(opportunity.fecha_cierre_estimada));
+    const [localOrigen, setLocalOrigen] = useState(opportunity.origen_oportunidad || "");
+    const [localUrlOrigen, setLocalUrlOrigen] = useState(opportunity.url_origen || "");
+    const [localFuente, setLocalFuente] = useState(opportunity.fuente_conversion || "");
     const [isSaving, setIsSaving] = useState(false);
     const [isSavingDate, setIsSavingDate] = useState(false);
+    const [isSavingOrigen, setIsSavingOrigen] = useState(false);
+    const [isSavingUrl, setIsSavingUrl] = useState(false);
+    const [isSavingFuente, setIsSavingFuente] = useState(false);
 
     // Filter Logic
     const [isLossReasonModalOpen, setIsLossReasonModalOpen] = useState(false);
@@ -266,7 +278,10 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     useEffect(() => {
         setLocalSegmentId(opportunity.segmento_id ? String(opportunity.segmento_id) : "");
         setLocalClosingDate(toInputDate(opportunity.fecha_cierre_estimada));
-    }, [opportunity.segmento_id, opportunity.fecha_cierre_estimada]);
+        setLocalOrigen(opportunity.origen_oportunidad || "");
+        setLocalUrlOrigen(opportunity.url_origen || "");
+        setLocalFuente(opportunity.fuente_conversion || "");
+    }, [opportunity.segmento_id, opportunity.fecha_cierre_estimada, opportunity.origen_oportunidad, opportunity.url_origen, opportunity.fuente_conversion]);
 
     useEffect(() => {
         const fetchSegments = async () => {
@@ -294,11 +309,16 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     );
 
     const [isFetchingAccount, setIsFetchingAccount] = useState(false);
+    const [isOfflineAccount, setIsOfflineAccount] = useState(false);
 
     // Rollback for Account (JIT Sync)
     useEffect(() => {
         const fetchAccountFromServer = async () => {
-            if (opportunity.account_id && !account && !isFetchingAccount && navigator.onLine) {
+            if (opportunity.account_id && !account && !isFetchingAccount && !isOfflineAccount) {
+                if (!navigator.onLine) {
+                    setIsOfflineAccount(true);
+                    return;
+                }
                 console.log(`[JIT Sync] Account ${opportunity.account_id} not found locally. Fetching from server...`);
                 setIsFetchingAccount(true);
                 try {
@@ -311,22 +331,45 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                     if (data && !error) {
                         console.log(`[JIT Sync] Found account on server. Saving locally...`);
                         await db.accounts.put(data);
+                    } else if (error) {
+                        console.warn(`[JIT Sync] Error fetching account from server:`, error);
                     }
                 } catch (err) {
                     console.error("Error fetching account from server", err);
                 } finally {
                     setIsFetchingAccount(false);
+                    // Keep isFetchingServer clean if we inadvertently mutated it in other flows, but actually we shouldn't touch it here
                 }
             }
         };
         fetchAccountFromServer();
-    }, [opportunity.account_id, account, isFetchingAccount]);
+    }, [opportunity.account_id, account, isFetchingAccount, isOfflineAccount]);
 
-    // Fetch Phases for Channel
+    const effectiveAccount = account || (isOfflineAccount ? {
+        id: opportunity.account_id,
+        nombre: "Cliente Offline (Datos Parciales)",
+        canal_id: null,
+        subclasificacion_id: null,
+        nit: "",
+        telefono: "",
+        direccion: "",
+        ciudad: ""
+    } : null);
+
+    // Fetch Phases for Channel (with deduplication by orden in case of DB integrity issues)
     const phases = useLiveQuery(
-        () => account?.canal_id
-            ? db.phases.where('canal_id').equals(account.canal_id).sortBy('orden')
-            : [],
+        async () => {
+            if (!effectiveAccount?.canal_id) return [];
+            const raw = await db.phases.where('canal_id').equals(effectiveAccount.canal_id).sortBy('orden');
+            // Deduplicate by orden, keeping the entry with the lowest id
+            const seen = new Map<number, typeof raw[0]>();
+            for (const phase of raw) {
+                if (!seen.has(phase.orden)) {
+                    seen.set(phase.orden, phase);
+                }
+            }
+            return Array.from(seen.values()).sort((a, b) => a.orden - b.orden);
+        },
         [account?.canal_id]
     );
 
@@ -370,7 +413,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
         }
     };
 
-    if (!account) {
+    if (!effectiveAccount) {
         return (
             <div className="p-12 text-center bg-white rounded-2xl border border-slate-200">
                 <Loader2 className="w-6 h-6 text-blue-600 animate-spin mx-auto mb-4" />
@@ -391,7 +434,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
 
                 {!phases || phases.length === 0 ? (
                     <div className="text-center text-slate-400 text-sm py-4">
-                        No hay fases definidas para el canal {account.canal_id || 'seleccionado'}.
+                        No hay fases definidas para el canal {effectiveAccount.canal_id || 'seleccionado'}.
                     </div>
                 ) : (
                     <div className="overflow-x-auto pb-16">
@@ -622,11 +665,11 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                     className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-bold text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none disabled:opacity-50"
                                     value={localSegmentId}
                                     onChange={(e) => handleSegmentChange(e.target.value)}
-                                    disabled={!account.subclasificacion_id || segments.length === 0}
+                                    disabled={!effectiveAccount.subclasificacion_id || segments.length === 0}
                                 >
                                     <option value="">Seleccione un segmento...</option>
                                     {segments
-                                        .filter(seg => account.subclasificacion_id && seg.subclasificacion_id === Number(account.subclasificacion_id))
+                                        .filter(seg => effectiveAccount.subclasificacion_id && seg.subclasificacion_id === Number(effectiveAccount.subclasificacion_id))
                                         .map(seg => (
                                             <option key={seg.id} value={String(seg.id)}>
                                                 {seg.nombre}
@@ -639,9 +682,9 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                         <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
                                     </div>
                                 )}
-                                {!account.subclasificacion_id && (
+                                {!effectiveAccount.subclasificacion_id && (
                                     <p className="text-[10px] text-orange-500 mt-1">
-                                        La cuenta no tiene subclasificación. Edite la cuenta para habilitar segmentos.
+                                        La cuenta no tiene subclasificación u origen offline.
                                     </p>
                                 )}
                             </div>
@@ -664,6 +707,82 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                 )}
                             </div>
                         </div>
+
+                        {/* Orígenes Section */}
+                        <div className="pt-4 border-t border-slate-100 space-y-4">
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Origen de la Oportunidad</label>
+                                <div className="relative group">
+                                    <input
+                                        type="text"
+                                        value={localOrigen}
+                                        onChange={(e) => setLocalOrigen(e.target.value)}
+                                        onBlur={async () => {
+                                            if (localOrigen !== opportunity.origen_oportunidad) {
+                                                setIsSavingOrigen(true);
+                                                await updateOpportunity(opportunity.id, { origen_oportunidad: localOrigen });
+                                                setIsSavingOrigen(false);
+                                            }
+                                        }}
+                                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none placeholder:text-slate-400"
+                                        placeholder="Ej: Llamada, Evento..."
+                                    />
+                                    {isSavingOrigen && (
+                                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                            <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">URL Origen</label>
+                                <div className="relative group">
+                                    <input
+                                        type="text"
+                                        value={localUrlOrigen}
+                                        onChange={(e) => setLocalUrlOrigen(e.target.value)}
+                                        onBlur={async () => {
+                                            if (localUrlOrigen !== opportunity.url_origen) {
+                                                setIsSavingUrl(true);
+                                                await updateOpportunity(opportunity.id, { url_origen: localUrlOrigen });
+                                                setIsSavingUrl(false);
+                                            }
+                                        }}
+                                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none placeholder:text-slate-400"
+                                        placeholder="https://..."
+                                    />
+                                    {isSavingUrl && (
+                                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                            <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Fuente de Conversión</label>
+                                <div className="relative group">
+                                    <input
+                                        type="text"
+                                        value={localFuente}
+                                        onChange={(e) => setLocalFuente(e.target.value)}
+                                        onBlur={async () => {
+                                            if (localFuente !== opportunity.fuente_conversion) {
+                                                setIsSavingFuente(true);
+                                                await updateOpportunity(opportunity.id, { fuente_conversion: localFuente });
+                                                setIsSavingFuente(false);
+                                            }
+                                        }}
+                                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none placeholder:text-slate-400"
+                                        placeholder="Ej: Google Ads, Referido..."
+                                    />
+                                    {isSavingFuente && (
+                                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                            <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -683,29 +802,29 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                         <div className="space-y-3">
                             <div>
                                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Nombre / Razón Social</label>
-                                <p className="text-slate-900 font-medium">{account.nombre}</p>
+                                <p className="text-slate-900 font-medium">{effectiveAccount.nombre}</p>
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">NIT</label>
-                                    <p className="text-slate-700">{account.nit || 'No registrado'}</p>
+                                    <p className="text-slate-700">{effectiveAccount.nit || 'No registrado'}</p>
                                 </div>
                                 <div>
                                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Teléfono</label>
-                                    <p className="text-slate-700">{account.telefono || 'No registrado'}</p>
+                                    <p className="text-slate-700">{effectiveAccount.telefono || 'No registrado'}</p>
                                 </div>
                             </div>
-                            {account.direccion && (
+                            {effectiveAccount.direccion && (
                                 <div>
                                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Dirección</label>
-                                    <p className="text-slate-700">{account.direccion} {account.ciudad && `• ${account.ciudad}`}</p>
+                                    <p className="text-slate-700">{effectiveAccount.direccion} {effectiveAccount.ciudad && `• ${effectiveAccount.ciudad}`}</p>
                                 </div>
                             )}
                         </div>
                     </div>
 
                     <Link
-                        href={`/cuentas?id=${account.id}`}
+                        href={`/cuentas?id=${effectiveAccount.id}`}
                         className="mt-6 w-full py-2 bg-slate-50 hover:bg-blue-50 text-blue-600 text-sm font-bold rounded-xl border border-slate-100 hover:border-blue-200 text-center transition-all flex items-center justify-center gap-2"
                     >
                         Ver detalles en Cuentas <ChevronRight className="w-4 h-4" />

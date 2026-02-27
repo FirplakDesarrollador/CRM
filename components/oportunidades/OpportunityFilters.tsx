@@ -208,10 +208,11 @@ export function OpportunityFilters({ onFilterChange }: OpportunityFiltersProps) 
     if (loadingMetadata) return <div className="text-xs text-slate-400">Cargando filtros...</div>;
 
     return (
-        <div className="flex flex-wrap items-center gap-3">
+        <div data-testid="opportunities-filters" className="flex flex-wrap items-center gap-3">
             {/* Status Filter Pills - Quick access to closed states */}
             <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
                 <button
+                    data-testid="opportunities-filter-status-all"
                     onClick={() => handleStatusChange('all')}
                     className={cn(
                         "px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5",
@@ -224,6 +225,7 @@ export function OpportunityFilters({ onFilterChange }: OpportunityFiltersProps) 
                     Todas
                 </button>
                 <button
+                    data-testid="opportunities-filter-status-open"
                     onClick={() => handleStatusChange('open')}
                     className={cn(
                         "px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5",
@@ -236,6 +238,7 @@ export function OpportunityFilters({ onFilterChange }: OpportunityFiltersProps) 
                     Abiertas
                 </button>
                 <button
+                    data-testid="opportunities-filter-status-won"
                     onClick={() => handleStatusChange('won')}
                     className={cn(
                         "px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5",
@@ -248,6 +251,7 @@ export function OpportunityFilters({ onFilterChange }: OpportunityFiltersProps) 
                     Ganadas
                 </button>
                 <button
+                    data-testid="opportunities-filter-status-lost"
                     onClick={() => handleStatusChange('lost')}
                     className={cn(
                         "px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5",
@@ -267,6 +271,7 @@ export function OpportunityFilters({ onFilterChange }: OpportunityFiltersProps) 
 
                 {/* Channel Select */}
                 <select
+                    data-testid="opportunities-filter-channel"
                     className="text-sm bg-transparent border-none focus:ring-0 cursor-pointer text-slate-700 font-medium max-w-[180px]"
                     value={selectedChannel || ""}
                     onChange={handleChannelChange}
@@ -284,6 +289,7 @@ export function OpportunityFilters({ onFilterChange }: OpportunityFiltersProps) 
 
                         {/* Subclassification Select */}
                         <select
+                            data-testid="opportunities-filter-subclass"
                             className="text-sm bg-transparent border-none focus:ring-0 cursor-pointer text-slate-700 max-w-[160px]"
                             value={selectedSubclass || ""}
                             onChange={handleSubclassChange}
@@ -298,6 +304,7 @@ export function OpportunityFilters({ onFilterChange }: OpportunityFiltersProps) 
 
                         {/* Segment Select */}
                         <select
+                            data-testid="opportunities-filter-segment"
                             className="text-sm bg-transparent border-none focus:ring-0 cursor-pointer text-slate-700 max-w-[160px]"
                             value={selectedSegment || ""}
                             onChange={handleSegmentChange}
@@ -313,6 +320,7 @@ export function OpportunityFilters({ onFilterChange }: OpportunityFiltersProps) 
                         {/* Phase Select - Only show when status is 'all' or 'open' */}
                         {(statusFilter === 'all' || statusFilter === 'open') && (
                             <select
+                                data-testid="opportunities-filter-phase"
                                 className="text-sm bg-transparent border-none focus:ring-0 cursor-pointer text-slate-700 max-w-[160px]"
                                 value={selectedPhase || ""}
                                 onChange={handlePhaseChange}
@@ -340,6 +348,7 @@ export function OpportunityFilters({ onFilterChange }: OpportunityFiltersProps) 
             {/* Clear Button */}
             {hasActiveFilters && (
                 <button
+                    data-testid="opportunities-filter-clear"
                     onClick={clearFilters}
                     className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1 px-2 py-1 rounded hover:bg-red-50 transition-colors"
                 >
