@@ -53,12 +53,25 @@ export function useActivities(opportunityId?: string) {
         let userId: string | null = null;
 
         try {
-            const { data: { user } } = await supabase.auth.getUser();
-            userId = user?.id || null;
-        } catch {
+            if (!navigator.onLine) {
+                // Instantly fallback to cache if offline
+                userId = localStorage.getItem('cachedUserId');
+            } else {
+                const { data: { user }, error } = await supabase.auth.getUser();
+                if (error || !user) {
+                    userId = localStorage.getItem('cachedUserId');
+                } else {
+                    userId = user.id;
+                    localStorage.setItem('cachedUserId', user.id); // Refresh cache
+                }
+            }
+        } catch (e) {
             // Offline - try to get cached user ID from localStorage
-            const cachedUser = localStorage.getItem('cachedUserId');
-            if (cachedUser) userId = cachedUser;
+            userId = localStorage.getItem('cachedUserId');
+        }
+
+        if (!userId) {
+            userId = localStorage.getItem('cachedUserId');
         }
 
         if (!userId) throw new Error("No authenticated user (even offline)");
@@ -79,6 +92,8 @@ export function useActivities(opportunityId?: string) {
             ms_event_id: data.ms_event_id || null,
             teams_meeting_url: data.teams_meeting_url || null,
             Tarea_planner: data.Tarea_planner || null,
+            // Capture any sync metadata passed from UI (like pending_planner)
+            _sync_metadata: (data as any)._sync_metadata || {},
             updated_at: new Date().toISOString()
         };
 

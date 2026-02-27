@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { syncEngine } from '@/lib/sync';
+import { db } from '@/lib/db';
 
 export type AccountServer = {
     id: string;
@@ -56,6 +57,58 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
             const currentPage = isLoadMore ? pageRef.current + 1 : 1;
             const from = (currentPage - 1) * pageSize;
             const to = from + pageSize - 1;
+
+            if (!navigator.onLine) {
+                console.log("[useAccountsServer] Device is offline. Falling back to local Dexie database...");
+                let localAccounts = await db.accounts.toArray();
+
+                // Filtering
+                if (searchTerm) {
+                    const lowerSearch = searchTerm.toLowerCase();
+                    localAccounts = localAccounts.filter(a =>
+                        a.nombre.toLowerCase().includes(lowerSearch) ||
+                        (a.nit_base && a.nit_base.toLowerCase().includes(lowerSearch))
+                    );
+                }
+
+                if (assignedUserId) {
+                    localAccounts = localAccounts.filter(a => a.owner_user_id === assignedUserId || a.created_by === assignedUserId);
+                }
+
+                // Sorting
+                localAccounts.sort((a, b) => {
+                    const dateA = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+                    const dateB = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+                    return dateB - dateA; // DESC
+                });
+
+                const totalCount = localAccounts.length;
+                const paginatedAccounts = localAccounts.slice(from, to + 1);
+
+                const flattenedResults = paginatedAccounts.map(item => ({
+                    ...item,
+                    owner_name: 'Usuario Offline',
+                    creator_name: 'Usuario Offline',
+                    contact_count: 0
+                }));
+
+                if (isLoadMore) {
+                    setData(prev => {
+                        const existingIds = new Set(prev.map(i => i.id));
+                        const newItems = flattenedResults.filter(i => !existingIds.has(i.id));
+                        return [...prev, ...newItems] as any;
+                    });
+                    setPage(currentPage);
+                    pageRef.current = currentPage;
+                } else {
+                    setData(flattenedResults as any);
+                    setPage(1);
+                    pageRef.current = 1;
+                }
+                setCount(totalCount);
+                setHasMore(from + paginatedAccounts.length < totalCount);
+                return;
+            }
 
             let query = supabase
                 .from('CRM_Cuentas')

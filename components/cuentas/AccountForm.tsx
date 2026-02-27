@@ -427,13 +427,13 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             </div>
 
             {activeTab === 'info' ? (
-                <form onSubmit={handleSubmit((data) => onSubmit(data as AccountFormData))} className="space-y-4 p-4">
+                <form data-testid="accounts-form" onSubmit={handleSubmit((data) => onSubmit(data as AccountFormData))} className="space-y-4 p-4">
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {/* Nombre */}
                         <div className="space-y-1">
                             <label className="text-sm font-medium">Nombre de Cuenta</label>
-                            <input {...register("nombre")} className="w-full border p-2 rounded" placeholder="Ej. Constructora XYZ" />
+                            <input data-testid="accounts-input-nombre" {...register("nombre")} className="w-full border p-2 rounded" placeholder="Ej. Constructora XYZ" />
                             {errors.nombre && <span className="text-red-500 text-xs">{errors.nombre.message}</span>}
                         </div>
 
@@ -589,6 +589,7 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                         <div className="space-y-1">
                             <label className="text-sm font-medium">NIT (Sin dígito de verificación)</label>
                             <input
+                                data-testid="accounts-input-nit"
                                 {...register("nit_base")}
                                 className={cn("w-full border p-2 rounded", nitError ? "border-red-500 bg-red-50" : "border-slate-200")}
                                 placeholder="Ej. 890900123"
@@ -692,10 +693,11 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                     )}
 
                     <div className="flex justify-end gap-2 pt-4">
-                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">
+                        <button data-testid="accounts-form-cancel" type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">
                             Cancelar
                         </button>
                         <button
+                            data-testid="accounts-form-save"
                             type="submit"
                             disabled={isSubmitting}
                             className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center"

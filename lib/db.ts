@@ -250,6 +250,7 @@ export interface LocalActivity {
     user_id?: string;
     ms_planner_id?: string | null;
     ms_event_id?: string | null;
+    _sync_metadata?: any;
     teams_meeting_url?: string | null;
     Tarea_planner?: boolean | null;
     created_at?: string;

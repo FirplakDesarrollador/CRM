@@ -249,6 +249,208 @@ export class SyncEngine {
             }
         }
 
+        // 3.0 OFFLINE PLANNER AUTO-SYNC FOR ACTIVITIES
+        if (batches['CRM_Actividades']) {
+            const actUpdates = batches['CRM_Actividades'];
+            // Group the updates by ID since one activity could have multiple field updates
+            const actGroups = new Map<string, any[]>();
+            actUpdates.forEach(u => {
+                if (!actGroups.has(u.id)) actGroups.set(u.id, []);
+                actGroups.get(u.id)!.push(u);
+            });
+
+            for (const [actId, changes] of Array.from(actGroups.entries())) {
+                const metadataChange = changes.find(c => c.field === '_sync_metadata');
+                if (metadataChange && metadataChange.value && metadataChange.value.pending_planner) {
+                    console.log(`[Sync] Found offline activity with pending Planner creation: ${actId}`);
+                    try {
+                        // Gather what we know from the batch or Dexie
+                        const localAct = await db.activities.get(actId);
+                        const titleField = changes.find(c => c.field === 'asunto');
+                        const title = titleField ? titleField.value : (localAct?.asunto || 'Nueva Tarea (CRM)');
+                        const dateField = changes.find(c => c.field === 'fecha_inicio');
+                        const dueDateTime = dateField ? dateField.value : localAct?.fecha_inicio;
+                        const notesField = changes.find(c => c.field === 'descripcion');
+                        const notes = notesField ? notesField.value : localAct?.descripcion;
+
+                        const meta = metadataChange.value;
+
+                        // Proceed to call our internal POST endpoint
+                        // We must send credentials to pass cookies (JWT token)
+                        const res = await fetch('/api/microsoft/planner/tasks', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'include',
+                            // Include cookies to pass the Next.js auth guard
+                            // Note: Sync usually runs in the same browser session so this should work
+                            body: JSON.stringify({
+                                planId: meta.planId,
+                                bucketId: meta.bucketId,
+                                title: title,
+                                dueDateTime: dueDateTime,
+                                notes: notes,
+                                checklist: meta.checklist,
+                                assigneeIds: meta.assigneeIds
+                            })
+                        });
+
+                        if (res.ok) {
+                            const taskResponse = await res.json();
+                            const newPlannerId = taskResponse.task?.id;
+                            console.log(`[Sync] Successfully late-created Planner task ${newPlannerId} for ${actId}`);
+
+                            // Remove pending_planner from metadata before sending to Supabase
+                            const newMeta = { ...meta };
+                            delete newMeta.pending_planner;
+                            // metadataChange.value = newMeta; // No longer needed, _sync_metadata is synced as-is
+
+                            // Inject ms_planner_id update into the batch
+                            const plannerChange = changes.find(c => c.field === 'ms_planner_id');
+                            if (plannerChange) {
+                                plannerChange.value = newPlannerId;
+                            } else {
+                                // Add it to the batch manually
+                                actUpdates.push({
+                                    id: actId,
+                                    field: 'ms_planner_id',
+                                    value: newPlannerId,
+                                    timestamp: new Date().toISOString()
+                                });
+                            }
+
+                            // Also update local copy
+                            await db.activities.update(actId, {
+                                ms_planner_id: newPlannerId,
+                                _sync_metadata: newMeta
+                            });
+                        } else {
+                            console.error(`[Sync] Failed to late-create Planner task error:`, await res.text());
+                            // We don't block the sync to Supabase, it will just not have planner ID
+                        }
+                    } catch (e) {
+                        console.error(`[Sync] Exception during late Planner creation:`, e);
+                    }
+                }
+
+                // NEW: Sync completion updates to Planner 
+                // This ensures if user checks/unchecks the task offline or online, 
+                // it queues the update and fires it against MS Microsoft Graph here.
+                const completedChange = changes.find(c => c.field === 'is_completed');
+                if (completedChange) {
+                    let msPlannerId = changes.find(c => c.field === 'ms_planner_id')?.value;
+                    if (!msPlannerId) {
+                        try {
+                            const localAct = await db.activities.get(actId);
+                            msPlannerId = localAct?.ms_planner_id;
+                        } catch (e) { }
+                    }
+
+                    if (msPlannerId && msPlannerId !== 'ERROR') {
+                        console.log(`[Sync] Found completion status change, syncing to Planner task ${msPlannerId}...`);
+                        try {
+                            const percentComplete = completedChange.value ? 100 : 0;
+                            const res = await fetch(`/api/microsoft/planner/tasks/${msPlannerId}`, {
+                                method: 'PATCH',
+                                headers: { 'Content-Type': 'application/json' },
+                                credentials: 'include',
+                                body: JSON.stringify({ percentComplete })
+                            });
+                            if (!res.ok) {
+                                console.error(`[Sync] Failed to update Planner completion status:`, await res.text());
+                            } else {
+                                console.log(`[Sync] Successfully updated Planner completion status for ${msPlannerId}`);
+                            }
+                        } catch (e) {
+                            console.error(`[Sync] Exception updating Planner completion status:`, e);
+                            // Do not throw, allow Supabase sync to proceed
+                        }
+                    }
+                }
+
+                if (metadataChange && metadataChange.value && metadataChange.value.pending_calendar) {
+                    console.log(`[Sync] Found offline activity with pending Calendar creation: ${actId}`);
+                    try {
+                        const localAct = await db.activities.get(actId);
+                        const titleField = changes.find(c => c.field === 'asunto');
+                        const title = titleField ? titleField.value : (localAct?.asunto || 'Nuevo Evento (CRM)');
+                        const descField = changes.find(c => c.field === 'descripcion');
+                        const desc = descField ? descField.value : localAct?.descripcion;
+                        const startField = changes.find(c => c.field === 'fecha_inicio');
+                        const start = startField ? startField.value : localAct?.fecha_inicio;
+                        const endField = changes.find(c => c.field === 'fecha_fin');
+                        const end = endField ? endField.value : localAct?.fecha_fin;
+
+                        const meta = metadataChange.value;
+
+                        // Proceed to call our internal POST endpoint
+                        const res = await fetch('/api/microsoft/calendar/create-event', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'include',
+                            body: JSON.stringify({
+                                subject: title,
+                                description: desc,
+                                start: start,
+                                end: end,
+                                attendees: meta.assigneeIds ? meta.assigneeIds.map((a: string) => ({ email: a, name: a })) : [],
+                                isOnlineMeeting: !!meta.isOnlineMeeting
+                            })
+                        });
+
+                        if (res.ok) {
+                            const eventResponse = await res.json();
+                            const newEventId = eventResponse.id;
+                            const teamsUrl = eventResponse.onlineMeeting?.joinUrl;
+                            console.log(`[Sync] Successfully late-created Calendar event ${newEventId} for ${actId}`);
+
+                            // Remove pending_calendar from metadata before sending to Supabase
+                            const newMeta = { ...meta };
+                            delete newMeta.pending_calendar;
+                            metadataChange.value = newMeta;
+
+                            // Inject ms_event_id update into the batch
+                            const eventChange = changes.find(c => c.field === 'ms_event_id');
+                            if (eventChange) {
+                                eventChange.value = newEventId;
+                            } else {
+                                actUpdates.push({
+                                    id: actId,
+                                    field: 'ms_event_id',
+                                    value: newEventId,
+                                    timestamp: new Date().toISOString()
+                                });
+                            }
+
+                            if (teamsUrl) {
+                                const teamsChange = changes.find(c => c.field === 'teams_meeting_url');
+                                if (teamsChange) {
+                                    teamsChange.value = teamsUrl;
+                                } else {
+                                    actUpdates.push({
+                                        id: actId,
+                                        field: 'teams_meeting_url',
+                                        value: teamsUrl,
+                                        timestamp: new Date().toISOString()
+                                    });
+                                }
+                            }
+
+                            // Also update local copy
+                            await db.activities.update(actId, {
+                                ms_event_id: newEventId,
+                                teams_meeting_url: teamsUrl || localAct?.teams_meeting_url,
+                                _sync_metadata: newMeta
+                            });
+                        } else {
+                            console.error(`[Sync] Failed to late-create Calendar event error:`, await res.text());
+                        }
+                    } catch (e) {
+                        console.error(`[Sync] Exception during late Calendar creation:`, e);
+                    }
+                }
+            }
+        }
+
         // 3.3b Proactive Fix: Filter out non-existent fields for CRM_Actividades
         // After migration 20260218_add_activities_ms_columns.sql, all known fields are now valid.
         // This block is kept as a safety net for future unknown fields.
@@ -737,7 +939,12 @@ export class SyncEngine {
                 .select('*')
                 .eq('is_deleted', false);
 
-            if (lastSync) accountsQuery = accountsQuery.gte('updated_at', lastSync);
+            if (lastSync) {
+                accountsQuery = accountsQuery.gte('updated_at', lastSync);
+            } else {
+                // Initial Load limit to 3000 most recent for caching
+                accountsQuery = accountsQuery.order('updated_at', { ascending: false }).limit(3000);
+            }
 
             const { data: accounts, error: accountsError } = await accountsQuery;
 
@@ -1007,7 +1214,12 @@ export class SyncEngine {
                 .select('*')
                 .eq('is_deleted', false);
 
-            if (lastSync) contactsQuery = contactsQuery.gte('updated_at', lastSync);
+            if (lastSync) {
+                contactsQuery = contactsQuery.gte('updated_at', lastSync);
+            } else {
+                // Initial Load limit to 3000 most recent for caching
+                contactsQuery = contactsQuery.order('updated_at', { ascending: false }).limit(3000);
+            }
 
             const { data: contacts, error: contactsError } = await contactsQuery;
 
@@ -1055,7 +1267,12 @@ export class SyncEngine {
                 .select('*')
                 .eq('is_deleted', false);
 
-            if (lastSync) oppsQuery = oppsQuery.gte('updated_at', lastSync);
+            if (lastSync) {
+                oppsQuery = oppsQuery.gte('updated_at', lastSync);
+            } else {
+                // Initial Load limit to 3000 most recent for caching
+                oppsQuery = oppsQuery.order('updated_at', { ascending: false }).limit(3000);
+            }
 
             const { data: opportunities, error: oppsError } = await oppsQuery;
 
@@ -1210,6 +1427,9 @@ export class SyncEngine {
                 // Incremental: only pull activities updated since last sync
                 if (lastSync) {
                     query = query.gte('updated_at', lastSync);
+                } else {
+                    // Initial Load limit to 3000 most recent for caching
+                    query = query.order('updated_at', { ascending: false }).limit(3000);
                 }
 
                 const { data: activities, error: activitiesError } = await query;
@@ -1260,7 +1480,6 @@ export class SyncEngine {
 
             for (const [field, value] of Object.entries(changes)) {
                 if (value === undefined) continue; // Skip undefined fields
-                if (field === '_sync_metadata') continue; // Skip sync metadata
                 if (field === 'id') continue; // Skip ID (it's the key, not a field to update)
 
                 items.push({
@@ -1288,6 +1507,12 @@ export class SyncEngine {
         }
     }
     async getCurrentUser() {
+        // Try local session first (crucial for offline mode)
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+            return { data: { user: session.user }, error: null };
+        }
+        // Fallback to server if needed
         return await supabase.auth.getUser();
     }
 }

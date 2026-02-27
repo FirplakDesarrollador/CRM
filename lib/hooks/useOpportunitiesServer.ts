@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { syncEngine } from '@/lib/sync';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
+import { db } from '@/lib/db';
 
 export type OpportunityServer = {
     id: string;
@@ -69,12 +70,20 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
     useEffect(() => {
         if (phasesLoadedRef.current) return;
         const loadClosedPhases = async () => {
-            const { data: phases } = await supabase
-                .from('CRM_FasesOportunidad')
-                .select('id, nombre')
-                .eq('is_active', true);
+            let phases: any[] = [];
 
-            if (phases) {
+            if (!navigator.onLine) {
+                const localPhases = await db.phases.toArray();
+                phases = localPhases;
+            } else {
+                const { data } = await supabase
+                    .from('CRM_FasesOportunidad')
+                    .select('id, nombre')
+                    .eq('is_active', true);
+                if (data) phases = data;
+            }
+
+            if (phases && phases.length > 0) {
                 const won: number[] = [];
                 const lost: number[] = [];
 
@@ -90,9 +99,10 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                 wonPhaseIdsRef.current = won;
                 lostPhaseIdsRef.current = lost;
                 closedPhaseIdsRef.current = [...won, ...lost];
-                phasesLoadedRef.current = true;
-                setPhasesReady(true); // Trigger re-render to enable fetching
             }
+            // Always set to true so offline doesn't block indefinitely
+            phasesLoadedRef.current = true;
+            setPhasesReady(true); // Trigger re-render to enable fetching
         };
         loadClosedPhases();
     }, []);
@@ -111,6 +121,94 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
             const currentPage = isLoadMore ? pageRef.current + 1 : 1;
             const from = (currentPage - 1) * pageSize;
             const to = from + pageSize - 1;
+
+            if (!navigator.onLine) {
+                console.log("[useOpportunitiesServer] Device is offline. Falling back to local Dexie database...");
+                let localOpps = await db.opportunities.toArray();
+                const allAccounts = await db.accounts.toArray();
+                const allPhases = await db.phases.toArray();
+
+                // Map helpers
+                const accMap = new Map(allAccounts.map(a => [a.id, a]));
+                const phaseMap = new Map(allPhases.map(p => [p.id, p]));
+
+                // Filtering
+                if (searchTerm) {
+                    const lowerSearch = searchTerm.toLowerCase();
+                    localOpps = localOpps.filter(o => o.nombre.toLowerCase().includes(lowerSearch));
+                }
+
+                if (channelFilter) {
+                    localOpps = localOpps.filter(o => accMap.get(o.account_id)?.canal_id === channelFilter);
+                }
+
+                if (subclassificationFilter) {
+                    localOpps = localOpps.filter(o => accMap.get(o.account_id)?.subclasificacion_id === subclassificationFilter);
+                }
+
+                if (segmentFilter) {
+                    localOpps = localOpps.filter(o => o.segmento_id === segmentFilter);
+                }
+
+                if (phaseFilter) {
+                    localOpps = localOpps.filter(o => o.fase_id === phaseFilter);
+                }
+
+                if (statusFilter === 'won' && wonPhaseIdsRef.current.length > 0) {
+                    localOpps = localOpps.filter(o => wonPhaseIdsRef.current.includes(o.fase_id as number));
+                } else if (statusFilter === 'lost' && lostPhaseIdsRef.current.length > 0) {
+                    localOpps = localOpps.filter(o => lostPhaseIdsRef.current.includes(o.fase_id as number));
+                } else if (statusFilter === 'open' && closedPhaseIdsRef.current.length > 0) {
+                    localOpps = localOpps.filter(o => !closedPhaseIdsRef.current.includes(o.fase_id as number));
+                }
+
+                if (accountOwnerId) {
+                    localOpps = localOpps.filter(o => o.owner_user_id === accountOwnerId);
+                } else {
+                    if (userFilter === 'mine') {
+                        localOpps = localOpps.filter(o => o.owner_user_id === currentUserId);
+                    } else if (userFilter === 'team' && userRole !== 'ADMIN') {
+                        localOpps = localOpps.filter(o => o.owner_user_id === currentUserId);
+                    }
+                }
+
+                // Sorting
+                localOpps.sort((a, b) => {
+                    const dateA = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+                    const dateB = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+                    return dateB - dateA;
+                });
+
+                const totalCount = localOpps.length;
+                const paginatedOpps = localOpps.slice(from, to + 1);
+
+                // Mapping to match server shape
+                const flattenedResults = paginatedOpps.map(item => {
+                    const acc = accMap.get(item.account_id);
+                    const ph = phaseMap.get(item.fase_id as number);
+                    return {
+                        ...item,
+                        account: acc ? { nombre: acc.nombre, canal_id: acc.canal_id } : null,
+                        fase_data: ph ? { nombre: ph.nombre } : null,
+                        estado_data: null // Mock offline
+                    };
+                });
+
+                if (isLoadMore) {
+                    setData(prev => {
+                        const existingIds = new Set(prev.map(i => i.id));
+                        const newItems = flattenedResults.filter(i => !existingIds.has(i.id));
+                        return [...prev, ...newItems] as any;
+                    });
+                    pageRef.current = currentPage;
+                } else {
+                    setData(flattenedResults as any);
+                    pageRef.current = 1;
+                }
+                setCount(totalCount);
+                setHasMore(from + paginatedOpps.length < totalCount);
+                return;
+            }
 
             // Dynamically build select to support filtering on account
             const useInnerJoin = channelFilter || subclassificationFilter;
