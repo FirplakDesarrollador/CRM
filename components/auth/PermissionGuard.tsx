@@ -1,10 +1,8 @@
 "use client";
 
 import { ReactNode } from 'react';
-import { useSyncStore } from '@/lib/stores/useSyncStore';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { hasPermission, hasAnyPermission, Permission } from '@/lib/permissions';
-import { UserRole } from '@/lib/hooks/useCurrentUser';
 
 interface PermissionGuardProps {
     /** Single permission or array of permissions required */
@@ -20,8 +18,8 @@ interface PermissionGuardProps {
 }
 
 /**
- * Component to conditionally render content based on user permissions
- * Uses useSyncStore to match Sidebar logic.
+ * Component to conditionally render content based on user permissions.
+ * Uses useCurrentUser() to respect viewMode simulation.
  */
 export function PermissionGuard({
     permission,
@@ -30,17 +28,7 @@ export function PermissionGuard({
     children,
     fallback = null
 }: PermissionGuardProps) {
-    const { userRole } = useSyncStore();
-    const { user } = useCurrentUser();
-
-    // Map Store Role (English) to Permission Role (Spanish)
-    const getPermissionRole = (storeRole: string): UserRole => {
-        if (storeRole === 'ADMIN') return 'ADMIN';
-        if (storeRole === 'COORDINATOR') return 'COORDINADOR';
-        return 'VENDEDOR'; // Default / SALES
-    };
-
-    const role = getPermissionRole(userRole);
+    const { user, role } = useCurrentUser();
 
     // 1. Check if allowed_modules explicitly grants access to this module
     if (modulePath && user?.allowed_modules?.includes(modulePath)) {

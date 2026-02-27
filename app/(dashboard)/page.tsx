@@ -1,242 +1,306 @@
 "use client";
 
+import React from "react";
 import { useOpportunities } from "@/lib/hooks/useOpportunities";
 import { useActivities } from "@/lib/hooks/useActivities";
+import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
-import { useEffect, useState } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { TrendingUp, Calendar, CheckCircle, Plus, Building2, AlertCircle } from "lucide-react";
-import { cn } from "@/components/ui/utils";
+import { Plus, Briefcase, Building2, TrendingUp } from "lucide-react";
+
+// Dashboard Components
+import { DashboardHeader } from "@/components/dashboard/DashboardHeader";
+import { OpportunitySummaryCard } from "@/components/dashboard/OpportunitySummaryCard";
+import { ObjectivesCard } from "@/components/dashboard/ObjectivesCard";
+import { RecentAccounts } from "@/components/dashboard/RecentAccounts";
+import { SalesFunnelTile } from "@/components/dashboard/SalesFunnelTile";
+import { DashboardGrid, DEFAULT_TILES, saveDashboardOrder } from "@/components/dashboard/DashboardGrid";
+import { DashboardFilters, DashboardFilterState } from "@/components/dashboard/DashboardFilters";
+import { PerformanceChartTile } from "@/components/dashboard/PerformanceChartTile";
+import { ClientDistributionTile } from "@/components/dashboard/ClientDistributionTile";
 
 export default function Home() {
   const { opportunities } = useOpportunities();
   const { activities } = useActivities();
+  const { accounts } = useAccounts();
   const router = useRouter();
-  const { user, role, isLoading, error } = useCurrentUser();
-  const [stats, setStats] = useState({
-    openCount: 0,
-    wonAmount: 0,
-    activitiesToday: 0
+  const { user, role, isLoading: userLoading } = useCurrentUser();
+
+  // Dashboard Filters State
+  const [filters, setFilters] = useState<DashboardFilterState>({
+    canal_id: null,
+    advisor_id: null,
+    subclasificacion_id: null,
+    nivel_premium: null,
+    search_query: null
   });
 
-  useEffect(() => {
-    if (!opportunities || !activities) return;
+  // Filtered Data Sets
+  const filteredData = useMemo(() => {
+    if (!opportunities || !accounts) return { opportunities: [], accounts: [] };
 
-    const openOpps = opportunities.filter(o => o.estado_id === 1 || !o.estado_id);
-    const wonOpps = opportunities.filter(o => o.estado_id === 2);
+    const accountMap = new Map(accounts.map(a => [a.id, a]));
 
-    const today = new Date();
-    const actsToday = activities.filter(a => {
-      const d = new Date(a.fecha_inicio);
-      return d.getDate() === today.getDate() &&
-        d.getMonth() === today.getMonth() &&
-        d.getFullYear() === today.getFullYear();
+    const filteredOpps = opportunities.filter(o => {
+      if (filters.advisor_id && o.owner_user_id !== filters.advisor_id) return false;
+
+      const acc = accountMap.get(o.account_id);
+      if (filters.canal_id && acc?.canal_id !== filters.canal_id) return false;
+      if (filters.subclasificacion_id && acc?.subclasificacion_id !== filters.subclasificacion_id) return false;
+      if (filters.nivel_premium && acc?.nivel_premium !== filters.nivel_premium) return false;
+
+      if (filters.search_query) {
+        const query = filters.search_query.toLowerCase();
+        const oppNameMatch = o.nombre?.toLowerCase().includes(query) || false;
+        const accNameMatch = acc?.nombre?.toLowerCase().includes(query) || false;
+        if (!oppNameMatch && !accNameMatch) return false;
+      }
+
+      return true;
     });
 
-    const totalWon = wonOpps.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+    const filteredAccs = accounts.filter(a => {
+      if (filters.canal_id && a.canal_id !== filters.canal_id) return false;
+      if (filters.subclasificacion_id && a.subclasificacion_id !== filters.subclasificacion_id) return false;
+      if (filters.nivel_premium && a.nivel_premium !== filters.nivel_premium) return false;
+      if (filters.advisor_id && a.owner_user_id !== filters.advisor_id) return false;
 
-    setStats({
-      openCount: openOpps.length,
-      wonAmount: totalWon,
-      activitiesToday: actsToday.length
+      if (filters.search_query) {
+        const query = filters.search_query.toLowerCase();
+        if (!a.nombre?.toLowerCase().includes(query)) return false;
+      }
+
+      return true;
     });
-  }, [opportunities, activities]);
 
-  // Format currency
+    return { opportunities: filteredOpps, accounts: filteredAccs };
+  }, [opportunities, accounts, filters]);
+
+  // Use filtered data for all derivations
+  const displayOpps = filteredData.opportunities;
+  const displayAccs = filteredData.accounts;
+
+  // Personalization state
+  const [isEditing, setIsEditing] = useState(false);
+  const currentOrderRef = useRef<string[]>(DEFAULT_TILES.map((t) => t.id));
+  const savedOrderRef = useRef<string[]>(DEFAULT_TILES.map((t) => t.id));
+
+  // Find the "Important" opportunity (Highest value open)
+  const importantOpportunity = useMemo(() => {
+    if (!displayOpps) return null;
+    return [...displayOpps]
+      .filter(o => o.estado_id === 1 || !o.estado_id)
+      .sort((a, b) => (Number(b.amount || b.valor) || 0) - (Number(a.amount || a.valor) || 0))[0];
+  }, [displayOpps]);
+
+  // Calculate Stats for Objectives
+  const stats = useMemo(() => {
+    if (!displayOpps || !displayAccs) {
+      return {
+        pipeline: { current: 0, goal: 50000000 },
+        newOpps: { current: 0, goal: 50 },
+        newAccounts: { current: 0, goal: 10 }
+      };
+    }
+
+    const currentMonth = new Date().getMonth();
+    const currentYear = new Date().getFullYear();
+
+    const monthlyOpps = displayOpps.filter(o => {
+      const d = new Date(o.created_at || '');
+      return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+    });
+
+    const monthlyAccounts = displayAccs.filter(a => {
+      const d = new Date(a.created_at || '');
+      return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+    });
+
+    const totalPipeline = displayOpps
+      .filter(o => o.estado_id === 1 || !o.estado_id)
+      .reduce((acc, curr) => acc + (Number(curr.amount || curr.valor) || 0), 0);
+
+    return {
+      pipeline: { current: totalPipeline, goal: 200000000 },
+      newOpps: { current: monthlyOpps.length, goal: 50 },
+      newAccounts: { current: monthlyAccounts.length, goal: 10 }
+    };
+  }, [displayOpps, displayAccs]);
+
+  // Recent Accounts
+  const recentAccountsData = useMemo(() => {
+    if (!displayAccs) return [];
+    return [...displayAccs]
+      .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
+      .slice(0, 4);
+  }, [displayAccs]);
+
+  // Recent Opportunities for list
+  const recentOppsData = useMemo(() => {
+    if (!displayOpps) return [];
+    return [...displayOpps]
+      .sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
+      .slice(0, 5);
+  }, [displayOpps]);
+
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(amount);
   };
 
-  // Get today's activities sorted by time
-  const dashboardActivities = activities?.filter(a => {
-    const d = new Date(a.fecha_inicio);
-    d.setHours(0, 0, 0, 0);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+  // Personalization handlers
+  const handleStartEditing = useCallback(() => {
+    savedOrderRef.current = [...currentOrderRef.current];
+    setIsEditing(true);
+  }, []);
 
-    const isToday = d.getTime() === today.getTime();
-    const isOverdue = !a.is_completed && d.getTime() < today.getTime();
+  const handleSave = useCallback(() => {
+    saveDashboardOrder(currentOrderRef.current);
+    setIsEditing(false);
+  }, []);
 
-    return isToday || isOverdue;
-  }).sort((a, b) => new Date(a.fecha_inicio).getTime() - new Date(b.fecha_inicio).getTime()).slice(0, 5) || [];
+  const handleCancel = useCallback(() => {
+    // Force reset to saved order by remounting the grid
+    currentOrderRef.current = [...savedOrderRef.current];
+    setIsEditing(false);
+    // Trigger re-render to restore order
+    setForceKey((k) => k + 1);
+  }, []);
 
-  // Recent opportunities
-  const recentOpps = opportunities?.sort((a, b) =>
-    new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
-  ).slice(0, 5) || [];
+  const handleReset = useCallback(() => {
+    const defaultOrder = DEFAULT_TILES.map((t) => t.id);
+    currentOrderRef.current = defaultOrder;
+    saveDashboardOrder(defaultOrder);
+    setIsEditing(false);
+    setForceKey((k) => k + 1);
+  }, []);
+
+  const handleOrderChange = useCallback((order: string[]) => {
+    currentOrderRef.current = order;
+  }, []);
+
+  const [forceKey, setForceKey] = useState(0);
+
+  // Build tile map
+  const tiles: Record<string, React.ReactNode> = {
+    "sales-funnel": <SalesFunnelTile filters={filters} />,
+    "performance-chart": <PerformanceChartTile />,
+    "client-distribution": <ClientDistributionTile />,
+    "opportunity-card": (
+      <OpportunitySummaryCard
+        opportunity={importantOpportunity}
+        isLoading={!displayOpps && !userLoading}
+      />
+    ),
+    "objectives-card": (
+      <ObjectivesCard
+        stats={stats}
+        isLoading={!displayOpps && !displayAccs}
+      />
+    ),
+    "recent-accounts": (
+      <RecentAccounts
+        accounts={recentAccountsData}
+        isLoading={!displayAccs}
+      />
+    ),
+    "recent-opps": (
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+        <div className="p-6 border-b border-slate-50 flex items-center justify-between">
+          <h3 className="font-bold text-slate-800 flex items-center gap-2">
+            <Briefcase className="w-5 h-5 text-[#254153]" />
+            Oportunidades Recientes
+          </h3>
+          <Link href="/oportunidades" className="text-xs font-bold text-[#254153] hover:underline">
+            Ver todas
+          </Link>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="bg-slate-50/50">
+                <th className="px-6 py-4 font-bold text-slate-400 text-[10px] uppercase tracking-wider">Oportunidad</th>
+                <th className="px-6 py-4 font-bold text-slate-400 text-[10px] uppercase tracking-wider">Valor</th>
+                <th className="px-6 py-4 font-bold text-slate-400 text-[10px] uppercase tracking-wider">Cliente</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {recentOppsData.map((opp: any) => (
+                <tr
+                  key={opp.id}
+                  className="hover:bg-slate-50/80 transition-colors cursor-pointer"
+                  onClick={() => router.push(`/oportunidades/${opp.id}`)}
+                >
+                  <td className="px-6 py-4">
+                    <p className="font-bold text-slate-800">{opp.nombre}</p>
+                    <p className="text-[10px] text-slate-400 uppercase font-bold mt-0.5">{opp.fase_id || 'Prospecto'}</p>
+                  </td>
+                  <td className="px-6 py-4 font-mono font-bold text-slate-700">
+                    {formatCurrency(opp.amount || opp.valor || 0)}
+                  </td>
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-md bg-slate-100 flex items-center justify-center">
+                        <Building2 className="w-3.5 h-3.5 text-slate-400" />
+                      </div>
+                      <span className="text-slate-600 font-medium">Empresa Registrada</span>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    ),
+    "global-pipeline": (
+      <div className="bg-[#254153] p-6 rounded-2xl text-white shadow-xl shadow-[#254153]/20 relative overflow-hidden group">
+        <div className="absolute top-0 right-0 p-8 opacity-10 group-hover:scale-110 transition-transform">
+          <TrendingUp className="w-24 h-24" />
+        </div>
+        <h3 className="font-bold text-lg mb-1">Global Pipeline</h3>
+        <p className="text-blue-200 text-xs mb-6">Total de oportunidades abiertas</p>
+        <p className="text-3xl font-bold mb-2">{formatCurrency(stats.pipeline.current)}</p>
+        <div className="w-full bg-white/10 h-1.5 rounded-full overflow-hidden mt-4">
+          <div
+            className="bg-white h-full"
+            style={{ width: `${Math.min((stats.pipeline.current / stats.pipeline.goal) * 100, 100)}%` }}
+          ></div>
+        </div>
+      </div>
+    ),
+  };
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex justify-between items-end">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-            Hola, {isLoading ? 'Cargando...' : (user?.full_name || user?.email?.split('@')[0] || 'Usuario')}
-            {error && <span className="text-xs text-red-500">Error: {error}</span>}
-            {!user && !isLoading && !error && <span className="text-xs text-orange-500">No encontrado en CRM</span>}
-          </h2>
-          <div className="flex flex-col gap-1 mt-1">
-            <p className="text-sm font-medium text-slate-600">
-              Rol: <span className="text-blue-600">{role || 'No definido'}</span>
-            </p>
-            <p className="text-xs text-slate-400 font-mono">
-              ID: {user?.id}
-            </p>
-          </div>
-          <p className="text-slate-500 mt-2">Aquí está tu resumen de hoy.</p>
-        </div>
-        <div className="text-right hidden sm:block">
-          <p className="text-sm font-medium text-slate-900 capitalize">
-            {new Date().toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}
-          </p>
-        </div>
-      </div>
+    <div className="max-w-[1400px] mx-auto pb-12">
+      <DashboardHeader
+        onPersonalize={handleStartEditing}
+        isEditing={isEditing}
+        onSave={handleSave}
+        onCancel={handleCancel}
+        onReset={handleReset}
+      />
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-100 flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Oportunidades Abiertas</p>
-            <h3 className="text-3xl font-bold text-slate-800 mt-1">{stats.openCount}</h3>
-          </div>
-          <div className="p-3 rounded-lg text-blue-600 bg-blue-50">
-            <TrendingUp className="w-6 h-6" />
-          </div>
-        </div>
+      <DashboardFilters
+        filters={filters}
+        onFilterChange={setFilters}
+      />
 
-        <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-100 flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Actividades Hoy</p>
-            <h3 className="text-3xl font-bold text-slate-800 mt-1">{stats.activitiesToday}</h3>
-          </div>
-          <div className="p-3 rounded-lg text-purple-600 bg-purple-50">
-            <Calendar className="w-6 h-6" />
-          </div>
-        </div>
+      <DashboardGrid
+        key={forceKey}
+        tiles={tiles}
+        isEditing={isEditing}
+        onOrderChange={handleOrderChange}
+      />
 
-        <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-100 flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Ventas Ganadas</p>
-            <h3 className="text-2xl font-bold text-slate-800 mt-1">{formatCurrency(stats.wonAmount)}</h3>
-          </div>
-          <div className="p-3 rounded-lg text-emerald-600 bg-emerald-50">
-            <CheckCircle className="w-6 h-6" />
-          </div>
-        </div>
-      </div>
-
-      {/* Main Content Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-        {/* Agenda Column */}
-        <div className="lg:col-span-1 space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="font-bold text-lg text-slate-800">Agenda de Hoy</h3>
-            <Link href="/actividades" className="text-sm text-blue-600 font-medium hover:underline">Ver todo</Link>
-          </div>
-
-          <div className="space-y-3">
-            {dashboardActivities.length > 0 ? dashboardActivities.map(act => {
-              const d = new Date(act.fecha_inicio);
-              d.setHours(0, 0, 0, 0);
-              const today = new Date();
-              today.setHours(0, 0, 0, 0);
-              const isOverdue = !act.is_completed && d.getTime() < today.getTime();
-
-              return (
-                <div key={act.id} className={cn(
-                  "bg-white p-4 rounded-lg shadow-sm border-l-4 flex flex-col gap-1 transition-all",
-                  isOverdue ? "border-red-500 bg-red-50/20" : "border-blue-500"
-                )}>
-                  <div className="flex justify-between items-start">
-                    <span className={cn(
-                      "text-xs font-bold uppercase",
-                      isOverdue ? "text-red-600 flex items-center gap-1" : "text-blue-600"
-                    )}>
-                      {isOverdue && <AlertCircle className="w-3 h-3" />}
-                      {isOverdue
-                        ? new Date(act.fecha_inicio).toLocaleDateString()
-                        : new Date(act.fecha_inicio).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                      }
-                    </span>
-                  </div>
-                  <h4 className={cn(
-                    "font-semibold line-clamp-1",
-                    isOverdue ? "text-red-900" : "text-slate-800"
-                  )}>{act.asunto}</h4>
-                  <p className="text-sm text-slate-500 line-clamp-1">{act.descripcion || 'Sin descripción'}</p>
-                </div>
-              );
-            }) : (
-              <div className="text-center py-8 bg-slate-50 rounded-lg dashed border-2 border-slate-200">
-                <p className="text-slate-400 text-sm">No tienes actividades para hoy</p>
-                <Link href="/actividades" className="text-blue-600 text-xs font-bold mt-2 block">Agendar Ahora</Link>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Recent Opportunities */}
-        <div className="lg:col-span-2 space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="font-bold text-lg text-slate-800">Oportunidades Recientes</h3>
-            <Link href="/oportunidades" className="text-sm text-blue-600 font-medium hover:underline">Ver todas</Link>
-          </div>
-
-          <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-slate-100">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="bg-slate-50 border-b border-slate-100">
-                  <tr>
-                    <th className="px-6 py-3 font-semibold text-slate-500">Oportunidad</th>
-                    <th className="px-6 py-3 font-semibold text-slate-500">Valor</th>
-                    <th className="px-6 py-3 font-semibold text-slate-500">Fase</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {recentOpps.length > 0 ? recentOpps.map(opp => (
-                    <tr
-                      key={opp.id}
-                      className="hover:bg-slate-50 transition-colors cursor-pointer group"
-                      onClick={() => router.push(`/oportunidades/${opp.id}`)}
-                    >
-                      <td className="px-6 py-4">
-                        <div className="font-medium text-slate-900 group-hover:text-blue-600 transition-colors">{opp.nombre}</div>
-                        <div className="text-xs text-slate-400 flex items-center gap-1">
-                          <Building2 className="w-3 h-3" />
-                          {opp.account_id ? 'Cliente Registrado' : 'Prospecto'}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-slate-900 font-mono">
-                        {formatCurrency(opp.amount || 0)}
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className="px-2 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-600">
-                          {opp.fase_id || 'Prospecto'}
-                        </span>
-                      </td>
-                    </tr>
-                  )) : (
-                    <tr>
-                      <td colSpan={3} className="text-center py-8 text-slate-400">
-                        No hay oportunidades recientes
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Quick Action FAB */}
-      <div className="fixed bottom-20 md:bottom-8 right-4 md:right-8">
-        <Link href="/oportunidades/nueva">
-          <button className="bg-slate-900 hover:bg-slate-800 text-white rounded-full p-4 shadow-lg hover:shadow-xl transition-all">
-            <Plus className="w-6 h-6" />
-          </button>
+      {/* Floating Action Button */}
+      <div className="fixed bottom-8 right-8 z-50">
+        <Link
+          href="/oportunidades/nueva"
+          className="w-14 h-14 bg-[#254153] hover:bg-[#1a2f3d] text-white rounded-full flex items-center justify-center shadow-2xl transition-all hover:scale-110 active:scale-95 group"
+        >
+          <Plus className="w-7 h-7 group-hover:rotate-90 transition-transform duration-300" />
         </Link>
       </div>
     </div>

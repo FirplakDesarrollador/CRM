@@ -1,9 +1,14 @@
 "use client";
 
-import { Suspense, useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useState, useMemo } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { useActivities, LocalActivity } from '@/lib/hooks/useActivities';
-import { useOpportunities } from '@/lib/hooks/useOpportunities';
+import { useOpportunitiesServer } from '@/lib/hooks/useOpportunitiesServer';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db } from '@/lib/db';
+import { syncEngine } from '@/lib/sync';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
+import { hasPermission } from '@/lib/permissions';
 import {
     Calendar as CalendarIcon,
     ChevronLeft,
@@ -14,9 +19,10 @@ import {
     Circle,
     Building2,
     CalendarDays,
-    Search,
     ListTodo,
-    CalendarClock
+    Filter,
+    Loader2,
+    Search
 } from 'lucide-react';
 
 import { cn } from '@/components/ui/utils';
@@ -24,12 +30,49 @@ import { CreateActivityModal } from '@/components/activities/CreateActivityModal
 
 function ActivitiesContent() {
     const searchParams = useSearchParams();
+    const router = useRouter();
     const { activities, createActivity, updateActivity, toggleComplete } = useActivities();
-    const { opportunities } = useOpportunities();
+    const { data: opportunities, setUserFilter } = useOpportunitiesServer({ pageSize: 100 });
+    const { user, role } = useCurrentUser();
+    const canViewAll = hasPermission(role, 'view_all_activities');
+
+    // Load collaborators to know which opportunities the user collaborates in
+    const userCollaborations = useLiveQuery(
+        () => user ? db.opportunityCollaborators.where('usuario_id').equals(user.id).toArray() : [],
+        [user]
+    ) || [];
+
+    const collaborativeOppIds = useMemo(() => {
+        return new Set(userCollaborations.map(c => c.oportunidad_id));
+    }, [userCollaborations]);
+
+    // Load all opportunities for the dropdown, not just user's own
+    useEffect(() => {
+        setUserFilter('all');
+    }, [setUserFilter]);
+
+    // Catalogs
+    const classifications = useLiveQuery(() => db.activityClassifications.toArray(), []) || [];
+    const subclassifications = useLiveQuery(() => db.activitySubclassifications.toArray(), []) || [];
+
+    // PROACTIVE SYNC: If catalogs are empty, trigger a pull
+    useEffect(() => {
+        if (classifications.length === 0 && navigator.onLine) {
+            console.log("[ActivitiesPage] Catalogs empty, triggering sync...");
+            syncEngine.triggerSync();
+        }
+    }, [classifications.length]);
+
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [view, setView] = useState<'agenda' | 'month' | 'all'>('agenda');
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedActivity, setSelectedActivity] = useState<LocalActivity | null>(null);
+
+    // Filters
+    const [searchQuery, setSearchQuery] = useState("");
+    const [filterType, setFilterType] = useState<string>("");
+    const [filterClassification, setFilterClassification] = useState<string>("");
+    const [filterSubclassification, setFilterSubclassification] = useState<string>("");
 
     // Deep linking: detect id in URL and open edit modal
     useEffect(() => {
@@ -43,6 +86,16 @@ function ActivitiesContent() {
             }
         }
     }, [searchParams, activities]);
+
+    // Reset dependent filters
+    useEffect(() => {
+        setFilterClassification("");
+        setFilterSubclassification("");
+    }, [filterType]);
+
+    useEffect(() => {
+        setFilterSubclassification("");
+    }, [filterClassification]);
 
     const handlePrev = () => {
         const newDate = new Date(selectedDate);
@@ -66,22 +119,78 @@ function ActivitiesContent() {
         setSelectedDate(newDate);
     };
 
-    // Format activities for display
-    const filteredActivities = activities?.filter(act => {
-        if (view === 'all') return true;
+    // Filter Options Logic
+    const availableClassifications = useMemo(() => {
+        if (!filterType) return classifications;
+        return classifications.filter(c => c.tipo_actividad === filterType);
+    }, [classifications, filterType]);
 
-        const actDate = new Date(act.fecha_inicio);
-        return (
-            actDate.getDate() === selectedDate.getDate() &&
-            actDate.getMonth() === selectedDate.getMonth() &&
-            actDate.getFullYear() === selectedDate.getFullYear()
-        );
-    })?.sort((a, b) => new Date(a.fecha_inicio).getTime() - new Date(b.fecha_inicio).getTime());
+    const availableSubclassifications = useMemo(() => {
+        if (!filterClassification) return [];
+        return subclassifications.filter(s => s.clasificacion_id === Number(filterClassification));
+    }, [subclassifications, filterClassification]);
+
+    // PERF FIX: Apply global filters once, then derive views from the result
+    const globallyFilteredActivities = useMemo(() => {
+        if (!activities) return [];
+        const lowerQuery = searchQuery.toLowerCase();
+        return activities.filter(act => {
+            // Apply role-based filtering: VENDEDOR and similar roles only see their own activities or those of opportunities they collaborate on
+            if (!canViewAll && user) {
+                const isOwner = act.user_id === user.id;
+                const isCollaborator = act.opportunity_id ? collaborativeOppIds.has(act.opportunity_id) : false;
+                if (!isOwner && !isCollaborator) {
+                    return false;
+                }
+            }
+
+            if (filterType && act.tipo_actividad !== filterType) return false;
+            if (filterClassification && act.clasificacion_id != filterClassification) return false;
+            if (filterSubclassification && act.subclasificacion_id != filterSubclassification) return false;
+
+            if (searchQuery) {
+                const searchMatch =
+                    act.asunto?.toLowerCase().includes(lowerQuery) ||
+                    act.descripcion?.toLowerCase().includes(lowerQuery);
+                if (!searchMatch) return false;
+            }
+
+            return true;
+        });
+    }, [activities, filterType, filterClassification, filterSubclassification, searchQuery, canViewAll, user, collaborativeOppIds]);
+
+    // For agenda/all views: filter by selected date + sort
+    const filteredActivities = useMemo(() => {
+        let result = globallyFilteredActivities;
+        if (view !== 'all') {
+            const sd = selectedDate.getDate();
+            const sm = selectedDate.getMonth();
+            const sy = selectedDate.getFullYear();
+            result = result.filter(act => {
+                const actDate = new Date(act.fecha_inicio);
+                return actDate.getDate() === sd && actDate.getMonth() === sm && actDate.getFullYear() === sy;
+            });
+        }
+        return result.sort((a, b) => new Date(a.fecha_inicio).getTime() - new Date(b.fecha_inicio).getTime());
+    }, [globallyFilteredActivities, view, selectedDate]);
+
+    // PERF FIX: Pre-group activities by day key for month view (computed once, not 31x)
+    const activitiesByDay = useMemo(() => {
+        const map = new Map<string, LocalActivity[]>();
+        globallyFilteredActivities.forEach(act => {
+            const d = new Date(act.fecha_inicio);
+            const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+            const arr = map.get(key);
+            if (arr) arr.push(act);
+            else map.set(key, [act]);
+        });
+        return map;
+    }, [globallyFilteredActivities]);
 
     return (
-        <div className="flex flex-col h-[calc(100vh-2rem)] space-y-4">
+        <div data-testid="activities-page" className="flex flex-col h-[calc(100vh-2rem)] space-y-4">
             {/* Header */}
-            <header className="flex justify-between items-center p-6 bg-white rounded-2xl border border-slate-200 shadow-sm">
+            <header className="flex flex-col md:flex-row md:items-center justify-between p-6 bg-white rounded-2xl border border-slate-200 shadow-sm gap-4">
                 <div className="flex items-center gap-4">
                     <div className="bg-blue-100 p-3 rounded-xl text-blue-600">
                         <CalendarIcon className="w-6 h-6" />
@@ -91,26 +200,101 @@ function ActivitiesContent() {
                         <p className="text-sm text-slate-500">Planifica tu día y haz seguimiento</p>
                     </div>
                 </div>
-                <button
-                    onClick={() => setIsModalOpen(true)}
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-blue-200 transition-all hover:scale-105 active:scale-95"
-                >
-                    <Plus className="w-5 h-5" />
-                    Nueva Actividad
-                </button>
+
+                <div className="flex flex-wrap items-center gap-2">
+                    {/* Search Input */}
+                    <div className="relative">
+                        <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                            type="text"
+                            data-testid="activities-search"
+                            placeholder="Buscar..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="bg-white border text-slate-600 border-slate-200 font-semibold text-sm rounded-xl pl-9 pr-4 py-2 w-full sm:w-48 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                        />
+                    </div>
+
+                    {/* Filters */}
+                    <div className="flex bg-slate-50 p-1 rounded-xl border border-slate-100 items-center">
+                        <div className="px-2 text-slate-400">
+                            {classifications.length === 0 ? <Loader2 className="w-4 h-4 animate-spin" /> : <Filter className="w-4 h-4" />}
+                        </div>
+                        <select
+                            data-testid="activities-filter-type"
+                            value={filterType}
+                            onChange={(e) => setFilterType(e.target.value)}
+                            className="bg-transparent text-sm font-semibold text-slate-600 focus:outline-none p-1.5"
+                        >
+                            <option value="">Tipos...</option>
+                            <option value="EVENTO">Eventos</option>
+                            <option value="TAREA">Tareas</option>
+                        </select>
+
+                        {(filterType || availableClassifications.length > 0) && (
+                            <>
+                                <div className="w-px h-4 bg-slate-200 mx-1"></div>
+                                <select
+                                    value={filterClassification}
+                                    onChange={(e) => setFilterClassification(e.target.value)}
+                                    className="bg-transparent text-sm font-semibold text-slate-600 focus:outline-none p-1.5 max-w-[150px] truncate"
+                                >
+                                    <option value="">Clasificación...</option>
+                                    {availableClassifications.map(c => (
+                                        <option key={c.id} value={String(c.id)}>{c.nombre}</option>
+                                    ))}
+                                </select>
+                            </>
+                        )}
+
+                        {availableSubclassifications.length > 0 && (
+                            <>
+                                <div className="w-px h-4 bg-slate-200 mx-1"></div>
+                                <select
+                                    value={filterSubclassification}
+                                    onChange={(e) => setFilterSubclassification(e.target.value)}
+                                    className="bg-transparent text-sm font-semibold text-slate-600 focus:outline-none p-1.5 max-w-[150px] truncate"
+                                >
+                                    <option value="">Subclasificación...</option>
+                                    {availableSubclassifications.map(s => (
+                                        <option key={s.id} value={String(s.id)}>{s.nombre}</option>
+                                    ))}
+                                </select>
+                            </>
+                        )}
+
+                        {(filterType || filterClassification || filterSubclassification) && (
+                            <button
+                                onClick={() => { setFilterType(""); setFilterClassification(""); setFilterSubclassification(""); }}
+                                className="ml-2 px-2 text-xs text-red-500 hover:text-red-700 font-bold"
+                            >
+                                &times;
+                            </button>
+                        )}
+                    </div>
+
+                    <button
+                        data-testid="activities-create-button"
+                        onClick={() => setIsModalOpen(true)}
+                        className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-blue-200 transition-all hover:scale-105 active:scale-95 ml-auto md:ml-0"
+                    >
+                        <Plus className="w-5 h-5" />
+                        <span className="hidden sm:inline">Nueva Actividad</span>
+                    </button>
+                </div>
             </header>
 
             <div className="flex flex-1 gap-6 overflow-hidden">
                 {/* Agenda / Month View */}
                 <div className="flex-1 bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm flex flex-col">
-                    <div className="p-6 border-b border-slate-100 flex items-center justify-between">
+                    <div className="p-6 border-b border-slate-100 flex items-center justify-between overflow-x-auto gap-4">
                         <div className="flex items-center gap-6">
                             <button
                                 onClick={() => setView(view === 'agenda' ? 'month' : 'agenda')}
-                                className="flex items-center gap-2 text-slate-600 hover:text-blue-600 transition-colors"
+                                className="flex items-center gap-2 text-slate-600 hover:text-blue-600 transition-colors whitespace-nowrap"
                             >
                                 {view === 'agenda' ? <CalendarDays className="w-5 h-5 text-blue-500" /> : view === 'month' ? <CalendarIcon className="w-5 h-5 text-blue-500" /> : <ListTodo className="w-5 h-5 text-blue-500" />}
-                                <span className="font-bold">
+                                <span className="font-bold hidden sm:inline">
                                     {view === 'agenda' ? 'Vista Agenda' : view === 'month' ? 'Vista Mensual' : 'Todas las Actividades'}
                                 </span>
                             </button>
@@ -118,18 +302,20 @@ function ActivitiesContent() {
                             {view !== 'all' && (
                                 <div className="flex items-center gap-4 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-100">
                                     <button
+                                        data-testid="activities-page-prev"
                                         onClick={handlePrev}
                                         className="p-1 hover:bg-white hover:shadow-sm rounded-lg text-slate-400 hover:text-blue-600 transition-all"
                                     >
                                         <ChevronLeft className="w-5 h-5" />
                                     </button>
-                                    <span className="text-base font-bold text-slate-900 capitalize min-w-[160px] text-center">
+                                    <span className="text-base font-bold text-slate-900 capitalize min-w-[140px] text-center">
                                         {view === 'agenda'
-                                            ? selectedDate.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })
+                                            ? selectedDate.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })
                                             : selectedDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })
                                         }
                                     </span>
                                     <button
+                                        data-testid="activities-page-next"
                                         onClick={handleNext}
                                         className="p-1 hover:bg-white hover:shadow-sm rounded-lg text-slate-400 hover:text-blue-600 transition-all"
                                     >
@@ -138,7 +324,7 @@ function ActivitiesContent() {
                                 </div>
                             )}
                         </div>
-                        <div className="flex gap-2 p-1 bg-slate-50 rounded-xl border border-slate-100">
+                        <div className="flex gap-2 p-1 bg-slate-50 rounded-xl border border-slate-100 shrink-0">
                             <button
                                 onClick={() => setView('all')}
                                 className={cn(
@@ -172,14 +358,24 @@ function ActivitiesContent() {
                     <div className="flex-1 overflow-y-auto p-6 bg-slate-50/50">
                         {view === 'agenda' || view === 'all' ? (
                             filteredActivities && filteredActivities.length > 0 ? (
-                                <div className="space-y-4">
+                                <div data-testid="activities-list" className="space-y-4">
                                     {filteredActivities.map((act) => {
                                         const opp = opportunities?.find(o => o.id === act.opportunity_id);
                                         const today = new Date();
                                         today.setHours(0, 0, 0, 0);
+                                        // Safety check
+                                        if (!act) return null;
+
                                         const actDate = new Date(act.fecha_inicio);
                                         actDate.setHours(0, 0, 0, 0);
                                         const isOverdue = !act.is_completed && actDate < today;
+
+                                        // Resolve Names (Loose equality to handle string vs number IDs from DB/Supabase)
+                                        const classificationNode = classifications.find(c => String(c.id) === String(act.clasificacion_id));
+                                        const subclassificationNode = subclassifications.find(s => String(s.id) === String(act.subclasificacion_id));
+
+                                        const clsName = classificationNode?.nombre;
+                                        const subName = subclassificationNode?.nombre;
 
                                         return (
                                             <div
@@ -218,16 +414,29 @@ function ActivitiesContent() {
                                                         )}
                                                     </button>
                                                     <div className="flex-1 min-w-0">
-                                                        <div className="flex justify-between items-start">
-                                                            <h4 className={cn(
-                                                                "font-bold text-lg",
-                                                                act.is_completed ? "text-slate-500 line-through" : isOverdue ? "text-red-700" : "text-slate-900"
-                                                            )}>
-                                                                {act.asunto}
-                                                            </h4>
+                                                        <div className="flex flex-col sm:flex-row justify-between items-start gap-2">
+                                                            <div>
+                                                                <h4 className={cn(
+                                                                    "font-bold text-lg",
+                                                                    act.is_completed ? "text-slate-500 line-through" : isOverdue ? "text-red-700" : "text-slate-900"
+                                                                )}>
+                                                                    {act.asunto}
+                                                                </h4>
+                                                                {(clsName || subName) && (
+                                                                    <div className="flex flex-wrap gap-1 mt-1">
+                                                                        {clsName && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{clsName}</span>}
+                                                                        {subName && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200">{subName}</span>}
+                                                                    </div>
+                                                                )}
+                                                                {/* DEBUG INDICATOR */}
+                                                                {act.clasificacion_id && !clsName && (
+                                                                    <div className="text-[10px] text-red-500 font-bold mt-1">Error L: {act.clasificacion_id}</div>
+                                                                )}
+                                                            </div>
+
                                                             {act.tipo_actividad === 'EVENTO' ? (
                                                                 <div className={cn(
-                                                                    "flex items-center gap-2 text-xs font-medium px-2 py-1 rounded-lg",
+                                                                    "flex items-center gap-2 text-xs font-medium px-2 py-1 rounded-lg shrink-0",
                                                                     isOverdue ? "text-red-600 bg-red-100" : "text-blue-600 bg-blue-50"
                                                                 )}>
                                                                     <Clock className="w-3.5 h-3.5" />
@@ -235,7 +444,7 @@ function ActivitiesContent() {
                                                                 </div>
                                                             ) : (
                                                                 <div className={cn(
-                                                                    "flex items-center gap-2 text-xs font-medium px-2 py-1 rounded-lg",
+                                                                    "flex items-center gap-2 text-xs font-medium px-2 py-1 rounded-lg shrink-0",
                                                                     isOverdue ? "text-red-600 bg-red-100" : "text-emerald-600 bg-emerald-50"
                                                                 )}>
                                                                     <ListTodo className="w-3.5 h-3.5" />
@@ -245,7 +454,7 @@ function ActivitiesContent() {
                                                         </div>
 
                                                         {act.descripcion && (
-                                                            <p className="text-sm text-slate-500 mt-1 line-clamp-2">{act.descripcion}</p>
+                                                            <p className="text-sm text-slate-500 mt-2 line-clamp-2">{act.descripcion}</p>
                                                         )}
 
                                                         {(opp || act.opportunity_id) && (
@@ -263,7 +472,7 @@ function ActivitiesContent() {
                                     })}
                                 </div>
                             ) : (
-                                <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-4">
+                                <div data-testid="activities-empty-state" className="flex flex-col items-center justify-center h-full text-slate-400 gap-4">
                                     <div className="bg-slate-50 p-6 rounded-full">
                                         <Clock className="w-12 h-12 text-slate-200" />
                                     </div>
@@ -297,10 +506,9 @@ function ActivitiesContent() {
                                         // Actual days
                                         for (let i = 1; i <= lastDay.getDate(); i++) {
                                             const currentDate = new Date(year, month, i);
-                                            const dayActivities = activities?.filter(a => {
-                                                const d = new Date(a.fecha_inicio);
-                                                return d.getDate() === i && d.getMonth() === month && d.getFullYear() === year;
-                                            }) || [];
+
+                                            // PERF FIX: O(1) Map lookup instead of filtering all activities per day cell
+                                            const dayActivities = activitiesByDay.get(`${year}-${month}-${i}`) || [];
 
                                             const isToday = new Date().toDateString() === currentDate.toDateString();
                                             const isSelected = selectedDate.getDate() === i && selectedDate.getMonth() === month;
@@ -340,26 +548,43 @@ function ActivitiesContent() {
 
                                                     {/* Activity Preview */}
                                                     <div className="flex-1 overflow-hidden space-y-0.5">
-                                                        {dayActivities.slice(0, 2).map(act => {
+                                                        {dayActivities.slice(0, 3).map(act => {
                                                             const isOverdueAct = !act.is_completed && new Date(act.fecha_inicio).setHours(0, 0, 0, 0) < new Date().setHours(0, 0, 0, 0);
                                                             return (
-                                                                <div key={act.id} className={cn(
-                                                                    "text-[10px] px-1.5 py-0.5 rounded truncate font-medium border-l-2",
-                                                                    act.is_completed
-                                                                        ? "bg-slate-50 text-slate-400 border-slate-300 line-through"
-                                                                        : isOverdueAct
-                                                                            ? "bg-red-50 text-red-700 border-red-400"
-                                                                            : act.tipo_actividad === 'TAREA'
-                                                                                ? "bg-emerald-50 text-emerald-700 border-emerald-400"
-                                                                                : "bg-blue-50 text-blue-700 border-blue-400"
-                                                                )}>
-                                                                    {act.asunto}
+                                                                <div key={act.id} className="flex gap-1 group/act">
+                                                                    <div
+                                                                        className={cn(
+                                                                            "text-[9px] px-1 py-0.5 rounded truncate font-medium border-l-2 flex-1",
+                                                                            act.is_completed
+                                                                                ? "bg-slate-50 text-slate-400 border-slate-300 line-through"
+                                                                                : isOverdueAct
+                                                                                    ? "bg-red-50 text-red-700 border-red-400"
+                                                                                    : act.tipo_actividad === 'TAREA'
+                                                                                        ? "bg-emerald-50 text-emerald-700 border-emerald-400"
+                                                                                        : "bg-blue-50 text-blue-700 border-blue-400"
+                                                                        )}
+                                                                        title={act.asunto}
+                                                                    >
+                                                                        {act.asunto}
+                                                                    </div>
+                                                                    <button
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation();
+                                                                            toggleComplete(act.id, !act.is_completed);
+                                                                        }}
+                                                                        className={cn(
+                                                                            "p-0.5 rounded-md transition-all sm:opacity-0 sm:group-hover/act:opacity-100",
+                                                                            act.is_completed ? "text-emerald-500 bg-emerald-50" : "text-slate-300 hover:text-blue-500 hover:bg-blue-50"
+                                                                        )}
+                                                                    >
+                                                                        <CheckCircle2 className="w-3 h-3" />
+                                                                    </button>
                                                                 </div>
                                                             );
                                                         })}
-                                                        {dayActivities.length > 2 && (
+                                                        {dayActivities.length > 3 && (
                                                             <div className="text-[9px] text-slate-400 font-medium pl-1">
-                                                                +{dayActivities.length - 2} más
+                                                                +{dayActivities.length - 3} más
                                                             </div>
                                                         )}
                                                     </div>
@@ -367,32 +592,51 @@ function ActivitiesContent() {
                                                     {/* Hover Tooltip */}
                                                     {dayActivities.length > 0 && (
                                                         <div className={cn(
-                                                            "absolute left-1/2 -translate-x-1/2 z-50 w-56 bg-white rounded-lg shadow-2xl border border-slate-200 p-3 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 pointer-events-none",
+                                                            "absolute left-1/2 -translate-x-1/2 z-50 w-56 bg-white rounded-lg shadow-2xl border border-slate-200 p-3 opacity-0 invisible group-hover/day:opacity-100 group-hover/day:visible transition-all duration-200 pointer-events-auto cursor-default",
                                                             i > 15 ? "bottom-full mb-2" : "top-full mt-1"
-                                                        )}>
+                                                        )}
+                                                            onClick={(e) => e.stopPropagation()}
+                                                        >
                                                             <div className="text-xs font-bold text-slate-900 mb-2 pb-2 border-b border-slate-100 flex justify-between items-center">
                                                                 <span>{currentDate.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'short' })}</span>
                                                                 <span className="text-slate-400 font-normal text-[10px]">({dayActivities.length})</span>
                                                             </div>
-                                                            <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                                                            <div className="space-y-1.5 max-h-[250px] overflow-y-auto pr-1">
                                                                 {dayActivities.map(act => {
                                                                     const isOverdueAct = !act.is_completed && new Date(act.fecha_inicio).setHours(0, 0, 0, 0) < new Date().setHours(0, 0, 0, 0);
+                                                                    const cName = classifications.find(c => String(c.id) === String(act.clasificacion_id))?.nombre;
+
                                                                     return (
                                                                         <div key={act.id} className={cn(
-                                                                            "text-[11px] p-1.5 rounded border-l-2",
+                                                                            "relative group/tip flex items-center gap-2 p-1.5 rounded border-l-2 transition-all hover:bg-slate-50",
                                                                             act.is_completed
-                                                                                ? "bg-slate-50 text-slate-400 border-slate-300"
+                                                                                ? "bg-slate-50/50 text-slate-400 border-slate-300"
                                                                                 : isOverdueAct
                                                                                     ? "bg-red-50 text-red-800 border-red-400"
                                                                                     : act.tipo_actividad === 'TAREA'
                                                                                         ? "bg-emerald-50 text-emerald-800 border-emerald-400"
                                                                                         : "bg-blue-50 text-blue-800 border-blue-400"
                                                                         )}>
-                                                                            <div className="font-medium truncate">{act.asunto}</div>
-                                                                            <div className="text-[10px] opacity-70 mt-0.5">
-                                                                                {new Date(act.fecha_inicio).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: true })}
-                                                                                {act.is_completed && ' • Completada'}
+                                                                            <div className="flex-1 min-w-0">
+                                                                                <div className="font-medium truncate">{act.asunto}</div>
+                                                                                {cName && <div className="text-[9px] font-bold text-slate-500 uppercase mt-0.5">{cName}</div>}
+                                                                                <div className="text-[10px] opacity-70 mt-0.5">
+                                                                                    {new Date(act.fecha_inicio).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: true })}
+                                                                                </div>
                                                                             </div>
+                                                                            <button
+                                                                                onClick={(e) => {
+                                                                                    e.stopPropagation();
+                                                                                    toggleComplete(act.id, !act.is_completed);
+                                                                                }}
+                                                                                className={cn(
+                                                                                    "p-1 rounded-md transition-all sm:opacity-0 sm:group-hover/tip:opacity-100 shrink-0",
+                                                                                    act.is_completed ? "text-emerald-500 bg-emerald-100" : "text-slate-300 hover:text-blue-600 hover:bg-blue-100"
+                                                                                )}
+                                                                                title={act.is_completed ? "Marcar como pendiente" : "Marcar como completada"}
+                                                                            >
+                                                                                <CheckCircle2 className="w-4 h-4" />
+                                                                            </button>
                                                                         </div>
                                                                     );
                                                                 })}
@@ -418,12 +662,17 @@ function ActivitiesContent() {
                     onClose={() => {
                         setIsModalOpen(false);
                         setSelectedActivity(null);
+                        // Clear URL parameter to prevent modal from reopening
+                        router.replace('/actividades', { scroll: false });
                     }}
-                    onSubmit={(data: any) => {
+                    onSubmit={async (data: any) => {
+                        console.log("[ActivitiesPage] Modal Submitted Data:", data);
                         if (selectedActivity) {
-                            updateActivity(selectedActivity.id, data);
+                            console.log("[ActivitiesPage] Calling updateActivity for:", selectedActivity.id);
+                            await updateActivity(selectedActivity.id, data);
                         } else {
-                            createActivity(data);
+                            console.log("[ActivitiesPage] Calling createActivity");
+                            await createActivity(data);
                         }
                         setIsModalOpen(false);
                         setSelectedActivity(null);
@@ -443,6 +692,3 @@ export default function ActivitiesPage() {
         </Suspense>
     );
 }
-
-
-

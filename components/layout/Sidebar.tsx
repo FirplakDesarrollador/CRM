@@ -3,21 +3,19 @@
 import React from "react";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { cn } from "@/components/ui/utils";
-import { FirplakLogo } from "./FirplakLogo";
+import { FirplakLogo, FirplakIsotipo } from "./FirplakLogo";
 import { SyncStatus } from "./SyncStatus";
 import { supabase } from "@/lib/supabase";
 import { useSyncStore } from "@/lib/stores/useSyncStore";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
-import { PermissionGuard } from "@/components/auth/PermissionGuard";
 import {
     Home,
     Briefcase,
     Building2,
     Calendar,
-    FileText,
     Files,
     Settings,
     Users,
@@ -26,6 +24,7 @@ import {
     ChevronLeft,
     ChevronRight,
     UserCircle,
+    DollarSign,
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -35,13 +34,11 @@ const NAV_ITEMS = [
     { label: "Contactos", href: "/contactos", icon: Users },
     { label: "Actividades", href: "/actividades", icon: Calendar },
     { label: "Pedidos", href: "/pedidos", icon: Truck },
+    { label: "Comisiones", href: "/comisiones", icon: DollarSign },
     { label: "Archivos", href: "/archivos", icon: Files },
     { label: "Usuarios", href: "/usuarios", icon: UserCircle, requiredRole: 'ADMIN' },
     { label: "Configuración", href: "/configuracion", icon: Settings },
 ];
-
-// Admin-only navigation items
-const ADMIN_NAV_ITEMS = [];
 
 export interface SidebarProps {
     isCollapsed: boolean;
@@ -50,7 +47,6 @@ export interface SidebarProps {
 
 export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar }: SidebarProps) {
     const pathname = usePathname();
-    const router = useRouter();
     const { userRole, setUserRole } = useSyncStore();
     const { user, role, isLoading } = useCurrentUser();
     const [showLogoutConfirm, setShowLogoutConfirm] = React.useState(false);
@@ -65,21 +61,47 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
         }
     }, [role, isLoading, setUserRole]);
 
+    // Filter nav items using effective role (respects viewMode)
+    const visibleNavItems = React.useMemo(() => {
+        return NAV_ITEMS.filter(item => {
+            if (item.href === '/usuarios' && role !== 'ADMIN') return false;
+            if (role === 'ADMIN') return true;
+            if (user?.allowed_modules && user.allowed_modules.length > 0) {
+                return user.allowed_modules.includes(item.href);
+            }
+            if (item.requiredRole && item.requiredRole !== role) return false;
+            return true;
+        });
+    }, [role, user?.allowed_modules]);
+
     const handleLogout = async () => {
         setIsLoggingOut(true);
-        try {
-            await supabase.auth.signOut();
-        } catch (err) {
-            console.error('[Sidebar] SignOut error:', err);
-        } finally {
-            localStorage.removeItem('cachedUserId');
-            // Force a clean redirect
-            window.location.href = '/login';
-        }
+
+        // Clear ALL local data FIRST
+        localStorage.removeItem('cachedUserId');
+        sessionStorage.removeItem('crm_initialSyncDone');
+
+        // Clear Supabase cookies (critical for mobile)
+        document.cookie.split(';').forEach(cookie => {
+            const name = cookie.split('=')[0].trim();
+            if (name.includes('sb-')) {
+                document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
+            }
+        });
+
+        // Fire signOut in background (don't wait for it)
+        supabase.auth.signOut().catch(err => {
+            console.warn('[Sidebar] SignOut background error (ignored):', err);
+        });
+
+        // Redirect IMMEDIATELY - don't wait for Supabase
+        console.log('[Sidebar] Redirecting to login immediately');
+        window.location.replace('/login');
     };
 
     return (
         <aside
+            data-testid="sidebar"
             className={cn(
                 "hidden md:flex flex-col bg-linear-to-b from-white to-slate-50/50 text-slate-900 h-screen border-r border-slate-200/60 shadow-lg transition-all duration-300 z-40 shrink-0 group",
                 isCollapsed ? "w-20" : "w-72"
@@ -93,20 +115,12 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
                 {/* Logo */}
                 <div className="w-full flex justify-center mb-2">
                     {isCollapsed ? (
-                        <div className="w-12 h-12 bg-linear-to-br from-[#254153] to-[#1a2f3d] rounded-2xl flex items-center justify-center shadow-lg transition-all">
-                            <img
-                                src="/isotipo.svg"
-                                alt="Logo"
-                                className="h-7 w-auto"
-                            />
+                        <div className="w-12 h-12 bg-linear-to-br from-[#254153] to-[#1a2f3d] rounded-2xl flex items-center justify-center shadow-lg transition-all p-2.5 text-white">
+                            <FirplakIsotipo className="w-full h-full" />
                         </div>
                     ) : (
-                        <div className="flex items-center justify-center py-2">
-                            <img
-                                src="/logo.svg"
-                                alt="Firplak Logo"
-                                className="h-12 w-auto"
-                            />
+                        <div className="flex items-center justify-center py-2 h-12">
+                            <FirplakLogo className="h-full w-auto text-[#254153]" />
                         </div>
                     )}
                 </div>
@@ -114,13 +128,14 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
                 {!isCollapsed && (
                     <div className="w-full mt-3 pt-3 border-t border-slate-200/60">
                         <p className="text-xs text-slate-400 text-center font-semibold uppercase tracking-wider">
-                            Versión 1.0.4
+                            Versión 1.0.8.2
                         </p>
                     </div>
                 )}
 
                 {/* Collapse/Expand Button - Subtle Design */}
                 <button
+                    data-testid="sidebar-toggle"
                     onClick={toggleSidebar}
                     className={cn(
                         "absolute -right-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-white border-2 border-slate-200 text-slate-400 hover:border-[#254153] hover:text-[#254153] hover:bg-slate-50 transition-all shadow-md flex items-center justify-center"
@@ -133,30 +148,13 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
 
             {/* Navigation Section */}
             <nav className="flex-1 p-4 space-y-1.5 overflow-y-auto overflow-x-hidden">
-                {NAV_ITEMS.filter(item => {
-                    // STRICT: Users module is ADMIN only
-                    // This overrides any allowlist configuration
-                    if (item.href === '/usuarios' && userRole !== 'ADMIN') return false;
-
-                    // Admins see everything by default
-                    if (userRole === 'ADMIN') return true;
-
-                    // Dynamic Config: If defined, strictly follow the allowed list
-                    // This allows granting "Admin-only" modules to other roles if strictly configured
-                    if (user?.allowed_modules && user.allowed_modules.length > 0) {
-                        return user.allowed_modules.includes(item.href);
-                    }
-
-                    // Fallback to Role Default limits
-                    if (item.requiredRole && item.requiredRole !== userRole) return false;
-
-                    return true;
-                }).map((item) => {
+                {visibleNavItems.map((item) => {
                     const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
                     return (
                         <Link
                             key={item.href}
                             href={item.href}
+                            data-testid={`nav-${item.href.replace('/', '') || 'home'}`}
                             title={isCollapsed ? item.label : undefined}
                             className={cn(
                                 "flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-sm font-semibold group/item relative",
@@ -193,6 +191,7 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
             {/* Logout Section */}
             <div className="p-4 border-t border-slate-200/60 bg-white">
                 <button
+                    data-testid="nav-logout"
                     onClick={() => setShowLogoutConfirm(true)}
                     className={cn(
                         "flex items-center gap-3 px-4 py-3 text-sm font-semibold text-slate-600 hover:text-red-600 hover:bg-red-50 w-full transition-all rounded-xl group/logout",

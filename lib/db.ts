@@ -23,18 +23,40 @@ export interface LocalCuenta {
     nit: string;
     nit_base?: string;
     id_cuenta_principal?: string | null;
+    owner_user_id?: string; // Nuevo campo propietario
     canal_id: string; // Nuevo campo obligatorio
     subclasificacion_id?: number | null; // Nuevo campo opcional
     es_premium?: boolean;
+    nivel_premium?: 'ORO' | 'PLATA' | 'BRONCE' | null; // Nuevo campo jerárquico
     telefono?: string;
     direccion?: string;
-    ciudad?: string;
+    ciudad?: string; // Legacy/Text field
+    ciudad_id?: number | null;
+    departamento_id?: number | null;
+    pais_id?: number | null;
     // ... other fields optional for now in local definition, or use 'any' schema
     _sync_metadata?: any;
     created_at?: string;
     created_by?: string;
     updated_by?: string;
     updated_at?: string;
+}
+
+export interface LocalPais {
+    id: number;
+    nombre: string;
+}
+
+export interface LocalDepartamento {
+    id: number;
+    pais_id: number;
+    nombre: string;
+}
+
+export interface LocalCiudad {
+    id: number;
+    departamento_id: number;
+    nombre: string;
 }
 
 // Types for Quotes
@@ -47,6 +69,7 @@ export interface LocalQuote {
     status: 'DRAFT' | 'SENT' | 'APPROVED' | 'REJECTED' | 'WINNER';
     is_winner?: boolean;
     es_pedido?: boolean; // Nuevo campo para diferenciar pedidos
+    segmento_id?: number | null; // Segmento del pedido/cotización
 
     // SAP Data
     fecha_minima_requerida?: string;
@@ -110,6 +133,7 @@ export interface LocalFase {
     orden: number;
     is_active: boolean;
     canal_id: string;
+    probability?: number;
 }
 
 export interface LocalSubclasificacion {
@@ -140,8 +164,17 @@ export interface LocalOportunidad {
     items?: any[];
     owner_user_id?: string;
     segmento_id?: number | null;
+    pais_id?: number | null;
+    departamento_id?: number | null;
+    ciudad_id?: number | null;
     created_at?: string;
     updated_at?: string;
+    probability?: number;
+    razon_perdida_id?: number | null;
+    is_deleted?: boolean;
+    origen_oportunidad?: string | null;
+    url_origen?: string | null;
+    fuente_conversion?: string | null;
 }
 
 export class CRMFirplakDB extends Dexie {
@@ -159,13 +192,20 @@ export class CRMFirplakDB extends Dexie {
     phases!: Table<LocalFase, number>; // Local table
     subclasificaciones!: Table<LocalSubclasificacion, number>; // Local table
     segments!: Table<LocalSegmento, number>; // Local table
+    countries!: Table<LocalPais, number>; // Local table
+    departments!: Table<LocalDepartamento, number>;
+    cities!: Table<LocalCiudad, number>;
+    activityClassifications!: Table<LocalActivityClassification, number>;
+    activitySubclassifications!: Table<LocalActivitySubclassification, number>;
+    lossReasons!: Table<LocalLossReason, number>;
+    opportunityCollaborators!: Table<LocalOpportunityCollaborator, string>; // New table
 
     constructor() {
         super('CRMFirplakDB');
-        this.version(6).stores({ // Bumped version to 6
+        this.version(9).stores({
             outbox: 'id, entity_type, status, field_timestamp',
             fileQueue: 'id, status',
-            accounts: 'id, nit, nombre',
+            accounts: 'id, nit, nombre, owner_user_id',
             opportunities: 'id, account_id, owner_user_id', // Simplified index
             contacts: 'id, account_id, email',
             quotes: 'id, opportunity_id, status, es_pedido',
@@ -173,9 +213,27 @@ export class CRMFirplakDB extends Dexie {
             activities: 'id, opportunity_id, user_id, fecha_inicio, tipo_actividad',
             phases: 'id, canal_id, orden',
             subclasificaciones: 'id, canal_id',
-            segments: '++id, subclasificacion_id'
+            segments: '++id, subclasificacion_id',
+            countries: 'id',
+            departments: 'id, pais_id, nombre',
+            cities: 'id, departamento_id, nombre',
+            activityClassifications: 'id, tipo_actividad',
+            activitySubclassifications: 'id, clasificacion_id',
+            lossReasons: 'id',
+            opportunityCollaborators: 'id, oportunidad_id, usuario_id' // New table
         });
     }
+}
+
+export interface LocalOpportunityCollaborator {
+    id: string;
+    oportunidad_id: string;
+    usuario_id: string;
+    porcentaje: number;
+    rol: string;
+    created_at?: string;
+    synced_at?: string;
+    is_deleted?: boolean;
 }
 
 export interface LocalActivity {
@@ -185,11 +243,37 @@ export interface LocalActivity {
     fecha_inicio: string;
     fecha_fin?: string;
     tipo_actividad: 'TAREA' | 'EVENTO';
+    clasificacion_id?: number | null;
+    subclasificacion_id?: number | null;
     is_completed: boolean;
     opportunity_id?: string;
     user_id?: string;
+    ms_planner_id?: string | null;
+    ms_event_id?: string | null;
+    _sync_metadata?: any;
+    teams_meeting_url?: string | null;
+    Tarea_planner?: boolean | null;
     created_at?: string;
     updated_at?: string;
+    is_deleted?: boolean;
+}
+
+export interface LocalActivityClassification {
+    id: number;
+    nombre: string;
+    tipo_actividad: 'TAREA' | 'EVENTO';
+}
+
+export interface LocalActivitySubclassification {
+    id: number;
+    nombre: string;
+    clasificacion_id: number;
+}
+
+export interface LocalLossReason {
+    id: number;
+    descripcion: string;
+    is_active: boolean;
 }
 
 export const db = new CRMFirplakDB();

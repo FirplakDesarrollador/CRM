@@ -50,7 +50,14 @@ export type Permission =
     // Configuración
     | 'manage_users'
     | 'manage_settings'
-    | 'view_audit_logs';
+    | 'view_audit_logs'
+
+    // Comisiones
+    | 'view_own_commissions'
+    | 'view_all_commissions'
+    | 'manage_commission_rules'
+    | 'manage_commission_categories'
+    | 'create_commission_adjustment';
 
 /**
  * Role-based permission matrix
@@ -91,6 +98,9 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
         // Reportes - solo propios
         'view_reports',
 
+        // Comisiones - solo propias
+        'view_own_commissions',
+
         // NO TIENE: view_all_opportunities, view_all_activities, manage_users, manage_settings
     ],
 
@@ -108,7 +118,6 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
         'view_accounts',
         'create_account',
         'edit_account',
-        'delete_account',
 
         // Contactos - acceso completo
         'view_contacts',
@@ -139,6 +148,11 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
         // Configuración - puede ver logs pero NO gestionar usuarios
         'view_audit_logs',
         'manage_settings',
+
+        // Comisiones - puede ver todas y gestionar reglas
+        'view_own_commissions',
+        'view_all_commissions',
+        'manage_commission_rules',
 
         // NO TIENE: manage_users (solo ADMIN puede gestionar usuarios)
     ],
@@ -189,6 +203,13 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
         'manage_users',
         'manage_settings',
         'view_audit_logs',
+
+        // Comisiones - ACCESO COMPLETO
+        'view_own_commissions',
+        'view_all_commissions',
+        'manage_commission_rules',
+        'manage_commission_categories',
+        'create_commission_adjustment',
     ],
 };
 

@@ -13,15 +13,27 @@ import {
     AlertCircle,
     CheckCircle2,
     HardDrive,
-    LogOut
+    LogOut,
+    Target,
+    DollarSign,
+    Bell
 } from 'lucide-react';
-import { useState, useEffect, Dispatch, SetStateAction } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, Dispatch, SetStateAction, Suspense } from 'react';
+import dynamic from 'next/dynamic';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { cn } from '@/components/ui/utils';
 import { supabase } from '@/lib/supabase';
 import { useConfig } from '@/lib/hooks/useConfig';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
-import { PriceListUploader } from '@/components/config/PriceListUploader';
+const PriceListUploader = dynamic(() => import('@/components/config/PriceListUploader').then(mod => mod.PriceListUploader), {
+    loading: () => <div className="animate-pulse bg-slate-100 h-20 rounded-2xl" />,
+    ssr: false
+});
+
+const ActivityClassificationManager = dynamic(() => import('@/components/config/ActivityClassificationManager').then(mod => mod.ActivityClassificationManager), {
+    loading: () => <div className="animate-pulse bg-slate-100 h-20 rounded-2xl" />,
+    ssr: false
+});
 import { ConfirmationModal } from '@/components/ui/ConfirmationModal';
 import packageJson from '../../package.json';
 
@@ -55,11 +67,13 @@ interface ModalConfig {
     isLoading?: boolean;
 }
 
-export default function ConfigPage() {
+function ConfigPageContent() {
     const router = useRouter();
     const { isSyncing, pendingCount, lastSyncTime, error, isPaused, setPaused } = useSyncStore();
-    const { role } = useCurrentUser();
+    const { user, role, realRole, viewMode, setViewMode } = useCurrentUser();
+    const searchParams = useSearchParams();
     const [outboxItems, setOutboxItems] = useState<OutboxItem[]>([]);
+    const [msConnected, setMsConnected] = useState<boolean | null>(null);
     const [stats, setStats] = useState<Stats | null>(null);
 
     const [modalConfig, setModalConfig] = useState<ModalConfig>({
@@ -71,14 +85,30 @@ export default function ConfigPage() {
 
     const handleLogout = async () => {
         setModalConfig(prev => ({ ...prev, isLoading: true }));
-        try {
-            await supabase.auth.signOut();
-        } catch (err) {
-            console.error('[Config] SignOut error:', err);
-        } finally {
-            localStorage.removeItem('cachedUserId');
-            window.location.href = '/login';
-        }
+
+        // Clear ALL local data FIRST
+        localStorage.removeItem('cachedUserId');
+        sessionStorage.removeItem('crm_initialSyncDone');
+
+        // Also clear view mode
+        localStorage.removeItem('crm_view_mode');
+
+        // Clear Supabase cookies (critical for mobile)
+        document.cookie.split(';').forEach(cookie => {
+            const name = cookie.split('=')[0].trim();
+            if (name.includes('sb-')) {
+                document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
+            }
+        });
+
+        // Fire signOut in background (don't wait for it)
+        supabase.auth.signOut().catch(err => {
+            console.warn('[Config] SignOut background error (ignored):', err);
+        });
+
+        // Redirect IMMEDIATELY - don't wait for Supabase
+        console.log('[Config] Redirecting to login immediately');
+        window.location.replace('/login');
     };
 
     const confirmLogout = () => {
@@ -111,6 +141,61 @@ export default function ConfigPage() {
         const interval = setInterval(fetchDebugInfo, 3000);
         return () => clearInterval(interval);
     }, []);
+
+    const checkMicrosoftStatus = async () => {
+        if (!user) return;
+        try {
+            const { data, error } = await supabase
+                .from('CRM_MicrosoftTokens')
+                .select('user_id')
+                .eq('user_id', user.id)
+                .maybeSingle();
+
+            setMsConnected(!!data);
+        } catch (e) {
+            setMsConnected(false);
+        }
+    };
+
+    useEffect(() => {
+        checkMicrosoftStatus();
+    }, [user]);
+
+    useEffect(() => {
+        const syncStatus = searchParams.get('ms_sync');
+        const msError = searchParams.get('ms_error');
+
+        if (syncStatus === 'success') {
+            setModalConfig({
+                isOpen: true,
+                title: "Microsoft Sincronizado",
+                message: "Tu cuenta de Microsoft ha sido vinculada correctamente. Ahora puedes usar Planner y Calendario.",
+                confirmLabel: "Excelente",
+                onConfirm: () => {
+                    setModalConfig(prev => ({ ...prev, isOpen: false }));
+                    router.replace('/configuracion');
+                },
+                variant: 'info'
+            });
+            checkMicrosoftStatus();
+        } else if (msError) {
+            setModalConfig({
+                isOpen: true,
+                title: "Error de Sincronización",
+                message: `No se pudo vincular la cuenta de Microsoft: ${msError}`,
+                confirmLabel: "Cerrar",
+                onConfirm: () => {
+                    setModalConfig(prev => ({ ...prev, isOpen: false }));
+                    router.replace('/configuracion');
+                },
+                variant: 'danger'
+            });
+        }
+    }, [searchParams]);
+
+    const handleMicrosoftSync = () => {
+        window.location.href = '/api/microsoft/login';
+    };
 
     const clearOutbox = async () => {
         setModalConfig({
@@ -187,20 +272,24 @@ export default function ConfigPage() {
     return (
         <div className="p-6 max-w-5xl mx-auto space-y-6">
             {/* Header */}
-            <div className="flex items-center gap-4 mb-8">
-                <div className="bg-slate-900 p-3 rounded-2xl text-white">
-                    <Settings className="w-8 h-8" />
-                </div>
-                <div>
-                    <div className="flex items-center gap-3">
-                        <h1 className="text-3xl font-bold text-slate-900">Configuración</h1>
-                        <span className="px-2.5 py-1 text-xs font-bold bg-slate-100 text-slate-600 rounded-full border border-slate-200">
-                            v{CRM_VERSION}
-                        </span>
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+                <div className="flex items-center gap-4">
+                    <div className="bg-slate-900 p-3 rounded-2xl text-white">
+                        <Settings className="w-8 h-8" />
                     </div>
-                    <p className="text-slate-500 font-medium">Estado del sistema y herrmientas de diagnóstico</p>
+                    <div>
+                        <div className="flex items-center gap-3">
+                            <h1 className="text-3xl font-bold text-slate-900">Configuración</h1>
+                            <span className="px-2.5 py-1 text-xs font-bold bg-slate-100 text-slate-600 rounded-full border border-slate-200">
+                                v{CRM_VERSION}
+                            </span>
+                        </div>
+                        <p className="text-slate-500 font-medium">Estado del sistema y herramientas de diagnóstico</p>
+                    </div>
                 </div>
+
             </div>
+
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 {/* Sync Status Card */}
@@ -348,19 +437,132 @@ export default function ConfigPage() {
                 </div>
 
                 {/* Session Card */}
-                <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-6">
-                    <div className="flex items-center gap-2">
+                <div className="md:col-span-2 bg-white rounded-3xl border border-slate-200 shadow-sm p-6">
+                    <div className="flex items-center gap-2 mb-4">
                         <LogOut className="w-5 h-5 text-slate-600" />
                         <h3 className="font-bold text-slate-900">Sesión</h3>
                     </div>
-                    <p className="text-sm text-slate-500">Administra tu acceso a la aplicación.</p>
-                    <button
-                        onClick={confirmLogout}
-                        className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-xl text-sm font-bold transition-colors border border-slate-200"
-                    >
-                        <LogOut className="w-4 h-4" />
-                        Cerrar Sesión
-                    </button>
+                    <p className="text-sm text-slate-500 mb-6">Administra tu acceso a la aplicación.</p>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {/* User Info */}
+                        <div className="bg-slate-50 rounded-2xl p-5 border border-slate-100 space-y-4">
+                            <div className="flex items-center gap-4">
+                                <div className="w-14 h-14 bg-linear-to-br from-blue-600 to-cyan-500 rounded-2xl flex items-center justify-center text-xl font-bold text-white shadow-md">
+                                    {user?.email?.substring(0, 2).toUpperCase() || '??'}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-bold text-slate-900 truncate">{user?.email || 'Usuario'}</p>
+                                    <span className={cn(
+                                        "inline-block mt-1 px-2.5 py-0.5 text-[10px] font-bold uppercase rounded-full",
+                                        role === 'ADMIN' ? "bg-purple-100 text-purple-700" :
+                                            role === 'COORDINADOR' ? "bg-blue-100 text-blue-700" :
+                                                "bg-slate-100 text-slate-600"
+                                    )}>
+                                        {role || 'Vendedor'}
+                                    </span>
+                                </div>
+                            </div>
+
+                            {/* View Mode Toggle for Admins */}
+                            {realRole === 'ADMIN' && (
+                                <div className="pt-3 border-t border-slate-200">
+                                    <label className="text-xs font-bold text-slate-500 uppercase block mb-2">Modo de Vista</label>
+                                    <div className="flex bg-slate-100 p-1 rounded-xl">
+                                        <button
+                                            onClick={() => setViewMode(null)}
+                                            className={cn(
+                                                "flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all",
+                                                !viewMode || viewMode === 'ADMIN'
+                                                    ? "bg-white text-slate-900 shadow-sm"
+                                                    : "text-slate-500 hover:text-slate-700"
+                                            )}
+                                        >
+                                            Administrador
+                                        </button>
+                                        <button
+                                            onClick={() => setViewMode('VENDEDOR')}
+                                            className={cn(
+                                                "flex-1 py-1.5 px-3 rounded-lg text-xs font-bold transition-all",
+                                                viewMode === 'VENDEDOR'
+                                                    ? "bg-white text-slate-900 shadow-sm"
+                                                    : "text-slate-500 hover:text-slate-700"
+                                            )}
+                                        >
+                                            Vendedor
+                                        </button>
+                                    </div>
+                                    <p className="text-[10px] text-slate-400 mt-2">
+                                        {viewMode === 'VENDEDOR'
+                                            ? 'Viendo solo tus datos personales (Simulación).'
+                                            : 'Viendo todos los datos del sistema.'}
+                                    </p>
+                                </div>
+                            )}
+
+                            <div className="text-xs text-slate-400 pt-2 border-t border-slate-200">
+                                Sesión activa desde: {new Date().toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' })}
+                            </div>
+                        </div>
+
+                        {/* Logout Button */}
+                        <div className="flex flex-col justify-center">
+                            <button
+                                onClick={confirmLogout}
+                                className="w-full flex items-center justify-center gap-2 px-4 py-4 bg-red-50 text-red-700 hover:bg-red-100 rounded-xl text-sm font-bold transition-colors border border-red-200"
+                            >
+                                <LogOut className="w-4 h-4" />
+                                Cerrar Sesión
+                            </button>
+                            <p className="text-xs text-slate-400 text-center mt-3">Asegúrate de sincronizar antes de salir.</p>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Microsoft Integration Card */}
+                <div className="md:col-span-1 bg-white rounded-3xl border border-slate-200 shadow-sm p-6 flex flex-col justify-between">
+                    <div>
+                        <div className="flex items-center gap-2 mb-4">
+                            <Cloud className="w-5 h-5 text-[#00a1f1]" />
+                            <h3 className="font-bold text-slate-900">Integración Microsoft</h3>
+                        </div>
+                        <p className="text-sm text-slate-500 mb-6">
+                            Sincroniza tus tareas con Planner y eventos con Outlook.
+                        </p>
+                    </div>
+
+                    <div className="space-y-4">
+                        <div className={cn(
+                            "p-4 rounded-2xl border flex items-center gap-3",
+                            msConnected === true ? "bg-emerald-50 border-emerald-100" :
+                                msConnected === false ? "bg-slate-50 border-slate-100" :
+                                    "bg-slate-50/50 border-slate-100 animate-pulse"
+                        )}>
+                            <div className={cn(
+                                "w-2 h-2 rounded-full",
+                                msConnected === true ? "bg-emerald-500" : "bg-slate-300"
+                            )} />
+                            <span className="text-sm font-bold text-slate-700">
+                                {msConnected === true ? 'Cuenta Vinculada' :
+                                    msConnected === false ? 'No Conectado' : 'Verificando...'}
+                            </span>
+                        </div>
+
+                        <button
+                            onClick={handleMicrosoftSync}
+                            className={cn(
+                                "w-full flex items-center justify-center gap-2 px-4 py-4 rounded-xl text-sm font-bold transition-all shadow-md",
+                                msConnected
+                                    ? "bg-white text-slate-700 border border-slate-200 hover:bg-slate-50"
+                                    : "bg-[#00a1f1] text-white hover:bg-[#008ad8] shadow-[#00a1f1]/20"
+                            )}
+                        >
+                            <svg className="w-4 h-4" viewBox="0 0 23 23" fill="currentColor">
+                                <path d="M11.4 24H0V12.6h11.4V24zM24 24H12.6V12.6H24V24zM11.4 11.4H0V0h11.4v11.4zM24 11.4H12.6V0H24v11.4z" />
+                            </svg>
+                            {msConnected ? 'Volver a Sincronizar' : 'Sincronizar Microsoft'}
+                        </button>
+                    </div>
                 </div>
             </div>
 
@@ -450,9 +652,59 @@ export default function ConfigPage() {
             )}
 
             {/* Price List Uploader - Admin Only */}
-            {role === 'ADMIN' && <PriceListUploader />}
+            {role === 'ADMIN' && (
+                <>
+                    <PriceListUploader />
+                    <ActivityClassificationManager />
+                </>
+            )}
 
-            <AdminSettings setModalConfig={setModalConfig} />
+            {/* Goals Configuration - Admin Only */}
+            {/* Goals Configuration - Admin Only */}
+            {role === 'ADMIN' && (
+                <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="flex items-center gap-4">
+                        <div className="bg-indigo-100 p-3 rounded-2xl text-indigo-600">
+                            <Target className="w-6 h-6" />
+                        </div>
+                        <div>
+                            <h3 className="font-bold text-slate-900 text-lg">Metas y Objetivos</h3>
+                            <p className="text-sm text-slate-500">Configurar y asignar metas comerciales a los usuarios</p>
+                        </div>
+                    </div>
+                    <button
+                        onClick={() => router.push('/configuracion/metas')}
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-xl text-sm font-bold shadow-md shadow-indigo-100 transition-all flex items-center justify-center gap-2"
+                    >
+                        <Target className="w-4 h-4" />
+                        Configurar Metas
+                    </button>
+                </div>
+            )}
+
+
+            {/* Notifications Configuration - Admin/Coordinator */}
+            {(role === 'ADMIN' || role === 'COORDINADOR') && (
+                <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div className="flex items-center gap-4">
+                        <div className="bg-blue-100 p-3 rounded-2xl text-blue-600">
+                            <Bell className="w-6 h-6" />
+                        </div>
+                        <div>
+                            <h3 className="font-bold text-slate-900 text-lg">Notificaciones</h3>
+                            <p className="text-sm text-slate-500">Configurar alertas automáticas y reglas de notificación</p>
+                        </div>
+                    </div>
+                    <button
+                        onClick={() => router.push('/configuracion/notificaciones')}
+                        className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl text-sm font-bold shadow-md shadow-blue-100 transition-all flex items-center justify-center gap-2"
+                    >
+                        <Bell className="w-4 h-4" />
+                        Configurar Reglas
+                    </button>
+                </div>
+            )}
+
 
             <ConfirmationModal
                 isOpen={modalConfig.isOpen}
@@ -464,6 +716,8 @@ export default function ConfigPage() {
                 variant={modalConfig.variant}
                 isLoading={modalConfig.isLoading}
             />
+
+
         </div>
     );
 }
@@ -488,104 +742,25 @@ function StatRow({ label, value, icon: Icon }: StatRowProps) {
     );
 }
 
-function AdminSettings({ setModalConfig }: { setModalConfig: Dispatch<SetStateAction<ModalConfig>> }) {
-    const { config, isAdmin, updateConfig, isLoading } = useConfig();
-    const [minValue, setMinValue] = useState("");
-    const [minInactiveDays, setMinInactiveDays] = useState("");
-    const [isSaving, setIsSaving] = useState(false);
 
-    useEffect(() => {
-        if (config.min_premium_order_value) {
-            setMinValue(config.min_premium_order_value);
-        }
-        if (config.inactive_account_days) {
-            setMinInactiveDays(config.inactive_account_days);
-        } else {
-            setMinInactiveDays('90'); // default
-        }
-    }, [config]);
-
-    if (isLoading) return null;
-    if (!isAdmin) return null;
-
-    const handleSave = async () => {
-        setIsSaving(true);
-        const p1 = updateConfig('min_premium_order_value', minValue);
-        const p2 = updateConfig('inactive_account_days', minInactiveDays);
-        await Promise.all([p1, p2]);
-        setModalConfig({
-            isOpen: true,
-            title: "Configuración Guardada",
-            message: "Los parámetros globales han sido actualizados correctamente.",
-            confirmLabel: "Aceptar",
-            onConfirm: () => setModalConfig(prev => ({ ...prev, isOpen: false })),
-            variant: "info"
-        });
-        setIsSaving(false);
-    };
-
+export default function ConfigPage() {
     return (
-        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden p-6 space-y-6">
-            <div className="flex items-center gap-2">
-                <div className="bg-purple-100 p-2 rounded-lg text-purple-600">
-                    <Settings className="w-5 h-5" />
+        <Suspense fallback={
+            <div className="p-6 max-w-5xl mx-auto space-y-6">
+                <div className="animate-pulse flex items-center gap-4 mb-8">
+                    <div className="bg-slate-200 w-14 h-14 rounded-2xl" />
+                    <div className="space-y-2">
+                        <div className="bg-slate-200 h-8 w-48 rounded" />
+                        <div className="bg-slate-200 h-4 w-64 rounded" />
+                    </div>
                 </div>
-                <div>
-                    <h3 className="font-bold text-slate-900 text-lg">Configuración de Administrador</h3>
-                    <p className="text-sm text-slate-500">Parámetros globales del sistema</p>
-                </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Min Premium Order */}
-                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                    <label className="block text-sm font-bold text-slate-700 mb-2">
-                        Pedido Mínimo Cliente Premium (COP)
-                    </label>
-                    <p className="text-xs text-slate-500 mb-3">
-                        Valor mínimo requerido en cotizaciones para clientes marcados como Premium. Si no se cumple, no podrán generar pedido.
-                    </p>
-                    <input
-                        type="number"
-                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-slate-900 mb-2"
-                        value={minValue}
-                        onChange={(e) => setMinValue(e.target.value)}
-                    />
-                </div>
-
-                {/* Inactive Client Alert */}
-                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                    <label className="block text-sm font-bold text-slate-700 mb-2">
-                        Alerta Inactividad Cliente (Días)
-                    </label>
-                    <p className="text-xs text-slate-500 mb-3">
-                        Días sin interacción (actividades u oportunidades) para considerar un cliente como inactivo y generar alerta.
-                    </p>
-                    <input
-                        type="number"
-                        className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-slate-900 mb-2"
-                        value={minInactiveDays}
-                        onChange={(e) => setMinInactiveDays(e.target.value)}
-                    />
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="md:col-span-2 bg-slate-100 h-96 rounded-3xl" />
+                    <div className="bg-slate-100 h-96 rounded-3xl" />
                 </div>
             </div>
-
-            <div className="flex justify-end">
-                <button
-                    onClick={handleSave}
-                    disabled={isSaving}
-                    className="bg-purple-600 text-white px-6 py-2 rounded-xl text-sm font-bold hover:bg-purple-700 disabled:opacity-50 shadow-md shadow-purple-200 flex items-center gap-2"
-                >
-                    {isSaving ? (
-                        <>Guardando...</>
-                    ) : (
-                        <>
-                            <CheckCircle2 className="w-4 h-4" />
-                            Guardar Cambios
-                        </>
-                    )}
-                </button>
-            </div>
-        </div>
+        }>
+            <ConfigPageContent />
+        </Suspense>
     );
 }

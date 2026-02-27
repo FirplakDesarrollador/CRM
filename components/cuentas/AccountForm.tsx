@@ -3,15 +3,18 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
+import { useLiveQuery } from "dexie-react-hooks";
+import { db, LocalCuenta } from "@/lib/db";
 import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useState, useEffect } from "react";
-import { Loader2, User, Building2 } from "lucide-react";
-import { LocalCuenta } from "@/lib/db";
+import { Loader2, User, Building2, Medal } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import AccountContactsTab from "./AccountContactsTab";
 import AccountOpportunitiesTab from "./AccountOpportunitiesTab";
 import { Briefcase } from "lucide-react";
 import { cn } from "@/components/ui/utils";
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { AccountAssignedTab } from "./AccountAssignedTab";
 
 // Schema
 const accountSchema = z.object({
@@ -22,9 +25,14 @@ const accountSchema = z.object({
     canal_id: z.string().min(1, "Canal de venta requerido"),
     subclasificacion_id: z.string().optional().nullable(), // Form uses string, convert to number on submit
     telefono: z.string().nullable().optional(),
+    email: z.string().email("Email inválido").nullable().optional().or(z.literal("")),
     direccion: z.string().nullable().optional(),
-    ciudad: z.string().nullable().optional(),
+    pais_id: z.string().nullable().optional(),
+    departamento_id: z.string().nullable().optional(),
+    ciudad_id: z.string().nullable().optional(),
+    ciudad: z.string().nullable().optional(), // Keep for backward compat
     es_premium: z.boolean().optional(),
+    nivel_premium: z.enum(['ORO', 'PLATA', 'BRONCE']).nullable().optional(),
 });
 
 type AccountFormData = z.infer<typeof accountSchema>;
@@ -37,24 +45,92 @@ interface AccountFormProps {
 
 export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) {
     const { createAccount, updateAccount } = useAccounts();
+    const { role: userRole } = useCurrentUser();
     const [parents, setParents] = useState<any[]>([]);
-    const [subclassifications, setSubclassifications] = useState<any[]>([]);
+    const [activeTab, setActiveTab] = useState<'info' | 'contacts' | 'opportunities' | 'assigned'>('info');
+
+    // Live Query for Subclassifications from local DB
+    const subclassifications = useLiveQuery(() => db.subclasificaciones.toArray()) || [];
+    const countriesList = useLiveQuery(() => db.countries.toArray()) || [];
+    const departmentsList = useLiveQuery(() => db.departments.toArray()) || [];
+    const citiesList = useLiveQuery(() => db.cities.toArray()) || [];
+
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [assignedUserName, setAssignedUserName] = useState<string | null>(null);
+    const [fallbackSubclassifications, setFallbackSubclassifications] = useState<any[]>([]);
+    const [fallbackCountries, setFallbackCountries] = useState<any[]>([]);
+    const [fallbackDepartments, setFallbackDepartments] = useState<any[]>([]);
+    const [fallbackCities, setFallbackCities] = useState<any[]>([]);
+
+    useEffect(() => {
+        if (subclassifications.length === 0) {
+            console.log('[AccountForm] INFO - Local subclasificaciones empty, fetching fallback from server...');
+            supabase
+                .from('CRM_Subclasificacion')
+                .select('id, nombre, canal_id')
+                .then(({ data }) => {
+                    if (data) setFallbackSubclassifications(data);
+                });
+        }
+
+        if (countriesList.length === 0) {
+            console.log('[AccountForm] INFO - Local countries empty, fetching fallback...');
+            supabase
+                .from('CRM_Paises')
+                .select('*')
+                .then(({ data }) => {
+                    if (data) setFallbackCountries(data);
+                });
+        }
+
+        if (departmentsList.length === 0) {
+            console.log('[AccountForm] INFO - Local departments empty, fetching fallback...');
+            supabase
+                .from('CRM_Departamentos')
+                .select('*')
+                .then(({ data }) => {
+                    if (data) setFallbackDepartments(data);
+                });
+        }
+
+        if (citiesList.length === 0) {
+            console.log('[AccountForm] INFO - Local cities empty, fetching fallback...');
+            supabase
+                .from('CRM_Ciudades')
+                .select('*')
+                .then(({ data }) => {
+                    if (data) setFallbackCities(data);
+                });
+        }
+    }, [subclassifications.length, countriesList.length, departmentsList.length, citiesList.length]);
+
+    const displaySubclassifications = subclassifications.length > 0 ? subclassifications : fallbackSubclassifications;
+    const displayCountries = countriesList.length > 0 ? countriesList : fallbackCountries;
+    const displayDepartments = departmentsList.length > 0 ? departmentsList : fallbackDepartments;
+    const displayCities = citiesList.length > 0 ? citiesList : fallbackCities;
 
     // Fetch assigned user name if exists
     useEffect(() => {
-        // If it's already in the object (from server join), use it
+        // 1. Try owner_name from server join (new field)
+        if ((account as any)?.owner_name) {
+            setAssignedUserName((account as any).owner_name);
+            return;
+        }
+
+        // 2. Fallback: creator_name (legacy)
         if ((account as any)?.creator_name) {
             setAssignedUserName((account as any).creator_name);
             return;
         }
 
-        if (account?.created_by) {
+        // 3. Fetch manually using owner_user_id or created_by
+        const ownerId = (account as any)?.owner_user_id || account?.created_by;
+
+        if (ownerId) {
             supabase
                 .from('CRM_Usuarios')
                 .select('full_name')
-                .eq('id', account.created_by)
+                .eq('id', ownerId)
                 .single()
                 .then(({ data }) => {
                     if (data?.full_name) {
@@ -66,7 +142,7 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
         } else {
             setAssignedUserName(null);
         }
-    }, [account?.created_by, (account as any)?.creator_name]);
+    }, [account?.created_by, (account as any)?.creator_name, (account as any)?.owner_user_id, (account as any)?.owner_name]);
 
     // Fetch potential parents (server-side lite fetch)
     useEffect(() => {
@@ -80,18 +156,10 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                 if (data) setParents(data);
             });
 
-        // Fetch Subclassifications
-        supabase
-            .from('CRM_Subclasificacion')
-            .select('id, nombre, canal_id')
-            .then(({ data }) => {
-                console.log('[AccountForm] DEBUG - Fetched subclassifications:', data);
-                if (data) setSubclassifications(data);
-            });
     }, []);
 
     // Tab State
-    const [activeTab, setActiveTab] = useState<'info' | 'contacts' | 'opportunities'>('info');
+    // Tab State moved to top
 
     const {
         register,
@@ -99,7 +167,7 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
         watch,
         setValue,
         reset,
-        formState: { errors },
+        formState: { errors, isDirty },
     } = useForm<AccountFormData>({
         resolver: zodResolver(accountSchema),
         defaultValues: {
@@ -108,63 +176,80 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             is_child: account?.id_cuenta_principal ? true : false,
             id_cuenta_principal: account?.id_cuenta_principal || "",
             canal_id: account?.canal_id || "DIST_NAC",
-            subclasificacion_id: account?.subclasificacion_id ? String(account.subclasificacion_id) : "",
+            subclasificacion_id: (account?.subclasificacion_id !== undefined && account?.subclasificacion_id !== null) ? String(account.subclasificacion_id) : "",
             telefono: account?.telefono || "",
+            email: (account as any)?.email || "",
             direccion: account?.direccion || "",
+            pais_id: account?.pais_id ? String(account.pais_id) : "1",
+            departamento_id: account?.departamento_id ? String(account.departamento_id) : "",
+            ciudad_id: account?.ciudad_id ? String(account.ciudad_id) : "",
             ciudad: account?.ciudad || "",
-            es_premium: account?.es_premium || false
+            es_premium: account?.es_premium || false,
+            nivel_premium: account?.nivel_premium || null
         }
     });
 
-    // Update form when account changes (for editing different accounts)
+    // Update form when account changes (ONLY if not modified by user to avoid overwriting)
     useEffect(() => {
-        if (account) {
-            console.log('[AccountForm] DEBUG - Form reset with account:', account);
-            console.log('[AccountForm] DEBUG - account.subclasificacion_id:', account.subclasificacion_id);
-            console.log('[AccountForm] DEBUG - typeof account.subclasificacion_id:', typeof account.subclasificacion_id);
+        if (account && !isDirty) {
+            console.log('[AccountForm] DEBUG - Syncing form with fresh account data (not dirty)');
             reset({
                 nombre: account.nombre || "",
                 nit_base: account.nit_base || "",
                 is_child: account.id_cuenta_principal ? true : false,
                 id_cuenta_principal: account.id_cuenta_principal || "",
                 canal_id: account.canal_id || "DIST_NAC",
-                subclasificacion_id: account.subclasificacion_id ? String(account.subclasificacion_id) : "",
+                subclasificacion_id: (account.subclasificacion_id !== undefined && account.subclasificacion_id !== null) ? String(account.subclasificacion_id) : "",
                 telefono: account.telefono || "",
+                email: (account as any)?.email || "",
                 direccion: account.direccion || "",
+                pais_id: account.pais_id ? String(account.pais_id) : "1",
+                departamento_id: account.departamento_id ? String(account.departamento_id) : "",
+                ciudad_id: account.ciudad_id ? String(account.ciudad_id) : "",
                 ciudad: account.ciudad || "",
-                es_premium: account.es_premium || false
-            });
+                es_premium: account.es_premium || false,
+                nivel_premium: account.nivel_premium || null
+            }, { keepDefaultValues: true });
         }
-    }, [account, reset]);
+    }, [account, reset, isDirty]);
 
     const isChild = watch("is_child");
     const selectedParentId = watch("id_cuenta_principal");
     const selectedChannel = watch("canal_id");
 
-    // Reset subclasificacion when channel changes (except on initial load)
-    const [initialChannelLoaded, setInitialChannelLoaded] = useState(false);
-    useEffect(() => {
-        if (initialChannelLoaded && selectedChannel) {
-            // Channel was changed by user, reset subclasificacion
-            const currentSubId = watch("subclasificacion_id");
-            const isValidForChannel = subclassifications.some(
-                sub => sub.canal_id === selectedChannel && String(sub.id) === currentSubId
-            );
-            if (!isValidForChannel) {
-                console.log('[AccountForm] DEBUG - Resetting subclasificacion_id because channel changed and current value is invalid');
-                setValue("subclasificacion_id", "");
-            }
-        } else if (selectedChannel) {
-            setInitialChannelLoaded(true);
-        }
-    }, [selectedChannel]);
+    // Reset subclasificacion when channel changes (ONLY if it's a manual change, not initial load)
+    const [lastProcessedChannel, setLastProcessedChannel] = useState<string | null>(account?.canal_id || null);
 
-    // DEBUG: Log filtered options whenever channel or subclassifications change
     useEffect(() => {
-        const filteredOptions = subclassifications.filter(sub => sub.canal_id === selectedChannel);
-        console.log('[AccountForm] DEBUG - selectedChannel:', selectedChannel);
-        console.log('[AccountForm] DEBUG - Filtered options for channel:', filteredOptions);
-    }, [selectedChannel, subclassifications]);
+        // If channel changed manually
+        if (selectedChannel && lastProcessedChannel && selectedChannel !== lastProcessedChannel) {
+            const currentSubId = watch("subclasificacion_id");
+
+            // CRITICAL: Only validate if we actually have options loaded. 
+            // If they are empty, it might be a sync delay, so we WAIT.
+            if (currentSubId && subclassifications.length > 0) {
+                const isValidForChannel = subclassifications.some(
+                    sub => sub.canal_id === selectedChannel && String(sub.id) === currentSubId
+                );
+
+                if (!isValidForChannel) {
+                    console.log('[AccountForm] DEBUG - Resetting subclasificacion_id because channel changed and current is invalid');
+                    setValue("subclasificacion_id", "", { shouldDirty: true });
+                }
+            } else if (currentSubId && displaySubclassifications.length > 0) {
+                // Secondary check with fallback data if local sync is pending
+                const isValidInFallback = displaySubclassifications.some(
+                    sub => sub.canal_id === selectedChannel && String(sub.id) === currentSubId
+                );
+                if (!isValidInFallback) {
+                    setValue("subclasificacion_id", "", { shouldDirty: true });
+                }
+            }
+            setLastProcessedChannel(selectedChannel);
+        } else if (selectedChannel && !lastProcessedChannel) {
+            setLastProcessedChannel(selectedChannel);
+        }
+    }, [selectedChannel, lastProcessedChannel, subclassifications, displaySubclassifications, setValue, watch]);
 
     // Filter possible parents (exclude self)
     const potentialParents = parents.filter(p => p.id !== account?.id);
@@ -185,17 +270,55 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
         try {
             const formData = data;
 
-            // PRE-VALIDATION: Check for duplicate NIT if it's a new PARENT account
-            if (!account?.id && !formData.is_child) {
-                const { data: existing, error: checkError } = await supabase
-                    .from('CRM_Cuentas')
-                    .select('id, nombre')
-                    .eq('nit_base', formData.nit_base)
-                    .is('id_cuenta_principal', null)
-                    .single();
+            // PRE-VALIDATION: Check for duplicates (Name, NIT, Phone, Email)
+            // Only checks against SERVER (Supabase) to ensure global uniqueness.
+            // Excludes current account ID if editing.
 
-                if (existing) {
-                    setNitError(`El NIT ${formData.nit_base} ya pertenece a la cuenta: ${existing.nombre}`);
+            const checkDuplicates = async () => {
+                let query = supabase
+                    .from('CRM_Cuentas')
+                    .select('id, nombre, nit_base, telefono, email')
+                    .eq('is_deleted', false)
+                    .or(`nombre.eq.${formData.nombre},nit_base.eq.${formData.nit_base}${formData.telefono ? `,telefono.eq.${formData.telefono}` : ''}${formData.email ? `,email.eq.${formData.email}` : ''}`);
+
+                if (account?.id) {
+                    query = query.neq('id', account.id);
+                }
+
+                // If it's a child account, we might be less strict about NIT (inherits), 
+                // but NAME should still be unique presumably? 
+                // The requirement says "duplicates in: Account Name, NIT, Phone, Email".
+                // We'll apply it broadly.
+
+                const { data: duplicates, error: checkError } = await query;
+
+                if (checkError) {
+                    console.error("Error checking duplicates:", checkError);
+                    // Decide if we block or proceed cautiously. Ideally block or warn?
+                    // Let's not block completely on network error, or alert user?
+                    // For now, allow proceed but log.
+                    return null;
+                }
+                return duplicates;
+            };
+
+            const duplicates = await checkDuplicates();
+
+            if (duplicates && duplicates.length > 0) {
+                // Find specific conflicts
+                const nameConflict = duplicates.find(d => d.nombre.toLowerCase() === formData.nombre.toLowerCase());
+                const nitConflict = duplicates.find(d => d.nit_base === formData.nit_base);
+                const phoneConflict = formData.telefono ? duplicates.find(d => d.telefono === formData.telefono) : null;
+                const emailConflict = formData.email ? duplicates.find(d => d.email === formData.email) : null;
+
+                let errorMessage = "";
+                if (nameConflict) errorMessage += `\n- El nombre "${formData.nombre}" ya existe.`;
+                if (nitConflict && (!formData.is_child)) errorMessage += `\n- El NIT "${formData.nit_base}" ya existe.`; // Allow duplicate NIT for child accounts? Form logic below handles inheritance, but requirement says "NIT". Usually branches share NIT. If is_child, we skip NIT check or let it pass? Code below sets NIT from parent. Let's strictly block invalid NIT usage for PARENTS.
+                if (phoneConflict) errorMessage += `\n- El teléfono "${formData.telefono}" ya existe.`;
+                if (emailConflict) errorMessage += `\n- El email "${formData.email}" ya existe.`;
+
+                if (errorMessage) {
+                    alert(`No se puede guardar. Se encontraron registros duplicados:${errorMessage}`);
                     setIsSubmitting(false);
                     return;
                 }
@@ -207,20 +330,26 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             }
 
             const payload: any = {
-                nombre: formData.nombre,
-                nit_base: formData.nit_base,
-                id_cuenta_principal: formData.is_child ? formData.id_cuenta_principal : null,
-                canal_id: formData.canal_id,
-                subclasificacion_id: formData.subclasificacion_id ? Number(formData.subclasificacion_id) : null,
-                telefono: formData.telefono || null,
-                direccion: formData.direccion || null,
-                ciudad: formData.ciudad || null,
-                es_premium: formData.es_premium || false
+                nombre: data.nombre,
+                nit_base: data.nit_base,
+                id_cuenta_principal: data.is_child ? data.id_cuenta_principal : null,
+                canal_id: data.canal_id,
+                subclasificacion_id: data.subclasificacion_id ? Number(data.subclasificacion_id) : null,
+                telefono: data.telefono || null,
+                email: data.email || null,
+                direccion: data.direccion || null,
+                pais_id: data.pais_id ? Number(data.pais_id) : null,
+                departamento_id: data.departamento_id ? Number(data.departamento_id) : null,
+                ciudad_id: data.ciudad_id ? Number(data.ciudad_id) : null,
+                ciudad: data.ciudad_id ? citiesList.find(c => String(c.id) === data.ciudad_id)?.nombre : (data.ciudad || null),
+                es_premium: !!data.nivel_premium,
+                nivel_premium: data.nivel_premium || null
             };
 
-            // DEBUG: Log the payload being sent
-            console.log('[AccountForm] DEBUG - formData.subclasificacion_id:', formData.subclasificacion_id);
-            console.log('[AccountForm] DEBUG - payload:', JSON.stringify(payload, null, 2));
+            // DEBUG: Log the final payload
+            console.log('--- SUBMITTING ACCOUNT PAYLOAD ---');
+            console.table(payload);
+            console.log('---------------------------------');
 
             if (account?.id) {
                 console.log('[AccountForm] DEBUG - Calling updateAccount with id:', account.id);
@@ -281,23 +410,31 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                         Oportunidades
                     </button>
                 )}
+
+                {account?.id && (userRole === 'ADMIN' || userRole === 'COORDINADOR') && (
+                    <button
+                        type="button"
+                        onClick={() => setActiveTab('assigned')}
+                        className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'assigned'
+                            ? "border-blue-600 text-blue-600"
+                            : "border-transparent text-gray-500 hover:text-gray-700"
+                            }`}
+                    >
+                        <User size={16} />
+                        Asignado
+                    </button>
+                )}
             </div>
 
             {activeTab === 'info' ? (
-                <form onSubmit={handleSubmit((data) => onSubmit(data as AccountFormData))} className="space-y-4 p-4">
+                <form data-testid="accounts-form" onSubmit={handleSubmit((data) => onSubmit(data as AccountFormData))} className="space-y-4 p-4">
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {/* Nombre */}
                         <div className="space-y-1">
                             <label className="text-sm font-medium">Nombre de Cuenta</label>
-                            <input {...register("nombre")} className="w-full border p-2 rounded" placeholder="Ej. Constructora XYZ" />
+                            <input data-testid="accounts-input-nombre" {...register("nombre")} className="w-full border p-2 rounded" placeholder="Ej. Constructora XYZ" />
                             {errors.nombre && <span className="text-red-500 text-xs">{errors.nombre.message}</span>}
-                            {assignedUserName && (
-                                <p className="text-xs text-slate-500 flex items-center gap-1 mt-1">
-                                    <User size={12} className="text-slate-400" />
-                                    Usuario asignado: <span className="font-semibold text-slate-700">{assignedUserName}</span>
-                                </p>
-                            )}
                         </div>
 
                         {/* Hierarchy Switch */}
@@ -313,17 +450,76 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                             </label>
                         </div>
 
-                        {/* Premium Switch */}
-                        <div className="flex items-center space-x-2 pt-6">
-                            <input
-                                type="checkbox"
-                                id="es_premium"
-                                {...register("es_premium")}
-                                className="w-4 h-4"
-                            />
-                            <label htmlFor="es_premium" className="text-sm font-bold text-amber-600 cursor-pointer select-none flex items-center gap-1">
-                                Cliente Premium
+                        {/* Premium Tiers (Medals) */}
+                        <div className="pt-6">
+                            <label className="text-sm font-bold text-slate-700 block mb-2">
+                                Nivel de Cliente (Premium)
                             </label>
+
+                            <div className="flex gap-3">
+                                {/* ORO */}
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const current = watch("nivel_premium");
+                                        const newVal = current === 'ORO' ? null : 'ORO';
+                                        setValue("nivel_premium", newVal);
+                                        setValue("es_premium", !!newVal);
+                                    }}
+                                    className={cn(
+                                        "flex-1 flex flex-col items-center justify-center p-3 rounded-lg border-2 transition-all",
+                                        watch("nivel_premium") === 'ORO'
+                                            ? "bg-amber-50 border-amber-400 text-amber-700 shadow-sm"
+                                            : "bg-white border-slate-100 text-slate-400 hover:border-amber-200 hover:text-amber-600/70"
+                                    )}
+                                >
+                                    <Medal className={cn("w-6 h-6 mb-1", watch("nivel_premium") === 'ORO' ? "fill-amber-400 text-amber-500" : "fill-none")} />
+                                    <span className="text-xs font-bold">ORO</span>
+                                </button>
+
+                                {/* PLATA */}
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const current = watch("nivel_premium");
+                                        const newVal = current === 'PLATA' ? null : 'PLATA';
+                                        setValue("nivel_premium", newVal);
+                                        setValue("es_premium", !!newVal);
+                                    }}
+                                    className={cn(
+                                        "flex-1 flex flex-col items-center justify-center p-3 rounded-lg border-2 transition-all",
+                                        watch("nivel_premium") === 'PLATA'
+                                            ? "bg-slate-100 border-slate-400 text-slate-700 shadow-sm"
+                                            : "bg-white border-slate-100 text-slate-400 hover:border-slate-300 hover:text-slate-600/70"
+                                    )}
+                                >
+                                    <Medal className={cn("w-6 h-6 mb-1", watch("nivel_premium") === 'PLATA' ? "fill-slate-300 text-slate-500" : "fill-none")} />
+                                    <span className="text-xs font-bold">PLATA</span>
+                                </button>
+
+                                {/* BRONCE */}
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const current = watch("nivel_premium");
+                                        const newVal = current === 'BRONCE' ? null : 'BRONCE';
+                                        setValue("nivel_premium", newVal);
+                                        setValue("es_premium", !!newVal);
+                                    }}
+                                    className={cn(
+                                        "flex-1 flex flex-col items-center justify-center p-3 rounded-lg border-2 transition-all",
+                                        watch("nivel_premium") === 'BRONCE'
+                                            ? "bg-orange-50 border-orange-400 text-orange-700 shadow-sm"
+                                            : "bg-white border-slate-100 text-slate-400 hover:border-orange-200 hover:text-orange-600/70"
+                                    )}
+                                >
+                                    <Medal className={cn("w-6 h-6 mb-1", watch("nivel_premium") === 'BRONCE' ? "fill-orange-400 text-orange-600" : "fill-none")} />
+                                    <span className="text-xs font-bold">BRONCE</span>
+                                </button>
+                            </div>
+
+                            {/* Hidden field for es_premium compatibility */}
+                            <input type="hidden" {...register("es_premium")} />
                         </div>
                     </div>
 
@@ -349,18 +545,23 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                     <div className="space-y-1">
                         <label className="text-sm font-medium">Subclasificación</label>
                         <select
+                            key={`sub-${displaySubclassifications.length}-${selectedChannel}`}
                             {...register("subclasificacion_id")}
                             className="w-full border p-2 rounded bg-white disabled:bg-slate-100 disabled:text-slate-400"
                             disabled={!selectedChannel}
                         >
                             <option value="">Seleccione...</option>
-                            {subclassifications
-                                .filter(sub => sub.canal_id === selectedChannel)
-                                .map(sub => (
-                                    <option key={sub.id} value={String(sub.id)}>
-                                        {sub.nombre}
-                                    </option>
-                                ))}
+                            {displaySubclassifications.length > 0 ? (
+                                displaySubclassifications
+                                    .filter(sub => sub.canal_id === selectedChannel)
+                                    .map(sub => (
+                                        <option key={sub.id} value={String(sub.id)}>
+                                            {sub.nombre}
+                                        </option>
+                                    ))
+                            ) : (
+                                <option disabled>Cargando opciones...</option>
+                            )}
                         </select>
                         <p className="text-xs text-slate-500">Opciones disponibles según el canal seleccionado.</p>
                     </div>
@@ -388,6 +589,7 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                         <div className="space-y-1">
                             <label className="text-sm font-medium">NIT (Sin dígito de verificación)</label>
                             <input
+                                data-testid="accounts-input-nit"
                                 {...register("nit_base")}
                                 className={cn("w-full border p-2 rounded", nitError ? "border-red-500 bg-red-50" : "border-slate-200")}
                                 placeholder="Ej. 890900123"
@@ -403,12 +605,66 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div>
-                            <label className="text-sm font-medium">Teléfono</label>
-                            <input {...register("telefono")} className="w-full border p-2 rounded" />
+                            <label className="text-sm font-medium">País</label>
+                            <select
+                                key={`pais-${displayCountries.length}-${account?.id || 'new'}`}
+                                {...register("pais_id")}
+                                className="w-full border p-2 rounded bg-white"
+                                onChange={(e) => {
+                                    register("pais_id").onChange(e);
+                                    setValue("departamento_id", "");
+                                    setValue("ciudad_id", "");
+                                }}
+                            >
+                                <option value="">Seleccione País...</option>
+                                {displayCountries.map(p => (
+                                    <option key={p.id} value={String(p.id)}>{p.nombre}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div>
+                            <label className="text-sm font-medium">Departamento</label>
+                            <select
+                                key={`dep-${displayDepartments.length}-${watch("pais_id")}-${account?.id || 'new'}`}
+                                {...register("departamento_id")}
+                                className="w-full border p-2 rounded bg-white disabled:bg-slate-50"
+                                disabled={!watch("pais_id")}
+                                onChange={(e) => {
+                                    register("departamento_id").onChange(e);
+                                    setValue("ciudad_id", "");
+                                }}
+                            >
+                                <option value="">Seleccione Departamento...</option>
+                                {displayDepartments
+                                    .filter(dep => String(dep.pais_id) === watch("pais_id") || (!dep.pais_id && watch("pais_id") === "1")) // Fallback local logic just in case
+                                    .map(dep => (
+                                        <option key={dep.id} value={String(dep.id)}>{dep.nombre}</option>
+                                    ))}
+                            </select>
                         </div>
                         <div>
                             <label className="text-sm font-medium">Ciudad</label>
-                            <input {...register("ciudad")} className="w-full border p-2 rounded" />
+                            <select
+                                key={`city-${displayCities.length}-${watch("departamento_id")}-${account?.id || 'new'}`}
+                                {...register("ciudad_id")}
+                                className="w-full border p-2 rounded bg-white disabled:bg-slate-50"
+                                disabled={!watch("departamento_id")}
+                            >
+                                <option value="">Seleccione Ciudad...</option>
+                                {displayCities
+                                    .filter(c => String(c.departamento_id) === watch("departamento_id"))
+                                    .map(city => (
+                                        <option key={city.id} value={String(city.id)}>{city.nombre}</option>
+                                    ))
+                                }
+                            </select>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="text-sm font-medium">Teléfono</label>
+                            <input {...register("telefono")} className="w-full border p-2 rounded" />
                         </div>
                         <div>
                             <label className="text-sm font-medium">Dirección</label>
@@ -416,11 +672,32 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                         </div>
                     </div>
 
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="text-sm font-medium">Email</label>
+                            <input {...register("email")} type="email" className="w-full border p-2 rounded" placeholder="correo@ejemplo.com" />
+                            {errors.email && <span className="text-red-500 text-xs">{errors.email.message}</span>}
+                        </div>
+                    </div>
+
+                    {assignedUserName && (
+                        <div className="mt-4 p-3 bg-slate-50 rounded-lg border border-slate-100 flex items-center gap-3">
+                            <div className="p-2 bg-white rounded-full border border-slate-200 shadow-sm text-blue-600">
+                                <User size={16} />
+                            </div>
+                            <div>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider leading-none">Vendedor Asignado</p>
+                                <p className="text-sm font-bold text-slate-700 mt-1">{assignedUserName}</p>
+                            </div>
+                        </div>
+                    )}
+
                     <div className="flex justify-end gap-2 pt-4">
-                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">
+                        <button data-testid="accounts-form-cancel" type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">
                             Cancelar
                         </button>
                         <button
+                            data-testid="accounts-form-save"
                             type="submit"
                             disabled={isSubmitting}
                             className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center"
@@ -434,6 +711,15 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             ) : activeTab === 'contacts' ? (
                 <div className="p-4">
                     {account?.id && <AccountContactsTab accountId={account.id} />}
+                    <div className="flex justify-end pt-4 border-t mt-4">
+                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">
+                            Cerrar
+                        </button>
+                    </div>
+                </div>
+            ) : activeTab === 'assigned' ? (
+                <div className="p-4">
+                    {account?.id && <AccountAssignedTab accountId={account.id} currentOwnerId={(account as any).owner_user_id || account.created_by || null} />}
                     <div className="flex justify-end pt-4 border-t mt-4">
                         <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">
                             Cerrar
