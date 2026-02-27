@@ -28,7 +28,7 @@ export function UserPickerFilter({ onUserSelect, selectedUserId }: UserPickerFil
     );
 
     return (
-        <div className="relative" ref={containerRef as any}>
+        <div className="relative" ref={containerRef as any} data-testid="accounts-user-picker-filter">
             <button
                 onClick={() => setIsOpen(!isOpen)}
                 className={cn(

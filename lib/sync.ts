@@ -451,24 +451,7 @@ export class SyncEngine {
             }
         }
 
-        // 3.3b Proactive Fix: Filter out non-existent fields for CRM_Actividades
-        // After migration 20260218_add_activities_ms_columns.sql, all known fields are now valid.
-        // This block is kept as a safety net for future unknown fields.
         if (batches['CRM_Actividades']) {
-            const invalidFieldsForActividades: string[] = []; // Add field names here if needed in future
-            if (invalidFieldsForActividades.length > 0) {
-                batches['CRM_Actividades'] = batches['CRM_Actividades'].filter(update => {
-                    if (invalidFieldsForActividades.includes(update.field)) {
-                        console.warn(`[Sync] Filtering out invalid field '${update.field}' from CRM_Actividades batch`);
-                        db.outbox.filter(i => i.entity_id === update.id && i.field_name === update.field && i.entity_type === 'CRM_Actividades')
-                            .delete()
-                            .catch(e => console.error("[Sync] Failed to delete filtered item from outbox", e));
-                        return false;
-                    }
-                    return true;
-                });
-            }
-
             // 3.3c SELF-HEALING: Validate opportunity_id FK for Activities
             // If the referenced opportunity doesn't exist on the server, set opportunity_id to null
             // to avoid "violates foreign key constraint fk_crmact_opp" errors.
@@ -536,38 +519,8 @@ export class SyncEngine {
         if (batches['CRM_Oportunidades']) {
             const updates = batches['CRM_Oportunidades'];
 
-            // 3.3 Proactive Fix: Filter out non-existent fields for CRM_Oportunidades
-            const invalidFieldsForOpp = ['ciudad', 'fase', 'valor', 'items'];
-            batches['CRM_Oportunidades'] = batches['CRM_Oportunidades'].filter(update => {
-                if (invalidFieldsForOpp.includes(update.field)) {
-                    console.warn(`[Sync] Filtering out invalid field '${update.field}' from CRM_Oportunidades batch`);
-                    // We delete these from Dexie outbox so they don't keep failing
-                    db.outbox.filter(i => i.entity_id === update.id && i.field_name === update.field && i.entity_type === 'CRM_Oportunidades')
-                        .delete()
-                        .catch(e => console.error("[Sync] Failed to delete filtered item from outbox", e));
-                    return false;
-                }
-                return true;
-            });
-
             // 3.4 SELF-HEALING: Check for missing accounts
             const uniqueAccountIds = new Set<string>();
-
-            // 3.5 Proactive Fix: Filter out incompatible columns for Collaborators if migration pending
-            if (batches['CRM_Oportunidades_Colaboradores']) {
-                const INVALID_COLLAB_FIELDS = ['created_at', 'updated_at'];
-                batches['CRM_Oportunidades_Colaboradores'] = batches['CRM_Oportunidades_Colaboradores'].filter(update => {
-                    if (INVALID_COLLAB_FIELDS.includes(update.field)) {
-                        console.warn(`[Sync] Filtering out '${update.field}' from CRM_Oportunidades_Colaboradores batch (schema compatibility)`);
-                        // Delete from outbox to prevent infinite retry loop
-                        db.outbox.filter(i => i.entity_id === update.id && i.field_name === update.field && i.entity_type === 'CRM_Oportunidades_Colaboradores')
-                            .delete()
-                            .catch(e => console.error("[Sync] Failed to delete filtered item from outbox", e));
-                        return false;
-                    }
-                    return true;
-                });
-            }
 
             // Gather account IDs from updates (if present in payload)
             updates.forEach(u => {
@@ -722,9 +675,10 @@ export class SyncEngine {
                     .filter(i => i.entity_type === table)
                     .map(i => i.id);
 
-                await db.outbox.where('id').anyOf(idsToFail).modify({
-                    status: 'FAILED',
-                    error: err.message
+                await db.outbox.where('id').anyOf(idsToFail).modify(item => {
+                    item.status = 'FAILED';
+                    item.error = err.message;
+                    item.retry_count = (item.retry_count || 0) + 1;
                 });
 
                 // BREAK ON FATAL: Prevent processing child tables if parent has a fatal RPC error
@@ -841,10 +795,10 @@ export class SyncEngine {
                         // Mark as failed in outbox
                         const idsToFail = collabUpdates.map(u => pending.find(p => p.entity_id === u.id && p.field_name === u.field && p.entity_type === 'CRM_Oportunidades_Colaboradores')?.id).filter(Boolean) as string[];
                         if (idsToFail.length > 0) {
-                            await db.outbox.where('id').anyOf(idsToFail).modify({
-                                status: 'FAILED',
-                                error: error.message,
-                                retry_count: 1 // Increment? Or just set?
+                            await db.outbox.where('id').anyOf(idsToFail).modify(item => {
+                                item.status = 'FAILED';
+                                item.error = error.message;
+                                item.retry_count = (item.retry_count || 0) + 1;
                             });
                         }
                     }

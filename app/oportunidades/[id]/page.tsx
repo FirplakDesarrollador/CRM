@@ -389,7 +389,8 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
         if (normalizedName.includes('ganada')) {
             await updateOpportunity(opportunity.id, {
                 fase_id: phaseId,
-                estado_id: 2 // Explicitly set to Won status
+                estado_id: 2, // Explicitly set to Won status
+                probability: targetPhase?.probability ?? 100 // Propagate phase probability
             });
             return;
         }
@@ -397,16 +398,19 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
         // Default: just update phase, reset estado to Open if coming from a closed state
         await updateOpportunity(opportunity.id, {
             fase_id: phaseId,
-            estado_id: 1 // Reset to Open status when moving to any other phase
+            estado_id: 1, // Reset to Open status when moving to any other phase
+            probability: targetPhase?.probability ?? 0 // Propagate phase probability
         });
     };
 
     const confirmLossReason = async (reasonId: number) => {
         if (pendingPhaseId) {
+            const lostPhase = phases?.find(p => p.id === pendingPhaseId);
             await updateOpportunity(opportunity.id, {
                 fase_id: pendingPhaseId,
                 razon_perdida_id: reasonId,
-                estado_id: 3 // Explicitly set to Lost status ID (usually 3)
+                estado_id: 3, // Explicitly set to Lost status ID (usually 3)
+                probability: lostPhase?.probability ?? 0 // Propagate phase probability
             });
             setIsLossReasonModalOpen(false);
             setPendingPhaseId(null);
@@ -459,6 +463,8 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                         <button
                                             key={phase.id}
                                             onClick={() => handlePhaseChange(phase.id)}
+                                            data-testid={`opportunity-phase-btn-${phase.id}`}
+                                            data-phase-id={phase.id}
                                             className="flex flex-col items-center group w-24 focus:outline-none relative z-10"
                                         >
                                             <div className={cn(
@@ -514,6 +520,8 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                             <button
                                                 key={phase.id}
                                                 onClick={() => handlePhaseChange(phase.id)}
+                                                data-testid={`opportunity-phase-btn-${phase.id}`}
+                                                data-phase-id={phase.id}
                                                 // Align buttons with the ends of the SVG paths (Y=16 and Y=96)
                                                 style={{ top: isWon ? '16px' : '96px', transform: 'translateY(-50%)' }}
                                                 className={cn(
@@ -557,8 +565,11 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                     </div>
 
                     <div className="space-y-4 flex-1">
-                        {/* Probability Donut - Added */}
-                        <div className="flex items-center justify-between bg-slate-50 p-4 rounded-xl border border-slate-100 mb-4">
+                        {/* Probability Donut - Always derived from current phase */}
+                        <div
+                            className="flex items-center justify-between bg-slate-50 p-4 rounded-xl border border-slate-100 mb-4"
+                            data-testid="opportunity-probability-section"
+                        >
                             <div>
                                 <h4 className="font-bold text-slate-700 text-sm">Probabilidad de Éxito</h4>
                                 <p className="text-xs text-slate-400 mt-1">Calculado según fase actual</p>
@@ -567,7 +578,9 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                 percentage={
                                     opportunity.estado_id === 2 ? 100 : // Cerrada Ganada = 100%
                                         opportunity.estado_id === 3 ? 0 :   // Cerrada Perdida = 0%
-                                            opportunity?.probability || (opportunity?.fase_id ? phases?.find(p => p.id === opportunity.fase_id)?.probability : 0) || 0
+                                            // Always re-derive from current phase for accuracy;
+                                            // fall back to stored probability only if phase not found locally
+                                            (opportunity?.fase_id ? (phases?.find(p => p.id === opportunity.fase_id)?.probability ?? opportunity?.probability) : opportunity?.probability) ?? 0
                                 }
                                 size={64}
                                 strokeWidth={6}
