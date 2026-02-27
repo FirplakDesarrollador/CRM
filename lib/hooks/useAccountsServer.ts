@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { syncEngine } from '@/lib/sync';
 import { db } from '@/lib/db';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 
 export type AccountServer = {
     id: string;
@@ -41,14 +42,9 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
     const [searchTerm, setSearchTerm] = useState<string>("");
     const [assignedUserId, setAssignedUserId] = useState<string | null>(null);
 
-    // User Context (needed if we want to filter by permissions, though Accounts are usually global in this CRM)
-    const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-
-    useEffect(() => {
-        syncEngine.getCurrentUser().then(({ data: { user } }) => {
-            if (user) setCurrentUserId(user?.id);
-        });
-    }, []);
+    // User Context
+    const { user, isVendedor } = useCurrentUser();
+    const currentUserId = user?.id;
 
     const fetchAccounts = useCallback(async (isLoadMore = false) => {
         setLoading(true);
@@ -61,6 +57,11 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
             if (!navigator.onLine) {
                 console.log("[useAccountsServer] Device is offline. Falling back to local Dexie database...");
                 let localAccounts = await db.accounts.toArray();
+
+                // Role filtering
+                if (isVendedor && currentUserId) {
+                    localAccounts = localAccounts.filter((a: any) => a.owner_user_id === currentUserId);
+                }
 
                 // Filtering
                 if (searchTerm) {
@@ -135,6 +136,11 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                 `, { count: 'exact' })
                 .eq('is_deleted', false);
 
+            // Role filtering
+            if (isVendedor && currentUserId) {
+                query = query.eq('owner_user_id', currentUserId);
+            }
+
             if (searchTerm) {
                 query = query.or(`nombre.ilike.%${searchTerm}%,nit_base.ilike.%${searchTerm}%`);
             }
@@ -208,7 +214,7 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
         } finally {
             setLoading(false);
         }
-    }, [currentUserId, pageSize, searchTerm, assignedUserId]);
+    }, [currentUserId, pageSize, searchTerm, assignedUserId, isVendedor]);
 
     // Initial Fetch & Filter Fetch
     useEffect(() => {

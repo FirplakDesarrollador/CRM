@@ -23,7 +23,7 @@ function AccountsContent() {
     } = useAccountsServer({ pageSize: 20 });
 
     const { deleteAccount } = useAccounts();
-    const { isAdmin } = useCurrentUser();
+    const { isAdmin, hasCoordinatorAccess } = useCurrentUser();
 
     const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
 
@@ -121,10 +121,12 @@ function AccountsContent() {
                 <h1 className="text-2xl font-bold text-slate-900">Cuentas</h1>
 
                 <div className="flex flex-wrap md:flex-nowrap gap-2 w-full md:w-auto items-center">
-                    <UserPickerFilter
-                        selectedUserId={selectedUserId}
-                        onUserSelect={handleUserSelect}
-                    />
+                    {hasCoordinatorAccess && (
+                        <UserPickerFilter
+                            selectedUserId={selectedUserId}
+                            onUserSelect={handleUserSelect}
+                        />
+                    )}
 
                     <div className="relative flex-1 md:w-64">
                         <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
