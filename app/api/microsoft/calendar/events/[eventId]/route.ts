@@ -35,6 +35,9 @@ export async function GET(req: NextRequest, { params }: { params: { eventId: str
         return NextResponse.json(event);
     } catch (error: any) {
         console.error('[API Get Event] Error:', error);
+        if (error.status === 404) {
+            return NextResponse.json({ error: 'Event not found in Outlook' }, { status: 404 });
+        }
         return NextResponse.json({ error: error.message }, { status: 500 });
     }
 }

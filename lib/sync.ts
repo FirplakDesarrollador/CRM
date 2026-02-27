@@ -280,6 +280,7 @@ export class SyncEngine {
                         const res = await fetch('/api/microsoft/planner/tasks', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
+                            credentials: 'include',
                             // Include cookies to pass the Next.js auth guard
                             // Note: Sync usually runs in the same browser session so this should work
                             body: JSON.stringify({
@@ -301,7 +302,7 @@ export class SyncEngine {
                             // Remove pending_planner from metadata before sending to Supabase
                             const newMeta = { ...meta };
                             delete newMeta.pending_planner;
-                            metadataChange.value = newMeta;
+                            // metadataChange.value = newMeta; // No longer needed, _sync_metadata is synced as-is
 
                             // Inject ms_planner_id update into the batch
                             const plannerChange = changes.find(c => c.field === 'ms_planner_id');
@@ -351,6 +352,7 @@ export class SyncEngine {
                             const res = await fetch(`/api/microsoft/planner/tasks/${msPlannerId}`, {
                                 method: 'PATCH',
                                 headers: { 'Content-Type': 'application/json' },
+                                credentials: 'include',
                                 body: JSON.stringify({ percentComplete })
                             });
                             if (!res.ok) {
@@ -384,6 +386,7 @@ export class SyncEngine {
                         const res = await fetch('/api/microsoft/calendar/create-event', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
+                            credentials: 'include',
                             body: JSON.stringify({
                                 subject: title,
                                 description: desc,
@@ -1477,7 +1480,6 @@ export class SyncEngine {
 
             for (const [field, value] of Object.entries(changes)) {
                 if (value === undefined) continue; // Skip undefined fields
-                if (field === '_sync_metadata') continue; // Skip sync metadata
                 if (field === 'id') continue; // Skip ID (it's the key, not a field to update)
 
                 items.push({

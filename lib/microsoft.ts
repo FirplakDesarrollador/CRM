@@ -791,7 +791,9 @@ export async function getMicrosoftEvent(accessToken: string, eventId: string) {
     if (!response.ok) {
         const errorText = await response.text();
         console.error('[Microsoft API] Error getting event:', response.status, errorText);
-        throw new Error(`Graph API returned ${response.status}: ${errorText}`);
+        const error: any = new Error(`Graph API returned ${response.status}: ${errorText}`);
+        error.status = response.status;
+        throw error;
     }
 
     return response.json();
@@ -886,4 +888,42 @@ export async function deleteMicrosoftEvent(accessToken: string, eventId: string)
     }
 
     return true;
+}
+
+/**
+ * Find an event in Microsoft Graph by subject and start time (to prevent duplicates)
+ */
+export async function findMicrosoftEvent(accessToken: string, subject: string, startTime: string) {
+    if (!accessToken) throw new Error('Access token is required');
+
+    // Convert startTime to ISO and use it for range filtering (within 2 minutes tolerance)
+    const start = new Date(startTime);
+    const rangeStart = new Date(start.getTime() - 120000).toISOString(); // 2 mins before
+    const rangeEnd = new Date(start.getTime() + 120000).toISOString();   // 2 mins after
+
+    // Filter by exact subject and fuzzy start time
+    const queryParams = new URLSearchParams({
+        '$filter': `subject eq '${subject.replace(/'/g, "''")}' and start/dateTime ge '${rangeStart}' and start/dateTime le '${rangeEnd}'`,
+        '$select': 'id,subject,start,onlineMeeting'
+    });
+
+    const url = `https://graph.microsoft.com/v1.0/me/events?${queryParams.toString()}`;
+    console.log(`[Microsoft API] Searching for existing event: ${url}`);
+
+    const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Accept': 'application/json'
+        }
+    });
+
+    if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[Microsoft API] Error searching event:', response.status, errorText);
+        return null; // Don't throw, just return no match
+    }
+
+    const data = await response.json();
+    return data.value && data.value.length > 0 ? data.value[0] : null;
 }
