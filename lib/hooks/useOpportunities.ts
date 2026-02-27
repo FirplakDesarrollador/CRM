@@ -249,8 +249,17 @@ export function useOpportunities() {
 
         await db.opportunities.update(id, updated);
 
-        // Send full opportunity data to satisfy NOT NULL constraints on server
-        await syncEngine.queueMutation('CRM_Oportunidades', id, sanitizeOpportunityForSync(updated));
+        // Prepare partial payload with mandatory NOT NULL fields for UPSERT safety
+        const syncPayload: any = sanitizeOpportunityForSync(sanitizedUpdates);
+        if (updates.fecha_cierre_estimada !== undefined) syncPayload.fecha_cierre_estimada = updated.fecha_cierre_estimada;
+
+        syncPayload.nombre = updated.nombre;
+        syncPayload.account_id = updated.account_id;
+        syncPayload.fase_id = updated.fase_id;
+        syncPayload.moneda_id = updated.moneda_id;
+        syncPayload.owner_user_id = updated.owner_user_id;
+
+        await syncEngine.queueMutation('CRM_Oportunidades', id, syncPayload);
 
         // PROPAGATION: If segmento_id changed, update all associated quotes
         if (updates.segmento_id !== undefined) {
@@ -275,7 +284,16 @@ async function performOpportunityUpdate(id: string, updates: any) {
 
     const updated = { ...current, ...updates, updated_at: new Date().toISOString() };
     await db.opportunities.update(id, updated);
-    await syncEngine.queueMutation('CRM_Oportunidades', id, sanitizeOpportunityForSync(updated));
+
+    // Prepare partial payload with mandatory NOT NULL fields
+    const syncPayload: any = sanitizeOpportunityForSync(updates);
+    syncPayload.nombre = updated.nombre;
+    syncPayload.account_id = updated.account_id;
+    syncPayload.fase_id = updated.fase_id;
+    syncPayload.moneda_id = updated.moneda_id;
+    syncPayload.owner_user_id = updated.owner_user_id;
+
+    await syncEngine.queueMutation('CRM_Oportunidades', id, syncPayload);
 }
 
 

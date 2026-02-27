@@ -3,10 +3,20 @@ import { db, LocalCuenta } from "@/lib/db";
 import { syncEngine } from "@/lib/sync";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 
 export function useAccounts() {
+    const { user, isVendedor } = useCurrentUser();
+    const userId = user?.id;
+
     // Live Query from Local DB (Dexie)
-    const accounts = useLiveQuery(() => db.accounts.toArray());
+    const accounts = useLiveQuery(async () => {
+        const allAccounts = await db.accounts.toArray();
+        if (isVendedor && userId) {
+            return allAccounts.filter((a: any) => a.owner_user_id === userId);
+        }
+        return allAccounts;
+    }, [isVendedor, userId]);
     const isLoading = false; // Background sync handles loading
 
     const createAccount = async (data: Partial<LocalCuenta>) => {
