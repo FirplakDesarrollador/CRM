@@ -50,6 +50,7 @@ function sanitizeOpportunityForSync(opp: any) {
         valor,  // Legacy 'valor' field (replaced by 'amount')
         items,  // Items are synced separately through CRM_CotizacionItems
         status, // Legacy 'status' field (replaced by 'estado_id')
+        _sync_metadata, // Exclude system field to prevent sync loops
         ...sanitized
     } = opp;
 
@@ -61,6 +62,8 @@ function sanitizeOpportunityForSync(opp: any) {
     if (sanitized.estado_id !== undefined) sanitized.estado_id = sanitized.estado_id ? Number(sanitized.estado_id) : 1;
     if (sanitized.fase_id !== undefined) sanitized.fase_id = sanitized.fase_id ? Number(sanitized.fase_id) : 1;
     if (sanitized.razon_perdida_id !== undefined) sanitized.razon_perdida_id = sanitized.razon_perdida_id ? Number(sanitized.razon_perdida_id) : null;
+    // Text fields — pass through as-is (no conversion needed)
+    // razon_perdida and comentarios_perdida are already strings or null
 
     return sanitized;
 }
@@ -232,6 +235,8 @@ export function useOpportunities() {
             departamento_id: updates.departamento_id !== undefined ? (updates.departamento_id ? Number(updates.departamento_id) : null) : undefined,
             ciudad_id: updates.ciudad_id !== undefined ? (updates.ciudad_id ? Number(updates.ciudad_id) : null) : undefined,
             razon_perdida_id: updates.razon_perdida_id !== undefined ? (updates.razon_perdida_id ? Number(updates.razon_perdida_id) : null) : undefined,
+            razon_perdida: updates.razon_perdida !== undefined ? (updates.razon_perdida || null) : undefined,
+            comentarios_perdida: updates.comentarios_perdida !== undefined ? (updates.comentarios_perdida || null) : undefined,
         };
 
         // Remove undefined fields to avoid overwriting with undefined

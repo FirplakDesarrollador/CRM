@@ -22,7 +22,7 @@ interface CreateActivityModalProps {
 
 export function CreateActivityModal({ onClose, onSubmit, opportunities, initialOpportunityId, initialData }: CreateActivityModalProps) {
     const isEditing = !!initialData;
-    const { register, handleSubmit, watch, setValue, reset } = useForm({
+    const { register, handleSubmit, watch, setValue, getValues, reset, formState: { dirtyFields } } = useForm({
         defaultValues: {
             asunto: initialData?.asunto || '',
             descripcion: initialData?.descripcion || '',
@@ -68,10 +68,8 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
 
     // Planner Integration State - Always sync tasks to Planner
     const [syncToPlanner, setSyncToPlanner] = useState<boolean>(true);
-    const [plannerGroups, setPlannerGroups] = useState<{ id: string; displayName: string }[]>([]);
     const [plannerPlans, setPlannerPlans] = useState<{ id: string; title: string }[]>([]);
     const [plannerBuckets, setPlannerBuckets] = useState<{ id: string; name: string }[]>([]);
-    const [selectedGroupId, setSelectedGroupId] = useState<string>("");
     const [selectedPlanId, setSelectedPlanId] = useState<string>("");
     const [selectedBucketId, setSelectedBucketId] = useState<string>("");
     const [loadingPlanner, setLoadingPlanner] = useState<boolean>(false);
@@ -92,6 +90,9 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         teams?: 'success' | 'error' | null;
         message?: string;
     }>({});
+
+    // Track if we already synced this activity instance to prevent loops
+    const hasSyncedRef = useRef<string | null>(null);
 
     // Check Microsoft Connection
     useEffect(() => {
@@ -120,62 +121,66 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                 if (res.ok) {
                     const taskData = await res.json();
 
-                    const crmDateStr = initialData.updated_at || initialData.created_at;
-                    const crmModifiedDate = crmDateStr ? new Date(crmDateStr).getTime() : 0;
+                    let crmDateStr = initialData.updated_at || initialData.created_at;
+                    if (crmDateStr && !crmDateStr.endsWith('Z') && !crmDateStr.includes('+')) {
+                        // Supabase timestamps might lack the Z (UTC) indicator, causing them to parse as local time (future).
+                        crmDateStr += 'Z';
+                    }
+
+                    // Protect Plan and Bucket from being reset
+                    if (taskData.planId) setSelectedPlanId(taskData.planId);
+                    if (taskData.bucketId) {
+                        // Small timeout to bypass the plan loading effect that clears the bucket
+                        setTimeout(() => setSelectedBucketId(taskData.bucketId), 50);
+                    }
+
+                    // Prioritize the detailed _sync_metadata timestamp if available, fallback to entity timestamp
+                    const crmModifiedDate = initialData._sync_metadata?.last_modified
+                        ? initialData._sync_metadata.last_modified
+                        : (crmDateStr ? new Date(crmDateStr).getTime() : 0);
 
                     const taskModifiedDate = taskData.lastModifiedDateTime ? new Date(taskData.lastModifiedDateTime).getTime() : 0;
                     const detailsModifiedDate = taskData.details?.lastModifiedDateTime ? new Date(taskData.details.lastModifiedDateTime).getTime() : 0;
                     const plannerModifiedDate = Math.max(taskModifiedDate, detailsModifiedDate);
 
-                    const isPlannerNewer = plannerModifiedDate > (crmModifiedDate + 10000); // 10s leeway
-                    const isCrmNewer = crmModifiedDate > (plannerModifiedDate + 10000);
+                    console.log(`[CreateActivityModal] Sync Comparison - CRM: ${new Date(crmModifiedDate).toISOString()} (${crmModifiedDate}) | Planner: ${new Date(plannerModifiedDate).toISOString()} (${plannerModifiedDate})`);
 
-                    if (isPlannerNewer) {
+                    const isPlannerNewer = plannerModifiedDate > (crmModifiedDate + 3000); // 3s leeway for API latency
+                    const isCrmNewer = crmModifiedDate > (plannerModifiedDate + 3000);
+
+                    // If Planner is completed but CRM is not, or Planner has notes and CRM doesn't
+                    const isCompleted = taskData.percentComplete === 100;
+                    const plannerWinsOnCompletion = isCompleted && !initialData.is_completed;
+                    const plannerFillsEmptyNotes = !initialData.descripcion && taskData.details?.description;
+
+                    if (isPlannerNewer || plannerWinsOnCompletion || plannerFillsEmptyNotes) {
                         console.log(`[CreateActivityModal] Planner is newer. Syncing to UI...`);
                         setMsPlannerId(taskData.id);
+
                         setValue('asunto', taskData.title, { shouldDirty: true });
-                        if (taskData.details?.description) {
+
+                        if (taskData.details?.description !== undefined) {
                             setValue('descripcion', taskData.details.description, { shouldDirty: true });
                         }
-                        const isCompleted = taskData.percentComplete === 100;
-                        setValue('is_completed', isCompleted, { shouldDirty: true });
 
-                        if (taskData.details?.checklist) {
-                            const plannerChecklist = Object.values(taskData.details.checklist).map((item: any) => item.title);
-                            setChecklist(plannerChecklist);
+                        if (isPlannerNewer) {
+                            setValue('is_completed', isCompleted, { shouldDirty: true });
                         }
 
                         if (taskData.resolvedAssignees && taskData.resolvedAssignees.length > 0) {
                             setAttendees(taskData.resolvedAssignees);
                         }
 
-                        // Si está completado en planner, lo disparamos localmente enseguida para no bloquear.
-                        if (isCompleted && !initialData.is_completed) {
-                            onSubmit({
-                                ...initialData,
-                                is_completed: true,
-                                asunto: taskData.title,
-                                descripcion: taskData.details?.description || ''
-                            });
-                        }
+                        // Reset form with new data so dirtyFields is cleared
+                        reset({
+                            ...getValues(),
+                            asunto: taskData.title,
+                            descripcion: taskData.details?.description || '',
+                            is_completed: isCompleted,
+                        });
                     } else if (isCrmNewer) {
-                        console.log(`[CreateActivityModal] CRM is newer. Pushing recent edits to Planner...`);
-                        // Attendees shouldn't be overridden with empty state if we didn't load them yet.
-                        // Wait for full submit to push complex changes, but simple status/title can be pushed here
-                        try {
-                            await fetch(`/api/microsoft/planner/tasks/${initialData.ms_planner_id}`, {
-                                method: 'PATCH',
-                                headers: { 'Content-Type': 'application/json' },
-                                credentials: 'include',
-                                body: JSON.stringify({
-                                    title: initialData.asunto,
-                                    percentComplete: initialData.is_completed ? 100 : 0,
-                                    notes: initialData.descripcion
-                                })
-                            });
-                        } catch (e) { }
-
-                        // Still load checklist / attendees for UI so they aren't lost from CRM form
+                        console.log(`[CreateActivityModal] CRM is newer. Retaining CRM data...`);
+                        setMsPlannerId(taskData.id);
                         if (taskData.details?.checklist) {
                             setChecklist(Object.values(taskData.details.checklist).map((item: any) => item.title));
                         }
@@ -191,6 +196,16 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                         if (taskData.resolvedAssignees && taskData.resolvedAssignees.length > 0) {
                             setAttendees(taskData.resolvedAssignees);
                         }
+                    }
+
+                    // Si está completado en planner y Planner es más reciente (o casi igual), lo disparamos localmente enseguida para no bloquear.
+                    if (isCompleted && !initialData.is_completed) {
+                        onSubmit({
+                            ...initialData,
+                            is_completed: true,
+                            asunto: taskData.title,
+                            descripcion: taskData.details?.description !== undefined ? taskData.details.description : (initialData.descripcion || '')
+                        });
                     }
                 } else {
                     console.error("[CreateActivityModal] Failed to sync planner bidirectional status:", await res.text());
@@ -215,8 +230,13 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                     if (res.ok) {
                         const eventData = await res.json();
 
-                        const crmDateStr = initialData.updated_at || initialData.created_at;
-                        const crmModifiedDate = crmDateStr ? new Date(crmDateStr).getTime() : 0;
+                        let crmDateStr = initialData.updated_at || initialData.created_at;
+                        if (crmDateStr && !crmDateStr.endsWith('Z') && !crmDateStr.includes('+')) {
+                            crmDateStr += 'Z';
+                        }
+                        const crmModifiedDate = initialData._sync_metadata?.last_modified
+                            ? initialData._sync_metadata.last_modified
+                            : (crmDateStr ? new Date(crmDateStr).getTime() : 0);
                         const eventModifiedDate = eventData.lastModifiedDateTime ? new Date(eventData.lastModifiedDateTime).getTime() : 0;
 
                         const isEventNewer = eventModifiedDate > (crmModifiedDate + 10000);
@@ -295,6 +315,10 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
             } finally {
                 setIsSyncingPlanner(false);
             }
+        }
+
+        if (initialData?.id) {
+            console.log(`[CreateActivityModal] Triggering bidirectional sync for: ${initialData.id}`);
         }
 
         if (initialData?.tipo_actividad === 'TAREA') {
@@ -401,84 +425,64 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         setChecklist(checklist.filter((_, i) => i !== index));
     };
 
-    // Planner: Load Groups when sync is enabled
+    // Planner: Load Plans directly when sync is enabled
     const tipoActividad = watch('tipo_actividad');
     useEffect(() => {
         if (syncToPlanner && msConnected && tipoActividad === 'TAREA') {
-            console.log('[Planner] Loading groups... msConnected:', msConnected, 'tipo:', tipoActividad);
+            console.log('[Planner] Loading plans... msConnected:', msConnected, 'tipo:', tipoActividad);
             setLoadingPlanner(true);
-            fetch('/api/microsoft/planner/groups', { credentials: 'include' })
-                .then(res => {
-                    console.log('[Planner] Groups response status:', res.status);
-                    return res.json();
-                })
+            setPlannerPlans([]);
+            // Don't wipe selections on initial mount if we are editing an existing task
+            if (!initialData?.ms_planner_id) {
+                setPlannerBuckets([]);
+                setSelectedPlanId("");
+                setSelectedBucketId("");
+            }
+            fetch('/api/microsoft/planner/plans', { credentials: 'include' })
+                .then(res => res.json())
                 .then(data => {
-                    console.log('[Planner] Groups data received:', data);
-                    const groups = data.groups || [];
-                    setPlannerGroups(groups);
-                    // Auto-select "CRM Ventas" group if it exists
-                    const defaultGroup = groups.find((g: { displayName: string }) => g.displayName === 'CRM Ventas');
-                    if (defaultGroup) {
-                        setSelectedGroupId(defaultGroup.id);
+                    const plans = data.plans || [];
+                    setPlannerPlans(plans);
+                    // Auto-select "CRM Ventas" plan if it exists, only for NEW tasks
+                    if (!initialData?.ms_planner_id && !selectedPlanId) {
+                        const defaultPlan = plans.find((p: { title: string }) => p.title === 'CRM Ventas');
+                        if (defaultPlan) setSelectedPlanId(defaultPlan.id);
                     }
                 })
-                .catch(err => console.error('[Planner] Error loading groups:', err))
+                .catch(err => console.error('[Planner] Error loading plans:', err))
                 .finally(() => setLoadingPlanner(false));
-        } else {
-            setPlannerGroups([]);
+        } else if (!initialData?.ms_planner_id) {
             setPlannerPlans([]);
             setPlannerBuckets([]);
-            setSelectedGroupId("");
             setSelectedPlanId("");
             setSelectedBucketId("");
         }
     }, [syncToPlanner, msConnected, tipoActividad]);
 
-    // Planner: Load Plans when Group is selected
-    useEffect(() => {
-        if (selectedGroupId) {
-            setLoadingPlanner(true);
-            setPlannerPlans([]);
-            setPlannerBuckets([]);
-            setSelectedPlanId("");
-            setSelectedBucketId("");
-            fetch(`/api/microsoft/planner/plans?groupId=${selectedGroupId}`, { credentials: 'include' })
-                .then(res => res.json())
-                .then(data => {
-                    const plans = data.plans || [];
-                    setPlannerPlans(plans);
-                    // Auto-select "CRM Ventas" plan if it exists
-                    const defaultPlan = plans.find((p: { title: string }) => p.title === 'CRM Ventas');
-                    if (defaultPlan) {
-                        setSelectedPlanId(defaultPlan.id);
-                    } else if (plans.length === 1) {
-                        // If only one plan, select it
-                        setSelectedPlanId(plans[0].id);
-                    }
-                })
-                .catch(err => console.error('[Planner] Error loading plans:', err))
-                .finally(() => setLoadingPlanner(false));
-        }
-    }, [selectedGroupId]);
 
     // Planner: Load Buckets when Plan is selected
     useEffect(() => {
         if (selectedPlanId) {
             setLoadingPlanner(true);
             setPlannerBuckets([]);
-            setSelectedBucketId("");
+            // Only wipe the bucket if the user manually changed the plan, not during initial load
+            if (!initialData?.ms_planner_id) {
+                setSelectedBucketId("");
+            }
             fetch(`/api/microsoft/planner/buckets?planId=${selectedPlanId}`, { credentials: 'include' })
                 .then(res => res.json())
                 .then(data => {
                     const buckets = data.buckets || [];
                     setPlannerBuckets(buckets);
-                    // Auto-select "Proyecto CRM" bucket if it exists
-                    const defaultBucket = buckets.find((b: { name: string }) => b.name === 'Proyecto CRM');
-                    if (defaultBucket) {
-                        setSelectedBucketId(defaultBucket.id);
-                    } else if (buckets.length === 1) {
-                        // If only one bucket, select it
-                        setSelectedBucketId(buckets[0].id);
+                    // Auto-select "Proyecto CRM" bucket if it exists, only for NEW tasks
+                    if (!initialData?.ms_planner_id && !selectedBucketId) {
+                        const defaultBucket = buckets.find((b: { name: string }) => b.name === 'Proyecto CRM');
+                        if (defaultBucket) {
+                            setSelectedBucketId(defaultBucket.id);
+                        } else if (buckets.length === 1) {
+                            // If only one bucket, select it
+                            setSelectedBucketId(buckets[0].id);
+                        }
                     }
                 })
                 .catch(err => console.error('[Planner] Error loading buckets:', err))
@@ -612,18 +616,25 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
 
                     if (plannerId) {
                         // --- UPDATE EXISTING PLANNER TASK ---
+                        const updatePayload: any = {};
+                        if (dirtyFields.asunto) updatePayload.title = data.asunto;
+                        if (dirtyFields.fecha_inicio) updatePayload.dueDateTime = data.fecha_inicio ? new Date(data.fecha_inicio).toISOString() : undefined;
+                        if (dirtyFields.descripcion) updatePayload.notes = data.descripcion;
+                        if (dirtyFields.is_completed) updatePayload.percentComplete = data.is_completed ? 100 : 0;
+                        if (selectedBucketId) updatePayload.bucketId = selectedBucketId;
+
+                        console.log("[CreateActivityModal] Planner Update Payload:", updatePayload);
+
+                        updatePayload.checklist = checklist;
+                        updatePayload.assigneeIds = assigneeIds;
+
+                        // Only hit planner if there is something actually dirty, or checklist/assignees were potentially modified
+                        // (We always send checklist/assignees safely via API, but at least we don't overwrite completed status if not dirty)
                         const res = await fetch(`/api/microsoft/planner/tasks/${plannerId}`, {
                             method: 'PATCH',
                             headers: { 'Content-Type': 'application/json' },
                             credentials: 'include',
-                            body: JSON.stringify({
-                                title: data.asunto,
-                                dueDateTime: data.fecha_inicio ? new Date(data.fecha_inicio).toISOString() : undefined,
-                                notes: data.descripcion,
-                                percentComplete: data.is_completed ? 100 : 0,
-                                checklist: checklist,
-                                assigneeIds: assigneeIds
-                            })
+                            body: JSON.stringify(updatePayload)
                         });
 
                         if (res.ok) {
@@ -683,14 +694,41 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
             }
 
             // 3. Process for CRM
-            const processed = {
-                ...data,
+            // Only submit fields that were actually changed to prevent resetting unmodified fields
+            const dataToSubmit: any = {};
+            if (isEditing) {
+                for (const key of Object.keys(data)) {
+                    if (dirtyFields[key as keyof typeof dirtyFields]) {
+                        dataToSubmit[key] = data[key as keyof typeof data];
+                    }
+                }
+                // Ensure tipo_actividad is always sent so backend knows logic to apply
+                dataToSubmit.tipo_actividad = data.tipo_actividad;
+            } else {
+                Object.assign(dataToSubmit, data);
+            }
+
+            const processed: any = {
+                ...dataToSubmit,
                 teams_meeting_url: teamsMeetingUrl,
                 ms_planner_id: plannerId,
                 ms_event_id: eventId,
                 microsoft_attendees: attendees.length > 0 ? JSON.stringify(attendees) : null,
-                _sync_metadata: {} as any
+                _sync_metadata: initialData?._sync_metadata ? { ...initialData._sync_metadata } : {}
             };
+
+            // Force metadata timestamps for changed fields to ensure CRM wins in LWW
+            if (isEditing) {
+                let anyDirty = false;
+                if (dirtyFields.asunto) { processed._sync_metadata.asunto = Date.now(); anyDirty = true; }
+                if (dirtyFields.descripcion) { processed._sync_metadata.descripcion = Date.now(); anyDirty = true; }
+                if (dirtyFields.fecha_inicio) { processed._sync_metadata.fecha_inicio = Date.now(); anyDirty = true; }
+                if (dirtyFields.is_completed) { processed._sync_metadata.is_completed = Date.now(); anyDirty = true; }
+
+                if (anyDirty) {
+                    processed._sync_metadata.last_modified = Date.now();
+                }
+            }
 
             // If Planner sync was requested but failed/offline, queue it
             if (syncToPlanner && data.tipo_actividad === 'TAREA' && !plannerId) {
@@ -711,8 +749,12 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                 processed._sync_metadata.isOnlineMeeting = isTeamsMeeting;
             }
 
-            processed.clasificacion_id = (data.clasificacion_id && data.clasificacion_id !== "") ? Number(data.clasificacion_id) : null;
-            processed.subclasificacion_id = (data.subclasificacion_id && data.subclasificacion_id !== "") ? Number(data.subclasificacion_id) : null;
+            if (!isEditing || dirtyFields.clasificacion_id) {
+                processed.clasificacion_id = (data.clasificacion_id && data.clasificacion_id !== "") ? Number(data.clasificacion_id) : null;
+            }
+            if (!isEditing || dirtyFields.subclasificacion_id) {
+                processed.subclasificacion_id = (data.subclasificacion_id && data.subclasificacion_id !== "") ? Number(data.subclasificacion_id) : null;
+            }
 
             console.log("[CreateActivityModal] Processed Submit Data:", processed);
 
@@ -1173,48 +1215,25 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
 
                                         {/* Planner Cascade Selectors - Always visible */}
                                         <div className="space-y-3">
-                                            {/* Group Selector */}
+                                            {/* Plan Selector */}
                                             <div className="space-y-1">
                                                 <label className="text-xs font-bold text-slate-500 uppercase">
-                                                    Grupo <span className="text-red-500">*</span>
+                                                    Plan <span className="text-red-500">*</span>
                                                 </label>
                                                 <select
-                                                    value={selectedGroupId}
-                                                    onChange={(e) => setSelectedGroupId(e.target.value)}
+                                                    value={selectedPlanId}
+                                                    onChange={(e) => setSelectedPlanId(e.target.value)}
                                                     disabled={loadingPlanner}
                                                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
                                                 >
                                                     <option value="">
-                                                        {loadingPlanner ? 'Cargando grupos...' : plannerGroups.length === 0 ? 'No hay grupos disponibles' : 'Seleccione un grupo...'}
+                                                        {loadingPlanner ? 'Cargando planes...' : plannerPlans.length === 0 ? 'No hay planes disponibles' : 'Seleccione un plan...'}
                                                     </option>
-                                                    {plannerGroups.map((g) => (
-                                                        <option key={g.id} value={g.id}>{g.displayName}</option>
+                                                    {plannerPlans.map((p) => (
+                                                        <option key={p.id} value={p.id}>{p.title}</option>
                                                     ))}
                                                 </select>
                                             </div>
-
-                                            {/* Plan Selector */}
-                                            {selectedGroupId && (
-                                                <div className="space-y-1">
-                                                    <label className="text-xs font-bold text-slate-500 uppercase">
-                                                        Plan <span className="text-red-500">*</span>
-                                                    </label>
-                                                    <select
-                                                        value={selectedPlanId}
-                                                        onChange={(e) => setSelectedPlanId(e.target.value)}
-                                                        disabled={loadingPlanner}
-                                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-                                                    >
-                                                        <option value="">
-                                                            {loadingPlanner ? 'Cargando planes...' : plannerPlans.length === 0 ? 'No hay planes en este grupo' : 'Seleccione un plan...'}
-                                                        </option>
-                                                        {plannerPlans.map((p) => (
-                                                            <option key={p.id} value={p.id}>{p.title}</option>
-                                                        ))}
-                                                    </select>
-                                                </div>
-                                            )}
-
                                             {/* Bucket Selector */}
                                             {selectedPlanId && (
                                                 <div className="space-y-1">
