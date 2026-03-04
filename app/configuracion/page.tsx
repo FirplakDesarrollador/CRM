@@ -34,6 +34,11 @@ const ActivityClassificationManager = dynamic(() => import('@/components/config/
     loading: () => <div className="animate-pulse bg-slate-100 h-20 rounded-2xl" />,
     ssr: false
 });
+
+const BulkAccountUploader = dynamic(() => import('@/components/config/BulkAccountUploader').then(mod => mod.BulkAccountUploader), {
+    loading: () => <div className="animate-pulse bg-slate-100 h-20 rounded-2xl" />,
+    ssr: false
+});
 import { ConfirmationModal } from '@/components/ui/ConfirmationModal';
 import packageJson from '../../package.json';
 
@@ -656,6 +661,7 @@ function ConfigPageContent() {
                 <>
                     <PriceListUploader />
                     <ActivityClassificationManager />
+                    <BulkAccountUploader />
                 </>
             )}
 
