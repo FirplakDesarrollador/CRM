@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { CalendarClock, ListTodo, Loader2, Users, Search, X, Video, Plus, CheckCircle2, AlertCircle, MoreVertical, Trash2 } from "lucide-react";
 import { useLiveQuery } from "dexie-react-hooks";
@@ -39,6 +40,23 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
             is_completed: !!initialData?.is_completed
         }
     });
+
+    const watchedOpportunityId = watch('opportunity_id');
+
+    const relatedOpportunity = useLiveQuery(
+        () => watchedOpportunityId ? db.opportunities.get(watchedOpportunityId) : undefined,
+        [watchedOpportunityId]
+    );
+
+    const relatedAccount = useLiveQuery(
+        () => relatedOpportunity?.account_id ? db.accounts.get(relatedOpportunity.account_id) : undefined,
+        [relatedOpportunity?.account_id]
+    );
+
+    const relatedContact = useLiveQuery(
+        () => relatedAccount?.id ? db.contacts.where('account_id').equals(relatedAccount.id).first() : undefined,
+        [relatedAccount?.id]
+    );
 
     const [msConnected, setMsConnected] = useState<boolean>(false);
     const [isTeamsMeeting, setIsTeamsMeeting] = useState<boolean>(!!initialData?.teams_meeting_url);
@@ -865,7 +883,33 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl md:rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col max-h-[95vh] md:max-h-[90vh]">
                 <div className="p-6 border-b border-slate-100 flex justify-between items-center shrink-0">
-                    <h2 className="text-xl font-bold text-slate-900">{isEditing ? 'Editar Actividad' : 'Programar Actividad'}</h2>
+                    <div>
+                        <h2 className="text-xl font-bold text-slate-900">{isEditing ? 'Editar Actividad' : 'Programar Actividad'}</h2>
+                        {relatedOpportunity && relatedAccount && (
+                            <div className="flex items-center gap-1.5 mt-1 text-sm flex-wrap">
+                                <Link href={`/cuentas/${relatedAccount.id}`} className="text-blue-600 hover:underline font-semibold transition-colors" target="_blank" rel="noopener noreferrer">
+                                    {relatedAccount.nombre}
+                                </Link>
+                                <span className="text-slate-400 font-medium">-</span>
+                                {relatedContact ? (
+                                    <div className="flex items-center gap-1">
+                                        <Link href={`/contactos/${relatedContact.id}`} className="text-blue-600 hover:underline font-semibold transition-colors" target="_blank" rel="noopener noreferrer">
+                                            {relatedContact.nombre}
+                                        </Link>
+                                        {relatedContact.telefono && (
+                                            <span className="text-slate-500 font-medium text-xs">({relatedContact.telefono})</span>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <span className="italic text-slate-400 font-medium text-xs">Sin contacto princ.</span>
+                                )}
+                                <span className="text-slate-400 font-medium">-</span>
+                                <Link href={`/oportunidades/${relatedOpportunity.id}`} className="text-blue-600 hover:underline font-semibold transition-colors" target="_blank" rel="noopener noreferrer">
+                                    {relatedOpportunity.nombre}
+                                </Link>
+                            </div>
+                        )}
+                    </div>
 
                     <div className="flex items-center gap-1">
                         {isEditing && (
