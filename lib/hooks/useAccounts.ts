@@ -67,8 +67,9 @@ export function useAccounts() {
         console.log('[useAccounts] DEBUG - updateAccount called with:', { id, updates });
 
         // Defensive conversion: ensure numeric IDs are numbers, not strings from form
+        const { _sync_metadata, ...sanitized } = updates;
         const sanitizedUpdates = {
-            ...updates,
+            ...sanitized,
             subclasificacion_id: updates.subclasificacion_id ? Number(updates.subclasificacion_id) : null,
             departamento_id: updates.departamento_id ? Number(updates.departamento_id) : null,
             ciudad_id: updates.ciudad_id ? Number(updates.ciudad_id) : null

@@ -1,15 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
-import { getGroupPlans, getMicrosoftTokens } from '@/lib/microsoft';
+import { getGroupPlans, getMyPlans, getMicrosoftTokens } from '@/lib/microsoft';
 
 export async function GET(request: NextRequest) {
     const groupId = request.nextUrl.searchParams.get('groupId');
-    console.log('[API Planner Plans] Request received, groupId:', groupId);
-
-    if (!groupId) {
-        return NextResponse.json({ error: 'groupId is required', plans: [] }, { status: 400 });
-    }
 
     try {
         const cookieStore = await cookies();
@@ -39,8 +34,15 @@ export async function GET(request: NextRequest) {
             return NextResponse.json({ error: 'Microsoft account not connected', plans: [] }, { status: 400 });
         }
 
-        console.log('[API Planner Plans] Getting plans from Microsoft Graph...');
-        const plans = await getGroupPlans(tokens.access_token, groupId);
+        let plans;
+        if (groupId) {
+            console.log('[API Planner Plans] Getting plans for group from Microsoft Graph...');
+            plans = await getGroupPlans(tokens.access_token, groupId);
+        } else {
+            console.log('[API Planner Plans] Getting all user plans from Microsoft Graph...');
+            plans = await getMyPlans(tokens.access_token);
+        }
+
         console.log(`[API Planner Plans] Found ${plans?.length || 0} plans`);
 
         return NextResponse.json({ plans });

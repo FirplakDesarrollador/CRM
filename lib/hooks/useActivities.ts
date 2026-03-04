@@ -44,7 +44,7 @@ export function useActivities(opportunityId?: string) {
     const DB_COLUMNS = new Set([
         'id', 'user_id', 'opportunity_id', 'tipo_actividad_id', 'asunto', 'descripcion',
         'fecha_inicio', 'fecha_fin', 'ms_planner_id', 'ms_event_id', 'created_at', 'updated_at',
-        'is_completed', '_sync_metadata', 'created_by', 'updated_by', 'is_deleted',
+        'is_completed', 'created_by', 'updated_by', 'is_deleted',
         'tipo_actividad', 'clasificacion_id', 'subclasificacion_id', 'Tarea_planner',
         'teams_meeting_url', 'microsoft_attendees'
     ]);
@@ -100,7 +100,11 @@ export function useActivities(opportunityId?: string) {
         // Ensure we don't have undefined fields that become null in JSON
         const cleanActivity = Object.fromEntries(
             Object.entries(newActivity).filter(([_, v]) => v !== undefined)
-        );
+        ) as any;
+
+        if (cleanActivity._sync_metadata && Object.keys(cleanActivity._sync_metadata).length === 0) {
+            delete cleanActivity._sync_metadata;
+        }
 
         console.log("[useActivities] Creating Activity in Dexie:", cleanActivity);
         await db.activities.add(cleanActivity as LocalActivity);
@@ -127,6 +131,10 @@ export function useActivities(opportunityId?: string) {
         const changes = Object.fromEntries(
             Object.entries(rawChanges).filter(([key]) => DB_COLUMNS.has(key))
         );
+
+        if (changes._sync_metadata && Object.keys(changes._sync_metadata).length === 0) {
+            delete changes._sync_metadata;
+        }
 
         console.log("[useActivities] Sanitized changes for sync:", changes);
 
