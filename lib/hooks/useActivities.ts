@@ -31,20 +31,26 @@ function toISODateString(dateInput: string | Date | undefined | null): string {
 
 export { type LocalActivity };
 
-export function useActivities(opportunityId?: string) {
+export function useActivities(filters?: { opportunity_id?: string, advisor_id?: string | null }) {
     const activities = useLiveQuery(
-        () => opportunityId
-            ? db.activities.where('opportunity_id').equals(opportunityId).toArray()
-            : db.activities.toArray(),
-        [opportunityId]
+        () => {
+            if (filters?.opportunity_id) {
+                return db.activities.where('opportunity_id').equals(filters.opportunity_id).toArray();
+            }
+            if (filters?.advisor_id) {
+                return db.activities.where('user_id').equals(filters.advisor_id).toArray();
+            }
+            return db.activities.toArray();
+        },
+        [filters?.opportunity_id, filters?.advisor_id]
     );
 
     // Allowlist of columns that actually exist in CRM_Actividades on Supabase.
     // See migration: 20260218_add_activities_ms_columns.sql for the full schema.
     const DB_COLUMNS = new Set([
-        'id', 'user_id', 'opportunity_id', 'tipo_actividad_id', 'asunto', 'descripcion',
+        'id', 'user_id', 'opportunity_id', 'account_id', 'tipo_actividad_id', 'asunto', 'descripcion',
         'fecha_inicio', 'fecha_fin', 'ms_planner_id', 'ms_event_id', 'created_at', 'updated_at',
-        'is_completed', '_sync_metadata', 'created_by', 'updated_by', 'is_deleted',
+        'is_completed', 'created_by', 'updated_by', 'is_deleted',
         'tipo_actividad', 'clasificacion_id', 'subclasificacion_id', 'Tarea_planner',
         'teams_meeting_url', 'microsoft_attendees'
     ]);
@@ -85,6 +91,7 @@ export function useActivities(opportunityId?: string) {
             fecha_fin: data.fecha_fin ? toISODateString(data.fecha_fin) : undefined,
             is_completed: !!data.is_completed,
             opportunity_id: data.opportunity_id || undefined,
+            account_id: data.account_id || undefined,
             clasificacion_id: data.clasificacion_id || null,
             subclasificacion_id: data.subclasificacion_id || null,
             // Microsoft integration fields
@@ -100,7 +107,11 @@ export function useActivities(opportunityId?: string) {
         // Ensure we don't have undefined fields that become null in JSON
         const cleanActivity = Object.fromEntries(
             Object.entries(newActivity).filter(([_, v]) => v !== undefined)
-        );
+        ) as any;
+
+        if (cleanActivity._sync_metadata && Object.keys(cleanActivity._sync_metadata).length === 0) {
+            delete cleanActivity._sync_metadata;
+        }
 
         console.log("[useActivities] Creating Activity in Dexie:", cleanActivity);
         await db.activities.add(cleanActivity as LocalActivity);
@@ -127,6 +138,10 @@ export function useActivities(opportunityId?: string) {
         const changes = Object.fromEntries(
             Object.entries(rawChanges).filter(([key]) => DB_COLUMNS.has(key))
         );
+
+        if (changes._sync_metadata && Object.keys(changes._sync_metadata).length === 0) {
+            delete changes._sync_metadata;
+        }
 
         console.log("[useActivities] Sanitized changes for sync:", changes);
 

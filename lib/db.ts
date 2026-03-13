@@ -171,6 +171,8 @@ export interface LocalOportunidad {
     updated_at?: string;
     probability?: number;
     razon_perdida_id?: number | null;
+    razon_perdida?: string | null;
+    comentarios_perdida?: string | null;
     is_deleted?: boolean;
     origen_oportunidad?: string | null;
     url_origen?: string | null;
@@ -202,8 +204,8 @@ export class CRMFirplakDB extends Dexie {
 
     constructor() {
         super('CRMFirplakDB');
-        this.version(9).stores({
-            outbox: 'id, entity_type, status, field_timestamp',
+        this.version(10).stores({
+            outbox: 'id, entity_type, status, field_timestamp, field_name',
             fileQueue: 'id, status',
             accounts: 'id, nit, nombre, owner_user_id',
             opportunities: 'id, account_id, owner_user_id', // Simplified index
@@ -247,6 +249,7 @@ export interface LocalActivity {
     subclasificacion_id?: number | null;
     is_completed: boolean;
     opportunity_id?: string;
+    account_id?: string;
     user_id?: string;
     ms_planner_id?: string | null;
     ms_event_id?: string | null;

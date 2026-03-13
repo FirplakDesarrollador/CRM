@@ -237,6 +237,16 @@ export default function OpportunityDetailPage() {
     );
 }
 
+const LOSS_REASONS = [
+    "Precio elevado",
+    "Compra en la competencia por precio",
+    "No contesta",
+    "Lo pospone",
+    "No va a comprar",
+    "Tiempos de entrega",
+    "No hay medida o color",
+];
+
 function SummaryTab({ opportunity }: { opportunity: any }) {
     const { updateOpportunity } = useOpportunities();
     const { quotes } = useQuotes(opportunity.id);
@@ -251,7 +261,13 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     const [isSavingUrl, setIsSavingUrl] = useState(false);
     const [isSavingFuente, setIsSavingFuente] = useState(false);
 
-    // Filter Logic
+    // Loss reason inline fields
+    const [localRazonPerdida, setLocalRazonPerdida] = useState(opportunity.razon_perdida || "");
+    const [localComentariosPerdida, setLocalComentariosPerdida] = useState(opportunity.comentarios_perdida || "");
+    const [isSavingLossReason, setIsSavingLossReason] = useState(false);
+    const [isSavingComentarios, setIsSavingComentarios] = useState(false);
+
+    // Modal state (kept for backward compat but no longer used for blocking)
     const [isLossReasonModalOpen, setIsLossReasonModalOpen] = useState(false);
     const [pendingPhaseId, setPendingPhaseId] = useState<number | null>(null);
     const [ownerSellerName, setOwnerSellerName] = useState<string | null>(null);
@@ -281,7 +297,9 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
         setLocalOrigen(opportunity.origen_oportunidad || "");
         setLocalUrlOrigen(opportunity.url_origen || "");
         setLocalFuente(opportunity.fuente_conversion || "");
-    }, [opportunity.segmento_id, opportunity.fecha_cierre_estimada, opportunity.origen_oportunidad, opportunity.url_origen, opportunity.fuente_conversion]);
+        setLocalRazonPerdida(opportunity.razon_perdida || "");
+        setLocalComentariosPerdida(opportunity.comentarios_perdida || "");
+    }, [opportunity.segmento_id, opportunity.fecha_cierre_estimada, opportunity.origen_oportunidad, opportunity.url_origen, opportunity.fuente_conversion, opportunity.razon_perdida, opportunity.comentarios_perdida]);
 
     useEffect(() => {
         const fetchSegments = async () => {
@@ -373,6 +391,9 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
         [account?.canal_id]
     );
 
+    // Computed: both loss reason fields are filled
+    const lossFieldsComplete = localRazonPerdida.trim() !== "" && localComentariosPerdida.trim() !== "";
+
     const handlePhaseChange = async (phaseId: number) => {
         const targetPhase = phases?.find(p => p.id === phaseId);
 
@@ -380,8 +401,17 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
         const normalizedName = targetPhase?.nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") || "";
 
         if (normalizedName.includes('perdida')) {
-            setPendingPhaseId(phaseId);
-            setIsLossReasonModalOpen(true);
+            // Block if loss reason fields are not filled
+            if (!lossFieldsComplete) return;
+
+            const lostPhase = phases?.find(p => p.id === phaseId);
+            await updateOpportunity(opportunity.id, {
+                fase_id: phaseId,
+                razon_perdida: localRazonPerdida,
+                comentarios_perdida: localComentariosPerdida,
+                estado_id: 3,
+                probability: lostPhase?.probability ?? 0
+            });
             return;
         }
 
@@ -403,14 +433,15 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
         });
     };
 
+    // Legacy: kept for backward compat, no longer used
     const confirmLossReason = async (reasonId: number) => {
         if (pendingPhaseId) {
             const lostPhase = phases?.find(p => p.id === pendingPhaseId);
             await updateOpportunity(opportunity.id, {
                 fase_id: pendingPhaseId,
                 razon_perdida_id: reasonId,
-                estado_id: 3, // Explicitly set to Lost status ID (usually 3)
-                probability: lostPhase?.probability ?? 0 // Propagate phase probability
+                estado_id: 3,
+                probability: lostPhase?.probability ?? 0
             });
             setIsLossReasonModalOpen(false);
             setPendingPhaseId(null);
@@ -516,26 +547,34 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                         const isWon = phase.nombre.toLowerCase().includes('ganada');
                                         const isActive = opportunity.fase_id === phase.id;
 
+                                        const isLostPhase = phase.nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes('perdida');
+                                        const isBlocked = isLostPhase && !lossFieldsComplete;
+
                                         return (
                                             <button
                                                 key={phase.id}
-                                                onClick={() => handlePhaseChange(phase.id)}
+                                                onClick={() => !isBlocked && handlePhaseChange(phase.id)}
                                                 data-testid={`opportunity-phase-btn-${phase.id}`}
                                                 data-phase-id={phase.id}
+                                                title={isBlocked ? "Completa los campos de pérdida en la tarjeta Información de Negocio" : undefined}
+                                                disabled={isBlocked}
                                                 // Align buttons with the ends of the SVG paths (Y=16 and Y=96)
                                                 style={{ top: isWon ? '16px' : '96px', transform: 'translateY(-50%)' }}
                                                 className={cn(
                                                     "absolute left-[88px] flex items-center gap-2 px-3 py-2 rounded-full text-[10px] font-bold uppercase tracking-wider border transition-all z-10 whitespace-nowrap",
-                                                    isActive
-                                                        ? (isWon ? "bg-green-100 text-green-700 border-green-200 shadow-sm ring-2 ring-green-500/20" : "bg-red-100 text-red-700 border-red-200 shadow-sm ring-2 ring-red-500/20")
-                                                        : "bg-white border-slate-200 text-slate-400 hover:border-slate-300 hover:bg-slate-50"
+                                                    isBlocked
+                                                        ? "bg-slate-50 border-slate-200 text-slate-300 cursor-not-allowed opacity-60"
+                                                        : isActive
+                                                            ? (isWon ? "bg-green-100 text-green-700 border-green-200 shadow-sm ring-2 ring-green-500/20" : "bg-red-100 text-red-700 border-red-200 shadow-sm ring-2 ring-red-500/20")
+                                                            : "bg-white border-slate-200 text-slate-400 hover:border-slate-300 hover:bg-slate-50"
                                                 )}
                                             >
                                                 <div className={cn(
                                                     "w-2 h-2 rounded-full",
-                                                    isWon ? "bg-green-500" : "bg-red-500"
+                                                    isBlocked ? "bg-slate-300" : isWon ? "bg-green-500" : "bg-red-500"
                                                 )} />
                                                 {phase.nombre}
+                                                {isBlocked && <span className="ml-0.5 text-[8px] opacity-70">🔒</span>}
                                             </button>
                                         );
                                     })}
@@ -795,6 +834,95 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                     )}
                                 </div>
                             </div>
+                        </div>
+
+                        {/* Loss Reason Section — Required for Cerrada Perdida */}
+                        <div className="pt-4 border-t border-red-100 space-y-3" data-testid="loss-reason-section">
+                            <div className="flex items-center gap-2 mb-1">
+                                <div className="w-2 h-2 rounded-full bg-red-400" />
+                                <span className="text-[10px] font-bold text-red-500 uppercase tracking-wider">Pérdida</span>
+                                <span className="text-[10px] text-slate-400">(obligatorio para cerrar como perdida)</span>
+                            </div>
+
+                            {/* Razón de pérdida */}
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                                    Razón de Pérdida
+                                    {!localRazonPerdida && <span className="text-red-400 ml-1">*</span>}
+                                </label>
+                                <div className="relative group">
+                                    <select
+                                        data-testid="razon-perdida-select"
+                                        value={localRazonPerdida}
+                                        onChange={async (e) => {
+                                            setLocalRazonPerdida(e.target.value);
+                                            setIsSavingLossReason(true);
+                                            try {
+                                                await updateOpportunity(opportunity.id, { razon_perdida: e.target.value || null });
+                                            } finally {
+                                                setIsSavingLossReason(false);
+                                            }
+                                        }}
+                                        className={cn(
+                                            "w-full px-3 py-1.5 bg-slate-50 border rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-red-400 focus:bg-white transition-all outline-none",
+                                            localRazonPerdida ? "border-slate-200" : "border-red-200 bg-red-50"
+                                        )}
+                                    >
+                                        <option value="">Seleccione una razón...</option>
+                                        {LOSS_REASONS.map(r => (
+                                            <option key={r} value={r}>{r}</option>
+                                        ))}
+                                    </select>
+                                    {isSavingLossReason && (
+                                        <div className="absolute right-8 top-1/2 -translate-y-1/2">
+                                            <Loader2 className="w-3 h-3 text-red-400 animate-spin" />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Comentarios de pérdida */}
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                                    Comentarios de Pérdida
+                                    {!localComentariosPerdida && <span className="text-red-400 ml-1">*</span>}
+                                </label>
+                                <div className="relative group">
+                                    <textarea
+                                        data-testid="comentarios-perdida-textarea"
+                                        value={localComentariosPerdida}
+                                        onChange={(e) => setLocalComentariosPerdida(e.target.value)}
+                                        onBlur={async () => {
+                                            if (localComentariosPerdida !== (opportunity.comentarios_perdida || "")) {
+                                                setIsSavingComentarios(true);
+                                                try {
+                                                    await updateOpportunity(opportunity.id, { comentarios_perdida: localComentariosPerdida || null });
+                                                } finally {
+                                                    setIsSavingComentarios(false);
+                                                }
+                                            }
+                                        }}
+                                        rows={3}
+                                        placeholder="Describe el motivo de la pérdida..."
+                                        className={cn(
+                                            "w-full px-3 py-1.5 bg-slate-50 border rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-red-400 focus:bg-white transition-all outline-none placeholder:text-slate-400 resize-none",
+                                            localComentariosPerdida ? "border-slate-200" : "border-red-200 bg-red-50"
+                                        )}
+                                    />
+                                    {isSavingComentarios && (
+                                        <div className="absolute right-3 top-3">
+                                            <Loader2 className="w-3 h-3 text-red-400 animate-spin" />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {!lossFieldsComplete && (
+                                <p className="text-[10px] text-red-400 flex items-center gap-1">
+                                    <span>🔒</span>
+                                    Completa estos campos para poder marcar la oportunidad como <strong>Cerrada Perdida</strong>.
+                                </p>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -1183,7 +1311,7 @@ function QuotesTab({ opportunityId, currency }: { opportunityId: string, currenc
 }
 
 function ActivitiesTab({ opportunityId }: { opportunityId: string }) {
-    const { activities, createActivity, updateActivity, toggleComplete } = useActivities(opportunityId);
+    const { activities, createActivity, updateActivity, toggleComplete } = useActivities({ opportunity_id: opportunityId });
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedActivity, setSelectedActivity] = useState<LocalActivity | null>(null);
     const { opportunities } = useOpportunities();

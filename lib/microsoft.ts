@@ -452,6 +452,31 @@ export async function getGroupPlans(accessToken: string, groupId: string) {
 }
 
 /**
+ * Get all Planner plans for the authenticated user
+ */
+export async function getMyPlans(accessToken: string) {
+    console.log(`[Microsoft] Fetching all plans for user...`);
+
+    const response = await fetch(
+        `https://graph.microsoft.com/v1.0/me/planner/plans`,
+        {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+        }
+    );
+
+    if (!response.ok) {
+        const error = await response.json();
+        console.error('[Microsoft] Get my plans error:', error);
+        throw new Error(error.error?.message || 'Failed to get plans');
+    }
+
+    const data = await response.json();
+    console.log(`[Microsoft] Found ${data.value?.length || 0} user plans`);
+
+    return data.value || [];
+}
+
+/**
  * Get buckets for a specific Planner plan
  */
 export async function getPlanBuckets(accessToken: string, planId: string) {
@@ -663,6 +688,7 @@ export async function updatePlannerTask(accessToken: string, taskId: string, upd
         if (updateData.title !== undefined) taskUpdate.title = updateData.title;
         if (updateData.percentComplete !== undefined) taskUpdate.percentComplete = updateData.percentComplete;
         if (updateData.dueDateTime !== undefined) taskUpdate.dueDateTime = updateData.dueDateTime;
+        if (updateData.bucketId !== undefined) taskUpdate.bucketId = updateData.bucketId;
 
         if (updateData.assigneeIds && updateData.assigneeIds.length > 0) {
             taskUpdate.assignments = {};

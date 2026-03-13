@@ -16,7 +16,8 @@
       "Bash(curl:*)",
       "Bash(node -e:*)",
       "Bash(node scripts/diagnose-forcemanager.js:*)",
-      "WebFetch(domain:apitracker.io)"
+      "WebFetch(domain:apitracker.io)",
+      "Bash(git stash:*)"
     ]
   }
 }

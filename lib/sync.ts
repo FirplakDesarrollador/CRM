@@ -110,11 +110,17 @@ export class SyncEngine {
      * Resets items that were left in 'SYNCING' state (e.g. after a crash)
      */
     private async resetStuckItems() {
-        const stuckCount = await db.outbox.where('status').equals('SYNCING').count();
-        if (stuckCount > 0) {
-            console.log(`[Sync] Resetting ${stuckCount} stuck items to PENDING...`);
-            await db.outbox.where('status').equals('SYNCING').modify({ status: 'PENDING' });
-        }
+        // Change status of items stuck in 'SYNCING' (e.g. if the app crashed) back to 'PENDING'
+        await db.outbox.where('status').equals('SYNCING').modify({ status: 'PENDING' });
+
+        // Self-heal: Remove stuck metadata updates for tables where RPC ignores them or if they are just empty `{}`
+        await db.outbox.where('field_name').equals('_sync_metadata')
+            .filter(item => {
+                if (item.entity_type === 'CRM_Oportunidades' || item.entity_type === 'CRM_Cuentas') return true;
+                if (item.entity_type === 'CRM_Actividades' && (!item.new_value || Object.keys(item.new_value).length === 0)) return true;
+                return false;
+            })
+            .delete();
     }
 
     private async updatePendingCount() {
@@ -302,10 +308,20 @@ export class SyncEngine {
                             // Remove pending_planner from metadata before sending to Supabase
                             const newMeta = { ...meta };
                             delete newMeta.pending_planner;
-                            // metadataChange.value = newMeta; // No longer needed, _sync_metadata is synced as-is
+
+                            if (Object.keys(newMeta).length === 0) {
+                                // If metadata is now empty, remove it from the sync payload entirely
+                                const metaIndex = changes.findIndex((c: any) => c.field === '_sync_metadata');
+                                if (metaIndex > -1) {
+                                    changes.splice(metaIndex, 1);
+                                }
+                            } else {
+                                // Otherwise, update the payload with the remaining metadata
+                                metadataChange.value = newMeta;
+                            }
 
                             // Inject ms_planner_id update into the batch
-                            const plannerChange = changes.find(c => c.field === 'ms_planner_id');
+                            const plannerChange = changes.find((c: any) => c.field === 'ms_planner_id');
                             if (plannerChange) {
                                 plannerChange.value = newPlannerId;
                             } else {
@@ -406,10 +422,19 @@ export class SyncEngine {
                             // Remove pending_calendar from metadata before sending to Supabase
                             const newMeta = { ...meta };
                             delete newMeta.pending_calendar;
-                            metadataChange.value = newMeta;
+
+                            if (Object.keys(newMeta).length === 0) {
+                                // If metadata is now empty, remove it from the sync payload entirely
+                                const metaIndex = changes.findIndex((c: any) => c.field === '_sync_metadata');
+                                if (metaIndex > -1) {
+                                    changes.splice(metaIndex, 1);
+                                }
+                            } else {
+                                metadataChange.value = newMeta;
+                            }
 
                             // Inject ms_event_id update into the batch
-                            const eventChange = changes.find(c => c.field === 'ms_event_id');
+                            const eventChange = changes.find((c: any) => c.field === 'ms_event_id');
                             if (eventChange) {
                                 eventChange.value = newEventId;
                             } else {
@@ -422,7 +447,7 @@ export class SyncEngine {
                             }
 
                             if (teamsUrl) {
-                                const teamsChange = changes.find(c => c.field === 'teams_meeting_url');
+                                const teamsChange = changes.find((c: any) => c.field === 'teams_meeting_url');
                                 if (teamsChange) {
                                     teamsChange.value = teamsUrl;
                                 } else {
@@ -612,6 +637,15 @@ export class SyncEngine {
 
         for (const [table, updates] of sortedTables) {
             try {
+                // Clean up _sync_metadata from outbox ONLY (to prevent loops)
+                // BUT keep them in the RPC payload so the server sees the timestamps
+                const metadataIdsToRemove = pending
+                    .filter(p => p.entity_type === table && p.field_name === '_sync_metadata')
+                    .map(p => p.id);
+                if (metadataIdsToRemove.length > 0) {
+                    await db.outbox.bulkDelete(metadataIdsToRemove);
+                }
+
                 const { data, error } = await supabase.rpc('process_field_updates', {
                     p_table_name: table,
                     p_updates: updates,
@@ -915,14 +949,14 @@ export class SyncEngine {
 
                 let mergedCount = 0;
                 let skippedCount = 0;
-
+                const accountsToPut = [];
                 for (const a of accounts) {
                     if (pendingAccountIds.has(a.id)) {
                         skippedCount++;
                         continue;
                     }
 
-                    await db.accounts.put({
+                    accountsToPut.push({
                         id: a.id,
                         nombre: a.nombre,
                         nit: a.nit,
@@ -942,6 +976,11 @@ export class SyncEngine {
                     });
                     mergedCount++;
                 }
+
+                if (accountsToPut.length > 0) {
+                    await db.accounts.bulkPut(accountsToPut);
+                }
+
                 console.log(`[Sync] Merged ${mergedCount} accounts (${skippedCount} with pending changes skipped).`);
             }
 
@@ -1190,13 +1229,13 @@ export class SyncEngine {
 
                 let mergedCount = 0;
                 let skippedCount = 0;
-
+                const contactsToPut = [];
                 for (const c of contacts) {
                     if (pendingContactIds.has(c.id)) {
                         skippedCount++;
                         continue;
                     }
-                    await db.contacts.put({
+                    contactsToPut.push({
                         id: c.id,
                         account_id: c.account_id,
                         nombre: c.nombre,
@@ -1210,6 +1249,11 @@ export class SyncEngine {
                     });
                     mergedCount++;
                 }
+
+                if (contactsToPut.length > 0) {
+                    await db.contacts.bulkPut(contactsToPut);
+                }
+
                 console.log(`[Sync] Merged ${mergedCount} contacts (${skippedCount} with pending changes skipped).`);
             }
 
@@ -1248,18 +1292,23 @@ export class SyncEngine {
 
                 let mergedCount = 0;
                 let skippedCount = 0;
-
+                const oppsToPut = [];
                 for (const opp of opportunities) {
                     if (pendingOppIds.has(opp.id)) {
                         skippedCount++;
                         continue;
                     }
-                    await db.opportunities.put({
+                    oppsToPut.push({
                         ...opp,
                         pais_id: opp.pais_id // Explicit mapping to be safe
                     });
                     mergedCount++;
                 }
+
+                if (oppsToPut.length > 0) {
+                    await db.opportunities.bulkPut(oppsToPut);
+                }
+
                 console.log(`[Sync] Merged ${mergedCount} opportunities (${skippedCount} with pending changes skipped).`);
             } else {
                 console.warn('[Sync] No opportunities returned from server (Length is 0 or undefined). Check RLS policies?');
@@ -1391,23 +1440,53 @@ export class SyncEngine {
                 if (activitiesError) throw activitiesError;
 
                 if (activities && activities.length > 0) {
-                    // Smart merge: Skip records with pending changes
-                    const pendingActivityIds = new Set(
-                        (await db.outbox
-                            .where('entity_type').equals('CRM_Actividades')
-                            .and(item => item.status === 'PENDING' || item.status === 'SYNCING')
-                            .toArray()
-                        ).map(item => item.entity_id)
-                    );
+                    // Smart merge: Apply Last-Write-Wins (LWW) locally
+                    // Don't just skip records with pending changes; merge them!
+                    const activitiesToPut = [];
 
-                    const activitiesToMerge = activities.filter(a => !pendingActivityIds.has(a.id));
-                    const skippedCount = activities.length - activitiesToMerge.length;
+                    for (const serverAct of activities) {
+                        try {
+                            const localAct = await db.activities.get(serverAct.id);
 
-                    if (activitiesToMerge.length > 0) {
-                        await db.activities.bulkPut(activitiesToMerge);
+                            if (!localAct) {
+                                // No local copy, safe to insert
+                                activitiesToPut.push(serverAct);
+                            } else {
+                                // Merge field by field based on _sync_metadata
+                                const mergedAct = { ...localAct };
+                                const serverMeta = serverAct._sync_metadata || {};
+                                const localMeta = localAct._sync_metadata || {};
+                                let hasChanges = false;
+
+                                for (const field of Object.keys(serverAct)) {
+                                    if (field === '_sync_metadata') continue;
+
+                                    const serverTs = serverMeta[field] || new Date(serverAct.updated_at || serverAct.created_at || 0).getTime();
+                                    const localTs = localMeta[field] || new Date(localAct.updated_at || localAct.created_at || 0).getTime();
+
+                                    // If server is strictly newer, take server value
+                                    if (serverTs > localTs) {
+                                        mergedAct[field] = serverAct[field];
+                                        if (!mergedAct._sync_metadata) mergedAct._sync_metadata = {};
+                                        mergedAct._sync_metadata[field] = serverTs;
+                                        hasChanges = true;
+                                    }
+                                }
+
+                                if (hasChanges) {
+                                    activitiesToPut.push(mergedAct);
+                                }
+                            }
+                        } catch (e) {
+                            console.warn(`[Sync] Failed to smart-merge activity ${serverAct.id}:`, e);
+                        }
                     }
 
-                    console.log(`[Sync] Merged ${activitiesToMerge.length} activities (${skippedCount} with pending changes skipped).`);
+                    if (activitiesToPut.length > 0) {
+                        await db.activities.bulkPut(activitiesToPut);
+                    }
+
+                    console.log(`[Sync] Merged ${activitiesToPut.length} activities (LWW field-level merge).`);
                 }
             } catch (actErr: any) {
                 console.error('[Sync] Failed to pull activities:', actErr.message);
@@ -1435,6 +1514,7 @@ export class SyncEngine {
             for (const [field, value] of Object.entries(changes)) {
                 if (value === undefined) continue; // Skip undefined fields
                 if (field === 'id') continue; // Skip ID (it's the key, not a field to update)
+                if (field === '_sync_metadata') continue; // Internal field managed by RPC/Trigger
 
                 items.push({
                     id: uuidv4(),
