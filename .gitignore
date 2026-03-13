@@ -59,7 +59,7 @@ node_modules/
 
 # MCP and Agent folders
 /n8n-mcp/
-/.agents/
+
 /.claude/
 
 # Temporary and log files
