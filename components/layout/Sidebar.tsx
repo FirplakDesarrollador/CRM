@@ -25,6 +25,7 @@ import {
     ChevronRight,
     UserCircle,
     DollarSign,
+    BarChart3,
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -35,6 +36,7 @@ const NAV_ITEMS = [
     { label: "Actividades", href: "/actividades", icon: Calendar },
     { label: "Pedidos", href: "/pedidos", icon: Truck },
     { label: "Comisiones", href: "/comisiones", icon: DollarSign },
+    { label: "Indicadores", href: "/indicadores", icon: BarChart3 },
     { label: "Archivos", href: "/archivos", icon: Files },
     { label: "Usuarios", href: "/usuarios", icon: UserCircle, requiredRole: 'ADMIN' },
     { label: "Configuración", href: "/configuracion", icon: Settings },
@@ -128,7 +130,7 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
                 {!isCollapsed && (
                     <div className="w-full mt-3 pt-3 border-t border-slate-200/60">
                         <p className="text-xs text-slate-400 text-center font-semibold uppercase tracking-wider">
-                            Versión 1.0.8.4
+                            Versión 1.0.8.5
                         </p>
                     </div>
                 )}
