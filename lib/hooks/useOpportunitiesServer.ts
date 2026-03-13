@@ -45,6 +45,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
     const [segmentFilter, setSegmentFilter] = useState<number | null>(null);
     const [phaseFilter, setPhaseFilter] = useState<number | null>(null);
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+    const [accountIdFilter, setAccountIdFilter] = useState<string | null>(null);
 
     // PERF FIX: Phase IDs only stored in refs (not state) to avoid triggering refetches
     const wonPhaseIdsRef = useRef<number[]>([]);
@@ -56,6 +57,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
     // User Context - uses useCurrentUser to respect viewMode
     const { role: userRole } = useCurrentUser();
     const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+    const [subordinateIds, setSubordinateIds] = useState<string[]>([]);
 
     // PERF FIX: Use ref for page to avoid including it in useCallback deps
     const pageRef = useRef(1);
@@ -65,6 +67,21 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
             if (user) setCurrentUserId(user?.id);
         });
     }, []);
+
+    // Fetch subordinates for team view if user is a coordinator
+    useEffect(() => {
+        if (userRole === 'COORDINADOR' && currentUserId) {
+            supabase
+                .from('CRM_Usuarios')
+                .select('id')
+                .contains('coordinadores', [currentUserId])
+                .then(({ data, error }) => {
+                    if (!error && data) {
+                        setSubordinateIds(data.map(u => u.id));
+                    }
+                });
+        }
+    }, [userRole, currentUserId]);
 
     // Load closed phase IDs on mount - store in refs AND state
     useEffect(() => {
@@ -162,13 +179,21 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                     localOpps = localOpps.filter(o => !closedPhaseIdsRef.current.includes(o.fase_id as number));
                 }
 
+                if (accountIdFilter) {
+                    localOpps = localOpps.filter(o => o.account_id === accountIdFilter);
+                }
+
                 if (accountOwnerId) {
                     localOpps = localOpps.filter(o => o.owner_user_id === accountOwnerId);
                 } else {
                     if (userFilter === 'mine') {
                         localOpps = localOpps.filter(o => o.owner_user_id === currentUserId);
                     } else if (userFilter === 'team' && userRole !== 'ADMIN') {
-                        localOpps = localOpps.filter(o => o.owner_user_id === currentUserId);
+                        if (userRole === 'COORDINADOR') {
+                            localOpps = localOpps.filter(o => o.owner_user_id === currentUserId || (o.owner_user_id && subordinateIds.includes(o.owner_user_id)));
+                        } else {
+                            localOpps = localOpps.filter(o => o.owner_user_id === currentUserId);
+                        }
                     }
                 }
 
@@ -266,13 +291,20 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                 query = query.not('fase_id', 'in', `(${closedPhaseIdsRef.current.join(',')})`);
             }
 
+            if (accountIdFilter) {
+                query = query.eq('account_id', accountIdFilter);
+            }
+
             if (accountOwnerId) {
                 query = query.eq('owner_user_id', accountOwnerId);
             } else {
                 if (userFilter === 'mine') {
                     query = query.eq('owner_user_id', currentUserId);
                 } else if (userFilter === 'team') {
-                    if (userRole !== 'ADMIN') {
+                    if (userRole === 'COORDINADOR') {
+                        const ids = [currentUserId, ...subordinateIds].filter(Boolean);
+                        query = query.in('owner_user_id', ids);
+                    } else if (userRole !== 'ADMIN') {
                         query = query.eq('owner_user_id', currentUserId);
                     }
                 }
@@ -310,7 +342,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
         } finally {
             setLoading(false);
         }
-    }, [currentUserId, pageSize, userFilter, searchTerm, accountOwnerId, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, phasesReady]);
+    }, [currentUserId, subordinateIds, pageSize, userFilter, searchTerm, accountIdFilter, accountOwnerId, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, phasesReady]);
 
     // Initial Fetch & Filter Fetch - no longer depends on phase IDs (read from refs)
     useEffect(() => {
@@ -339,6 +371,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
         setSegmentFilter,
         setPhaseFilter,
         setStatusFilter,
+        setAccountIdFilter,
 
         refresh: () => fetchOpportunities(false)
     };

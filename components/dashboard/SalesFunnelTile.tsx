@@ -51,7 +51,7 @@ export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
                         <AlertCircle className="w-6 h-6" />
                     </div>
                     <p className="text-sm font-semibold">Error al cargar datos</p>
-                    <p className="text-xs text-red-400 max-w-[240px] text-center">{error}</p>
+                    <p className="text-xs text-red-400 max-w-[240px] text-center">{error.message}</p>
                     <button
                         onClick={() => mutate()}
                         className="text-xs font-bold text-slate-600 hover:text-slate-800 underline mt-2"
@@ -87,15 +87,14 @@ export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
     const totalPipeline = data.reduce((acc, curr) => acc + Number(curr.total_amount), 0);
     const totalCount = data.reduce((acc, curr) => acc + Number(curr.count), 0);
 
-    // Grouping by Order to merge stages (like Proposal and Negotiation if they share order)
+    // Grouping by normalized phase name (case-insensitive) to merge equivalent stages
+    // across channels. This avoids mixing non-equivalent phases that shared the same 'orden'.
     const groupedData = data.reduce((acc, curr) => {
-        const existing = acc.find(item => item.orden === curr.orden);
+        const normalizedName = curr.fase_nombre.trim().toLowerCase();
+        const existing = acc.find(item => item.fase_nombre.trim().toLowerCase() === normalizedName);
         if (existing) {
             existing.total_amount = Number(existing.total_amount) + Number(curr.total_amount);
             existing.count = Number(existing.count) + Number(curr.count);
-            if (!existing.fase_nombre.includes(curr.fase_nombre)) {
-                existing.fase_nombre += ` / ${curr.fase_nombre}`;
-            }
             return acc;
         }
         return [...acc, { ...curr, total_amount: Number(curr.total_amount), count: Number(curr.count) }];
@@ -116,14 +115,15 @@ export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
             padding: 12,
             textStyle: { color: '#fff', fontSize: 12, fontWeight: 'bold', fontFamily: 'var(--font-geist-sans), sans-serif' },
             formatter: (params: any) => {
-                const { name, value, data } = params;
-                const actualValue = data.actualValue;
+                const { name, data } = params;
+                if (!data) return name;
+                const actualValue = data.actualValue || 0;
                 const pct = totalPipeline > 0 ? ((actualValue / totalPipeline) * 100).toFixed(1) : "0";
                 return `
                     <div style="font-family: var(--font-geist-sans), sans-serif;">
                         <div style="text-transform: uppercase; font-size: 10px; letter-spacing: 0.1em; opacity: 0.7; margin-bottom: 4px;">${name}</div>
                         <div style="font-size: 14px;">${formatCurrency(actualValue)}</div>
-                        <div style="font-size: 10px; margin-top: 4px; opacity: 0.8;">${data.count} Opportunities • ${pct}% Share</div>
+                        <div style="font-size: 10px; margin-top: 4px; opacity: 0.8;">${data.count || 0} Opportunities • ${pct}% Share</div>
                     </div>
                 `;
             }
@@ -146,7 +146,8 @@ export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
                     show: true,
                     position: 'right',
                     formatter: (params: any) => {
-                        return `{name|${params.name}}\n{val|${formatCurrency(params.data.actualValue)}}`;
+                        if (!params.data) return params.name;
+                        return `{name|${params.name}}\n{val|${formatCurrency(params.data.actualValue || 0)}}`;
                     },
                     rich: {
                         name: {

@@ -11,8 +11,6 @@ export interface TileDef {
 
 export const DEFAULT_TILES: TileDef[] = [
   { id: "sales-funnel", label: "Embudo de Ventas", colSpan: 12 },
-  { id: "performance-chart", label: "Desempeño de Ventas", colSpan: 8 },
-  { id: "client-distribution", label: "Distribución de Clientes", colSpan: 4 },
   { id: "opportunity-card", label: "Oportunidad Clave", colSpan: 4 },
   { id: "objectives-card", label: "Objetivos del Mes", colSpan: 4 },
   { id: "recent-accounts", label: "Cuentas Recientes", colSpan: 4 },
@@ -52,19 +50,23 @@ interface DashboardGridProps {
 }
 
 export function DashboardGrid({ tiles, isEditing, onOrderChange }: DashboardGridProps) {
-  const [tileOrder, setTileOrder] = useState<string[]>(() => {
+  const [tileOrder, setTileOrder] = useState<string[]>([]);
+
+  useEffect(() => {
     const saved = loadOrder();
     const defaultOrder = DEFAULT_TILES.map((t) => t.id);
-    if (!saved) return defaultOrder;
-    // Validate saved order contains all current tile IDs
-    const savedSet = new Set(saved);
-    const defaultSet = new Set(defaultOrder);
-    if (defaultOrder.every((id) => savedSet.has(id))) {
-      // Filter out any tiles that no longer exist
-      return saved.filter((id) => defaultSet.has(id));
+    if (!saved) {
+      setTileOrder(defaultOrder);
+    } else {
+      const savedSet = new Set(saved);
+      const defaultSet = new Set(defaultOrder);
+      if (defaultOrder.every((id) => savedSet.has(id))) {
+        setTileOrder(saved.filter((id) => defaultSet.has(id)));
+      } else {
+        setTileOrder(defaultOrder);
+      }
     }
-    return defaultOrder;
-  });
+  }, []);
 
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
@@ -73,7 +75,9 @@ export function DashboardGrid({ tiles, isEditing, onOrderChange }: DashboardGrid
   const tileMap = Object.fromEntries(DEFAULT_TILES.map((t) => [t.id, t]));
 
   useEffect(() => {
-    onOrderChange?.(tileOrder);
+    if (tileOrder.length > 0) {
+      onOrderChange?.(tileOrder);
+    }
   }, [tileOrder, onOrderChange]);
 
   const handleDragStart = useCallback((e: React.DragEvent, id: string) => {

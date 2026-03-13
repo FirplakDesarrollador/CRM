@@ -68,8 +68,16 @@ function sanitizeOpportunityForSync(opp: any) {
     return sanitized;
 }
 
-export function useOpportunities() {
-    const opportunities = useLiveQuery(() => db.opportunities.toArray());
+export function useOpportunities(filters?: { advisor_id?: string | null }) {
+    const opportunities = useLiveQuery(
+        () => {
+            if (filters?.advisor_id) {
+                return db.opportunities.where('owner_user_id').equals(filters.advisor_id).toArray();
+            }
+            return db.opportunities.toArray();
+        },
+        [filters?.advisor_id]
+    );
 
     const createOpportunity = async (data: any) => {
         const id = uuidv4();

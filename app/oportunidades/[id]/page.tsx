@@ -1311,7 +1311,7 @@ function QuotesTab({ opportunityId, currency }: { opportunityId: string, currenc
 }
 
 function ActivitiesTab({ opportunityId }: { opportunityId: string }) {
-    const { activities, createActivity, updateActivity, toggleComplete } = useActivities(opportunityId);
+    const { activities, createActivity, updateActivity, toggleComplete } = useActivities({ opportunity_id: opportunityId });
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedActivity, setSelectedActivity] = useState<LocalActivity | null>(null);
     const { opportunities } = useOpportunities();

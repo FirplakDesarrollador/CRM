@@ -249,6 +249,7 @@ export interface LocalActivity {
     subclasificacion_id?: number | null;
     is_completed: boolean;
     opportunity_id?: string;
+    account_id?: string;
     user_id?: string;
     ms_planner_id?: string | null;
     ms_event_id?: string | null;

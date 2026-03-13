@@ -5,18 +5,24 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 
-export function useAccounts() {
+export function useAccounts(filters?: { advisor_id?: string | null }) {
     const { user, isVendedor } = useCurrentUser();
     const userId = user?.id;
 
     // Live Query from Local DB (Dexie)
     const accounts = useLiveQuery(async () => {
-        const allAccounts = await db.accounts.toArray();
-        if (isVendedor && userId) {
-            return allAccounts.filter((a: any) => a.owner_user_id === userId);
+        // Priority 1: Specific advisor filter from Dashboard
+        if (filters?.advisor_id) {
+            return db.accounts.where('owner_user_id').equals(filters.advisor_id).toArray();
         }
-        return allAccounts;
-    }, [isVendedor, userId]);
+
+        // Priority 2: Vendedor role restriction
+        if (isVendedor && userId) {
+            return db.accounts.where('owner_user_id').equals(userId).toArray();
+        }
+
+        return db.accounts.toArray();
+    }, [isVendedor, userId, filters?.advisor_id]);
     const isLoading = false; // Background sync handles loading
 
     const createAccount = async (data: Partial<LocalCuenta>) => {

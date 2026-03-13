@@ -54,6 +54,7 @@ interface Catalog {
     ciudades: { id: number; nombre: string; departamento_id: number }[];
     existingAccounts: { id: string; nombre: string; nit_base: string; email: string; telefono: string }[];
     existingContacts: { id: string; nombre: string; email: string; account_id: string }[];
+    vendedores: { id: string; full_name: string | null }[];
 }
 
 const CSV_HEADERS = [
@@ -325,18 +326,19 @@ export function BulkAccountUploader() {
     const [isLoadingCatalogs, setIsLoadingCatalogs] = useState(false);
     const [progress, setProgress] = useState(0);
     const [result, setResult] = useState<UploadResult | null>(null);
-    const [fileName, setFileName] = useState('');
     const [missingColumns, setMissingColumns] = useState<string[]>([]);
+    const [selectedVendedorId, setSelectedVendedorId] = useState<string>('');
     const fileRef = useRef<HTMLInputElement>(null);
 
     // ── Fetch catalogs ──
     const fetchCatalogs = useCallback(async (): Promise<Catalog> => {
-        const [paisRes, depRes, cityRes, accRes, conRes] = await Promise.all([
+        const [paisRes, depRes, cityRes, accRes, conRes, venRes] = await Promise.all([
             supabase.from('CRM_Paises').select('id, nombre'),
             supabase.from('CRM_Departamentos').select('id, nombre, pais_id'),
             supabase.from('CRM_Ciudades').select('id, nombre, departamento_id'),
             supabase.from('CRM_Cuentas').select('id, nombre, nit_base, email, telefono').eq('is_deleted', false).limit(5000),
             supabase.from('CRM_Contactos').select('id, nombre, email, account_id').eq('is_deleted', false).limit(5000),
+            supabase.from('CRM_Usuarios').select('id, full_name').eq('is_active', true).order('full_name'),
         ]);
         return {
             paises: paisRes.data || [],
@@ -344,6 +346,7 @@ export function BulkAccountUploader() {
             ciudades: cityRes.data || [],
             existingAccounts: accRes.data || [],
             existingContacts: conRes.data || [],
+            vendedores: venRes.data || [],
         };
     }, []);
 
@@ -437,6 +440,7 @@ export function BulkAccountUploader() {
             const vals = runValidation(rows, cat);
             setParsedRows(rows);
             setValidations(vals);
+            setSelectedVendedorId(''); // Reset selection
             setWizardStep(0);
             setWizardOpen(true);
             setIsLoadingCatalogs(false);
@@ -448,7 +452,7 @@ export function BulkAccountUploader() {
     const handleUpload = useCallback(async () => {
         setIsUploading(true);
         setProgress(10);
-        setWizardStep(2);
+        setWizardStep(3); // Resultado
 
         // Build payload: only enabled rows, inject resolved IDs
         const payload = parsedRows
@@ -468,7 +472,7 @@ export function BulkAccountUploader() {
             const res = await fetch('/api/bulk-accounts', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ rows: payload }),
+                body: JSON.stringify({ rows: payload, vendedor_id: selectedVendedorId }),
             });
             setProgress(90);
             const data = await res.json();
@@ -489,6 +493,7 @@ export function BulkAccountUploader() {
         setProgress(0);
         setFileName('');
         setMissingColumns([]);
+        setSelectedVendedorId('');
     }, []);
 
     // ── Stats ──
@@ -579,7 +584,7 @@ export function BulkAccountUploader() {
 
                         {/* Steps */}
                         <div className="flex items-center gap-2 px-5 py-2.5 bg-slate-50 border-b border-slate-100 shrink-0">
-                            {['Validación y Edición', 'Confirmación', 'Resultado'].map((label, idx) => (
+                            {['Asignación', 'Validación y Edición', 'Confirmación', 'Resultado'].map((label, idx) => (
                                 <div key={idx} className="flex items-center gap-2">
                                     <div className={cn(
                                         "w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold",
@@ -590,7 +595,7 @@ export function BulkAccountUploader() {
                                         {wizardStep > idx ? '✓' : idx + 1}
                                     </div>
                                     <span className={cn("text-xs font-medium hidden sm:inline", wizardStep === idx ? "text-slate-900" : "text-slate-400")}>{label}</span>
-                                    {idx < 2 && <ChevronRight className="w-3 h-3 text-slate-300" />}
+                                    {idx < 3 && <ChevronRight className="w-3 h-3 text-slate-300" />}
                                 </div>
                             ))}
                         </div>
@@ -623,8 +628,41 @@ export function BulkAccountUploader() {
 
                         {/* Body */}
                         <div className="flex-1 overflow-auto">
-                            {/* Step 0: Validation Table */}
+                            {/* Step 0: Vendedor Selection */}
                             {wizardStep === 0 && (
+                                <div className="p-10 flex flex-col items-center justify-center space-y-6 max-w-2xl mx-auto text-center">
+                                    <div className="bg-emerald-100 p-4 rounded-full text-emerald-600">
+                                        <Rocket className="w-8 h-8" />
+                                    </div>
+                                    <div>
+                                        <h3 className="text-xl font-bold text-slate-900">¿A quién se asignarán estas cuentas?</h3>
+                                        <p className="text-slate-500 mt-2">Selecciona el vendedor o coordinador responsable de las cuentas y contactos que vas a cargar.</p>
+                                    </div>
+
+                                    <div className="w-full space-y-2 text-left">
+                                        <label className="text-xs font-bold text-slate-400 uppercase tracking-wider ml-1">Vendedor Responsable</label>
+                                        <select
+                                            value={selectedVendedorId}
+                                            onChange={(e) => setSelectedVendedorId(e.target.value)}
+                                            className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all appearance-none cursor-pointer text-lg font-medium"
+                                        >
+                                            <option value="">— Seleccionar Vendedor —</option>
+                                            {catalog?.vendedores.map(v => (
+                                                <option key={v.id} value={v.id}>{v.full_name || 'Sin nombre'}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+
+                                    {!selectedVendedorId && (
+                                        <p className="text-amber-600 text-xs font-medium bg-amber-50 px-3 py-1.5 rounded-lg flex items-center gap-1.5 mt-2">
+                                            <AlertTriangle className="w-3.5 h-3.5" /> Debes seleccionar un vendedor para continuar
+                                        </p>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Step 1: Validation Table */}
+                            {wizardStep === 1 && (
                                 <div className="overflow-x-auto">
                                     <table className="w-full text-[11px]">
                                         <thead className="bg-slate-50 text-slate-400 uppercase text-[9px] font-bold sticky top-0 z-10">
@@ -801,52 +839,53 @@ export function BulkAccountUploader() {
                                 </div>
                             )}
 
-                            {/* Step 1: Confirmation */}
-                            {wizardStep === 1 && (
-                                <div className="space-y-6 max-w-lg mx-auto text-center py-8 px-6">
-                                    <div className="bg-emerald-50 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto">
-                                        <Rocket className="w-8 h-8 text-emerald-600" />
-                                    </div>
-                                    <div>
-                                        <h3 className="text-xl font-bold text-slate-900 mb-2">¿Confirmar Carga?</h3>
-                                        <p className="text-slate-500">
-                                            Se crearán <strong className="text-emerald-700">{accountCount} cuentas</strong> y{' '}
-                                            <strong className="text-blue-700">{contactCount} contactos</strong>.
-                                        </p>
+                            {/* Step 2: Confirmation */}
+                            {wizardStep === 2 && (
+                                <div className="p-10 flex flex-col items-center justify-center space-y-8 max-w-3xl mx-auto text-center">
+                                    <div className="bg-blue-100 p-4 rounded-full text-blue-600">
+                                        <Rocket className="w-10 h-10" />
                                     </div>
 
-                                    <div className="bg-slate-50 rounded-xl p-4 text-left space-y-2">
-                                        <p className="text-xs font-bold text-slate-500 uppercase">Resumen</p>
-                                        <div className="flex justify-between text-sm"><span className="text-slate-600">Cuentas a crear</span><span className="font-bold text-slate-900">{accountCount}</span></div>
-                                        <div className="flex justify-between text-sm"><span className="text-slate-600">Contactos a crear</span><span className="font-bold text-slate-900">{contactCount}</span></div>
-                                        <div className="flex justify-between text-sm"><span className="text-slate-600">Filas omitidas</span><span className="font-bold text-slate-500">{validations.filter(v => !v.enabled).length}</span></div>
-                                        <div className="flex justify-between text-sm"><span className="text-slate-600">Advertencias</span><span className={cn("font-bold", warningCount > 0 ? "text-amber-600" : "text-emerald-600")}>{warningCount}</span></div>
-                                        <div className="flex justify-between text-sm"><span className="text-slate-600">Duplicados marcados</span><span className={cn("font-bold", duplicateCount > 0 ? "text-purple-600" : "text-emerald-600")}>{duplicateCount}</span></div>
+                                    <div className="space-y-3">
+                                        <h3 className="text-2xl font-bold text-slate-900">¿Todo listo para despegar?</h3>
+                                        <p className="text-slate-500">
+                                            Estás a punto de crear <span className="text-slate-900 font-bold">{accountCount} cuentas</span> y <span className="text-slate-900 font-bold">{contactCount} contactos</span>.
+                                        </p>
+                                        <div className="mt-4 p-4 bg-emerald-50 rounded-2xl border border-emerald-100 inline-block text-left">
+                                            <p className="text-[10px] text-emerald-600 font-bold uppercase tracking-wider mb-1">ResponsableAsignado:</p>
+                                            <p className="text-emerald-900 font-bold text-lg">
+                                                {catalog?.vendedores.find(v => v.id === selectedVendedorId)?.full_name || 'Vendedor no seleccionado'}
+                                            </p>
+                                        </div>
                                     </div>
 
                                     {hasBlockingErrors && (
-                                        <div className="bg-red-50 border border-red-200 rounded-xl p-3 flex items-start gap-2 text-left">
-                                            <AlertCircle className="w-4 h-4 text-red-600 mt-0.5 shrink-0" />
-                                            <p className="text-xs text-red-700">Hay filas con nombre vacío que serán omitidas automáticamente por el servidor.</p>
+                                        <div className="bg-red-50 border border-red-100 rounded-2xl p-4 flex items-start gap-3 text-left">
+                                            <AlertCircle className="w-5 h-5 text-red-600 mt-0.5" />
+                                            <div>
+                                                <p className="text-sm font-bold text-red-900">Hay errores críticos en la validación</p>
+                                                <p className="text-xs text-red-700 mt-0.5">Corrige las filas resaltadas en rojo antes de proceder.</p>
+                                            </div>
                                         </div>
                                     )}
 
-                                    {duplicateCount > 0 && (
-                                        <div className="bg-purple-50 border border-purple-200 rounded-xl p-3 flex items-start gap-2 text-left">
-                                            <Copy className="w-4 h-4 text-purple-600 mt-0.5 shrink-0" />
-                                            <p className="text-xs text-purple-700">Hay {duplicateCount} posibles duplicados. Si no los deshabilitaste, se crearán igualmente.</p>
+                                    {!hasBlockingErrors && (
+                                        <div className="grid grid-cols-2 gap-4 w-full">
+                                            <div className="bg-slate-50 p-5 rounded-2xl text-center">
+                                                <p className="text-3xl font-bold text-slate-900">{accountCount}</p>
+                                                <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mt-1">Cuentas</p>
+                                            </div>
+                                            <div className="bg-slate-50 p-5 rounded-2xl text-center">
+                                                <p className="text-3xl font-bold text-slate-900">{contactCount}</p>
+                                                <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mt-1">Contactos</p>
+                                            </div>
                                         </div>
                                     )}
-
-                                    <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 flex items-start gap-2 text-left">
-                                        <MapPin className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
-                                        <p className="text-xs text-blue-700">Los territorios resueltos se usarán como IDs directos.</p>
-                                    </div>
                                 </div>
                             )}
 
-                            {/* Step 2: Result */}
-                            {wizardStep === 2 && (
+                            {/* Step 3: Result */}
+                            {wizardStep === 3 && (
                                 <div className="space-y-6 max-w-lg mx-auto text-center py-8 px-6">
                                     {isUploading ? (
                                         <div className="space-y-4">
@@ -885,24 +924,39 @@ export function BulkAccountUploader() {
                         </div>
 
                         {/* Footer */}
-                        <div className="flex items-center justify-between p-5 border-t border-slate-100 bg-slate-50/50 shrink-0">
-                            <div>
-                                {wizardStep === 0 && <button onClick={closeWizard} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-xl font-medium transition-colors">Cancelar</button>}
-                                {wizardStep === 1 && <button onClick={() => setWizardStep(0)} className="flex items-center gap-1 px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-xl font-medium transition-colors"><ChevronLeft className="w-4 h-4" /> Volver a editar</button>}
-                            </div>
-                            <div>
-                                {wizardStep === 0 && (
-                                    <button onClick={() => setWizardStep(1)} className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-bold shadow-md shadow-emerald-100 transition-all">
-                                        Continuar <ChevronRight className="w-4 h-4" />
+                        <div className="p-5 border-t border-slate-100 flex items-center justify-between bg-slate-50 shrink-0">
+                            <button
+                                onClick={() => setWizardStep(s => s - 1)}
+                                disabled={wizardStep === 0 || isUploading}
+                                className="flex items-center gap-2 px-5 py-2.5 text-slate-600 font-bold text-sm hover:bg-slate-100 rounded-xl disabled:opacity-0 transition-all"
+                            >
+                                <ChevronLeft className="w-4 h-4" /> Anterior
+                            </button>
+
+                            <div className="flex items-center gap-3">
+                                {wizardStep < 2 ? (
+                                    <button
+                                        onClick={() => setWizardStep(s => s + 1)}
+                                        disabled={wizardStep === 0 && !selectedVendedorId}
+                                        className="flex items-center gap-2 px-8 py-2.5 bg-slate-900 text-white font-bold text-sm rounded-xl hover:bg-slate-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-slate-200"
+                                    >
+                                        Siguiente <ChevronRight className="w-4 h-4" />
                                     </button>
-                                )}
-                                {wizardStep === 1 && (
-                                    <button onClick={handleUpload} disabled={isUploading} className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-sm font-bold shadow-md shadow-emerald-100 transition-all">
-                                        <Rocket className="w-4 h-4" /> Cargar Datos
+                                ) : wizardStep === 2 ? (
+                                    <button
+                                        onClick={handleUpload}
+                                        disabled={isUploading || hasBlockingErrors || !selectedVendedorId}
+                                        className="flex items-center gap-2 px-8 py-2.5 bg-emerald-600 text-white font-bold text-sm rounded-xl hover:bg-emerald-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-emerald-200"
+                                    >
+                                        {isUploading ? <><Loader2 className="w-4 h-4 animate-spin" /> Procesando...</> : <><Rocket className="w-4 h-4" /> ¡Iniciar Carga!</>}
                                     </button>
-                                )}
-                                {wizardStep === 2 && !isUploading && (
-                                    <button onClick={closeWizard} className="flex items-center gap-2 px-5 py-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-sm font-bold shadow-md transition-all">Cerrar</button>
+                                ) : (
+                                    <button
+                                        onClick={closeWizard}
+                                        className="flex items-center gap-2 px-8 py-2.5 bg-slate-900 text-white font-bold text-sm rounded-xl hover:bg-slate-800 transition-all shadow-lg shadow-slate-200"
+                                    >
+                                        Cerrar Wizard
+                                    </button>
                                 )}
                             </div>
                         </div>

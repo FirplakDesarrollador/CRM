@@ -137,7 +137,7 @@ export async function POST(req: NextRequest) {
                     departamento_id: depId,
                     ciudad_id: ciudadId,
                     created_by: user.id,
-                    owner_user_id: user.id,
+                    owner_user_id: body.vendedor_id || user.id,
                     updated_at: new Date().toISOString(),
                 };
 
