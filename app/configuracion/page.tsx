@@ -42,7 +42,8 @@ const BulkAccountUploader = dynamic(() => import('@/components/config/BulkAccoun
 import { ConfirmationModal } from '@/components/ui/ConfirmationModal';
 import packageJson from '../../package.json';
 
-const CRM_VERSION = packageJson.version;
+// Use a safe wrapper for version to avoid hydration issues if it changes between environments
+const CRM_VERSION = packageJson?.version || '0.0.0';
 
 const getFriendlyErrorMessage = (error: string | undefined | null) => {
     if (!error) return "Error desconocido";
@@ -80,6 +81,7 @@ function ConfigPageContent() {
     const [outboxItems, setOutboxItems] = useState<OutboxItem[]>([]);
     const [msConnected, setMsConnected] = useState<boolean | null>(null);
     const [stats, setStats] = useState<Stats | null>(null);
+    const [isMounted, setIsMounted] = useState(false);
 
     const [modalConfig, setModalConfig] = useState<ModalConfig>({
         isOpen: false,
@@ -142,6 +144,7 @@ function ConfigPageContent() {
     };
 
     useEffect(() => {
+        setIsMounted(true);
         fetchDebugInfo();
         const interval = setInterval(fetchDebugInfo, 3000);
         return () => clearInterval(interval);
@@ -275,7 +278,7 @@ function ConfigPageContent() {
     };
 
     return (
-        <div className="p-6 max-w-5xl mx-auto space-y-6">
+        <div className="p-6 max-w-5xl mx-auto space-y-6" data-testid="config-page">
             {/* Header */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
                 <div className="flex items-center gap-4">
@@ -506,7 +509,7 @@ function ConfigPageContent() {
                             )}
 
                             <div className="text-xs text-slate-400 pt-2 border-t border-slate-200">
-                                Sesión activa desde: {new Date().toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                {isMounted ? `Sesión activa desde: ${new Date().toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' })}` : 'Cargando sesión...'}
                             </div>
                         </div>
 

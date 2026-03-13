@@ -15,6 +15,7 @@ import { Briefcase } from "lucide-react";
 import { cn } from "@/components/ui/utils";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { AccountAssignedTab } from "./AccountAssignedTab";
+import AccountBranchesTab from "./AccountBranchesTab";
 
 // Schema
 const accountSchema = z.object({
@@ -47,7 +48,8 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
     const { createAccount, updateAccount } = useAccounts();
     const { role: userRole } = useCurrentUser();
     const [parents, setParents] = useState<any[]>([]);
-    const [activeTab, setActiveTab] = useState<'info' | 'contacts' | 'opportunities' | 'assigned'>('info');
+    const [activeTab, setActiveTab] = useState<'info' | 'contacts' | 'opportunities' | 'branches' | 'assigned'>('info');
+    const [hasBranches, setHasBranches] = useState(false);
 
     // Live Query for Subclassifications from local DB
     const subclassifications = useLiveQuery(() => db.subclasificaciones.toArray()) || [];
@@ -157,6 +159,23 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             });
 
     }, []);
+
+    // Check if this account has branches (is a parent)
+    useEffect(() => {
+        if (!account?.id) {
+            setHasBranches(false);
+            return;
+        }
+
+        supabase
+            .from('CRM_Cuentas')
+            .select('id', { count: 'exact', head: true })
+            .eq('id_cuenta_principal', account.id)
+            .limit(1)
+            .then(({ count }) => {
+                setHasBranches(!!count && count > 0);
+            });
+    }, [account?.id]);
 
     // Tab State
     // Tab State moved to top
@@ -408,6 +427,20 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                     >
                         <Briefcase size={16} />
                         Oportunidades
+                    </button>
+                )}
+
+                {account?.id && hasBranches && (
+                    <button
+                        type="button"
+                        onClick={() => setActiveTab('branches')}
+                        className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'branches'
+                            ? "border-blue-600 text-blue-600"
+                            : "border-transparent text-gray-500 hover:text-gray-700"
+                            }`}
+                    >
+                        <Building2 size={16} />
+                        Sucursales
                     </button>
                 )}
 
@@ -720,6 +753,18 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             ) : activeTab === 'assigned' ? (
                 <div className="p-4">
                     {account?.id && <AccountAssignedTab accountId={account.id} currentOwnerId={(account as any).owner_user_id || account.created_by || null} />}
+                    <div className="flex justify-end pt-4 border-t mt-4">
+                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">
+                            Cerrar
+                        </button>
+                    </div>
+                </div>
+            ) : activeTab === 'branches' ? (
+                <div className="p-4">
+                    {account?.id && <AccountBranchesTab accountId={account.id} onSelectAccount={(branch) => {
+                        // Logic to open branch account - In this CRM context, we can reuse the handleEdit if it's available in props or similar
+                        // For now, it will just show the information.
+                    }} />}
                     <div className="flex justify-end pt-4 border-t mt-4">
                         <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">
                             Cerrar

@@ -949,14 +949,14 @@ export class SyncEngine {
 
                 let mergedCount = 0;
                 let skippedCount = 0;
-
+                const accountsToPut = [];
                 for (const a of accounts) {
                     if (pendingAccountIds.has(a.id)) {
                         skippedCount++;
                         continue;
                     }
 
-                    await db.accounts.put({
+                    accountsToPut.push({
                         id: a.id,
                         nombre: a.nombre,
                         nit: a.nit,
@@ -976,6 +976,11 @@ export class SyncEngine {
                     });
                     mergedCount++;
                 }
+
+                if (accountsToPut.length > 0) {
+                    await db.accounts.bulkPut(accountsToPut);
+                }
+
                 console.log(`[Sync] Merged ${mergedCount} accounts (${skippedCount} with pending changes skipped).`);
             }
 
@@ -1224,13 +1229,13 @@ export class SyncEngine {
 
                 let mergedCount = 0;
                 let skippedCount = 0;
-
+                const contactsToPut = [];
                 for (const c of contacts) {
                     if (pendingContactIds.has(c.id)) {
                         skippedCount++;
                         continue;
                     }
-                    await db.contacts.put({
+                    contactsToPut.push({
                         id: c.id,
                         account_id: c.account_id,
                         nombre: c.nombre,
@@ -1244,6 +1249,11 @@ export class SyncEngine {
                     });
                     mergedCount++;
                 }
+
+                if (contactsToPut.length > 0) {
+                    await db.contacts.bulkPut(contactsToPut);
+                }
+
                 console.log(`[Sync] Merged ${mergedCount} contacts (${skippedCount} with pending changes skipped).`);
             }
 
@@ -1282,18 +1292,23 @@ export class SyncEngine {
 
                 let mergedCount = 0;
                 let skippedCount = 0;
-
+                const oppsToPut = [];
                 for (const opp of opportunities) {
                     if (pendingOppIds.has(opp.id)) {
                         skippedCount++;
                         continue;
                     }
-                    await db.opportunities.put({
+                    oppsToPut.push({
                         ...opp,
                         pais_id: opp.pais_id // Explicit mapping to be safe
                     });
                     mergedCount++;
                 }
+
+                if (oppsToPut.length > 0) {
+                    await db.opportunities.bulkPut(oppsToPut);
+                }
+
                 console.log(`[Sync] Merged ${mergedCount} opportunities (${skippedCount} with pending changes skipped).`);
             } else {
                 console.warn('[Sync] No opportunities returned from server (Length is 0 or undefined). Check RLS policies?');

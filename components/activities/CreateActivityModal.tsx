@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useForm } from "react-hook-form";
-import { CalendarClock, ListTodo, Loader2, Users, Search, X, Video, Plus, CheckCircle2, AlertCircle, MoreVertical, Trash2 } from "lucide-react";
+import { CalendarClock, ListTodo, Loader2, Users, Search, X, Video, Plus, CheckCircle2, AlertCircle, MoreVertical, Trash2, UserCog } from "lucide-react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { cn } from "@/components/ui/utils";
@@ -12,6 +12,9 @@ import { syncEngine } from "@/lib/sync";
 import { supabase } from "@/lib/supabase";
 import { DateTimePicker } from "@/components/ui/DateTimePicker";
 import { useActivities } from "@/lib/hooks/useActivities";
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { OpportunityCombobox } from "@/components/opportunities/OpportunityCombobox";
+import { AccountCombobox } from "@/components/accounts/AccountCombobox";
 
 interface CreateActivityModalProps {
     onClose: () => void;
@@ -37,6 +40,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                 ? toInputDateTime(initialData.fecha_fin)
                 : toInputDateTime(new Date(Date.now() + 3600000)),
             opportunity_id: initialData?.opportunity_id || initialOpportunityId || '',
+            account_id: initialData?.account_id || '',
             is_completed: !!initialData?.is_completed
         }
     });
@@ -57,6 +61,39 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         () => relatedAccount?.id ? db.contacts.where('account_id').equals(relatedAccount.id).first() : undefined,
         [relatedAccount?.id]
     );
+
+    const opportunityAccountRef = useRef<string | null>(null);
+
+    // Auto-fill account_id when opportunity changes
+    useEffect(() => {
+        const fillAccount = async () => {
+            if (!watchedOpportunityId) return;
+
+            // 1. Try local cache
+            const localOpp = await db.opportunities.get(watchedOpportunityId);
+            if (localOpp?.account_id) {
+                opportunityAccountRef.current = localOpp.account_id;
+                setValue('account_id', localOpp.account_id, { shouldDirty: true });
+                return;
+            }
+
+            // 2. Fallback to Supabase if not found locally
+            if (navigator.onLine) {
+                const { data, error } = await supabase
+                    .from('CRM_Oportunidades')
+                    .select('account_id')
+                    .eq('id', watchedOpportunityId)
+                    .maybeSingle();
+
+                if (!error && data?.account_id) {
+                    opportunityAccountRef.current = data.account_id;
+                    setValue('account_id', data.account_id, { shouldDirty: true });
+                }
+            }
+        };
+
+        fillAccount();
+    }, [watchedOpportunityId, setValue]);
 
     const [msConnected, setMsConnected] = useState<boolean>(false);
     const [isTeamsMeeting, setIsTeamsMeeting] = useState<boolean>(!!initialData?.teams_meeting_url);
@@ -97,7 +134,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
     // Deletion State
     const [isDeleting, setIsDeleting] = useState(false);
     const [showMenu, setShowMenu] = useState(false);
-    const { updateActivity, deleteActivity } = useActivities(initialOpportunityId);
+    const { updateActivity, deleteActivity } = useActivities({ opportunity_id: initialOpportunityId });
 
     // Planner Status Sync State
     const [isSyncingPlanner, setIsSyncingPlanner] = useState<boolean>(false);
@@ -111,6 +148,36 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
 
     // Track if we already synced this activity instance to prevent loops
     const hasSyncedRef = useRef<string | null>(null);
+
+    // Reassignment state (ADMIN / COORDINADOR only)
+    const { user: currentUser, role: currentRole } = useCurrentUser();
+    const canReassign = isEditing && (currentRole === 'ADMIN' || currentRole === 'COORDINADOR');
+    const [reassignUserId, setReassignUserId] = useState<string>(initialData?.user_id || '');
+    const [reassignableUsers, setReassignableUsers] = useState<{ id: string; full_name: string | null; email: string }[]>([]);
+
+    useEffect(() => {
+        if (!canReassign || !currentUser) return;
+        const fetchReassignableUsers = async () => {
+            if (currentRole === 'ADMIN') {
+                const { data } = await supabase
+                    .from('CRM_Usuarios')
+                    .select('id, full_name, email')
+                    .eq('is_active', true)
+                    .order('full_name');
+                if (data) setReassignableUsers(data);
+            } else {
+                // COORDINADOR: only themselves + their subordinates
+                const { data } = await supabase
+                    .from('CRM_Usuarios')
+                    .select('id, full_name, email')
+                    .eq('is_active', true)
+                    .or(`id.eq.${currentUser.id},coordinadores.cs.{${currentUser.id}}`)
+                    .order('full_name');
+                if (data) setReassignableUsers(data);
+            }
+        };
+        fetchReassignableUsers();
+    }, [canReassign, currentUser, currentRole]);
 
     // Check Microsoft Connection
     useEffect(() => {
@@ -382,6 +449,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                     ? toInputDateTime(initialData.fecha_fin)
                     : toInputDateTime(new Date(Date.now() + 3600000)),
                 opportunity_id: initialData.opportunity_id || initialOpportunityId || '',
+                account_id: initialData.account_id || '',
                 is_completed: !!initialData.is_completed
             });
         }
@@ -735,6 +803,11 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                 _sync_metadata: initialData?._sync_metadata ? { ...initialData._sync_metadata } : {}
             };
 
+            // Include user_id reassignment if changed
+            if (canReassign && reassignUserId && reassignUserId !== initialData?.user_id) {
+                processed.user_id = reassignUserId;
+            }
+
             // Force metadata timestamps for changed fields to ensure CRM wins in LWW
             if (isEditing) {
                 let anyDirty = false;
@@ -1005,6 +1078,32 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                             <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
                         </label>
                     </div>
+
+                    {/* REASSIGN ACTIVITY (ADMIN / COORDINADOR only) */}
+                    {canReassign && reassignableUsers.length > 0 && (
+                        <div className="bg-amber-50 p-4 rounded-2xl border border-amber-200 space-y-2 animate-in slide-in-from-top-2 duration-200">
+                            <label className="text-xs font-bold text-amber-800 uppercase flex items-center gap-2">
+                                <UserCog className="w-3.5 h-3.5" />
+                                Reasignar Actividad
+                            </label>
+                            <select
+                                value={reassignUserId}
+                                onChange={(e) => setReassignUserId(e.target.value)}
+                                className="w-full bg-white border border-amber-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
+                            >
+                                {reassignableUsers.map(u => (
+                                    <option key={u.id} value={u.id}>
+                                        {u.full_name || u.email}
+                                    </option>
+                                ))}
+                            </select>
+                            {reassignUserId !== initialData?.user_id && (
+                                <p className="text-[10px] text-amber-700 font-medium">
+                                    La actividad se transferirá al usuario seleccionado.
+                                </p>
+                            )}
+                        </div>
+                    )}
 
                     {/* CLASSIFICATION SELECTORS */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1335,20 +1434,28 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
 
                     <div className="space-y-1">
                         <label className="text-xs font-bold text-slate-500 uppercase">Oportunidad Relacionada</label>
-                        <select
-                            {...register('opportunity_id')}
+                        <OpportunityCombobox
+                            value={watch('opportunity_id')}
+                            accountId={watch('account_id')}
+                            onChange={(val) => setValue('opportunity_id', val, { shouldDirty: true, shouldValidate: true })}
                             disabled={!!initialOpportunityId}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all disabled:bg-slate-100 disabled:text-slate-500"
-                        >
-                            <option value="">
-                                {!opportunities || opportunities.length === 0
-                                    ? 'No hay oportunidades disponibles'
-                                    : 'Seleccione una oportunidad...'}
-                            </option>
-                            {opportunities?.map((opp: any) => (
-                                <option key={opp.id} value={opp.id}>{opp.nombre}</option>
-                            ))}
-                        </select>
+                        />
+                    </div>
+
+                    <div className="space-y-1">
+                        <label className="text-xs font-bold text-slate-500 uppercase">Cuenta Relacionada</label>
+                        <AccountCombobox
+                            value={watch('account_id')}
+                            onChange={(val) => {
+                                setValue('account_id', val, { shouldDirty: true, shouldValidate: true });
+                                // Logic: Clear opportunity if the new account doesn't match the current opportunity's account
+                                const currentOppId = getValues('opportunity_id');
+                                if (currentOppId && opportunityAccountRef.current !== val) {
+                                    setValue('opportunity_id', '', { shouldDirty: true });
+                                    opportunityAccountRef.current = null;
+                                }
+                            }}
+                        />
                     </div>
 
                     <div className="space-y-1">
