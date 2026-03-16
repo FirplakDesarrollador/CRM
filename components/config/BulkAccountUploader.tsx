@@ -328,6 +328,7 @@ export function BulkAccountUploader() {
     const [result, setResult] = useState<UploadResult | null>(null);
     const [missingColumns, setMissingColumns] = useState<string[]>([]);
     const [selectedVendedorId, setSelectedVendedorId] = useState<string>('');
+    const [fileName, setFileName] = useState<string>('');
     const fileRef = useRef<HTMLInputElement>(null);
 
     // ── Fetch catalogs ──
