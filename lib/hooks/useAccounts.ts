@@ -70,23 +70,28 @@ export function useAccounts(filters?: { advisor_id?: string | null }) {
 
 
     const updateAccount = async (id: string, updates: Partial<LocalCuenta>) => {
-        console.log('[useAccounts] DEBUG - updateAccount called with:', { id, updates });
+        console.log('[useAccounts] DEBUG - updateAccount original updates:', JSON.stringify(updates));
 
         // Defensive conversion: ensure numeric IDs are numbers, not strings from form
         const { _sync_metadata, ...sanitized } = updates;
-        const sanitizedUpdates = {
+        
+        // Ensure email and telefono are preserved even if they are null strings
+        const sanitizedUpdates: any = {
             ...sanitized,
-            subclasificacion_id: updates.subclasificacion_id ? Number(updates.subclasificacion_id) : null,
-            departamento_id: updates.departamento_id ? Number(updates.departamento_id) : null,
-            ciudad_id: updates.ciudad_id ? Number(updates.ciudad_id) : null
+            subclasificacion_id: (updates as any).subclasificacion_id ? Number((updates as any).subclasificacion_id) : null,
+            departamento_id: (updates as any).departamento_id ? Number((updates as any).departamento_id) : null,
+            ciudad_id: (updates as any).ciudad_id ? Number((updates as any).ciudad_id) : null,
+            telefono: (updates as any).telefono !== undefined ? (updates as any).telefono : sanitized.telefono,
+            email: (updates as any).email !== undefined ? (updates as any).email : (sanitized as any).email
         };
 
-        console.log('[useAccounts] DEBUG - subclasificacion_id sanitized:', sanitizedUpdates.subclasificacion_id);
+        console.log('[useAccounts] DEBUG - sanitizedUpdates result:', JSON.stringify(sanitizedUpdates));
+        
         const fullUpdates = { ...sanitizedUpdates, updated_at: new Date().toISOString() };
         await db.accounts.update(id, fullUpdates);
-        console.log('[useAccounts] DEBUG - Calling syncEngine.queueMutation with updates:', sanitizedUpdates);
+        
+        console.log('[useAccounts] DEBUG - Queuing mutation for sync:', sanitizedUpdates);
         await syncEngine.queueMutation('CRM_Cuentas', id, sanitizedUpdates);
-        console.log('[useAccounts] DEBUG - queueMutation completed');
     };
 
     const deleteAccount = async (id: string) => {
