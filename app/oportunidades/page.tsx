@@ -187,6 +187,11 @@ export default function OpportunitiesPage() {
                                                 For now we show ID or TODO: map it 
                                             */}
                                                 {opp.fase_data?.nombre || 'Prospecto'} • {opp.estado_data?.nombre || 'Abierta'} • {opp.currency_id || 'COP'} {new Intl.NumberFormat().format(opp.amount || 0)}
+                                                {opp.owner_data?.full_name && (
+                                                    <span className="ml-2 text-slate-400">
+                                                        • Por: <span className="font-medium text-slate-600 italic">{opp.owner_data.full_name}</span>
+                                                    </span>
+                                                )}
                                                 {opp.fecha_cierre_estimada && (
                                                     <span className={cn(
                                                         "ml-2 font-normal",

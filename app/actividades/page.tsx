@@ -563,11 +563,23 @@ function ActivitiesContent() {
                                                                 )}>
                                                                     {act.asunto}
                                                                 </h4>
-                                                                {(clsName || subName) && (
-                                                                    <div className="flex flex-wrap gap-1 mt-1">
+                                                                <div className="flex flex-wrap gap-1 mt-1">
                                                                         {clsName && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{clsName}</span>}
                                                                         {subName && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200">{subName}</span>}
+                                                                        {act.prioridad && (
+                                                                            <span className={cn(
+                                                                                "text-[10px] font-bold px-1.5 py-0.5 rounded border",
+                                                                                act.prioridad === 'Alta' ? "bg-red-50 text-red-600 border-red-100" :
+                                                                                act.prioridad === 'Media' ? "bg-amber-50 text-amber-600 border-amber-100" :
+                                                                                "bg-blue-50 text-blue-600 border-blue-100"
+                                                                            )}>
+                                                                                {act.prioridad}
+                                                                            </span>
+                                                                        )}
                                                                     </div>
+                                                                {/* DEBUG INDICATOR */}
+                                                                {act.clasificacion_id && !clsName && (
+                                                                    <div className="text-[10px] text-red-500 font-bold mt-1">Error L: {act.clasificacion_id}</div>
                                                                 )}
                                                             </div>
 
@@ -775,7 +787,19 @@ function ActivitiesContent() {
                                                                         )}>
                                                                             <div className="flex-1 min-w-0">
                                                                                 <div className="font-medium truncate">{act.asunto}</div>
-                                                                                {cName && <div className="text-[9px] font-bold text-slate-500 uppercase mt-0.5">{cName}</div>}
+                                                                                <div className="flex flex-wrap gap-1 mt-0.5">
+                                                                                    {cName && <div className="text-[9px] font-bold text-slate-500 uppercase">{cName}</div>}
+                                                                                    {act.prioridad && (
+                                                                                        <div className={cn(
+                                                                                            "text-[9px] font-bold px-1 rounded border",
+                                                                                            act.prioridad === 'Alta' ? "bg-red-50 text-red-600 border-red-100" :
+                                                                                            act.prioridad === 'Media' ? "bg-amber-50 text-amber-600 border-amber-100" :
+                                                                                            "bg-blue-50 text-blue-600 border-blue-100"
+                                                                                        )}>
+                                                                                            {act.prioridad}
+                                                                                        </div>
+                                                                                    )}
+                                                                                </div>
                                                                                 <div className="text-[10px] opacity-70 mt-0.5">
                                                                                     {new Date(act.fecha_inicio).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: true })}
                                                                                 </div>

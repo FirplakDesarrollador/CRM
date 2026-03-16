@@ -430,6 +430,24 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
     console.log("[CreateActivityModal] clasificacion_id:", initialData?.clasificacion_id, "type:", typeof initialData?.clasificacion_id);
     console.log("[CreateActivityModal] Available classifications:", classifications.length);
 
+    const { register, handleSubmit, watch, setValue, reset } = useForm({
+        defaultValues: {
+            asunto: initialData?.asunto || '',
+            descripcion: initialData?.descripcion || '',
+            tipo_actividad: (initialData?.tipo_actividad || 'EVENTO') as 'TAREA' | 'EVENTO',
+            clasificacion_id: initialData?.clasificacion_id ? String(initialData.clasificacion_id) : "",
+            subclasificacion_id: initialData?.subclasificacion_id ? String(initialData.subclasificacion_id) : "",
+            fecha_inicio: initialData?.fecha_inicio
+                ? (initialData.tipo_actividad === 'TAREA' ? toInputDate(initialData.fecha_inicio) : toInputDateTime(initialData.fecha_inicio))
+                : (initialData?.tipo_actividad === 'TAREA' ? toInputDate(new Date()) : toInputDateTime(new Date())),
+            fecha_fin: initialData?.fecha_fin
+                ? toInputDateTime(initialData.fecha_fin)
+                : toInputDateTime(new Date(Date.now() + 3600000)),
+            opportunity_id: initialData?.opportunity_id || initialOpportunityId || '',
+            is_completed: !!initialData?.is_completed,
+            prioridad: initialData?.prioridad || 'Media'
+        }
+    });
 
     // Force form reset when initialData changes OR when classifications finish loading
     // This fixes the timing issue where the select options don't exist yet when form resets
@@ -449,8 +467,8 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                     ? toInputDateTime(initialData.fecha_fin)
                     : toInputDateTime(new Date(Date.now() + 3600000)),
                 opportunity_id: initialData.opportunity_id || initialOpportunityId || '',
-                account_id: initialData.account_id || '',
-                is_completed: !!initialData.is_completed
+                is_completed: !!initialData.is_completed,
+                prioridad: initialData.prioridad || 'Media'
             });
         }
     }, [initialData, reset, initialOpportunityId, classifications.length]);
@@ -1164,6 +1182,30 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                 </select>
                             </div>
                         )}
+                    </div>
+
+                    {/* Priority Selector */}
+                    <div className="space-y-1">
+                        <label className="text-xs font-bold text-slate-500 uppercase">Prioridad</label>
+                        <div className="flex gap-2">
+                            {['Baja', 'Media', 'Alta'].map((p) => (
+                                <button
+                                    key={p}
+                                    type="button"
+                                    onClick={() => setValue('prioridad', p as any)}
+                                    className={cn(
+                                        "flex-1 py-2 text-xs font-bold rounded-lg border transition-all",
+                                        watch('prioridad') === p 
+                                            ? (p === 'Alta' ? "bg-red-50 border-red-200 text-red-600 shadow-sm" : 
+                                               p === 'Media' ? "bg-amber-50 border-amber-200 text-amber-600 shadow-sm" : 
+                                               "bg-blue-50 border-blue-200 text-blue-600 shadow-sm")
+                                            : "bg-white border-slate-200 text-slate-500 hover:border-slate-300"
+                                    )}
+                                >
+                                    {p}
+                                </button>
+                            ))}
+                        </div>
                     </div>
 
                     <div className="space-y-1">
