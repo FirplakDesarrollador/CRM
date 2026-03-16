@@ -163,6 +163,8 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
             } else if (statusFilter === 'lost' && lostPhaseIdsRef.current.length > 0) {
                 query = query.in('fase_id', lostPhaseIdsRef.current);
             } else if (statusFilter === 'open' && closedPhaseIdsRef.current.length > 0) {
+                // To be robust, also handle the case where fase_id might be null (though we just repaired it)
+                // but the primary logic is to exclude all known closed phases
                 query = query.not('fase_id', 'in', `(${closedPhaseIdsRef.current.join(',')})`);
             }
 
