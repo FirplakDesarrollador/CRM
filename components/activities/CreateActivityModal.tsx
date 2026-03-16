@@ -96,7 +96,8 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                 ? toInputDateTime(initialData.fecha_fin)
                 : toInputDateTime(new Date(Date.now() + 3600000)),
             opportunity_id: initialData?.opportunity_id || initialOpportunityId || '',
-            is_completed: !!initialData?.is_completed
+            is_completed: !!initialData?.is_completed,
+            prioridad: initialData?.prioridad || 'Media'
         }
     });
 
@@ -118,7 +119,8 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                     ? toInputDateTime(initialData.fecha_fin)
                     : toInputDateTime(new Date(Date.now() + 3600000)),
                 opportunity_id: initialData.opportunity_id || initialOpportunityId || '',
-                is_completed: !!initialData.is_completed
+                is_completed: !!initialData.is_completed,
+                prioridad: initialData.prioridad || 'Media'
             });
         }
     }, [initialData, reset, initialOpportunityId, classifications.length]);
@@ -523,6 +525,30 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                 </select>
                             </div>
                         )}
+                    </div>
+
+                    {/* Priority Selector */}
+                    <div className="space-y-1">
+                        <label className="text-xs font-bold text-slate-500 uppercase">Prioridad</label>
+                        <div className="flex gap-2">
+                            {['Baja', 'Media', 'Alta'].map((p) => (
+                                <button
+                                    key={p}
+                                    type="button"
+                                    onClick={() => setValue('prioridad', p as any)}
+                                    className={cn(
+                                        "flex-1 py-2 text-xs font-bold rounded-lg border transition-all",
+                                        watch('prioridad') === p 
+                                            ? (p === 'Alta' ? "bg-red-50 border-red-200 text-red-600 shadow-sm" : 
+                                               p === 'Media' ? "bg-amber-50 border-amber-200 text-amber-600 shadow-sm" : 
+                                               "bg-blue-50 border-blue-200 text-blue-600 shadow-sm")
+                                            : "bg-white border-slate-200 text-slate-500 hover:border-slate-300"
+                                    )}
+                                >
+                                    {p}
+                                </button>
+                            ))}
+                        </div>
                     </div>
 
                     <div className="space-y-1">

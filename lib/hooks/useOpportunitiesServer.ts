@@ -18,6 +18,7 @@ export type OpportunityServer = {
     account?: { nombre: string; canal_id?: string } | null; // Joined data
     fase_data?: { nombre: string } | null; // Joined data
     estado_data?: { nombre: string } | null; // Joined data
+    owner_data?: { full_name: string } | null; // Joined data
 };
 
 type StatusFilter = 'all' | 'open' | 'won' | 'lost';
@@ -129,9 +130,11 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                     updated_at,
                     fecha_cierre_estimada,
                     segmento_id,
+                    created_by,
                     ${accountRelation},
                     fase_data:CRM_FasesOportunidad(nombre),
-                    estado_data:CRM_EstadosOportunidad(nombre)
+                    estado_data:CRM_EstadosOportunidad(nombre),
+                    owner_data:CRM_Usuarios!owner_user_id(full_name)
                 `, { count: 'exact' })
                 .eq('is_deleted', false);
 

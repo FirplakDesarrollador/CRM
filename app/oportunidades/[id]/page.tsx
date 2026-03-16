@@ -243,6 +243,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     const [isLossReasonModalOpen, setIsLossReasonModalOpen] = useState(false);
     const [pendingPhaseId, setPendingPhaseId] = useState<number | null>(null);
     const [ownerSellerName, setOwnerSellerName] = useState<string | null>(null);
+    const [reporterName, setReporterName] = useState<string | null>(null);
 
     useEffect(() => {
         if (opportunity?.owner_user_id) {
@@ -255,7 +256,17 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                     if (data?.full_name) setOwnerSellerName(data.full_name);
                 });
         }
-    }, [opportunity?.owner_user_id]);
+        if (opportunity?.created_by) {
+            supabase
+                .from('CRM_Usuarios')
+                .select('full_name')
+                .eq('id', opportunity.created_by)
+                .single()
+                .then(({ data }) => {
+                    if (data?.full_name) setReporterName(data.full_name);
+                });
+        }
+    }, [opportunity?.owner_user_id, opportunity?.created_by]);
 
     // Segments Logic
     const [segments, setSegments] = useState<any[]>([]);
@@ -713,17 +724,30 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                 </div>
 
                 {/* Seller Card (New) */}
-                {ownerSellerName && (
-                    <div className="md:col-span-2 bg-slate-50 p-4 rounded-2xl border border-slate-200 flex items-center gap-4">
-                        <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-sm text-blue-600">
-                            <User className="w-6 h-6" />
+                <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {ownerSellerName && (
+                        <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex items-center gap-4">
+                            <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-sm text-blue-600">
+                                <User className="w-6 h-6" />
+                            </div>
+                            <div>
+                                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Vendedor Asignado</p>
+                                <p className="text-lg font-bold text-slate-900">{ownerSellerName}</p>
+                            </div>
                         </div>
-                        <div>
-                            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Vendedor Asignado</p>
-                            <p className="text-lg font-bold text-slate-900">{ownerSellerName}</p>
+                    )}
+                    {reporterName && (
+                        <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex items-center gap-4">
+                            <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-sm text-emerald-600">
+                                <User className="w-6 h-6" />
+                            </div>
+                            <div>
+                                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Reportado por</p>
+                                <p className="text-lg font-bold text-slate-900">{reporterName}</p>
+                            </div>
                         </div>
-                    </div>
-                )}
+                    )}
+                </div>
             </div>
 
             <LossReasonModal
@@ -1146,12 +1170,20 @@ function ActivitiesTab({ opportunityId }: { opportunityId: string }) {
                                                 )}>
                                                     {act.asunto}
                                                 </h4>
-                                                {(clsName || subName) && (
-                                                    <div className="flex flex-wrap gap-1 mt-1">
+                                                <div className="flex flex-wrap gap-1 mt-1">
                                                         {clsName && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{clsName}</span>}
                                                         {subName && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200">{subName}</span>}
+                                                        {act.prioridad && (
+                                                            <span className={cn(
+                                                                "text-[10px] font-bold px-1.5 py-0.5 rounded border",
+                                                                act.prioridad === 'Alta' ? "bg-red-50 text-red-600 border-red-100" :
+                                                                act.prioridad === 'Media' ? "bg-amber-50 text-amber-600 border-amber-100" :
+                                                                "bg-blue-50 text-blue-600 border-blue-100"
+                                                            )}>
+                                                                {act.prioridad}
+                                                            </span>
+                                                        )}
                                                     </div>
-                                                )}
                                                 {/* DEBUG INDICATOR */}
                                                 {act.clasificacion_id && !clsName && (
                                                     <div className="text-[10px] text-red-500 font-bold mt-1">Error L: {act.clasificacion_id}</div>
