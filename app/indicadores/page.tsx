@@ -3,10 +3,26 @@
 import React from "react";
 import { BarChart3, ExternalLink, Info } from "lucide-react";
 import { cn } from "@/components/ui/utils";
+import { VentasGanadasTile } from "@/components/indicadores/VentasGanadasTile";
 
 export default function IndicadoresPage() {
     return (
-        <div className="flex flex-col h-full bg-slate-50/50 p-6 space-y-6 overflow-hidden">
+        <div className="flex flex-col h-full bg-slate-50/50 p-6 space-y-6 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
+            <style jsx>{`
+                .scrollbar-thin::-webkit-scrollbar {
+                    width: 6px;
+                }
+                .scrollbar-thin::-webkit-scrollbar-track {
+                    background: transparent;
+                }
+                .scrollbar-thin::-webkit-scrollbar-thumb {
+                    background: #e2e8f0;
+                    border-radius: 10px;
+                }
+                .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+                    background: #cbd5e1;
+                }
+            `}</style>
             {/* Header Section */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
@@ -36,6 +52,11 @@ export default function IndicadoresPage() {
                         <ExternalLink className="w-4 h-4" />
                     </a>
                 </div>
+            </div>
+
+            {/* Dashboard Tiles Section */}
+            <div className="w-full relative z-10 block">
+                <VentasGanadasTile />
             </div>
 
             {/* Power BI Container - Glassmorphism Design */}
