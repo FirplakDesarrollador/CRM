@@ -592,7 +592,7 @@ export class SyncEngine {
                             if (localAccount) {
                                 console.log(`[Sync] Re-queueing missing local account: ${missingId}`);
                                 const fieldsToSync: (keyof typeof localAccount)[] =
-                                    ['nombre', 'nit', 'nit_base', 'canal_id', 'telefono', 'direccion', 'pais_id', 'departamento_id', 'ciudad_id', 'created_by', 'created_at', 'updated_at'];
+                                    ['nombre', 'nit', 'nit_base', 'canal_id', 'telefono', 'email', 'direccion', 'pais_id', 'departamento_id', 'ciudad_id', 'owner_user_id', 'nivel_premium', 'es_premium', 'created_by', 'created_at', 'updated_at'];
 
                                 const newOutboxItems: any[] = [];
                                 fieldsToSync.forEach(field => {
@@ -964,12 +964,15 @@ export class SyncEngine {
                         id_cuenta_principal: a.id_cuenta_principal,
                         canal_id: a.canal_id || 'DIST_NAC',
                         es_premium: a.es_premium ?? false,
+                        nivel_premium: a.nivel_premium,
                         telefono: a.telefono,
+                        email: a.email,
                         direccion: a.direccion,
                         pais_id: a.pais_id,
                         departamento_id: a.departamento_id,
                         ciudad_id: a.ciudad_id,
                         ciudad: a.ciudad,
+                        owner_user_id: a.owner_user_id,
                         created_by: a.created_by,
                         updated_by: a.updated_by,
                         updated_at: a.updated_at
