@@ -50,6 +50,7 @@ function sanitizeOpportunityForSync(opp: any) {
         valor,  // Legacy 'valor' field (replaced by 'amount')
         items,  // Items are synced separately through CRM_CotizacionItems
         status, // Legacy 'status' field (replaced by 'estado_id')
+        _sync_metadata, // Exclude system field to prevent sync loops
         ...sanitized
     } = opp;
 
@@ -61,12 +62,22 @@ function sanitizeOpportunityForSync(opp: any) {
     if (sanitized.estado_id !== undefined) sanitized.estado_id = sanitized.estado_id ? Number(sanitized.estado_id) : 1;
     if (sanitized.fase_id !== undefined) sanitized.fase_id = sanitized.fase_id ? Number(sanitized.fase_id) : 1;
     if (sanitized.razon_perdida_id !== undefined) sanitized.razon_perdida_id = sanitized.razon_perdida_id ? Number(sanitized.razon_perdida_id) : null;
+    // Text fields — pass through as-is (no conversion needed)
+    // razon_perdida and comentarios_perdida are already strings or null
 
     return sanitized;
 }
 
-export function useOpportunities() {
-    const opportunities = useLiveQuery(() => db.opportunities.toArray());
+export function useOpportunities(filters?: { advisor_id?: string | null }) {
+    const opportunities = useLiveQuery(
+        () => {
+            if (filters?.advisor_id) {
+                return db.opportunities.where('owner_user_id').equals(filters.advisor_id).toArray();
+            }
+            return db.opportunities.toArray();
+        },
+        [filters?.advisor_id]
+    );
 
     const createOpportunity = async (data: any) => {
         const id = uuidv4();
@@ -232,6 +243,8 @@ export function useOpportunities() {
             departamento_id: updates.departamento_id !== undefined ? (updates.departamento_id ? Number(updates.departamento_id) : null) : undefined,
             ciudad_id: updates.ciudad_id !== undefined ? (updates.ciudad_id ? Number(updates.ciudad_id) : null) : undefined,
             razon_perdida_id: updates.razon_perdida_id !== undefined ? (updates.razon_perdida_id ? Number(updates.razon_perdida_id) : null) : undefined,
+            razon_perdida: updates.razon_perdida !== undefined ? (updates.razon_perdida || null) : undefined,
+            comentarios_perdida: updates.comentarios_perdida !== undefined ? (updates.comentarios_perdida || null) : undefined,
         };
 
         // Remove undefined fields to avoid overwriting with undefined
@@ -249,8 +262,17 @@ export function useOpportunities() {
 
         await db.opportunities.update(id, updated);
 
-        // Send full opportunity data to satisfy NOT NULL constraints on server
-        await syncEngine.queueMutation('CRM_Oportunidades', id, sanitizeOpportunityForSync(updated));
+        // Prepare partial payload with mandatory NOT NULL fields for UPSERT safety
+        const syncPayload: any = sanitizeOpportunityForSync(sanitizedUpdates);
+        if (updates.fecha_cierre_estimada !== undefined) syncPayload.fecha_cierre_estimada = updated.fecha_cierre_estimada;
+
+        syncPayload.nombre = updated.nombre;
+        syncPayload.account_id = updated.account_id;
+        syncPayload.fase_id = updated.fase_id;
+        syncPayload.moneda_id = updated.moneda_id;
+        syncPayload.owner_user_id = updated.owner_user_id;
+
+        await syncEngine.queueMutation('CRM_Oportunidades', id, syncPayload);
 
         // PROPAGATION: If segmento_id changed, update all associated quotes
         if (updates.segmento_id !== undefined) {
@@ -275,7 +297,16 @@ async function performOpportunityUpdate(id: string, updates: any) {
 
     const updated = { ...current, ...updates, updated_at: new Date().toISOString() };
     await db.opportunities.update(id, updated);
-    await syncEngine.queueMutation('CRM_Oportunidades', id, sanitizeOpportunityForSync(updated));
+
+    // Prepare partial payload with mandatory NOT NULL fields
+    const syncPayload: any = sanitizeOpportunityForSync(updates);
+    syncPayload.nombre = updated.nombre;
+    syncPayload.account_id = updated.account_id;
+    syncPayload.fase_id = updated.fase_id;
+    syncPayload.moneda_id = updated.moneda_id;
+    syncPayload.owner_user_id = updated.owner_user_id;
+
+    await syncEngine.queueMutation('CRM_Oportunidades', id, syncPayload);
 }
 
 

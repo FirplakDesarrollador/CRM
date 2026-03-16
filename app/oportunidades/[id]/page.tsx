@@ -48,6 +48,11 @@ export default function OpportunityDetailPage() {
     useEffect(() => {
         const fetchFromServer = async () => {
             if (opportunities && !opportunity && !isFetchingServer && !serverOpportunity) {
+                if (!navigator.onLine) {
+                    console.warn(`[JIT Sync] Offline: Cannot fetch opportunity ${id}`);
+                    setServerOpportunity('NOT_FOUND');
+                    return;
+                }
                 console.log(`[JIT Sync] Opportunity ${id} not found locally. Fetching from server...`);
                 setIsFetchingServer(true);
                 try {
@@ -82,6 +87,7 @@ export default function OpportunityDetailPage() {
                     }
                 } catch (err) {
                     console.error(`[JIT Sync] Error fetching opportunity:`, err);
+                    setServerOpportunity('NOT_FOUND');
                 } finally {
                     setIsFetchingServer(false);
                 }
@@ -231,15 +237,37 @@ export default function OpportunityDetailPage() {
     );
 }
 
+const LOSS_REASONS = [
+    "Precio elevado",
+    "Compra en la competencia por precio",
+    "No contesta",
+    "Lo pospone",
+    "No va a comprar",
+    "Tiempos de entrega",
+    "No hay medida o color",
+];
+
 function SummaryTab({ opportunity }: { opportunity: any }) {
     const { updateOpportunity } = useOpportunities();
     const { quotes } = useQuotes(opportunity.id);
     const [localAmount, setLocalAmount] = useState(opportunity.amount || 0);
     const [localClosingDate, setLocalClosingDate] = useState(toInputDate(opportunity.fecha_cierre_estimada));
+    const [localOrigen, setLocalOrigen] = useState(opportunity.origen_oportunidad || "");
+    const [localUrlOrigen, setLocalUrlOrigen] = useState(opportunity.url_origen || "");
+    const [localFuente, setLocalFuente] = useState(opportunity.fuente_conversion || "");
     const [isSaving, setIsSaving] = useState(false);
     const [isSavingDate, setIsSavingDate] = useState(false);
+    const [isSavingOrigen, setIsSavingOrigen] = useState(false);
+    const [isSavingUrl, setIsSavingUrl] = useState(false);
+    const [isSavingFuente, setIsSavingFuente] = useState(false);
 
-    // Filter Logic
+    // Loss reason inline fields
+    const [localRazonPerdida, setLocalRazonPerdida] = useState(opportunity.razon_perdida || "");
+    const [localComentariosPerdida, setLocalComentariosPerdida] = useState(opportunity.comentarios_perdida || "");
+    const [isSavingLossReason, setIsSavingLossReason] = useState(false);
+    const [isSavingComentarios, setIsSavingComentarios] = useState(false);
+
+    // Modal state (kept for backward compat but no longer used for blocking)
     const [isLossReasonModalOpen, setIsLossReasonModalOpen] = useState(false);
     const [pendingPhaseId, setPendingPhaseId] = useState<number | null>(null);
     const [ownerSellerName, setOwnerSellerName] = useState<string | null>(null);
@@ -277,7 +305,12 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     useEffect(() => {
         setLocalSegmentId(opportunity.segmento_id ? String(opportunity.segmento_id) : "");
         setLocalClosingDate(toInputDate(opportunity.fecha_cierre_estimada));
-    }, [opportunity.segmento_id, opportunity.fecha_cierre_estimada]);
+        setLocalOrigen(opportunity.origen_oportunidad || "");
+        setLocalUrlOrigen(opportunity.url_origen || "");
+        setLocalFuente(opportunity.fuente_conversion || "");
+        setLocalRazonPerdida(opportunity.razon_perdida || "");
+        setLocalComentariosPerdida(opportunity.comentarios_perdida || "");
+    }, [opportunity.segmento_id, opportunity.fecha_cierre_estimada, opportunity.origen_oportunidad, opportunity.url_origen, opportunity.fuente_conversion, opportunity.razon_perdida, opportunity.comentarios_perdida]);
 
     useEffect(() => {
         const fetchSegments = async () => {
@@ -305,11 +338,16 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     );
 
     const [isFetchingAccount, setIsFetchingAccount] = useState(false);
+    const [isOfflineAccount, setIsOfflineAccount] = useState(false);
 
     // Rollback for Account (JIT Sync)
     useEffect(() => {
         const fetchAccountFromServer = async () => {
-            if (opportunity.account_id && !account && !isFetchingAccount && navigator.onLine) {
+            if (opportunity.account_id && !account && !isFetchingAccount && !isOfflineAccount) {
+                if (!navigator.onLine) {
+                    setIsOfflineAccount(true);
+                    return;
+                }
                 console.log(`[JIT Sync] Account ${opportunity.account_id} not found locally. Fetching from server...`);
                 setIsFetchingAccount(true);
                 try {
@@ -322,24 +360,50 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                     if (data && !error) {
                         console.log(`[JIT Sync] Found account on server. Saving locally...`);
                         await db.accounts.put(data);
+                    } else if (error) {
+                        console.warn(`[JIT Sync] Error fetching account from server:`, error);
                     }
                 } catch (err) {
                     console.error("Error fetching account from server", err);
                 } finally {
                     setIsFetchingAccount(false);
+                    // Keep isFetchingServer clean if we inadvertently mutated it in other flows, but actually we shouldn't touch it here
                 }
             }
         };
         fetchAccountFromServer();
-    }, [opportunity.account_id, account, isFetchingAccount]);
+    }, [opportunity.account_id, account, isFetchingAccount, isOfflineAccount]);
 
-    // Fetch Phases for Channel
+    const effectiveAccount = account || (isOfflineAccount ? {
+        id: opportunity.account_id,
+        nombre: "Cliente Offline (Datos Parciales)",
+        canal_id: null,
+        subclasificacion_id: null,
+        nit: "",
+        telefono: "",
+        direccion: "",
+        ciudad: ""
+    } : null);
+
+    // Fetch Phases for Channel (with deduplication by orden in case of DB integrity issues)
     const phases = useLiveQuery(
-        () => account?.canal_id
-            ? db.phases.where('canal_id').equals(account.canal_id).sortBy('orden')
-            : [],
+        async () => {
+            if (!effectiveAccount?.canal_id) return [];
+            const raw = await db.phases.where('canal_id').equals(effectiveAccount.canal_id).sortBy('orden');
+            // Deduplicate by orden, keeping the entry with the lowest id
+            const seen = new Map<number, typeof raw[0]>();
+            for (const phase of raw) {
+                if (!seen.has(phase.orden)) {
+                    seen.set(phase.orden, phase);
+                }
+            }
+            return Array.from(seen.values()).sort((a, b) => a.orden - b.orden);
+        },
         [account?.canal_id]
     );
+
+    // Computed: both loss reason fields are filled
+    const lossFieldsComplete = localRazonPerdida.trim() !== "" && localComentariosPerdida.trim() !== "";
 
     const handlePhaseChange = async (phaseId: number) => {
         const targetPhase = phases?.find(p => p.id === phaseId);
@@ -348,8 +412,17 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
         const normalizedName = targetPhase?.nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") || "";
 
         if (normalizedName.includes('perdida')) {
-            setPendingPhaseId(phaseId);
-            setIsLossReasonModalOpen(true);
+            // Block if loss reason fields are not filled
+            if (!lossFieldsComplete) return;
+
+            const lostPhase = phases?.find(p => p.id === phaseId);
+            await updateOpportunity(opportunity.id, {
+                fase_id: phaseId,
+                razon_perdida: localRazonPerdida,
+                comentarios_perdida: localComentariosPerdida,
+                estado_id: 3,
+                probability: lostPhase?.probability ?? 0
+            });
             return;
         }
 
@@ -357,7 +430,8 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
         if (normalizedName.includes('ganada')) {
             await updateOpportunity(opportunity.id, {
                 fase_id: phaseId,
-                estado_id: 2 // Explicitly set to Won status
+                estado_id: 2, // Explicitly set to Won status
+                probability: targetPhase?.probability ?? 100 // Propagate phase probability
             });
             return;
         }
@@ -365,23 +439,27 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
         // Default: just update phase, reset estado to Open if coming from a closed state
         await updateOpportunity(opportunity.id, {
             fase_id: phaseId,
-            estado_id: 1 // Reset to Open status when moving to any other phase
+            estado_id: 1, // Reset to Open status when moving to any other phase
+            probability: targetPhase?.probability ?? 0 // Propagate phase probability
         });
     };
 
+    // Legacy: kept for backward compat, no longer used
     const confirmLossReason = async (reasonId: number) => {
         if (pendingPhaseId) {
+            const lostPhase = phases?.find(p => p.id === pendingPhaseId);
             await updateOpportunity(opportunity.id, {
                 fase_id: pendingPhaseId,
                 razon_perdida_id: reasonId,
-                estado_id: 3 // Explicitly set to Lost status ID (usually 3)
+                estado_id: 3,
+                probability: lostPhase?.probability ?? 0
             });
             setIsLossReasonModalOpen(false);
             setPendingPhaseId(null);
         }
     };
 
-    if (!account) {
+    if (!effectiveAccount) {
         return (
             <div className="p-12 text-center bg-white rounded-2xl border border-slate-200">
                 <Loader2 className="w-6 h-6 text-blue-600 animate-spin mx-auto mb-4" />
@@ -402,7 +480,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
 
                 {!phases || phases.length === 0 ? (
                     <div className="text-center text-slate-400 text-sm py-4">
-                        No hay fases definidas para el canal {account.canal_id || 'seleccionado'}.
+                        No hay fases definidas para el canal {effectiveAccount.canal_id || 'seleccionado'}.
                     </div>
                 ) : (
                     <div className="overflow-x-auto pb-16">
@@ -427,6 +505,8 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                         <button
                                             key={phase.id}
                                             onClick={() => handlePhaseChange(phase.id)}
+                                            data-testid={`opportunity-phase-btn-${phase.id}`}
+                                            data-phase-id={phase.id}
                                             className="flex flex-col items-center group w-24 focus:outline-none relative z-10"
                                         >
                                             <div className={cn(
@@ -478,24 +558,34 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                         const isWon = phase.nombre.toLowerCase().includes('ganada');
                                         const isActive = opportunity.fase_id === phase.id;
 
+                                        const isLostPhase = phase.nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes('perdida');
+                                        const isBlocked = isLostPhase && !lossFieldsComplete;
+
                                         return (
                                             <button
                                                 key={phase.id}
-                                                onClick={() => handlePhaseChange(phase.id)}
+                                                onClick={() => !isBlocked && handlePhaseChange(phase.id)}
+                                                data-testid={`opportunity-phase-btn-${phase.id}`}
+                                                data-phase-id={phase.id}
+                                                title={isBlocked ? "Completa los campos de pérdida en la tarjeta Información de Negocio" : undefined}
+                                                disabled={isBlocked}
                                                 // Align buttons with the ends of the SVG paths (Y=16 and Y=96)
                                                 style={{ top: isWon ? '16px' : '96px', transform: 'translateY(-50%)' }}
                                                 className={cn(
                                                     "absolute left-[88px] flex items-center gap-2 px-3 py-2 rounded-full text-[10px] font-bold uppercase tracking-wider border transition-all z-10 whitespace-nowrap",
-                                                    isActive
-                                                        ? (isWon ? "bg-green-100 text-green-700 border-green-200 shadow-sm ring-2 ring-green-500/20" : "bg-red-100 text-red-700 border-red-200 shadow-sm ring-2 ring-red-500/20")
-                                                        : "bg-white border-slate-200 text-slate-400 hover:border-slate-300 hover:bg-slate-50"
+                                                    isBlocked
+                                                        ? "bg-slate-50 border-slate-200 text-slate-300 cursor-not-allowed opacity-60"
+                                                        : isActive
+                                                            ? (isWon ? "bg-green-100 text-green-700 border-green-200 shadow-sm ring-2 ring-green-500/20" : "bg-red-100 text-red-700 border-red-200 shadow-sm ring-2 ring-red-500/20")
+                                                            : "bg-white border-slate-200 text-slate-400 hover:border-slate-300 hover:bg-slate-50"
                                                 )}
                                             >
                                                 <div className={cn(
                                                     "w-2 h-2 rounded-full",
-                                                    isWon ? "bg-green-500" : "bg-red-500"
+                                                    isBlocked ? "bg-slate-300" : isWon ? "bg-green-500" : "bg-red-500"
                                                 )} />
                                                 {phase.nombre}
+                                                {isBlocked && <span className="ml-0.5 text-[8px] opacity-70">🔒</span>}
                                             </button>
                                         );
                                     })}
@@ -525,8 +615,11 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                     </div>
 
                     <div className="space-y-4 flex-1">
-                        {/* Probability Donut - Added */}
-                        <div className="flex items-center justify-between bg-slate-50 p-4 rounded-xl border border-slate-100 mb-4">
+                        {/* Probability Donut - Always derived from current phase */}
+                        <div
+                            className="flex items-center justify-between bg-slate-50 p-4 rounded-xl border border-slate-100 mb-4"
+                            data-testid="opportunity-probability-section"
+                        >
                             <div>
                                 <h4 className="font-bold text-slate-700 text-sm">Probabilidad de Éxito</h4>
                                 <p className="text-xs text-slate-400 mt-1">Calculado según fase actual</p>
@@ -535,7 +628,9 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                 percentage={
                                     opportunity.estado_id === 2 ? 100 : // Cerrada Ganada = 100%
                                         opportunity.estado_id === 3 ? 0 :   // Cerrada Perdida = 0%
-                                            opportunity?.probability || (opportunity?.fase_id ? phases?.find(p => p.id === opportunity.fase_id)?.probability : 0) || 0
+                                            // Always re-derive from current phase for accuracy;
+                                            // fall back to stored probability only if phase not found locally
+                                            (opportunity?.fase_id ? (phases?.find(p => p.id === opportunity.fase_id)?.probability ?? opportunity?.probability) : opportunity?.probability) ?? 0
                                 }
                                 size={64}
                                 strokeWidth={6}
@@ -633,11 +728,11 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                     className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-bold text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none disabled:opacity-50"
                                     value={localSegmentId}
                                     onChange={(e) => handleSegmentChange(e.target.value)}
-                                    disabled={!account.subclasificacion_id || segments.length === 0}
+                                    disabled={!effectiveAccount.subclasificacion_id || segments.length === 0}
                                 >
                                     <option value="">Seleccione un segmento...</option>
                                     {segments
-                                        .filter(seg => account.subclasificacion_id && seg.subclasificacion_id === Number(account.subclasificacion_id))
+                                        .filter(seg => effectiveAccount.subclasificacion_id && seg.subclasificacion_id === Number(effectiveAccount.subclasificacion_id))
                                         .map(seg => (
                                             <option key={seg.id} value={String(seg.id)}>
                                                 {seg.nombre}
@@ -650,9 +745,9 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                         <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
                                     </div>
                                 )}
-                                {!account.subclasificacion_id && (
+                                {!effectiveAccount.subclasificacion_id && (
                                     <p className="text-[10px] text-orange-500 mt-1">
-                                        La cuenta no tiene subclasificación. Edite la cuenta para habilitar segmentos.
+                                        La cuenta no tiene subclasificación u origen offline.
                                     </p>
                                 )}
                             </div>
@@ -675,6 +770,171 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                 )}
                             </div>
                         </div>
+
+                        {/* Orígenes Section */}
+                        <div className="pt-4 border-t border-slate-100 space-y-4">
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Origen de la Oportunidad</label>
+                                <div className="relative group">
+                                    <input
+                                        type="text"
+                                        value={localOrigen}
+                                        onChange={(e) => setLocalOrigen(e.target.value)}
+                                        onBlur={async () => {
+                                            if (localOrigen !== opportunity.origen_oportunidad) {
+                                                setIsSavingOrigen(true);
+                                                await updateOpportunity(opportunity.id, { origen_oportunidad: localOrigen });
+                                                setIsSavingOrigen(false);
+                                            }
+                                        }}
+                                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none placeholder:text-slate-400"
+                                        placeholder="Ej: Llamada, Evento..."
+                                    />
+                                    {isSavingOrigen && (
+                                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                            <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">URL Origen</label>
+                                <div className="relative group">
+                                    <input
+                                        type="text"
+                                        value={localUrlOrigen}
+                                        onChange={(e) => setLocalUrlOrigen(e.target.value)}
+                                        onBlur={async () => {
+                                            if (localUrlOrigen !== opportunity.url_origen) {
+                                                setIsSavingUrl(true);
+                                                await updateOpportunity(opportunity.id, { url_origen: localUrlOrigen });
+                                                setIsSavingUrl(false);
+                                            }
+                                        }}
+                                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none placeholder:text-slate-400"
+                                        placeholder="https://..."
+                                    />
+                                    {isSavingUrl && (
+                                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                            <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Fuente de Conversión</label>
+                                <div className="relative group">
+                                    <input
+                                        type="text"
+                                        value={localFuente}
+                                        onChange={(e) => setLocalFuente(e.target.value)}
+                                        onBlur={async () => {
+                                            if (localFuente !== opportunity.fuente_conversion) {
+                                                setIsSavingFuente(true);
+                                                await updateOpportunity(opportunity.id, { fuente_conversion: localFuente });
+                                                setIsSavingFuente(false);
+                                            }
+                                        }}
+                                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none placeholder:text-slate-400"
+                                        placeholder="Ej: Google Ads, Referido..."
+                                    />
+                                    {isSavingFuente && (
+                                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                            <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Loss Reason Section — Required for Cerrada Perdida */}
+                        <div className="pt-4 border-t border-red-100 space-y-3" data-testid="loss-reason-section">
+                            <div className="flex items-center gap-2 mb-1">
+                                <div className="w-2 h-2 rounded-full bg-red-400" />
+                                <span className="text-[10px] font-bold text-red-500 uppercase tracking-wider">Pérdida</span>
+                                <span className="text-[10px] text-slate-400">(obligatorio para cerrar como perdida)</span>
+                            </div>
+
+                            {/* Razón de pérdida */}
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                                    Razón de Pérdida
+                                    {!localRazonPerdida && <span className="text-red-400 ml-1">*</span>}
+                                </label>
+                                <div className="relative group">
+                                    <select
+                                        data-testid="razon-perdida-select"
+                                        value={localRazonPerdida}
+                                        onChange={async (e) => {
+                                            setLocalRazonPerdida(e.target.value);
+                                            setIsSavingLossReason(true);
+                                            try {
+                                                await updateOpportunity(opportunity.id, { razon_perdida: e.target.value || null });
+                                            } finally {
+                                                setIsSavingLossReason(false);
+                                            }
+                                        }}
+                                        className={cn(
+                                            "w-full px-3 py-1.5 bg-slate-50 border rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-red-400 focus:bg-white transition-all outline-none",
+                                            localRazonPerdida ? "border-slate-200" : "border-red-200 bg-red-50"
+                                        )}
+                                    >
+                                        <option value="">Seleccione una razón...</option>
+                                        {LOSS_REASONS.map(r => (
+                                            <option key={r} value={r}>{r}</option>
+                                        ))}
+                                    </select>
+                                    {isSavingLossReason && (
+                                        <div className="absolute right-8 top-1/2 -translate-y-1/2">
+                                            <Loader2 className="w-3 h-3 text-red-400 animate-spin" />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Comentarios de pérdida */}
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                                    Comentarios de Pérdida
+                                    {!localComentariosPerdida && <span className="text-red-400 ml-1">*</span>}
+                                </label>
+                                <div className="relative group">
+                                    <textarea
+                                        data-testid="comentarios-perdida-textarea"
+                                        value={localComentariosPerdida}
+                                        onChange={(e) => setLocalComentariosPerdida(e.target.value)}
+                                        onBlur={async () => {
+                                            if (localComentariosPerdida !== (opportunity.comentarios_perdida || "")) {
+                                                setIsSavingComentarios(true);
+                                                try {
+                                                    await updateOpportunity(opportunity.id, { comentarios_perdida: localComentariosPerdida || null });
+                                                } finally {
+                                                    setIsSavingComentarios(false);
+                                                }
+                                            }
+                                        }}
+                                        rows={3}
+                                        placeholder="Describe el motivo de la pérdida..."
+                                        className={cn(
+                                            "w-full px-3 py-1.5 bg-slate-50 border rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-red-400 focus:bg-white transition-all outline-none placeholder:text-slate-400 resize-none",
+                                            localComentariosPerdida ? "border-slate-200" : "border-red-200 bg-red-50"
+                                        )}
+                                    />
+                                    {isSavingComentarios && (
+                                        <div className="absolute right-3 top-3">
+                                            <Loader2 className="w-3 h-3 text-red-400 animate-spin" />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {!lossFieldsComplete && (
+                                <p className="text-[10px] text-red-400 flex items-center gap-1">
+                                    <span>🔒</span>
+                                    Completa estos campos para poder marcar la oportunidad como <strong>Cerrada Perdida</strong>.
+                                </p>
+                            )}
+                        </div>
                     </div>
                 </div>
 
@@ -694,29 +954,29 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                         <div className="space-y-3">
                             <div>
                                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Nombre / Razón Social</label>
-                                <p className="text-slate-900 font-medium">{account.nombre}</p>
+                                <p className="text-slate-900 font-medium">{effectiveAccount.nombre}</p>
                             </div>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">NIT</label>
-                                    <p className="text-slate-700">{account.nit || 'No registrado'}</p>
+                                    <p className="text-slate-700">{effectiveAccount.nit || 'No registrado'}</p>
                                 </div>
                                 <div>
                                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Teléfono</label>
-                                    <p className="text-slate-700">{account.telefono || 'No registrado'}</p>
+                                    <p className="text-slate-700">{effectiveAccount.telefono || 'No registrado'}</p>
                                 </div>
                             </div>
-                            {account.direccion && (
+                            {effectiveAccount.direccion && (
                                 <div>
                                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Dirección</label>
-                                    <p className="text-slate-700">{account.direccion} {account.ciudad && `• ${account.ciudad}`}</p>
+                                    <p className="text-slate-700">{effectiveAccount.direccion} {effectiveAccount.ciudad && `• ${effectiveAccount.ciudad}`}</p>
                                 </div>
                             )}
                         </div>
                     </div>
 
                     <Link
-                        href={`/cuentas?id=${account.id}`}
+                        href={`/cuentas?id=${effectiveAccount.id}`}
                         className="mt-6 w-full py-2 bg-slate-50 hover:bg-blue-50 text-blue-600 text-sm font-bold rounded-xl border border-slate-100 hover:border-blue-200 text-center transition-all flex items-center justify-center gap-2"
                     >
                         Ver detalles en Cuentas <ChevronRight className="w-4 h-4" />
@@ -1075,7 +1335,7 @@ function QuotesTab({ opportunityId, currency }: { opportunityId: string, currenc
 }
 
 function ActivitiesTab({ opportunityId }: { opportunityId: string }) {
-    const { activities, createActivity, updateActivity, toggleComplete } = useActivities(opportunityId);
+    const { activities, createActivity, updateActivity, toggleComplete } = useActivities({ opportunity_id: opportunityId });
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedActivity, setSelectedActivity] = useState<LocalActivity | null>(null);
     const { opportunities } = useOpportunities();

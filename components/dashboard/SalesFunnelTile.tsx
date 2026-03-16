@@ -51,7 +51,7 @@ export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
                         <AlertCircle className="w-6 h-6" />
                     </div>
                     <p className="text-sm font-semibold">Error al cargar datos</p>
-                    <p className="text-xs text-red-400 max-w-[240px] text-center">{error}</p>
+                    <p className="text-xs text-red-400 max-w-[240px] text-center">{error.message}</p>
                     <button
                         onClick={() => mutate()}
                         className="text-xs font-bold text-slate-600 hover:text-slate-800 underline mt-2"
@@ -87,21 +87,21 @@ export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
     const totalPipeline = data.reduce((acc, curr) => acc + Number(curr.total_amount), 0);
     const totalCount = data.reduce((acc, curr) => acc + Number(curr.count), 0);
 
-    // Grouping by Order to merge stages (like Proposal and Negotiation if they share order)
+    // Grouping by normalized phase name (case-insensitive) to merge equivalent stages
+    // across channels. This avoids mixing non-equivalent phases that shared the same 'orden'.
     const groupedData = data.reduce((acc, curr) => {
-        const existing = acc.find(item => item.orden === curr.orden);
+        const normalizedName = curr.fase_nombre.trim().toLowerCase();
+        const existing = acc.find(item => item.fase_nombre.trim().toLowerCase() === normalizedName);
         if (existing) {
             existing.total_amount = Number(existing.total_amount) + Number(curr.total_amount);
             existing.count = Number(existing.count) + Number(curr.count);
-            if (!existing.fase_nombre.includes(curr.fase_nombre)) {
-                existing.fase_nombre += ` / ${curr.fase_nombre}`;
-            }
             return acc;
         }
         return [...acc, { ...curr, total_amount: Number(curr.total_amount), count: Number(curr.count) }];
     }, [] as typeof data).sort((a, b) => a.orden - b.orden);
 
     const maxAmount = Math.max(...groupedData.map(d => d.total_amount));
+    const logMax = Math.log10(maxAmount + 1);
 
     // ECharts Funnel Option
     const option = {
@@ -115,14 +115,15 @@ export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
             padding: 12,
             textStyle: { color: '#fff', fontSize: 12, fontWeight: 'bold', fontFamily: 'var(--font-geist-sans), sans-serif' },
             formatter: (params: any) => {
-                const { name, value, data } = params;
-                const actualValue = data.actualValue;
+                const { name, data } = params;
+                if (!data) return name;
+                const actualValue = data.actualValue || 0;
                 const pct = totalPipeline > 0 ? ((actualValue / totalPipeline) * 100).toFixed(1) : "0";
                 return `
                     <div style="font-family: var(--font-geist-sans), sans-serif;">
                         <div style="text-transform: uppercase; font-size: 10px; letter-spacing: 0.1em; opacity: 0.7; margin-bottom: 4px;">${name}</div>
                         <div style="font-size: 14px;">${formatCurrency(actualValue)}</div>
-                        <div style="font-size: 10px; margin-top: 4px; opacity: 0.8;">${data.count} Opportunities • ${pct}% Share</div>
+                        <div style="font-size: 10px; margin-top: 4px; opacity: 0.8;">${data.count || 0} Opportunities • ${pct}% Share</div>
                     </div>
                 `;
             }
@@ -132,12 +133,12 @@ export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
                 name: 'Funnel',
                 type: 'funnel',
                 left: '10%',
-                top: 30,
-                bottom: 30,
+                top: 40,
+                bottom: 20,
                 width: '70%',
                 min: 0,
-                max: maxAmount || 1, // Avoid division by zero if no data
-                minSize: '20%', // Fix for "needle" shape on small top values
+                max: logMax || 1,
+                minSize: '2%', // Significant reduction to allow visibility of smaller stages without clamping
                 maxSize: '100%',
                 sort: 'none', // Preservation of stage order
                 gap: 4,
@@ -145,7 +146,8 @@ export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
                     show: true,
                     position: 'right',
                     formatter: (params: any) => {
-                        return `{name|${params.name}}\n{val|${formatCurrency(params.data.actualValue)}}`;
+                        if (!params.data) return params.name;
+                        return `{name|${params.name}}\n{val|${formatCurrency(params.data.actualValue || 0)}}`;
                     },
                     rich: {
                         name: {
@@ -187,7 +189,9 @@ export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
                     }
                 },
                 data: groupedData.map(item => ({
-                    value: item.total_amount, // Use real amount for exact proportionality
+                    // Using log scale for the 'value' which determines the width
+                    // this allows stages with $1M to still be visible alongside stages with $100B
+                    value: Math.log10(item.total_amount + 1),
                     actualValue: item.total_amount,
                     name: item.fase_nombre,
                     itemStyle: {
@@ -250,6 +254,7 @@ export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
                     option={option}
                     style={{ height: '100%', width: '100%' }}
                     opts={{ renderer: 'svg' }}
+                    notMerge={true}
                 />
             </div>
         </div>

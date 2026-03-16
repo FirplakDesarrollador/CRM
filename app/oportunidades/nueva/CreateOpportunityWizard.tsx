@@ -26,9 +26,14 @@ const schema = z.object({
     estado_id: z.coerce.number().default(1), // 1 = Abierta
     fase_id: z.coerce.number().min(1, "Fase requerida").default(1),
     segmento_id: z.coerce.number().nullable().optional(),
+    pais_id: z.coerce.number().nullable().optional(),
     departamento_id: z.coerce.number().nullable().optional(),
     ciudad_id: z.coerce.number().nullable().optional(),
     fecha_cierre_estimada: z.string().optional().nullable(),
+    origen_oportunidad: z.string().optional().nullable(),
+    url_origen: z.string().optional().nullable(),
+    fuente_conversion: z.string().optional().nullable(),
+    probability: z.coerce.number().min(0).max(100).default(0).optional().nullable(),
     items: z.array(z.object({
         product_id: z.string(),
         cantidad: z.number().min(1),
@@ -49,10 +54,12 @@ export default function CreateOpportunityWizard() {
     const [showAccountDropdown, setShowAccountDropdown] = useState(false);
     const [selectedAccount, setSelectedAccount] = useState<any>(null);
     const [segments, setSegments] = useState<any[]>([]);
+    const [fallbackCountries, setFallbackCountries] = useState<any[]>([]);
     const [fallbackDepartments, setFallbackDepartments] = useState<any[]>([]);
     const [fallbackCities, setFallbackCities] = useState<any[]>([]);
 
     // Catalogs for cities
+    const countriesList = useLiveQuery(() => db.countries.toArray()) || [];
     const departmentsList = useLiveQuery(() => db.departments.toArray()) || [];
     const citiesList = useLiveQuery(() => db.cities.toArray()) || [];
 
@@ -71,6 +78,10 @@ export default function CreateOpportunityWizard() {
 
         const fetchCatalogs = async () => {
             const { supabase } = await import("@/lib/supabase");
+            if (countriesList.length === 0) {
+                const { data } = await supabase.from('CRM_Paises').select('*');
+                if (data) setFallbackCountries(data);
+            }
             if (departmentsList.length === 0) {
                 const { data } = await supabase.from('CRM_Departamentos').select('*');
                 if (data) setFallbackDepartments(data);
@@ -81,8 +92,9 @@ export default function CreateOpportunityWizard() {
             }
         };
         fetchCatalogs();
-    }, [departmentsList.length, citiesList.length]);
+    }, [countriesList.length, departmentsList.length, citiesList.length]);
 
+    const displayCountries = countriesList.length > 0 ? countriesList : fallbackCountries;
     const displayDepartments = departmentsList.length > 0 ? departmentsList : fallbackDepartments;
     const displayCities = citiesList.length > 0 ? citiesList : fallbackCities;
 
@@ -150,9 +162,14 @@ export default function CreateOpportunityWizard() {
             estado_id: 1,
             fase_id: 1,
             amount: 0,
+            pais_id: null,
             departamento_id: null,
             ciudad_id: null,
             fecha_cierre_estimada: '',
+            origen_oportunidad: '',
+            url_origen: '',
+            fuente_conversion: '',
+            probability: 0,
             items: []
         }
     });
@@ -196,6 +213,9 @@ export default function CreateOpportunityWizard() {
                 setSelectedAccount(acc);
                 setAccountSearchTerm(acc.nombre);
                 // Inherit location from account
+                if (acc.pais_id) {
+                    setValue("pais_id", Number(acc.pais_id));
+                }
                 if (acc.departamento_id) {
                     setValue("departamento_id", Number(acc.departamento_id));
                 }
@@ -212,10 +232,12 @@ export default function CreateOpportunityWizard() {
     const { products: searchResults, isLoading: isSearching } = useProductSearch(searchTerm);
 
     // Filtrar cuentas para el buscador
-    const filteredAccounts = (accounts || []).filter(acc =>
-        acc.nombre.toLowerCase().includes(accountSearchTerm.toLowerCase()) ||
-        (acc.nit || '').includes(accountSearchTerm)
-    );
+    const filteredAccounts = (accounts || []).filter(acc => {
+        if (!acc) return false;
+        const nombreMatch = String(acc.nombre || '').toLowerCase().includes(String(accountSearchTerm || '').toLowerCase());
+        const nitMatch = String(acc.nit || '').includes(String(accountSearchTerm || ''));
+        return nombreMatch || nitMatch;
+    });
 
     const handleSelectAccount = (acc: any) => {
         setValue("account_id", acc.id);
@@ -224,6 +246,9 @@ export default function CreateOpportunityWizard() {
         setShowAccountDropdown(false);
 
         // Inherit location from account
+        if (acc.pais_id) {
+            setValue("pais_id", Number(acc.pais_id));
+        }
         if (acc.departamento_id) {
             setValue("departamento_id", Number(acc.departamento_id));
         }
@@ -354,9 +379,11 @@ export default function CreateOpportunityWizard() {
             // Defensive conversion for numeric IDs
             const sanitizedData = {
                 ...data,
+                pais_id: data.pais_id ? Number(data.pais_id) : null,
                 departamento_id: data.departamento_id ? Number(data.departamento_id) : null,
                 ciudad_id: data.ciudad_id ? Number(data.ciudad_id) : null,
                 segmento_id: data.segmento_id ? Number(data.segmento_id) : null,
+                probability: data.probability ? Number(data.probability) : 0,
                 collaborators: collaborators
             };
 
@@ -382,7 +409,7 @@ export default function CreateOpportunityWizard() {
         if (step === 0) {
             isValid = await trigger('account_id');
         } else if (step === 1) {
-            isValid = await trigger(['nombre', 'currency_id', 'amount', 'fase_id']);
+            isValid = await trigger(['nombre', 'currency_id', 'amount', 'fase_id', 'probability']);
         } else {
             // Steps 2 and 3 have no required fields
             isValid = true;
@@ -566,21 +593,41 @@ export default function CreateOpportunityWizard() {
                         </div>
 
                         {/* CITY SELECTION */}
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                                <label className="text-sm font-medium">País</label>
+                                <select
+                                    {...register("pais_id")}
+                                    className="w-full p-2 border rounded-lg"
+                                    onChange={(e) => {
+                                        register("pais_id").onChange(e);
+                                        setValue("departamento_id", null);
+                                        setValue("ciudad_id", null);
+                                    }}
+                                >
+                                    <option value="">Seleccione País...</option>
+                                    {displayCountries.map(p => (
+                                        <option key={p.id} value={p.id}>{p.nombre}</option>
+                                    ))}
+                                </select>
+                            </div>
                             <div>
                                 <label className="text-sm font-medium">Departamento</label>
                                 <select
                                     {...register("departamento_id")}
-                                    className="w-full p-2 border rounded-lg"
+                                    className="w-full p-2 border rounded-lg disabled:bg-slate-50"
+                                    disabled={!watch("pais_id")}
                                     onChange={(e) => {
                                         register("departamento_id").onChange(e);
                                         setValue("ciudad_id", null);
                                     }}
                                 >
                                     <option value="">Seleccione Departamento...</option>
-                                    {displayDepartments.map(dep => (
-                                        <option key={dep.id} value={dep.id}>{dep.nombre}</option>
-                                    ))}
+                                    {displayDepartments
+                                        .filter(dep => String(dep.pais_id) === String(watch("pais_id")) || (!dep.pais_id && String(watch("pais_id")) === "1"))
+                                        .map(dep => (
+                                            <option key={dep.id} value={dep.id}>{dep.nombre}</option>
+                                        ))}
                                 </select>
                             </div>
                             <div>
@@ -610,6 +657,42 @@ export default function CreateOpportunityWizard() {
                             <div>
                                 <label className="text-sm font-medium">Fecha Cierre Estimada</label>
                                 <input type="date" {...register("fecha_cierre_estimada")} className="w-full p-2 border rounded-lg" />
+                            </div>
+                        </div>
+
+                        {/* Fifth Row - Orígenes */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4 border-t border-slate-100">
+                            <div className="space-y-2">
+                                <label htmlFor="origen_oportunidad" className="text-sm font-medium">Origen de la Oportunidad</label>
+                                <input
+                                    id="origen_oportunidad"
+                                    placeholder="Ej: Llamada, Evento..."
+                                    {...register("origen_oportunidad")}
+                                    className="w-full p-2 border rounded-lg hover:border-blue-300 focus:border-blue-500 transition-colors"
+                                />
+                                {errors.origen_oportunidad && <p className="text-sm text-red-500 mt-1">{errors.origen_oportunidad.message as string}</p>}
+                            </div>
+
+                            <div className="space-y-2">
+                                <label htmlFor="url_origen" className="text-sm font-medium">URL Origen</label>
+                                <input
+                                    id="url_origen"
+                                    placeholder="https://..."
+                                    {...register("url_origen")}
+                                    className="w-full p-2 border rounded-lg hover:border-blue-300 focus:border-blue-500 transition-colors"
+                                />
+                                {errors.url_origen && <p className="text-sm text-red-500 mt-1">{errors.url_origen.message as string}</p>}
+                            </div>
+
+                            <div className="space-y-2">
+                                <label htmlFor="fuente_conversion" className="text-sm font-medium">Fuente de Conversión</label>
+                                <input
+                                    id="fuente_conversion"
+                                    placeholder="Ej: Google Ads, Referido..."
+                                    {...register("fuente_conversion")}
+                                    className="w-full p-2 border rounded-lg hover:border-blue-300 focus:border-blue-500 transition-colors"
+                                />
+                                {errors.fuente_conversion && <p className="text-sm text-red-500 mt-1">{errors.fuente_conversion.message as string}</p>}
                             </div>
                         </div>
                     </div>

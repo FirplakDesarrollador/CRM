@@ -25,6 +25,7 @@ import {
     ChevronRight,
     UserCircle,
     DollarSign,
+    BarChart3,
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -35,6 +36,7 @@ const NAV_ITEMS = [
     { label: "Actividades", href: "/actividades", icon: Calendar },
     { label: "Pedidos", href: "/pedidos", icon: Truck },
     { label: "Comisiones", href: "/comisiones", icon: DollarSign },
+    { label: "Indicadores", href: "/indicadores", icon: BarChart3 },
     { label: "Archivos", href: "/archivos", icon: Files },
     { label: "Usuarios", href: "/usuarios", icon: UserCircle, requiredRole: 'ADMIN' },
     { label: "Configuración", href: "/configuracion", icon: Settings },
@@ -101,6 +103,7 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
 
     return (
         <aside
+            data-testid="sidebar"
             className={cn(
                 "hidden md:flex flex-col bg-linear-to-b from-white to-slate-50/50 text-slate-900 h-screen border-r border-slate-200/60 shadow-lg transition-all duration-300 z-40 shrink-0 group",
                 isCollapsed ? "w-20" : "w-72"
@@ -127,13 +130,14 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
                 {!isCollapsed && (
                     <div className="w-full mt-3 pt-3 border-t border-slate-200/60">
                         <p className="text-xs text-slate-400 text-center font-semibold uppercase tracking-wider">
-                            Versión 1.0.7.7
+                            Versión 1.0.8.5
                         </p>
                     </div>
                 )}
 
                 {/* Collapse/Expand Button - Subtle Design */}
                 <button
+                    data-testid="sidebar-toggle"
                     onClick={toggleSidebar}
                     className={cn(
                         "absolute -right-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-white border-2 border-slate-200 text-slate-400 hover:border-[#254153] hover:text-[#254153] hover:bg-slate-50 transition-all shadow-md flex items-center justify-center"
@@ -152,6 +156,7 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
                         <Link
                             key={item.href}
                             href={item.href}
+                            data-testid={`nav-${item.href.replace('/', '') || 'home'}`}
                             title={isCollapsed ? item.label : undefined}
                             className={cn(
                                 "flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-sm font-semibold group/item relative",
@@ -188,6 +193,7 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
             {/* Logout Section */}
             <div className="p-4 border-t border-slate-200/60 bg-white">
                 <button
+                    data-testid="nav-logout"
                     onClick={() => setShowLogoutConfirm(true)}
                     className={cn(
                         "flex items-center gap-3 px-4 py-3 text-sm font-semibold text-slate-600 hover:text-red-600 hover:bg-red-50 w-full transition-all rounded-xl group/logout",

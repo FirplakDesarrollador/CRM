@@ -19,7 +19,12 @@ export function ProbabilityDonut({
     const strokeDashoffset = circumference - (percentage / 100) * circumference;
 
     return (
-        <div className="relative flex items-center justify-center" style={{ width: size, height: size }}>
+        <div
+            className="relative flex items-center justify-center"
+            style={{ width: size, height: size }}
+            data-testid="probability-donut"
+            data-percentage={percentage}
+        >
             <svg
                 height={size}
                 width={size}
@@ -45,7 +50,7 @@ export function ProbabilityDonut({
                     cy={radius}
                 />
             </svg>
-            <div className="absolute text-sm font-bold text-slate-700">
+            <div className="absolute text-sm font-bold text-slate-700" data-testid="probability-donut-text">
                 {percentage}%
             </div>
         </div>

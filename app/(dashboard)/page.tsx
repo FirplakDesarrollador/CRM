@@ -18,23 +18,23 @@ import { RecentAccounts } from "@/components/dashboard/RecentAccounts";
 import { SalesFunnelTile } from "@/components/dashboard/SalesFunnelTile";
 import { DashboardGrid, DEFAULT_TILES, saveDashboardOrder } from "@/components/dashboard/DashboardGrid";
 import { DashboardFilters, DashboardFilterState } from "@/components/dashboard/DashboardFilters";
-import { PerformanceChartTile } from "@/components/dashboard/PerformanceChartTile";
-import { ClientDistributionTile } from "@/components/dashboard/ClientDistributionTile";
+
 
 export default function Home() {
-  const { opportunities } = useOpportunities();
-  const { activities } = useActivities();
-  const { accounts } = useAccounts();
-  const router = useRouter();
-  const { user, role, isLoading: userLoading } = useCurrentUser();
-
-  // Dashboard Filters State
+  // Dashboard Filters State (Moved up for use in hooks)
   const [filters, setFilters] = useState<DashboardFilterState>({
     canal_id: null,
     advisor_id: null,
     subclasificacion_id: null,
-    nivel_premium: null
+    nivel_premium: null,
+    search_query: null
   });
+
+  const { opportunities } = useOpportunities({ advisor_id: filters.advisor_id });
+  const { activities } = useActivities({ advisor_id: filters.advisor_id });
+  const { accounts } = useAccounts({ advisor_id: filters.advisor_id });
+  const router = useRouter();
+  const { user, role, isLoading: userLoading } = useCurrentUser();
 
   // Filtered Data Sets
   const filteredData = useMemo(() => {
@@ -50,6 +50,13 @@ export default function Home() {
       if (filters.subclasificacion_id && acc?.subclasificacion_id !== filters.subclasificacion_id) return false;
       if (filters.nivel_premium && acc?.nivel_premium !== filters.nivel_premium) return false;
 
+      if (filters.search_query) {
+        const query = filters.search_query.toLowerCase();
+        const oppNameMatch = o.nombre?.toLowerCase().includes(query) || false;
+        const accNameMatch = acc?.nombre?.toLowerCase().includes(query) || false;
+        if (!oppNameMatch && !accNameMatch) return false;
+      }
+
       return true;
     });
 
@@ -57,8 +64,13 @@ export default function Home() {
       if (filters.canal_id && a.canal_id !== filters.canal_id) return false;
       if (filters.subclasificacion_id && a.subclasificacion_id !== filters.subclasificacion_id) return false;
       if (filters.nivel_premium && a.nivel_premium !== filters.nivel_premium) return false;
-      // Note: advisor filter on accounts usually means who created it or who owns it
-      if (filters.advisor_id && a.created_by !== filters.advisor_id) return false;
+      if (filters.advisor_id && a.owner_user_id !== filters.advisor_id) return false;
+
+      if (filters.search_query) {
+        const query = filters.search_query.toLowerCase();
+        if (!a.nombre?.toLowerCase().includes(query)) return false;
+      }
+
       return true;
     });
 
@@ -172,8 +184,7 @@ export default function Home() {
   // Build tile map
   const tiles: Record<string, React.ReactNode> = {
     "sales-funnel": <SalesFunnelTile filters={filters} />,
-    "performance-chart": <PerformanceChartTile />,
-    "client-distribution": <ClientDistributionTile />,
+
     "opportunity-card": (
       <OpportunitySummaryCard
         opportunity={importantOpportunity}

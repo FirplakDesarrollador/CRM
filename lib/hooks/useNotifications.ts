@@ -1,5 +1,7 @@
 import { useMemo, useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/db';
+import { useLiveQuery } from 'dexie-react-hooks';
 import { Notification as PersistedNotification } from '@/lib/types/notifications';
 import { useCurrentUser } from './useCurrentUser';
 
@@ -24,6 +26,9 @@ export interface NotificationItem {
 export function useNotifications() {
     const { user } = useCurrentUser();
     const [persistedNotifications, setPersistedNotifications] = useState<PersistedNotification[]>([]);
+
+    // Fetch activities from local DB to check completion status
+    const activities = useLiveQuery(() => db.activities.toArray());
 
     // Fetch & Subscribe to Persisted Notifications
     useEffect(() => {
@@ -70,6 +75,7 @@ export function useNotifications() {
             let link = '#';
             if (n.entity_type === 'ACCOUNT') link = `/cuentas?id=${n.entity_id}`;
             if (n.entity_type === 'OPPORTUNITY') link = `/oportunidades/${n.entity_id}`;
+            if (n.entity_type === 'ACTIVITY') link = `/actividades?id=${n.entity_id}`;
 
             items.push({
                 id: n.id,
@@ -83,16 +89,25 @@ export function useNotifications() {
             });
         });
 
-        // Sort: unread first, then by date (newest first)
-        return items.sort((a, b) => {
-            if (a.isRead === false && b.isRead !== false) return -1;
-            if (a.isRead !== false && b.isRead === false) return 1;
+        // Filter out activity notifications if the activity is already completed
+        return items
+            .filter(n => {
+                if (n.type === 'ACTIVITY_OVERDUE' && n.entityId) {
+                    const activity = activities?.find(a => a.id === n.entityId);
+                    if (activity?.is_completed) return false;
+                }
+                return true;
+            })
+            // Sort: unread first, then by date (newest first)
+            .sort((a, b) => {
+                if (a.isRead === false && b.isRead !== false) return -1;
+                if (a.isRead !== false && b.isRead === false) return 1;
 
-            const dateA = new Date(a.date || 0).getTime();
-            const dateB = new Date(b.date || 0).getTime();
-            return dateB - dateA;
-        });
-    }, [persistedNotifications]);
+                const dateA = new Date(a.date || 0).getTime();
+                const dateB = new Date(b.date || 0).getTime();
+                return dateB - dateA;
+            });
+    }, [persistedNotifications, activities]);
 
     const markAsRead = async (id: string) => {
         if (persistedNotifications.find(n => n.id === id)) {

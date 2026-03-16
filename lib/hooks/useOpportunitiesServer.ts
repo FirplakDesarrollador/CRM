@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { syncEngine } from '@/lib/sync';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
+import { db } from '@/lib/db';
 
 export type OpportunityServer = {
     id: string;
@@ -45,6 +46,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
     const [segmentFilter, setSegmentFilter] = useState<number | null>(null);
     const [phaseFilter, setPhaseFilter] = useState<number | null>(null);
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+    const [accountIdFilter, setAccountIdFilter] = useState<string | null>(null);
 
     // PERF FIX: Phase IDs only stored in refs (not state) to avoid triggering refetches
     const wonPhaseIdsRef = useRef<number[]>([]);
@@ -56,6 +58,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
     // User Context - uses useCurrentUser to respect viewMode
     const { role: userRole } = useCurrentUser();
     const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+    const [subordinateIds, setSubordinateIds] = useState<string[]>([]);
 
     // PERF FIX: Use ref for page to avoid including it in useCallback deps
     const pageRef = useRef(1);
@@ -66,16 +69,39 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
         });
     }, []);
 
+    // Fetch subordinates for team view if user is a coordinator
+    useEffect(() => {
+        if (userRole === 'COORDINADOR' && currentUserId) {
+            supabase
+                .from('CRM_Usuarios')
+                .select('id')
+                .contains('coordinadores', [currentUserId])
+                .then(({ data, error }) => {
+                    if (!error && data) {
+                        setSubordinateIds(data.map(u => u.id));
+                    }
+                });
+        }
+    }, [userRole, currentUserId]);
+
     // Load closed phase IDs on mount - store in refs AND state
     useEffect(() => {
         if (phasesLoadedRef.current) return;
         const loadClosedPhases = async () => {
-            const { data: phases } = await supabase
-                .from('CRM_FasesOportunidad')
-                .select('id, nombre')
-                .eq('is_active', true);
+            let phases: any[] = [];
 
-            if (phases) {
+            if (!navigator.onLine) {
+                const localPhases = await db.phases.toArray();
+                phases = localPhases;
+            } else {
+                const { data } = await supabase
+                    .from('CRM_FasesOportunidad')
+                    .select('id, nombre')
+                    .eq('is_active', true);
+                if (data) phases = data;
+            }
+
+            if (phases && phases.length > 0) {
                 const won: number[] = [];
                 const lost: number[] = [];
 
@@ -91,9 +117,10 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                 wonPhaseIdsRef.current = won;
                 lostPhaseIdsRef.current = lost;
                 closedPhaseIdsRef.current = [...won, ...lost];
-                phasesLoadedRef.current = true;
-                setPhasesReady(true); // Trigger re-render to enable fetching
             }
+            // Always set to true so offline doesn't block indefinitely
+            phasesLoadedRef.current = true;
+            setPhasesReady(true); // Trigger re-render to enable fetching
         };
         loadClosedPhases();
     }, []);
@@ -112,6 +139,102 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
             const currentPage = isLoadMore ? pageRef.current + 1 : 1;
             const from = (currentPage - 1) * pageSize;
             const to = from + pageSize - 1;
+
+            if (!navigator.onLine) {
+                console.log("[useOpportunitiesServer] Device is offline. Falling back to local Dexie database...");
+                let localOpps = await db.opportunities.toArray();
+                const allAccounts = await db.accounts.toArray();
+                const allPhases = await db.phases.toArray();
+
+                // Map helpers
+                const accMap = new Map(allAccounts.map(a => [a.id, a]));
+                const phaseMap = new Map(allPhases.map(p => [p.id, p]));
+
+                // Filtering
+                if (searchTerm) {
+                    const lowerSearch = searchTerm.toLowerCase();
+                    localOpps = localOpps.filter(o => o.nombre.toLowerCase().includes(lowerSearch));
+                }
+
+                if (channelFilter) {
+                    localOpps = localOpps.filter(o => accMap.get(o.account_id)?.canal_id === channelFilter);
+                }
+
+                if (subclassificationFilter) {
+                    localOpps = localOpps.filter(o => accMap.get(o.account_id)?.subclasificacion_id === subclassificationFilter);
+                }
+
+                if (segmentFilter) {
+                    localOpps = localOpps.filter(o => o.segmento_id === segmentFilter);
+                }
+
+                if (phaseFilter) {
+                    localOpps = localOpps.filter(o => o.fase_id === phaseFilter);
+                }
+
+                if (statusFilter === 'won' && wonPhaseIdsRef.current.length > 0) {
+                    localOpps = localOpps.filter(o => wonPhaseIdsRef.current.includes(o.fase_id as number));
+                } else if (statusFilter === 'lost' && lostPhaseIdsRef.current.length > 0) {
+                    localOpps = localOpps.filter(o => lostPhaseIdsRef.current.includes(o.fase_id as number));
+                } else if (statusFilter === 'open' && closedPhaseIdsRef.current.length > 0) {
+                    localOpps = localOpps.filter(o => !closedPhaseIdsRef.current.includes(o.fase_id as number));
+                }
+
+                if (accountIdFilter) {
+                    localOpps = localOpps.filter(o => o.account_id === accountIdFilter);
+                }
+
+                if (accountOwnerId) {
+                    localOpps = localOpps.filter(o => o.owner_user_id === accountOwnerId);
+                } else {
+                    if (userFilter === 'mine') {
+                        localOpps = localOpps.filter(o => o.owner_user_id === currentUserId);
+                    } else if (userFilter === 'team' && userRole !== 'ADMIN') {
+                        if (userRole === 'COORDINADOR') {
+                            localOpps = localOpps.filter(o => o.owner_user_id === currentUserId || (o.owner_user_id && subordinateIds.includes(o.owner_user_id)));
+                        } else {
+                            localOpps = localOpps.filter(o => o.owner_user_id === currentUserId);
+                        }
+                    }
+                }
+
+                // Sorting
+                localOpps.sort((a, b) => {
+                    const dateA = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+                    const dateB = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+                    return dateB - dateA;
+                });
+
+                const totalCount = localOpps.length;
+                const paginatedOpps = localOpps.slice(from, to + 1);
+
+                // Mapping to match server shape
+                const flattenedResults = paginatedOpps.map(item => {
+                    const acc = accMap.get(item.account_id);
+                    const ph = phaseMap.get(item.fase_id as number);
+                    return {
+                        ...item,
+                        account: acc ? { nombre: acc.nombre, canal_id: acc.canal_id } : null,
+                        fase_data: ph ? { nombre: ph.nombre } : null,
+                        estado_data: null // Mock offline
+                    };
+                });
+
+                if (isLoadMore) {
+                    setData(prev => {
+                        const existingIds = new Set(prev.map(i => i.id));
+                        const newItems = flattenedResults.filter(i => !existingIds.has(i.id));
+                        return [...prev, ...newItems] as any;
+                    });
+                    pageRef.current = currentPage;
+                } else {
+                    setData(flattenedResults as any);
+                    pageRef.current = 1;
+                }
+                setCount(totalCount);
+                setHasMore(from + paginatedOpps.length < totalCount);
+                return;
+            }
 
             // Dynamically build select to support filtering on account
             const useInnerJoin = channelFilter || subclassificationFilter;
@@ -171,13 +294,20 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                 query = query.not('fase_id', 'in', `(${closedPhaseIdsRef.current.join(',')})`);
             }
 
+            if (accountIdFilter) {
+                query = query.eq('account_id', accountIdFilter);
+            }
+
             if (accountOwnerId) {
                 query = query.eq('owner_user_id', accountOwnerId);
             } else {
                 if (userFilter === 'mine') {
                     query = query.eq('owner_user_id', currentUserId);
                 } else if (userFilter === 'team') {
-                    if (userRole !== 'ADMIN') {
+                    if (userRole === 'COORDINADOR') {
+                        const ids = [currentUserId, ...subordinateIds].filter(Boolean);
+                        query = query.in('owner_user_id', ids);
+                    } else if (userRole !== 'ADMIN') {
                         query = query.eq('owner_user_id', currentUserId);
                     }
                 }
@@ -215,7 +345,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
         } finally {
             setLoading(false);
         }
-    }, [currentUserId, pageSize, userFilter, searchTerm, accountOwnerId, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, phasesReady]);
+    }, [currentUserId, subordinateIds, pageSize, userFilter, searchTerm, accountIdFilter, accountOwnerId, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, phasesReady]);
 
     // Initial Fetch & Filter Fetch - no longer depends on phase IDs (read from refs)
     useEffect(() => {
@@ -244,6 +374,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
         setSegmentFilter,
         setPhaseFilter,
         setStatusFilter,
+        setAccountIdFilter,
 
         refresh: () => fetchOpportunities(false)
     };

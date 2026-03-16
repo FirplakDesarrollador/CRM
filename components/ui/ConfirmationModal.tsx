@@ -42,12 +42,13 @@ export function ConfirmationModal({
         <div className="fixed inset-0 z-100 flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-200">
             {/* Backdrop */}
             <div
+                data-testid="modal-backdrop"
                 className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
                 onClick={isLoading ? undefined : onClose}
             />
 
             {/* Modal Container */}
-            <div className="relative bg-white w-full max-w-md rounded-3xl shadow-2xl border border-slate-200 overflow-hidden animate-in zoom-in-95 duration-200">
+            <div data-testid="modal-container" className="relative bg-white w-full max-w-md rounded-3xl shadow-2xl border border-slate-200 overflow-hidden animate-in zoom-in-95 duration-200">
                 {/* Header/Banner decorative */}
                 <div className={cn(
                     "h-2 w-full",
@@ -94,6 +95,7 @@ export function ConfirmationModal({
                             {cancelLabel}
                         </button>
                         <button
+                            data-testid="modal-confirm"
                             onClick={onConfirm}
                             disabled={isLoading}
                             className={cn(

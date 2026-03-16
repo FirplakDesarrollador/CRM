@@ -3,10 +3,26 @@ import { db, LocalCuenta } from "@/lib/db";
 import { syncEngine } from "@/lib/sync";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 
-export function useAccounts() {
+export function useAccounts(filters?: { advisor_id?: string | null }) {
+    const { user, isVendedor } = useCurrentUser();
+    const userId = user?.id;
+
     // Live Query from Local DB (Dexie)
-    const accounts = useLiveQuery(() => db.accounts.toArray());
+    const accounts = useLiveQuery(async () => {
+        // Priority 1: Specific advisor filter from Dashboard
+        if (filters?.advisor_id) {
+            return db.accounts.where('owner_user_id').equals(filters.advisor_id).toArray();
+        }
+
+        // Priority 2: Vendedor role restriction
+        if (isVendedor && userId) {
+            return db.accounts.where('owner_user_id').equals(userId).toArray();
+        }
+
+        return db.accounts.toArray();
+    }, [isVendedor, userId, filters?.advisor_id]);
     const isLoading = false; // Background sync handles loading
 
     const createAccount = async (data: Partial<LocalCuenta>) => {
@@ -25,6 +41,7 @@ export function useAccounts() {
             ...sanitizedData,
             id,
             created_by: user?.id,
+            owner_user_id: user?.id,
             updated_at: new Date().toISOString()
         };
         await db.accounts.add(newAccount as LocalCuenta);
@@ -56,8 +73,9 @@ export function useAccounts() {
         console.log('[useAccounts] DEBUG - updateAccount called with:', { id, updates });
 
         // Defensive conversion: ensure numeric IDs are numbers, not strings from form
+        const { _sync_metadata, ...sanitized } = updates;
         const sanitizedUpdates = {
-            ...updates,
+            ...sanitized,
             subclasificacion_id: updates.subclasificacion_id ? Number(updates.subclasificacion_id) : null,
             departamento_id: updates.departamento_id ? Number(updates.departamento_id) : null,
             ciudad_id: updates.ciudad_id ? Number(updates.ciudad_id) : null

@@ -1,15 +1,20 @@
 "use client";
 
+import Link from "next/link";
 import { useForm } from "react-hook-form";
-import { CalendarClock, ListTodo, Loader2, Users, Search, X, Video, Plus, CheckCircle2, AlertCircle } from "lucide-react";
+import { CalendarClock, ListTodo, Loader2, Users, Search, X, Video, Plus, CheckCircle2, AlertCircle, MoreVertical, Trash2, UserCog } from "lucide-react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { cn } from "@/components/ui/utils";
 import { toInputDate, toInputDateTime } from "@/lib/date-utils";
 import { db, LocalActivityClassification, LocalActivitySubclassification } from "@/lib/db";
 import { syncEngine } from "@/lib/sync";
 import { supabase } from "@/lib/supabase";
 import { DateTimePicker } from "@/components/ui/DateTimePicker";
+import { useActivities } from "@/lib/hooks/useActivities";
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { OpportunityCombobox } from "@/components/opportunities/OpportunityCombobox";
+import { AccountCombobox } from "@/components/accounts/AccountCombobox";
 
 interface CreateActivityModalProps {
     onClose: () => void;
@@ -21,9 +26,96 @@ interface CreateActivityModalProps {
 
 export function CreateActivityModal({ onClose, onSubmit, opportunities, initialOpportunityId, initialData }: CreateActivityModalProps) {
     const isEditing = !!initialData;
+    const { register, handleSubmit, watch, setValue, getValues, reset, formState: { dirtyFields } } = useForm({
+        defaultValues: {
+            asunto: initialData?.asunto || '',
+            descripcion: initialData?.descripcion || '',
+            tipo_actividad: (initialData?.tipo_actividad || 'EVENTO') as 'TAREA' | 'EVENTO',
+            clasificacion_id: initialData?.clasificacion_id ? String(initialData.clasificacion_id) : "",
+            subclasificacion_id: initialData?.subclasificacion_id ? String(initialData.subclasificacion_id) : "",
+            fecha_inicio: initialData?.fecha_inicio
+                ? (initialData.tipo_actividad === 'TAREA' ? toInputDate(initialData.fecha_inicio) : toInputDateTime(initialData.fecha_inicio))
+                : (initialData?.tipo_actividad === 'TAREA' ? toInputDate(new Date()) : toInputDateTime(new Date())),
+            fecha_fin: initialData?.fecha_fin
+                ? toInputDateTime(initialData.fecha_fin)
+                : toInputDateTime(new Date(Date.now() + 3600000)),
+            opportunity_id: initialData?.opportunity_id || initialOpportunityId || '',
+            account_id: initialData?.account_id || '',
+            is_completed: !!initialData?.is_completed
+        }
+    });
+
+    const watchedOpportunityId = watch('opportunity_id');
+
+    const relatedOpportunity = useLiveQuery(
+        () => watchedOpportunityId ? db.opportunities.get(watchedOpportunityId) : undefined,
+        [watchedOpportunityId]
+    );
+
+    const relatedAccount = useLiveQuery(
+        () => relatedOpportunity?.account_id ? db.accounts.get(relatedOpportunity.account_id) : undefined,
+        [relatedOpportunity?.account_id]
+    );
+
+    const relatedContact = useLiveQuery(
+        () => relatedAccount?.id ? db.contacts.where('account_id').equals(relatedAccount.id).first() : undefined,
+        [relatedAccount?.id]
+    );
+
+    const opportunityAccountRef = useRef<string | null>(null);
+
+    // Auto-fill account_id when opportunity changes
+    useEffect(() => {
+        const fillAccount = async () => {
+            if (!watchedOpportunityId) return;
+
+            // 1. Try local cache
+            const localOpp = await db.opportunities.get(watchedOpportunityId);
+            if (localOpp?.account_id) {
+                opportunityAccountRef.current = localOpp.account_id;
+                setValue('account_id', localOpp.account_id, { shouldDirty: true });
+                return;
+            }
+
+            // 2. Fallback to Supabase if not found locally
+            if (navigator.onLine) {
+                const { data, error } = await supabase
+                    .from('CRM_Oportunidades')
+                    .select('account_id')
+                    .eq('id', watchedOpportunityId)
+                    .maybeSingle();
+
+                if (!error && data?.account_id) {
+                    opportunityAccountRef.current = data.account_id;
+                    setValue('account_id', data.account_id, { shouldDirty: true });
+                }
+            }
+        };
+
+        fillAccount();
+    }, [watchedOpportunityId, setValue]);
+
     const [msConnected, setMsConnected] = useState<boolean>(false);
-    const [isTeamsMeeting, setIsTeamsMeeting] = useState<boolean>(false);
-    const [attendees, setAttendees] = useState<{ id: string; name: string; email: string }[]>([]);
+    const [isTeamsMeeting, setIsTeamsMeeting] = useState<boolean>(!!initialData?.teams_meeting_url);
+    const [attendees, setAttendees] = useState<{ id: string; name: string; email: string }[]>(() => {
+        if (initialData?.microsoft_attendees) {
+            try {
+                const parsed = typeof initialData.microsoft_attendees === 'string'
+                    ? JSON.parse(initialData.microsoft_attendees)
+                    : initialData.microsoft_attendees;
+                return Array.isArray(parsed) ? parsed : [];
+            } catch (e) {
+                console.error("[CreateActivityModal] Error parsing attendees:", e);
+                return [];
+            }
+        }
+        return [];
+    });
+
+    const [msEventId, setMsEventId] = useState<string | null>(initialData?.ms_event_id || null);
+    const [msPlannerId, setMsPlannerId] = useState<string | null>(initialData?.ms_planner_id || null);
+    const [currentTeamsMeetingUrl, setCurrentTeamsMeetingUrl] = useState<string | null>(initialData?.teams_meeting_url || null);
+
     const [userSearch, setUserSearch] = useState("");
     const [searchResults, setSearchResults] = useState<{ id: string; displayName: string; mail?: string; userPrincipalName?: string; jobTitle?: string }[]>([]);
     const [isSearching, setIsSearching] = useState(false);
@@ -31,15 +123,21 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
 
     // Planner Integration State - Always sync tasks to Planner
     const [syncToPlanner, setSyncToPlanner] = useState<boolean>(true);
-    const [plannerGroups, setPlannerGroups] = useState<{ id: string; displayName: string }[]>([]);
     const [plannerPlans, setPlannerPlans] = useState<{ id: string; title: string }[]>([]);
     const [plannerBuckets, setPlannerBuckets] = useState<{ id: string; name: string }[]>([]);
-    const [selectedGroupId, setSelectedGroupId] = useState<string>("");
     const [selectedPlanId, setSelectedPlanId] = useState<string>("");
     const [selectedBucketId, setSelectedBucketId] = useState<string>("");
     const [loadingPlanner, setLoadingPlanner] = useState<boolean>(false);
     const [checklist, setChecklist] = useState<string[]>([]);
     const [newChecklistItem, setNewChecklistItem] = useState("");
+
+    // Deletion State
+    const [isDeleting, setIsDeleting] = useState(false);
+    const [showMenu, setShowMenu] = useState(false);
+    const { updateActivity, deleteActivity } = useActivities({ opportunity_id: initialOpportunityId });
+
+    // Planner Status Sync State
+    const [isSyncingPlanner, setIsSyncingPlanner] = useState<boolean>(false);
 
     // Sync Feedback State
     const [syncFeedback, setSyncFeedback] = useState<{
@@ -47,6 +145,39 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         teams?: 'success' | 'error' | null;
         message?: string;
     }>({});
+
+    // Track if we already synced this activity instance to prevent loops
+    const hasSyncedRef = useRef<string | null>(null);
+
+    // Reassignment state (ADMIN / COORDINADOR only)
+    const { user: currentUser, role: currentRole } = useCurrentUser();
+    const canReassign = isEditing && (currentRole === 'ADMIN' || currentRole === 'COORDINADOR');
+    const [reassignUserId, setReassignUserId] = useState<string>(initialData?.user_id || '');
+    const [reassignableUsers, setReassignableUsers] = useState<{ id: string; full_name: string | null; email: string }[]>([]);
+
+    useEffect(() => {
+        if (!canReassign || !currentUser) return;
+        const fetchReassignableUsers = async () => {
+            if (currentRole === 'ADMIN') {
+                const { data } = await supabase
+                    .from('CRM_Usuarios')
+                    .select('id, full_name, email')
+                    .eq('is_active', true)
+                    .order('full_name');
+                if (data) setReassignableUsers(data);
+            } else {
+                // COORDINADOR: only themselves + their subordinates
+                const { data } = await supabase
+                    .from('CRM_Usuarios')
+                    .select('id, full_name, email')
+                    .eq('is_active', true)
+                    .or(`id.eq.${currentUser.id},coordinadores.cs.{${currentUser.id}}`)
+                    .order('full_name');
+                if (data) setReassignableUsers(data);
+            }
+        };
+        fetchReassignableUsers();
+    }, [canReassign, currentUser, currentRole]);
 
     // Check Microsoft Connection
     useEffect(() => {
@@ -64,6 +195,223 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         }
         checkMS();
     }, []);
+
+    useEffect(() => {
+        async function syncPlannerBidirectional() {
+            if (!initialData || !initialData.ms_planner_id) return;
+
+            setIsSyncingPlanner(true);
+            try {
+                const res = await fetch(`/api/microsoft/planner/tasks/${initialData.ms_planner_id}`, { credentials: 'include' });
+                if (res.ok) {
+                    const taskData = await res.json();
+
+                    let crmDateStr = initialData.updated_at || initialData.created_at;
+                    if (crmDateStr && !crmDateStr.endsWith('Z') && !crmDateStr.includes('+')) {
+                        // Supabase timestamps might lack the Z (UTC) indicator, causing them to parse as local time (future).
+                        crmDateStr += 'Z';
+                    }
+
+                    // Protect Plan and Bucket from being reset
+                    if (taskData.planId) setSelectedPlanId(taskData.planId);
+                    if (taskData.bucketId) {
+                        // Small timeout to bypass the plan loading effect that clears the bucket
+                        setTimeout(() => setSelectedBucketId(taskData.bucketId), 50);
+                    }
+
+                    // Prioritize the detailed _sync_metadata timestamp if available, fallback to entity timestamp
+                    const crmModifiedDate = initialData._sync_metadata?.last_modified
+                        ? initialData._sync_metadata.last_modified
+                        : (crmDateStr ? new Date(crmDateStr).getTime() : 0);
+
+                    const taskModifiedDate = taskData.lastModifiedDateTime ? new Date(taskData.lastModifiedDateTime).getTime() : 0;
+                    const detailsModifiedDate = taskData.details?.lastModifiedDateTime ? new Date(taskData.details.lastModifiedDateTime).getTime() : 0;
+                    const plannerModifiedDate = Math.max(taskModifiedDate, detailsModifiedDate);
+
+                    console.log(`[CreateActivityModal] Sync Comparison - CRM: ${new Date(crmModifiedDate).toISOString()} (${crmModifiedDate}) | Planner: ${new Date(plannerModifiedDate).toISOString()} (${plannerModifiedDate})`);
+
+                    const isPlannerNewer = plannerModifiedDate > (crmModifiedDate + 3000); // 3s leeway for API latency
+                    const isCrmNewer = crmModifiedDate > (plannerModifiedDate + 3000);
+
+                    // If Planner is completed but CRM is not, or Planner has notes and CRM doesn't
+                    const isCompleted = taskData.percentComplete === 100;
+                    const plannerWinsOnCompletion = isCompleted && !initialData.is_completed;
+                    const plannerFillsEmptyNotes = !initialData.descripcion && taskData.details?.description;
+
+                    if (isPlannerNewer || plannerWinsOnCompletion || plannerFillsEmptyNotes) {
+                        console.log(`[CreateActivityModal] Planner is newer. Syncing to UI...`);
+                        setMsPlannerId(taskData.id);
+
+                        setValue('asunto', taskData.title, { shouldDirty: true });
+
+                        if (taskData.details?.description !== undefined) {
+                            setValue('descripcion', taskData.details.description, { shouldDirty: true });
+                        }
+
+                        if (isPlannerNewer) {
+                            setValue('is_completed', isCompleted, { shouldDirty: true });
+                        }
+
+                        if (taskData.resolvedAssignees && taskData.resolvedAssignees.length > 0) {
+                            setAttendees(taskData.resolvedAssignees);
+                        }
+
+                        // Reset form with new data so dirtyFields is cleared
+                        reset({
+                            ...getValues(),
+                            asunto: taskData.title,
+                            descripcion: taskData.details?.description || '',
+                            is_completed: isCompleted,
+                        });
+                    } else if (isCrmNewer) {
+                        console.log(`[CreateActivityModal] CRM is newer. Retaining CRM data...`);
+                        setMsPlannerId(taskData.id);
+                        if (taskData.details?.checklist) {
+                            setChecklist(Object.values(taskData.details.checklist).map((item: any) => item.title));
+                        }
+                        if (taskData.resolvedAssignees && taskData.resolvedAssignees.length > 0) {
+                            setAttendees(taskData.resolvedAssignees);
+                        }
+                    } else {
+                        // Same timestamps. Just populate UI details
+                        setMsPlannerId(taskData.id);
+                        if (taskData.details?.checklist) {
+                            setChecklist(Object.values(taskData.details.checklist).map((item: any) => item.title));
+                        }
+                        if (taskData.resolvedAssignees && taskData.resolvedAssignees.length > 0) {
+                            setAttendees(taskData.resolvedAssignees);
+                        }
+                    }
+
+                    // Si está completado en planner y Planner es más reciente (o casi igual), lo disparamos localmente enseguida para no bloquear.
+                    if (isCompleted && !initialData.is_completed) {
+                        onSubmit({
+                            ...initialData,
+                            is_completed: true,
+                            asunto: taskData.title,
+                            descripcion: taskData.details?.description !== undefined ? taskData.details.description : (initialData.descripcion || '')
+                        });
+                    }
+                } else {
+                    console.error("[CreateActivityModal] Failed to sync planner bidirectional status:", await res.text());
+                }
+            } catch (err) {
+                console.error("[CreateActivityModal] Error fetching planner task:", err);
+            } finally {
+                setIsSyncingPlanner(false);
+            }
+        }
+
+        async function syncEventBidirectional() {
+            if (!initialData || initialData.tipo_actividad !== 'EVENTO') return;
+
+            setIsSyncingPlanner(true);
+            try {
+                let currentEventId = initialData.ms_event_id;
+
+                // CASE: Linked event - verify it exists
+                if (currentEventId) {
+                    const res = await fetch(`/api/microsoft/calendar/events/${currentEventId}`, { credentials: 'include' });
+                    if (res.ok) {
+                        const eventData = await res.json();
+
+                        let crmDateStr = initialData.updated_at || initialData.created_at;
+                        if (crmDateStr && !crmDateStr.endsWith('Z') && !crmDateStr.includes('+')) {
+                            crmDateStr += 'Z';
+                        }
+                        const crmModifiedDate = initialData._sync_metadata?.last_modified
+                            ? initialData._sync_metadata.last_modified
+                            : (crmDateStr ? new Date(crmDateStr).getTime() : 0);
+                        const eventModifiedDate = eventData.lastModifiedDateTime ? new Date(eventData.lastModifiedDateTime).getTime() : 0;
+
+                        const isEventNewer = eventModifiedDate > (crmModifiedDate + 10000);
+                        const isCrmNewer = crmModifiedDate > (eventModifiedDate + 10000);
+
+                        if (isEventNewer) {
+                            console.log(`[CreateActivityModal] Calendar Event is newer. Syncing to UI...`);
+                            setMsEventId(eventData.id);
+                            setValue('asunto', eventData.subject, { shouldDirty: true });
+                            if (eventData.body?.content) {
+                                setValue('descripcion', eventData.bodyPreview || eventData.body.content.replace(/<[^>]+>/g, ''), { shouldDirty: true });
+                            }
+                            if (eventData.attendees && eventData.attendees.length > 0) {
+                                setAttendees(eventData.attendees.map((a: any) => ({
+                                    id: a.emailAddress.address,
+                                    name: a.emailAddress.name,
+                                    email: a.emailAddress.address
+                                })));
+                            }
+                            setIsTeamsMeeting(!!eventData.isOnlineMeeting || !!eventData.onlineMeeting?.joinUrl);
+                            setCurrentTeamsMeetingUrl(eventData.onlineMeeting?.joinUrl || null);
+                        } else if (isCrmNewer) {
+                            console.log(`[CreateActivityModal] CRM is newer. Event will be updated on submit.`);
+                            setMsEventId(eventData.id);
+                            if (eventData.attendees && eventData.attendees.length > 0) {
+                                setAttendees(eventData.attendees.map((a: any) => ({
+                                    id: a.emailAddress.address,
+                                    name: a.emailAddress.name,
+                                    email: a.emailAddress.address
+                                })));
+                            }
+                            // Don't overwrite isTeamsMeeting here if CRM is newer and user might have just changed it in form
+                        } else {
+                            setMsEventId(eventData.id);
+                            if (eventData.onlineMeeting?.joinUrl) {
+                                setIsTeamsMeeting(true);
+                                setCurrentTeamsMeetingUrl(eventData.onlineMeeting?.joinUrl);
+                            }
+                            if (eventData.attendees && eventData.attendees.length > 0) {
+                                setAttendees(eventData.attendees.map((a: any) => ({
+                                    id: a.emailAddress.address,
+                                    name: a.emailAddress.name,
+                                    email: a.emailAddress.address
+                                })));
+                            }
+                        }
+                    } else if (res.status === 404) {
+                        console.warn(`[CreateActivityModal] Event not found in Outlook (Deleted). It will be recreated on submit.`);
+                        // We set ms_event_id to null locally so submit logic recreates it
+                        // Optional: updateActivity(initialData.id, { ms_event_id: null });
+                    }
+                }
+                // CASE: Not linked - check if it already exists in Outlook to avoid duplicates
+                else if (msConnected && initialData.asunto && initialData.fecha_inicio) {
+                    console.log(`[CreateActivityModal] Unlinked event. Searching Outlook to avoid duplicates...`);
+                    const searchRes = await fetch(`/api/microsoft/calendar/search-event?subject=${encodeURIComponent(initialData.asunto.trim())}&startTime=${encodeURIComponent(initialData.fecha_inicio)}`, { credentials: 'include' });
+
+                    if (searchRes.ok) {
+                        const { event: foundEvent } = await searchRes.json();
+                        if (foundEvent) {
+                            console.log(`[CreateActivityModal] Found existing event in Outlook. Linking to ID: ${foundEvent.id}`);
+                            // Link it immediately
+                            setMsEventId(foundEvent.id);
+                            setCurrentTeamsMeetingUrl(foundEvent.onlineMeeting?.joinUrl || null);
+                            updateActivity(initialData.id, {
+                                ms_event_id: foundEvent.id,
+                                teams_meeting_url: foundEvent.onlineMeeting?.joinUrl || null
+                            });
+                            // Refresh UI
+                            if (foundEvent.onlineMeeting?.joinUrl) setIsTeamsMeeting(true);
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error("[CreateActivityModal] Error in syncEventBidirectional:", err);
+            } finally {
+                setIsSyncingPlanner(false);
+            }
+        }
+
+        if (initialData?.id) {
+            console.log(`[CreateActivityModal] Triggering bidirectional sync for: ${initialData.id}`);
+        }
+
+        if (initialData?.tipo_actividad === 'TAREA') {
+            syncPlannerBidirectional();
+        } else if (initialData?.tipo_actividad === 'EVENTO') {
+            syncEventBidirectional();
+        }
+    }, [initialData, setValue, onSubmit]); // Fixed dependencies
 
     // Load Catalogs
     const classifications = useLiveQuery(() => db.activityClassifications.toArray(), []) || [];
@@ -181,84 +529,64 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         setChecklist(checklist.filter((_, i) => i !== index));
     };
 
-    // Planner: Load Groups when sync is enabled
+    // Planner: Load Plans directly when sync is enabled
     const tipoActividad = watch('tipo_actividad');
     useEffect(() => {
         if (syncToPlanner && msConnected && tipoActividad === 'TAREA') {
-            console.log('[Planner] Loading groups... msConnected:', msConnected, 'tipo:', tipoActividad);
+            console.log('[Planner] Loading plans... msConnected:', msConnected, 'tipo:', tipoActividad);
             setLoadingPlanner(true);
-            fetch('/api/microsoft/planner/groups', { credentials: 'include' })
-                .then(res => {
-                    console.log('[Planner] Groups response status:', res.status);
-                    return res.json();
-                })
+            setPlannerPlans([]);
+            // Don't wipe selections on initial mount if we are editing an existing task
+            if (!initialData?.ms_planner_id) {
+                setPlannerBuckets([]);
+                setSelectedPlanId("");
+                setSelectedBucketId("");
+            }
+            fetch('/api/microsoft/planner/plans', { credentials: 'include' })
+                .then(res => res.json())
                 .then(data => {
-                    console.log('[Planner] Groups data received:', data);
-                    const groups = data.groups || [];
-                    setPlannerGroups(groups);
-                    // Auto-select "CRM Ventas" group if it exists
-                    const defaultGroup = groups.find((g: { displayName: string }) => g.displayName === 'CRM Ventas');
-                    if (defaultGroup) {
-                        setSelectedGroupId(defaultGroup.id);
+                    const plans = data.plans || [];
+                    setPlannerPlans(plans);
+                    // Auto-select "CRM Ventas" plan if it exists, only for NEW tasks
+                    if (!initialData?.ms_planner_id && !selectedPlanId) {
+                        const defaultPlan = plans.find((p: { title: string }) => p.title === 'CRM Ventas');
+                        if (defaultPlan) setSelectedPlanId(defaultPlan.id);
                     }
                 })
-                .catch(err => console.error('[Planner] Error loading groups:', err))
+                .catch(err => console.error('[Planner] Error loading plans:', err))
                 .finally(() => setLoadingPlanner(false));
-        } else {
-            setPlannerGroups([]);
+        } else if (!initialData?.ms_planner_id) {
             setPlannerPlans([]);
             setPlannerBuckets([]);
-            setSelectedGroupId("");
             setSelectedPlanId("");
             setSelectedBucketId("");
         }
     }, [syncToPlanner, msConnected, tipoActividad]);
 
-    // Planner: Load Plans when Group is selected
-    useEffect(() => {
-        if (selectedGroupId) {
-            setLoadingPlanner(true);
-            setPlannerPlans([]);
-            setPlannerBuckets([]);
-            setSelectedPlanId("");
-            setSelectedBucketId("");
-            fetch(`/api/microsoft/planner/plans?groupId=${selectedGroupId}`, { credentials: 'include' })
-                .then(res => res.json())
-                .then(data => {
-                    const plans = data.plans || [];
-                    setPlannerPlans(plans);
-                    // Auto-select "CRM Ventas" plan if it exists
-                    const defaultPlan = plans.find((p: { title: string }) => p.title === 'CRM Ventas');
-                    if (defaultPlan) {
-                        setSelectedPlanId(defaultPlan.id);
-                    } else if (plans.length === 1) {
-                        // If only one plan, select it
-                        setSelectedPlanId(plans[0].id);
-                    }
-                })
-                .catch(err => console.error('[Planner] Error loading plans:', err))
-                .finally(() => setLoadingPlanner(false));
-        }
-    }, [selectedGroupId]);
 
     // Planner: Load Buckets when Plan is selected
     useEffect(() => {
         if (selectedPlanId) {
             setLoadingPlanner(true);
             setPlannerBuckets([]);
-            setSelectedBucketId("");
+            // Only wipe the bucket if the user manually changed the plan, not during initial load
+            if (!initialData?.ms_planner_id) {
+                setSelectedBucketId("");
+            }
             fetch(`/api/microsoft/planner/buckets?planId=${selectedPlanId}`, { credentials: 'include' })
                 .then(res => res.json())
                 .then(data => {
                     const buckets = data.buckets || [];
                     setPlannerBuckets(buckets);
-                    // Auto-select "Proyecto CRM" bucket if it exists
-                    const defaultBucket = buckets.find((b: { name: string }) => b.name === 'Proyecto CRM');
-                    if (defaultBucket) {
-                        setSelectedBucketId(defaultBucket.id);
-                    } else if (buckets.length === 1) {
-                        // If only one bucket, select it
-                        setSelectedBucketId(buckets[0].id);
+                    // Auto-select "Proyecto CRM" bucket if it exists, only for NEW tasks
+                    if (!initialData?.ms_planner_id && !selectedBucketId) {
+                        const defaultBucket = buckets.find((b: { name: string }) => b.name === 'Proyecto CRM');
+                        if (defaultBucket) {
+                            setSelectedBucketId(defaultBucket.id);
+                        } else if (buckets.length === 1) {
+                            // If only one bucket, select it
+                            setSelectedBucketId(buckets[0].id);
+                        }
                     }
                 })
                 .catch(err => console.error('[Planner] Error loading buckets:', err))
@@ -272,101 +600,339 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         try {
             console.log("[CreateActivityModal] Raw Submit Data:", data);
 
-            // 1. Create Teams Meeting if requested
-            let teamsMeetingUrl = null;
-            if (isTeamsMeeting && msConnected && tipo === 'EVENTO') {
-                try {
-                    const res = await fetch('/api/microsoft/calendar/create-event', {
-                        method: 'POST',
-                        body: JSON.stringify({
-                            subject: data.asunto,
-                            description: data.descripcion,
-                            start: new Date(data.fecha_inicio).toISOString(),
-                            end: new Date(data.fecha_fin).toISOString(),
-                            attendees: attendees,
-                            isOnlineMeeting: true
-                        })
-                    });
+            // 1. Create or Update Calendar Event
+            let eventId = msEventId || initialData?.ms_event_id || null;
+            let teamsMeetingUrl = currentTeamsMeetingUrl || initialData?.teams_meeting_url || null;
+            let calendarSuccess = false;
 
-                    if (res.ok) {
-                        const event = await res.json();
-                        teamsMeetingUrl = event.onlineMeeting?.joinUrl || null;
-                        console.log("[CreateActivityModal] Teams Meeting Created:", teamsMeetingUrl);
-                        setSyncFeedback(prev => ({ ...prev, teams: 'success' }));
+            const tipo = data.tipo_actividad;
+            if (msConnected && tipo === 'EVENTO') {
+                try {
+                    const eventPayload = {
+                        subject: data.asunto,
+                        description: data.descripcion,
+                        start: new Date(data.fecha_inicio).toISOString(),
+                        end: new Date(data.fecha_fin).toISOString(),
+                        attendees: attendees,
+                        isOnlineMeeting: isTeamsMeeting
+                    };
+
+                    if (eventId) {
+                        // UPDATE EXISTING EVENT
+                        const res = await fetch(`/api/microsoft/calendar/events/${eventId}`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'include',
+                            body: JSON.stringify(eventPayload)
+                        });
+
+                        if (res.ok) {
+                            calendarSuccess = true;
+                            const updatedEvent = await res.json();
+                            teamsMeetingUrl = isTeamsMeeting ? (updatedEvent.onlineMeeting?.joinUrl || teamsMeetingUrl) : null;
+                            console.log("[CreateActivityModal] Event Updated:", eventId);
+                            setSyncFeedback(prev => ({ ...prev, teams: 'success' }));
+                        } else {
+                            const err = await res.json();
+                            console.error("[CreateActivityModal] Failed to update Event:", err);
+                            if (!navigator.onLine || res.status >= 500) {
+                                console.log("[CreateActivityModal] Queuing Event sync for later.");
+                                setSyncFeedback(prev => ({ ...prev, teams: 'error', message: 'Guardado local. Se sincronizará luego.' }));
+                            } else {
+                                setSyncFeedback(prev => ({ ...prev, teams: 'error', message: err.error || 'Error actualizando Evento' }));
+                            }
+                        }
+
                     } else {
-                        const err = await res.json();
-                        console.error("[CreateActivityModal] Failed to create Teams meeting:", err);
-                        setSyncFeedback(prev => ({ ...prev, teams: 'error', message: err.error || 'Error creando reunión Teams' }));
+                        // CREATE NEW EVENT - but check for duplicates first to be safe
+                        console.log("[CreateActivityModal] Checking for duplicates in Outlook before creating...");
+                        const searchRes = await fetch(`/api/microsoft/calendar/search-event?subject=${encodeURIComponent(data.asunto.trim())}&startTime=${encodeURIComponent(new Date(data.fecha_inicio).toISOString())}`, { credentials: 'include' });
+
+                        let duplicateEvent = null;
+                        if (searchRes.ok) {
+                            const searchData = await searchRes.json();
+                            duplicateEvent = searchData.event;
+                        }
+
+                        if (duplicateEvent) {
+                            console.log("[CreateActivityModal] Found duplicate event in Outlook. Linking instead of creating:", duplicateEvent.id);
+                            eventId = duplicateEvent.id;
+                            const patchRes = await fetch(`/api/microsoft/calendar/events/${eventId}`, {
+                                method: 'PATCH',
+                                headers: { 'Content-Type': 'application/json' },
+                                credentials: 'include',
+                                body: JSON.stringify(eventPayload)
+                            });
+
+                            if (patchRes.ok) {
+                                calendarSuccess = true;
+                                const updatedEvent = await patchRes.json();
+                                teamsMeetingUrl = isTeamsMeeting ? (updatedEvent.onlineMeeting?.joinUrl || duplicateEvent.onlineMeeting?.joinUrl || teamsMeetingUrl) : null;
+                                console.log("[CreateActivityModal] Linked Event Updated:", eventId);
+                                setSyncFeedback(prev => ({ ...prev, teams: 'success' }));
+                            } else {
+                                console.error("[CreateActivityModal] Error patching duplicate event");
+                                // We linked it anyway
+                                eventId = duplicateEvent.id;
+                                teamsMeetingUrl = duplicateEvent.onlineMeeting?.joinUrl || teamsMeetingUrl;
+                                calendarSuccess = true;
+                            }
+                        } else {
+                            const res = await fetch('/api/microsoft/calendar/create-event', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                credentials: 'include',
+                                body: JSON.stringify(eventPayload)
+                            });
+
+                            if (res.ok) {
+                                const event = await res.json();
+                                eventId = event.id;
+                                teamsMeetingUrl = event.onlineMeeting?.joinUrl || null;
+                                calendarSuccess = !!eventId;
+                                console.log("[CreateActivityModal] Event Created:", eventId);
+                                setSyncFeedback(prev => ({ ...prev, teams: 'success' }));
+                            } else {
+                                const err = await res.json();
+                                console.error("[CreateActivityModal] Failed to create Event:", err);
+                                if (!navigator.onLine || res.status >= 500) {
+                                    console.log("[CreateActivityModal] Queuing Event sync for later.");
+                                    setSyncFeedback(prev => ({ ...prev, teams: 'error', message: 'Guardado local. Se sincronizará luego.' }));
+                                } else {
+                                    setSyncFeedback(prev => ({ ...prev, teams: 'error', message: err.error || 'Error creando Evento' }));
+                                }
+                            }
+                        }
                     }
                 } catch (e) {
-                    console.error("[CreateActivityModal] Teams creation error:", e);
-                    setSyncFeedback(prev => ({ ...prev, teams: 'error', message: 'Error de conexión con Teams' }));
+                    console.error("[CreateActivityModal] Event creation/update error:", e);
+                    setSyncFeedback(prev => ({ ...prev, teams: 'error', message: 'Guardado local. Se sincronizará luego.' }));
                 }
             }
 
-            // 2. Create Planner Task if requested
-            let plannerId = null;
+            // 2. Create or Update Planner Task
+            let plannerId = msPlannerId || initialData?.ms_planner_id || null;
             let plannerSuccess = false;
-            if (syncToPlanner && msConnected && tipo === 'TAREA' && selectedPlanId && selectedBucketId) {
+
+            if (msConnected && tipo === 'TAREA') {
                 try {
-                    // Map attendees to assigneeIds (IDs are Microsoft User IDs)
                     const assigneeIds = attendees.map(a => a.id);
 
-                    const res = await fetch('/api/microsoft/planner/tasks', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        credentials: 'include',
-                        body: JSON.stringify({
-                            planId: selectedPlanId,
-                            bucketId: selectedBucketId,
-                            title: data.asunto,
-                            dueDateTime: data.fecha_inicio ? new Date(data.fecha_inicio).toISOString() : undefined,
-                            notes: data.descripcion,
-                            checklist: checklist,
-                            assigneeIds: assigneeIds
-                        })
-                    });
+                    if (plannerId) {
+                        // --- UPDATE EXISTING PLANNER TASK ---
+                        const updatePayload: any = {};
+                        if (dirtyFields.asunto) updatePayload.title = data.asunto;
+                        if (dirtyFields.fecha_inicio) updatePayload.dueDateTime = data.fecha_inicio ? new Date(data.fecha_inicio).toISOString() : undefined;
+                        if (dirtyFields.descripcion) updatePayload.notes = data.descripcion;
+                        if (dirtyFields.is_completed) updatePayload.percentComplete = data.is_completed ? 100 : 0;
+                        if (selectedBucketId) updatePayload.bucketId = selectedBucketId;
 
-                    if (res.ok) {
-                        const taskResponse = await res.json();
-                        plannerId = taskResponse.task?.id || null;
-                        plannerSuccess = !!plannerId;
-                        console.log("[CreateActivityModal] Planner Task Created:", plannerId);
-                        setSyncFeedback(prev => ({ ...prev, planner: 'success' }));
-                    } else {
-                        const err = await res.json();
-                        console.error("[CreateActivityModal] Failed to create Planner task:", err);
-                        setSyncFeedback(prev => ({ ...prev, planner: 'error', message: err.error || 'Error creando tarea en Planner' }));
+                        console.log("[CreateActivityModal] Planner Update Payload:", updatePayload);
+
+                        updatePayload.checklist = checklist;
+                        updatePayload.assigneeIds = assigneeIds;
+
+                        // Only hit planner if there is something actually dirty, or checklist/assignees were potentially modified
+                        // (We always send checklist/assignees safely via API, but at least we don't overwrite completed status if not dirty)
+                        const res = await fetch(`/api/microsoft/planner/tasks/${plannerId}`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'include',
+                            body: JSON.stringify(updatePayload)
+                        });
+
+                        if (res.ok) {
+                            plannerSuccess = true;
+                            console.log("[CreateActivityModal] Planner Task Updated:", plannerId);
+                            setSyncFeedback(prev => ({ ...prev, planner: 'success' }));
+                        } else {
+                            const err = await res.json();
+                            console.error("[CreateActivityModal] Failed to update Planner task:", err);
+                            if (!navigator.onLine || res.status >= 500) {
+                                console.log("[CreateActivityModal] Queuing Planner sync for later due to connection error.");
+                                setSyncFeedback(prev => ({ ...prev, planner: 'error', message: 'Guardado local. Se sincronizará con Planner luego.' }));
+                            } else {
+                                setSyncFeedback(prev => ({ ...prev, planner: 'error', message: err.error || 'Error actualizando tarea en Planner' }));
+                            }
+                        }
+                    } else if (syncToPlanner && selectedPlanId && selectedBucketId) {
+                        // --- CREATE NEW PLANNER TASK ---
+                        const res = await fetch('/api/microsoft/planner/tasks', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'include',
+                            body: JSON.stringify({
+                                planId: selectedPlanId,
+                                bucketId: selectedBucketId,
+                                title: data.asunto,
+                                dueDateTime: data.fecha_inicio ? new Date(data.fecha_inicio).toISOString() : undefined,
+                                notes: data.descripcion,
+                                checklist: checklist,
+                                assigneeIds: assigneeIds
+                            })
+                        });
+
+                        if (res.ok) {
+                            const taskResponse = await res.json();
+                            plannerId = taskResponse.task?.id || null;
+                            plannerSuccess = !!plannerId;
+                            console.log("[CreateActivityModal] Planner Task Created:", plannerId);
+                            setSyncFeedback(prev => ({ ...prev, planner: 'success' }));
+                        } else {
+                            const err = await res.json();
+                            console.error("[CreateActivityModal] Failed to create Planner task:", err);
+
+                            if (!navigator.onLine || res.status >= 500) {
+                                console.log("[CreateActivityModal] Queuing Planner sync for later due to connection error.");
+                                setSyncFeedback(prev => ({ ...prev, planner: 'error', message: 'Guardado local. Se sincronizará con Planner luego.' }));
+                            } else {
+                                setSyncFeedback(prev => ({ ...prev, planner: 'error', message: err.error || 'Error creando tarea en Planner' }));
+                            }
+                        }
                     }
                 } catch (e) {
-                    console.error("[CreateActivityModal] Planner creation error:", e);
-                    setSyncFeedback(prev => ({ ...prev, planner: 'error', message: 'Error de conexión con Planner' }));
+                    console.error("[CreateActivityModal] Planner creation/update error:", e);
+                    console.log("[CreateActivityModal] Queuing Planner sync for later due to network error.");
+                    setSyncFeedback(prev => ({ ...prev, planner: 'error', message: 'Guardado local. Se sincronizará con Planner luego.' }));
                 }
             }
 
             // 3. Process for CRM
-            const processed = {
-                ...data,
+            // Only submit fields that were actually changed to prevent resetting unmodified fields
+            const dataToSubmit: any = {};
+            if (isEditing) {
+                for (const key of Object.keys(data)) {
+                    if (dirtyFields[key as keyof typeof dirtyFields]) {
+                        dataToSubmit[key] = data[key as keyof typeof data];
+                    }
+                }
+                // Ensure tipo_actividad is always sent so backend knows logic to apply
+                dataToSubmit.tipo_actividad = data.tipo_actividad;
+            } else {
+                Object.assign(dataToSubmit, data);
+            }
+
+            const processed: any = {
+                ...dataToSubmit,
                 teams_meeting_url: teamsMeetingUrl,
                 ms_planner_id: plannerId,
-                microsoft_attendees: attendees.length > 0 ? JSON.stringify(attendees) : null
+                ms_event_id: eventId,
+                microsoft_attendees: attendees.length > 0 ? JSON.stringify(attendees) : null,
+                _sync_metadata: initialData?._sync_metadata ? { ...initialData._sync_metadata } : {}
             };
-            processed.clasificacion_id = (data.clasificacion_id && data.clasificacion_id !== "") ? Number(data.clasificacion_id) : null;
-            processed.subclasificacion_id = (data.subclasificacion_id && data.subclasificacion_id !== "") ? Number(data.subclasificacion_id) : null;
+
+            // Include user_id reassignment if changed
+            if (canReassign && reassignUserId && reassignUserId !== initialData?.user_id) {
+                processed.user_id = reassignUserId;
+            }
+
+            // Force metadata timestamps for changed fields to ensure CRM wins in LWW
+            if (isEditing) {
+                let anyDirty = false;
+                if (dirtyFields.asunto) { processed._sync_metadata.asunto = Date.now(); anyDirty = true; }
+                if (dirtyFields.descripcion) { processed._sync_metadata.descripcion = Date.now(); anyDirty = true; }
+                if (dirtyFields.fecha_inicio) { processed._sync_metadata.fecha_inicio = Date.now(); anyDirty = true; }
+                if (dirtyFields.is_completed) { processed._sync_metadata.is_completed = Date.now(); anyDirty = true; }
+
+                if (anyDirty) {
+                    processed._sync_metadata.last_modified = Date.now();
+                }
+            }
+
+            // If Planner sync was requested but failed/offline, queue it
+            if (syncToPlanner && data.tipo_actividad === 'TAREA' && !plannerId) {
+                processed._sync_metadata.pending_planner = true;
+                processed._sync_metadata.checklist = checklist;
+                // Add attendees to metadata for Planner
+                processed._sync_metadata.assigneeIds = attendees.map(a => a.id);
+                // In case plan/bucket load failed, keep the intent explicitly
+                processed._sync_metadata.planId = selectedPlanId || null;
+                processed._sync_metadata.bucketId = selectedBucketId || null;
+            }
+
+            // If Calendar sync was requested but failed/offline, queue it
+            // If Calendar sync was requested but failed/offline, queue it
+            if (data.tipo_actividad === 'EVENTO' && !eventId) {
+                processed._sync_metadata.pending_calendar = true;
+                processed._sync_metadata.assigneeIds = attendees.map(a => a.id);
+                processed._sync_metadata.isOnlineMeeting = isTeamsMeeting;
+            }
+
+            if (!isEditing || dirtyFields.clasificacion_id) {
+                processed.clasificacion_id = (data.clasificacion_id && data.clasificacion_id !== "") ? Number(data.clasificacion_id) : null;
+            }
+            if (!isEditing || dirtyFields.subclasificacion_id) {
+                processed.subclasificacion_id = (data.subclasificacion_id && data.subclasificacion_id !== "") ? Number(data.subclasificacion_id) : null;
+            }
 
             console.log("[CreateActivityModal] Processed Submit Data:", processed);
 
+            // Show brief success feedback before closing
             // Show brief success feedback before closing
             if (plannerSuccess || teamsMeetingUrl) {
                 await new Promise(resolve => setTimeout(resolve, 800)); // Brief delay to show feedback
             }
 
             onSubmit(processed);
+        } catch (e: any) {
+            console.error("[CreateActivityModal] Uncaught error in submit:", e);
+            alert(`Error interno: ${e.message}`);
         } finally {
             setIsSubmitting(false);
         }
     };
 
+    const handleDelete = async () => {
+        if (!initialData?.id) return;
+        const confirmDelete = window.confirm("¿Estás seguro de que deseas eliminar definitivamente esta actividad? Esta acción no se puede deshacer.");
+        if (!confirmDelete) return;
+
+        setIsDeleting(true);
+        try {
+            // Delete from Planner if needed and connected
+            if (initialData.ms_planner_id && msConnected && navigator.onLine) {
+                try {
+                    const res = await fetch(`/api/microsoft/planner/tasks/${initialData.ms_planner_id}`, {
+                        method: 'DELETE',
+                        credentials: 'include'
+                    });
+
+                    if (!res.ok) {
+                        const errText = await res.text();
+                        console.error("[CreateActivityModal] Failed to delete from Planner:", res.status, errText);
+                    }
+                } catch (err) {
+                    console.error("[CreateActivityModal] Network error deleting from Planner:", err);
+                }
+            }
+
+            // Delete from Calendar if needed and connected
+            if (initialData.ms_event_id && msConnected && navigator.onLine) {
+                try {
+                    const res = await fetch(`/api/microsoft/calendar/events/${initialData.ms_event_id}`, {
+                        method: 'DELETE',
+                        credentials: 'include'
+                    });
+
+                    if (!res.ok) {
+                        const errText = await res.text();
+                        console.error("[CreateActivityModal] Failed to delete from Calendar:", res.status, errText);
+                    }
+                } catch (err) {
+                    console.error("[CreateActivityModal] Network error deleting from Calendar:", err);
+                }
+            }
+
+            await deleteActivity(initialData.id);
+            onClose();
+        } catch (e: any) {
+            console.error("[CreateActivityModal] Deletion error:", e);
+            alert(`Error al eliminar la actividad: ${e.message}`);
+        } finally {
+            setIsDeleting(false);
+            setShowMenu(false);
+        }
+    };
 
     const tipo = watch('tipo_actividad');
     const fechaInicio = watch('fecha_inicio');
@@ -408,16 +974,81 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl md:rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col max-h-[95vh] md:max-h-[90vh]">
                 <div className="p-6 border-b border-slate-100 flex justify-between items-center shrink-0">
-                    <h2 className="text-xl font-bold text-slate-900">{isEditing ? 'Editar Actividad' : 'Programar Actividad'}</h2>
-                    <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-2xl">&times;</button>
+                    <div>
+                        <h2 className="text-xl font-bold text-slate-900">{isEditing ? 'Editar Actividad' : 'Programar Actividad'}</h2>
+                        {relatedOpportunity && relatedAccount && (
+                            <div className="flex items-center gap-1.5 mt-1 text-sm flex-wrap">
+                                <Link href={`/cuentas/${relatedAccount.id}`} className="text-blue-600 hover:underline font-semibold transition-colors" target="_blank" rel="noopener noreferrer">
+                                    {relatedAccount.nombre}
+                                </Link>
+                                <span className="text-slate-400 font-medium">-</span>
+                                {relatedContact ? (
+                                    <div className="flex items-center gap-1">
+                                        <Link href={`/contactos/${relatedContact.id}`} className="text-blue-600 hover:underline font-semibold transition-colors" target="_blank" rel="noopener noreferrer">
+                                            {relatedContact.nombre}
+                                        </Link>
+                                        {relatedContact.telefono && (
+                                            <span className="text-slate-500 font-medium text-xs">({relatedContact.telefono})</span>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <span className="italic text-slate-400 font-medium text-xs">Sin contacto princ.</span>
+                                )}
+                                <span className="text-slate-400 font-medium">-</span>
+                                <Link href={`/oportunidades/${relatedOpportunity.id}`} className="text-blue-600 hover:underline font-semibold transition-colors" target="_blank" rel="noopener noreferrer">
+                                    {relatedOpportunity.nombre}
+                                </Link>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                        {isEditing && (
+                            <div className="relative">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowMenu(!showMenu)}
+                                    className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors"
+                                    title="Más opciones"
+                                >
+                                    <MoreVertical className="w-5 h-5" />
+                                </button>
+
+                                {showMenu && (
+                                    <>
+                                        <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
+                                        <div className="absolute right-0 mt-1 w-48 bg-white rounded-xl shadow-lg border border-slate-100 py-1 z-20 animate-in fade-in slide-in-from-top-2">
+                                            <button
+                                                type="button"
+                                                onClick={handleDelete}
+                                                disabled={isDeleting}
+                                                className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 disabled:opacity-50"
+                                            >
+                                                {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                                                {isDeleting ? 'Eliminando...' : 'Eliminar Actividad'}
+                                            </button>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+                        )}
+                        <button onClick={onClose} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors text-2xl leading-none">&times;</button>
+                    </div>
                 </div>
 
                 <form
                     onSubmit={handleSubmit(handleActualSubmit, (errors) => {
                         console.error("[CreateActivityModal] Validation Errors:", errors);
+                        alert(`Errores de validación: ${Object.keys(errors).join(', ')}. Revisa los campos obligatorios.`);
                     })}
                     className="p-4 md:p-6 space-y-4 overflow-y-auto flex-1 overscroll-contain pb-6"
                 >
+                    {isSyncingPlanner && (
+                        <div className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-xl text-xs font-bold animate-in fade-in slide-in-from-top-2">
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            Sincronizando estado con Microsoft Planner...
+                        </div>
+                    )}
                     {/* Activity Type Selector */}
                     <div className="flex bg-slate-100 p-1 rounded-xl">
                         <button
@@ -465,6 +1096,32 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                             <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
                         </label>
                     </div>
+
+                    {/* REASSIGN ACTIVITY (ADMIN / COORDINADOR only) */}
+                    {canReassign && reassignableUsers.length > 0 && (
+                        <div className="bg-amber-50 p-4 rounded-2xl border border-amber-200 space-y-2 animate-in slide-in-from-top-2 duration-200">
+                            <label className="text-xs font-bold text-amber-800 uppercase flex items-center gap-2">
+                                <UserCog className="w-3.5 h-3.5" />
+                                Reasignar Actividad
+                            </label>
+                            <select
+                                value={reassignUserId}
+                                onChange={(e) => setReassignUserId(e.target.value)}
+                                className="w-full bg-white border border-amber-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
+                            >
+                                {reassignableUsers.map(u => (
+                                    <option key={u.id} value={u.id}>
+                                        {u.full_name || u.email}
+                                    </option>
+                                ))}
+                            </select>
+                            {reassignUserId !== initialData?.user_id && (
+                                <p className="text-[10px] text-amber-700 font-medium">
+                                    La actividad se transferirá al usuario seleccionado.
+                                </p>
+                            )}
+                        </div>
+                    )}
 
                     {/* CLASSIFICATION SELECTORS */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -743,48 +1400,25 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
 
                                         {/* Planner Cascade Selectors - Always visible */}
                                         <div className="space-y-3">
-                                            {/* Group Selector */}
+                                            {/* Plan Selector */}
                                             <div className="space-y-1">
                                                 <label className="text-xs font-bold text-slate-500 uppercase">
-                                                    Grupo <span className="text-red-500">*</span>
+                                                    Plan <span className="text-red-500">*</span>
                                                 </label>
                                                 <select
-                                                    value={selectedGroupId}
-                                                    onChange={(e) => setSelectedGroupId(e.target.value)}
+                                                    value={selectedPlanId}
+                                                    onChange={(e) => setSelectedPlanId(e.target.value)}
                                                     disabled={loadingPlanner}
                                                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
                                                 >
                                                     <option value="">
-                                                        {loadingPlanner ? 'Cargando grupos...' : plannerGroups.length === 0 ? 'No hay grupos disponibles' : 'Seleccione un grupo...'}
+                                                        {loadingPlanner ? 'Cargando planes...' : plannerPlans.length === 0 ? 'No hay planes disponibles' : 'Seleccione un plan...'}
                                                     </option>
-                                                    {plannerGroups.map((g) => (
-                                                        <option key={g.id} value={g.id}>{g.displayName}</option>
+                                                    {plannerPlans.map((p) => (
+                                                        <option key={p.id} value={p.id}>{p.title}</option>
                                                     ))}
                                                 </select>
                                             </div>
-
-                                            {/* Plan Selector */}
-                                            {selectedGroupId && (
-                                                <div className="space-y-1">
-                                                    <label className="text-xs font-bold text-slate-500 uppercase">
-                                                        Plan <span className="text-red-500">*</span>
-                                                    </label>
-                                                    <select
-                                                        value={selectedPlanId}
-                                                        onChange={(e) => setSelectedPlanId(e.target.value)}
-                                                        disabled={loadingPlanner}
-                                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-                                                    >
-                                                        <option value="">
-                                                            {loadingPlanner ? 'Cargando planes...' : plannerPlans.length === 0 ? 'No hay planes en este grupo' : 'Seleccione un plan...'}
-                                                        </option>
-                                                        {plannerPlans.map((p) => (
-                                                            <option key={p.id} value={p.id}>{p.title}</option>
-                                                        ))}
-                                                    </select>
-                                                </div>
-                                            )}
-
                                             {/* Bucket Selector */}
                                             {selectedPlanId && (
                                                 <div className="space-y-1">
@@ -842,20 +1476,28 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
 
                     <div className="space-y-1">
                         <label className="text-xs font-bold text-slate-500 uppercase">Oportunidad Relacionada</label>
-                        <select
-                            {...register('opportunity_id')}
+                        <OpportunityCombobox
+                            value={watch('opportunity_id')}
+                            accountId={watch('account_id')}
+                            onChange={(val) => setValue('opportunity_id', val, { shouldDirty: true, shouldValidate: true })}
                             disabled={!!initialOpportunityId}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all disabled:bg-slate-100 disabled:text-slate-500"
-                        >
-                            <option value="">
-                                {!opportunities || opportunities.length === 0
-                                    ? 'No hay oportunidades disponibles'
-                                    : 'Seleccione una oportunidad...'}
-                            </option>
-                            {opportunities?.map((opp: any) => (
-                                <option key={opp.id} value={opp.id}>{opp.nombre}</option>
-                            ))}
-                        </select>
+                        />
+                    </div>
+
+                    <div className="space-y-1">
+                        <label className="text-xs font-bold text-slate-500 uppercase">Cuenta Relacionada</label>
+                        <AccountCombobox
+                            value={watch('account_id')}
+                            onChange={(val) => {
+                                setValue('account_id', val, { shouldDirty: true, shouldValidate: true });
+                                // Logic: Clear opportunity if the new account doesn't match the current opportunity's account
+                                const currentOppId = getValues('opportunity_id');
+                                if (currentOppId && opportunityAccountRef.current !== val) {
+                                    setValue('opportunity_id', '', { shouldDirty: true });
+                                    opportunityAccountRef.current = null;
+                                }
+                            }}
+                        />
                     </div>
 
                     <div className="space-y-1">

@@ -2,13 +2,15 @@
 
 import React from "react";
 import { useDashboardFilters } from "@/lib/hooks/useDashboardFilters";
-import { Filter, X, ChevronDown } from "lucide-react";
+import { Filter, X, Search } from "lucide-react";
+import { FilterCombobox } from "@/components/dashboard/FilterCombobox";
 
 export interface DashboardFilterState {
     canal_id: string | null;
     advisor_id: string | null;
     subclasificacion_id: number | null;
     nivel_premium: 'ORO' | 'PLATA' | 'BRONCE' | null;
+    search_query: string | null;
 }
 
 interface DashboardFiltersProps {
@@ -31,11 +33,12 @@ export function DashboardFilters({ filters, onFilterChange }: DashboardFiltersPr
             canal_id: null,
             advisor_id: null,
             subclasificacion_id: null,
-            nivel_premium: null
+            nivel_premium: null,
+            search_query: null
         });
     };
 
-    const hasFilters = filters.canal_id || filters.advisor_id || filters.subclasificacion_id || filters.nivel_premium;
+    const hasFilters = filters.canal_id || filters.advisor_id || filters.subclasificacion_id || filters.nivel_premium || filters.search_query;
 
     return (
         <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 mb-6 flex flex-wrap items-center gap-6 transition-all duration-300">
@@ -49,64 +52,62 @@ export function DashboardFilters({ filters, onFilterChange }: DashboardFiltersPr
 
             {/* Filters Container */}
             <div className="flex flex-wrap gap-3 items-center">
+                {/* Search */}
+                <div className="relative group w-[200px] shrink-0">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <Search className="h-4 w-4 text-slate-400" />
+                    </div>
+                    <input
+                        type="text"
+                        placeholder="Buscar cliente, op..."
+                        className="w-full h-10 pl-9 pr-3 py-2 bg-slate-50 border border-slate-100 rounded-xl text-sm font-medium text-slate-600 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#254153]/10 transition-all"
+                        value={filters.search_query || ""}
+                        onChange={(e) => handleChange("search_query", e.target.value)}
+                    />
+                </div>
+
                 {/* Canal de Venta */}
                 <div className="relative group w-[200px] shrink-0">
-                    <select
-                        className="w-full h-10 pl-3 pr-10 py-2 bg-slate-50 border border-slate-100 rounded-xl text-sm font-medium text-slate-600 appearance-none cursor-pointer hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#254153]/10 transition-all truncate"
-                        value={filters.canal_id || ""}
-                        onChange={(e) => handleChange("canal_id", e.target.value)}
-                    >
-                        <option value="">Canal de Venta</option>
-                        {options.channels.map((c) => (
-                            <option key={c.id} value={c.id}>{c.nombre}</option>
-                        ))}
-                    </select>
-                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none group-hover:text-slate-500 transition-colors" />
+                    <FilterCombobox
+                        options={options.channels.map(c => ({ value: c.id, label: c.nombre }))}
+                        value={filters.canal_id}
+                        onChange={(value) => handleChange("canal_id", value as string | null)}
+                        placeholder="Canal de Venta"
+                    />
                 </div>
 
                 {/* Asesor */}
                 <div className="relative group w-[200px] shrink-0">
-                    <select
-                        className="w-full h-10 pl-3 pr-10 py-2 bg-slate-50 border border-slate-100 rounded-xl text-sm font-medium text-slate-600 appearance-none cursor-pointer hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#254153]/10 transition-all truncate"
-                        value={filters.advisor_id || ""}
-                        onChange={(e) => handleChange("advisor_id", e.target.value)}
-                    >
-                        <option value="">Asesor / Vendedor</option>
-                        {options.advisors.map((a) => (
-                            <option key={a.id} value={a.id}>{a.full_name}</option>
-                        ))}
-                    </select>
-                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none group-hover:text-slate-500 transition-colors" />
+                    <FilterCombobox
+                        options={options.advisors.map(a => ({ value: a.id, label: a.full_name }))}
+                        value={filters.advisor_id}
+                        onChange={(value) => handleChange("advisor_id", value as string | null)}
+                        placeholder="Asesor / Vendedor"
+                    />
                 </div>
 
                 {/* Tipo de Cliente */}
                 <div className="relative group w-[200px] shrink-0">
-                    <select
-                        className="w-full h-10 pl-3 pr-10 py-2 bg-slate-50 border border-slate-100 rounded-xl text-sm font-medium text-slate-600 appearance-none cursor-pointer hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#254153]/10 transition-all truncate"
-                        value={filters.subclasificacion_id || ""}
-                        onChange={(e) => handleChange("subclasificacion_id", e.target.value ? Number(e.target.value) : "")}
-                    >
-                        <option value="">Tipo de Cliente</option>
-                        {options.clientTypes.map((t) => (
-                            <option key={t.id} value={t.id}>{t.nombre}</option>
-                        ))}
-                    </select>
-                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none group-hover:text-slate-500 transition-colors" />
+                    <FilterCombobox
+                        options={options.clientTypes.map(t => ({ value: t.id, label: t.nombre }))}
+                        value={filters.subclasificacion_id}
+                        onChange={(value) => handleChange("subclasificacion_id", value ? Number(value) : null)}
+                        placeholder="Tipo de Cliente"
+                    />
                 </div>
 
                 {/* Nivel Premium */}
                 <div className="relative group w-[200px] shrink-0">
-                    <select
-                        className="w-full h-10 pl-3 pr-10 py-2 bg-slate-50 border border-slate-100 rounded-xl text-sm font-medium text-slate-600 appearance-none cursor-pointer hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#254153]/10 transition-all truncate"
-                        value={filters.nivel_premium || ""}
-                        onChange={(e) => handleChange("nivel_premium", e.target.value)}
-                    >
-                        <option value="">Nivel Premium ✨</option>
-                        <option value="ORO">Oro 🏆</option>
-                        <option value="PLATA">Plata 🥈</option>
-                        <option value="BRONCE">Bronce 🥉</option>
-                    </select>
-                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none group-hover:text-slate-500 transition-colors" />
+                    <FilterCombobox
+                        options={[
+                            { value: 'ORO', label: 'Oro 🏆' },
+                            { value: 'PLATA', label: 'Plata 🥈' },
+                            { value: 'BRONCE', label: 'Bronce 🥉' }
+                        ]}
+                        value={filters.nivel_premium}
+                        onChange={(value) => handleChange("nivel_premium", value as 'ORO' | 'PLATA' | 'BRONCE' | null)}
+                        placeholder="Nivel Premium ✨"
+                    />
                 </div>
 
                 {hasFilters && (

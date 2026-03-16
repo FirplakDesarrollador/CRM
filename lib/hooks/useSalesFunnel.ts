@@ -1,7 +1,6 @@
-import { useLiveQuery } from "dexie-react-hooks";
-import { db, LocalOportunidad, LocalFase } from "@/lib/db";
+import { useState, useCallback, useEffect } from "react";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
-import { useState, useCallback } from "react";
+import { supabase } from "@/lib/supabase";
 
 export interface FunnelStage {
     fase_id: number;
@@ -17,107 +16,79 @@ export interface SalesFunnelFilters {
     advisor_id: string | null;
     subclasificacion_id: number | null;
     nivel_premium: 'ORO' | 'PLATA' | 'BRONCE' | null;
+    search_query?: string | null;
 }
 
 export function useSalesFunnel(filters?: SalesFunnelFilters) {
     const { user, role, isLoading: userLoading } = useCurrentUser();
+    const [data, setData] = useState<FunnelStage[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState<Error | null>(null);
     const [revision, setRevision] = useState(0);
 
-    const mutate = useCallback(async () => {
+    const mutate = useCallback(() => {
         setRevision(prev => prev + 1);
     }, []);
 
-    const data = useLiveQuery(async () => {
-        if (!user) return [];
-        // Depend on revision to trigger re-run
-        const _rev = revision;
+    useEffect(() => {
+        let isMounted = true;
 
-        // 1. Get all relevant phases
-        const allPhases = await db.phases.toArray();
-        const phases = allPhases.filter(f => f.is_active);
-        const sortedPhases = phases.sort((a, b) => a.orden - b.orden);
-
-        // 2. Get all relevant opportunities (Open only)
-        const allOpps = await db.opportunities.toArray();
-        const allAccounts = await db.accounts.toArray();
-        const accountMap = new Map(allAccounts.map(a => [a.id, a]));
-
-        const filteredOpps = allOpps.filter(o => {
-            // Filter deleted
-            if (o.is_deleted) return false;
-            // Permission filtering
-            let hasPermission = false;
-            if (role === 'ADMIN') hasPermission = true;
-            else if (role === 'COORDINADOR') {
-                const isOwner = o.owner_user_id === user.id;
-                // For now assume all synced opps for coordinator are visible due to RLS sync logic
-                hasPermission = true;
-            } else if (role === 'VENDEDOR') {
-                hasPermission = o.owner_user_id === user.id;
-            } else {
-                hasPermission = o.owner_user_id === user.id;
+        async function fetchData() {
+            if (!user) {
+                if (isMounted) {
+                    setData([]);
+                    setIsLoading(false);
+                }
+                return;
             }
 
-            if (!hasPermission) return false;
+            try {
+                if (isMounted) setIsLoading(true);
 
-            // Opportunity Status
-            if (o.estado_id !== 1 && o.estado_id !== undefined && o.estado_id !== null) return false;
+                const { data: rpcData, error: rpcError } = await supabase.rpc('get_sales_funnel_data', {
+                    p_user_id: user.id,
+                    p_user_role: role || 'USER',
+                    p_canal_id: filters?.canal_id || null,
+                    p_advisor_id: filters?.advisor_id || null,
+                    p_subclasificacion_id: filters?.subclasificacion_id || null,
+                    p_nivel_premium: filters?.nivel_premium || null,
+                    p_search_query: filters?.search_query || null
+                });
 
-            // Applied Filters
-            if (filters?.advisor_id && o.owner_user_id !== filters.advisor_id) return false;
+                if (rpcError) throw rpcError;
 
-            if (filters?.canal_id || filters?.subclasificacion_id || filters?.nivel_premium) {
-                const acc = accountMap.get(o.account_id);
-                if (!acc) return false;
-                if (filters.canal_id && acc.canal_id !== filters.canal_id) return false;
-                if (filters.subclasificacion_id && acc.subclasificacion_id !== filters.subclasificacion_id) return false;
-                if (filters.nivel_premium && acc.nivel_premium !== filters.nivel_premium) return false;
+                if (isMounted) {
+                    setData(rpcData as FunnelStage[] || []);
+                    setError(null);
+                }
+            } catch (err: any) {
+                console.error("Error fetching sales funnel data from RPC:", err);
+                if (isMounted) setError(err);
+            } finally {
+                if (isMounted) setIsLoading(false);
             }
+        }
 
-            return true;
-        });
+        fetchData();
 
-        // 3. Aggregate
-        const aggregated = sortedPhases.map(phase => {
-            const stageOpps = filteredOpps.filter(o => o.fase_id === phase.id);
-            const total_amount = stageOpps.reduce((acc, curr) => acc + (Number(curr.amount || curr.valor) || 0), 0);
-
-            // Assign colors based on order
-            let color = '#64748b';
-
-            // Custom colors from implementation plan (approximate to screenshot)
-            // 1: Indigo/Blue
-            // 2: Violet/Purple
-            // 3: Pink
-            // 4: Rose/Red
-            // 5: Orange/Amber
-            // 6: Emerald/Green
-            switch (phase.orden) {
-                case 1: color = '#6366f1'; break;
-                case 2: color = '#8b5cf6'; break;
-                case 3: color = '#ec4899'; break;
-                case 4: color = '#f43f5e'; break;
-                case 5: color = '#f97316'; break;
-                case 6: color = '#10b981'; break;
-            }
-
-            return {
-                fase_id: phase.id,
-                fase_nombre: phase.nombre,
-                orden: phase.orden,
-                total_amount,
-                count: stageOpps.length,
-                color
-            };
-        });
-
-        return aggregated;
-    }, [user, role, filters?.canal_id, filters?.advisor_id, filters?.subclasificacion_id, filters?.nivel_premium, revision]);
+        return () => {
+            isMounted = false;
+        };
+    }, [
+        user?.id,
+        role,
+        filters?.canal_id,
+        filters?.advisor_id,
+        filters?.subclasificacion_id,
+        filters?.nivel_premium,
+        filters?.search_query,
+        revision
+    ]);
 
     return {
-        data: data || [],
-        isLoading: userLoading || data === undefined,
-        error: null,
+        data,
+        isLoading: userLoading || isLoading,
+        error,
         mutate
     };
 }

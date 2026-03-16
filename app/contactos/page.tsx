@@ -123,7 +123,7 @@ export default function ContactsPage() {
 
     // --- VIEW: Global List ---
     return (
-        <div className="p-6 max-w-7xl mx-auto space-y-8">
+        <div data-testid="contacts-page" className="p-6 max-w-7xl mx-auto space-y-8">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
                 <div className="flex items-center gap-4">
                     <div className="bg-[#254153] p-3 rounded-2xl text-white shadow-lg shadow-[#254153]/20">
@@ -137,6 +137,7 @@ export default function ContactsPage() {
                     </div>
                 </div>
                 <button
+                    data-testid="contacts-create-button"
                     onClick={() => setIsCreating(true)}
                     className="w-full md:w-auto px-6 py-3 bg-[#254153] text-white rounded-xl hover:bg-[#1a2f3d] flex items-center justify-center gap-2 shadow-xl shadow-[#254153]/10 transition-all hover:scale-[1.02] active:scale-[0.98] font-bold"
                 >
@@ -150,6 +151,7 @@ export default function ContactsPage() {
                 <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400 group-focus-within:text-[#254153] transition-colors" size={20} />
                 <input
                     type="text"
+                    data-testid="contacts-search"
                     placeholder="Buscar por nombre, cuenta o email..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
@@ -159,7 +161,7 @@ export default function ContactsPage() {
 
             {/* List */}
             {(!filteredContacts || filteredContacts.length === 0) ? (
-                <div className="flex flex-col items-center justify-center py-20 text-slate-400 bg-slate-50/50 dark:bg-slate-800/20 rounded-3xl border-2 border-dashed border-slate-200 dark:border-slate-800">
+                <div data-testid="contacts-empty-state" className="flex flex-col items-center justify-center py-20 text-slate-400 bg-slate-50/50 dark:bg-slate-800/20 rounded-3xl border-2 border-dashed border-slate-200 dark:border-slate-800">
                     <div className="bg-white dark:bg-slate-800 p-4 rounded-full shadow-sm mb-4">
                         <User size={40} className="text-slate-300" />
                     </div>
@@ -169,14 +171,15 @@ export default function ContactsPage() {
                     <p className="text-sm">{searchTerm ? "Prueba con otros términos de búsqueda" : "Empieza por añadir tu primer contacto"}</p>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div data-testid="contacts-list" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {filteredContacts.map(contact => {
                         const accountName = accountMap.get(contact.account_id);
                         return (
-                            <div key={contact.id} className="group bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm hover:shadow-xl hover:shadow-slate-200/50 dark:hover:shadow-none transition-all duration-300 relative flex flex-col h-full">
+                            <div key={contact.id} data-testid={`contacts-row-${contact.id}`} className="group bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-sm hover:shadow-xl hover:shadow-slate-200/50 dark:hover:shadow-none transition-all duration-300 relative flex flex-col h-full">
                                 {/* Actions Overlay */}
                                 <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
                                     <button
+                                        data-testid={`contacts-edit-${contact.id}`}
                                         onClick={() => handleEdit(contact)}
                                         className="p-2 text-blue-600 bg-blue-50 hover:bg-blue-600 hover:text-white rounded-xl transition-all shadow-sm"
                                         title="Editar"
@@ -184,6 +187,7 @@ export default function ContactsPage() {
                                         <Edit2 size={16} />
                                     </button>
                                     <button
+                                        data-testid={`contacts-delete-${contact.id}`}
                                         onClick={() => setContactToDelete(contact)}
                                         className="p-2 text-red-600 bg-red-50 hover:bg-red-600 hover:text-white rounded-xl transition-all shadow-sm"
                                         title="Eliminar"

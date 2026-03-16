@@ -12,9 +12,9 @@ export async function POST(request: NextRequest) {
 
         console.log('[API Planner Tasks] Body:', { planId, bucketId, title, checklistCount: checklist?.length, assigneesCount: assigneeIds?.length });
 
-        if (!planId || !bucketId || !title) {
+        if (!title) {
             return NextResponse.json(
-                { error: 'planId, bucketId, and title are required' },
+                { error: 'title is required' },
                 { status: 400 }
             );
         }
@@ -71,10 +71,65 @@ export async function POST(request: NextRequest) {
             // Continue with just the provided assignees
         }
 
+        let finalPlanId = planId;
+        let finalBucketId = bucketId;
+
+        // Auto-discover "CRM Ventas" plan and "Proyecto CRM" bucket if not provided
+        if (!finalPlanId || !finalBucketId) {
+            try {
+                console.log('[API Planner Tasks] Missing planId or bucketId. Attempting auto-discovery...');
+                // 1. Get Group
+                const groupRes = await fetch('https://graph.microsoft.com/v1.0/groups?$filter=displayName eq \'CRM Ventas\'', {
+                    headers: { 'Authorization': `Bearer ${tokens.access_token}` }
+                });
+                if (groupRes.ok) {
+                    const groupData = await groupRes.json();
+                    if (groupData.value && groupData.value.length > 0) {
+                        const groupId = groupData.value[0].id;
+
+                        // 2. Get Plan
+                        if (!finalPlanId) {
+                            const plansRes = await fetch(`https://graph.microsoft.com/v1.0/groups/${groupId}/planner/plans`, {
+                                headers: { 'Authorization': `Bearer ${tokens.access_token}` }
+                            });
+                            if (plansRes.ok) {
+                                const plansData = await plansRes.json();
+                                const crmPlan = plansData.value?.find((p: any) => p.title === 'CRM Ventas') || plansData.value?.[0];
+                                if (crmPlan) finalPlanId = crmPlan.id;
+                            }
+                        }
+
+                        // 3. Get Bucket
+                        if (finalPlanId && !finalBucketId) {
+                            const bucketRes = await fetch(`https://graph.microsoft.com/v1.0/planner/plans/${finalPlanId}/buckets`, {
+                                headers: { 'Authorization': `Bearer ${tokens.access_token}` }
+                            });
+                            if (bucketRes.ok) {
+                                const bucketData = await bucketRes.json();
+                                const crmBucket = bucketData.value?.find((b: any) => b.name === 'Proyecto CRM') || bucketData.value?.[0];
+                                if (crmBucket) finalBucketId = crmBucket.id;
+                            }
+                        }
+                    }
+                }
+
+                console.log('[API Planner Tasks] Auto-discovery results:', { finalPlanId, finalBucketId });
+            } catch (autoDiscErr) {
+                console.error('[API Planner Tasks] Error during auto-discovery:', autoDiscErr);
+            }
+        }
+
+        if (!finalPlanId || !finalBucketId) {
+            return NextResponse.json(
+                { error: 'Could not auto-discover or missing planId/bucketId.' },
+                { status: 400 }
+            );
+        }
+
         console.log('[API Planner Tasks] Creating task in Planner with assignees:', finalAssigneeIds.length);
         const task = await createPlannerTask(tokens.access_token, {
-            planId,
-            bucketId,
+            planId: finalPlanId,
+            bucketId: finalBucketId,
             title,
             dueDateTime,
             assigneeIds: finalAssigneeIds,

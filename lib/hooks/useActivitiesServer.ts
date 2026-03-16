@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { syncEngine } from '@/lib/sync';
+import { db } from '@/lib/db';
 
 export type ActivityServer = {
     id: string;
@@ -54,6 +55,65 @@ export function useActivitiesServer({ pageSize = 20, opportunityId }: UseActivit
             const currentPage = isLoadMore ? page + 1 : 1;
             const from = (currentPage - 1) * pageSize;
             const to = from + pageSize - 1;
+
+            if (!navigator.onLine) {
+                console.log("[useActivitiesServer] Device is offline. Falling back to local Dexie database...");
+                let localActivities = await db.activities.toArray();
+                const allOpps = await db.opportunities.toArray();
+                const oppMap = new Map(allOpps.map(o => [o.id, o]));
+
+                if (opportunityId) {
+                    localActivities = localActivities.filter(a => a.opportunity_id === opportunityId);
+                } else {
+                    localActivities = localActivities.filter(a => a.created_by === currentUserId || a.updated_by === currentUserId);
+                }
+
+                if (searchTerm) {
+                    const lowerSearch = searchTerm.toLowerCase();
+                    localActivities = localActivities.filter(a => a.asunto.toLowerCase().includes(lowerSearch));
+                }
+
+                if (typeFilter !== 'all') {
+                    localActivities = localActivities.filter(a => a.tipo_actividad === typeFilter);
+                }
+
+                if (!showCompleted) {
+                    localActivities = localActivities.filter(a => !a.is_completed);
+                }
+
+                localActivities.sort((a, b) => {
+                    const dateA = new Date(a.fecha_inicio).getTime();
+                    const dateB = new Date(b.fecha_inicio).getTime();
+                    return dateB - dateA;
+                });
+
+                const totalCount = localActivities.length;
+                const paginatedActivities = localActivities.slice(from, to + 1);
+
+                const flattenedResults = paginatedActivities.map(item => {
+                    const opp = item.opportunity_id ? oppMap.get(item.opportunity_id) : null;
+                    return {
+                        ...item,
+                        opportunity: opp ? { nombre: opp.nombre } : null,
+                        user: { full_name: 'Usuario Offline' }
+                    };
+                });
+
+                if (isLoadMore) {
+                    setData(prev => {
+                        const existingIds = new Set(prev.map(i => i.id));
+                        const newItems = flattenedResults.filter(i => !existingIds.has(i.id));
+                        return [...prev, ...newItems] as any;
+                    });
+                    setPage(currentPage);
+                } else {
+                    setData(flattenedResults as any);
+                    setPage(1);
+                }
+                setCount(totalCount);
+                setHasMore(from + paginatedActivities.length < totalCount);
+                return;
+            }
 
             let query = supabase
                 .from('CRM_Actividades')

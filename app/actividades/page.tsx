@@ -3,10 +3,13 @@
 import { Suspense, useEffect, useState, useMemo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useActivities, LocalActivity } from '@/lib/hooks/useActivities';
-import { useOpportunitiesServer } from '@/lib/hooks/useOpportunitiesServer';
+import { useDebounce } from '@/lib/hooks/useDebounce';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
 import { syncEngine } from '@/lib/sync';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
+import { hasPermission } from '@/lib/permissions';
+import { useUsers } from '@/lib/hooks/useUsers';
 import {
     Calendar as CalendarIcon,
     ChevronLeft,
@@ -19,22 +22,37 @@ import {
     CalendarDays,
     ListTodo,
     Filter,
-    Loader2
+    Loader2,
+    Search,
+    Zap,
+    Briefcase,
+    User as UserIcon,
+    X,
+    CheckCircle
 } from 'lucide-react';
 
 import { cn } from '@/components/ui/utils';
 import { CreateActivityModal } from '@/components/activities/CreateActivityModal';
+import { SearchableSelect } from '@/components/ui/SearchableSelect';
 
 function ActivitiesContent() {
     const searchParams = useSearchParams();
     const router = useRouter();
     const { activities, createActivity, updateActivity, toggleComplete } = useActivities();
-    const { data: opportunities, setUserFilter } = useOpportunitiesServer({ pageSize: 100 });
+    const { user, role } = useCurrentUser();
+    const canViewAll = hasPermission(role, 'view_all_activities');
 
-    // Load all opportunities for the dropdown, not just user's own
-    useEffect(() => {
-        setUserFilter('all');
-    }, [setUserFilter]);
+    // Load collaborators to know which opportunities the user collaborates in
+    const userCollaborations = useLiveQuery(
+        () => user ? db.opportunityCollaborators.where('usuario_id').equals(user.id).toArray() : [],
+        [user]
+    ) || [];
+
+    const collaborativeOppIds = useMemo(() => {
+        return new Set(userCollaborations.map(c => c.oportunidad_id));
+    }, [userCollaborations]);
+
+
 
     // Catalogs
     const classifications = useLiveQuery(() => db.activityClassifications.toArray(), []) || [];
@@ -54,9 +72,24 @@ function ActivitiesContent() {
     const [selectedActivity, setSelectedActivity] = useState<LocalActivity | null>(null);
 
     // Filters
+    const [searchQuery, setSearchQuery] = useState("");
+    const debouncedSearchQuery = useDebounce(searchQuery, 400);
     const [filterType, setFilterType] = useState<string>("");
     const [filterClassification, setFilterClassification] = useState<string>("");
     const [filterSubclassification, setFilterSubclassification] = useState<string>("");
+
+    // NEW Filters
+    const [filterUser, setFilterUser] = useState<string>("");
+    const [filterStatus, setFilterStatus] = useState<"all" | "completed" | "pending">("all");
+    const [filterChannel, setFilterChannel] = useState<string>("");
+
+    // Performance: Display limit for pagination
+    const [displayLimit, setDisplayLimit] = useState(20);
+
+    // Hook data for filters
+    const { users } = useUsers();
+    const accounts = useLiveQuery(() => db.accounts.toArray()) || [];
+    const opportunities = useLiveQuery(() => db.opportunities.toArray()) || [];
 
     // Deep linking: detect id in URL and open edit modal
     useEffect(() => {
@@ -80,6 +113,11 @@ function ActivitiesContent() {
     useEffect(() => {
         setFilterSubclassification("");
     }, [filterClassification]);
+
+    // Reset display limit when search or filters change to improve perceived performance
+    useEffect(() => {
+        setDisplayLimit(20);
+    }, [debouncedSearchQuery, filterType, filterClassification, filterSubclassification, filterUser, filterStatus, filterChannel]);
 
     const handlePrev = () => {
         const newDate = new Date(selectedDate);
@@ -117,13 +155,67 @@ function ActivitiesContent() {
     // PERF FIX: Apply global filters once, then derive views from the result
     const globallyFilteredActivities = useMemo(() => {
         if (!activities) return [];
+        const lowerQuery = debouncedSearchQuery.toLowerCase();
+
+        // Optimize lookup for search matches (O(1) instead of O(N))
+        const oppMap = new Map(opportunities.map(o => [o.id, o]));
+        const accMap = new Map(accounts.map(a => [a.id, a]));
+
         return activities.filter(act => {
+            // Apply role-based filtering: VENDEDOR and similar roles only see their own activities or those of opportunities they collaborate on
+            if (!canViewAll && user) {
+                const isOwner = act.user_id === user.id;
+                const isCollaborator = act.opportunity_id ? collaborativeOppIds.has(act.opportunity_id) : false;
+                if (!isOwner && !isCollaborator) {
+                    return false;
+                }
+            }
+
+            // 1. Search Query (Extended to Accounts and Opportunities)
+            if (debouncedSearchQuery) {
+                const opp = act.opportunity_id ? oppMap.get(act.opportunity_id) : null;
+                const acc = act.account_id ? accMap.get(act.account_id) : (opp?.account_id ? accMap.get(opp.account_id) : null);
+
+                const searchMatch =
+                    act.asunto?.toLowerCase().includes(lowerQuery) ||
+                    act.descripcion?.toLowerCase().includes(lowerQuery) ||
+                    acc?.nombre?.toLowerCase().includes(lowerQuery) ||
+                    opp?.nombre?.toLowerCase().includes(lowerQuery);
+
+                if (!searchMatch) return false;
+            }
+
+            // 2. Type/Classification/Subclassification
             if (filterType && act.tipo_actividad !== filterType) return false;
             if (filterClassification && act.clasificacion_id != filterClassification) return false;
             if (filterSubclassification && act.subclasificacion_id != filterSubclassification) return false;
+
+            // 3. NEW: Vendedor (Usuario)
+            if (filterUser && act.user_id !== filterUser) return false;
+
+            // 4. NEW: Estado
+            if (filterStatus === "completed" && !act.is_completed) return false;
+            if (filterStatus === "pending" && act.is_completed) return false;
+
+            // 7. NEW: Canal
+            if (filterChannel) {
+                let actChannel = "";
+                if (act.opportunity_id) {
+                    const opp = oppMap.get(act.opportunity_id);
+                    if (opp?.account_id) {
+                        const acc = accMap.get(opp.account_id);
+                        actChannel = acc?.canal_id || "";
+                    }
+                } else if (act.account_id) {
+                    const acc = accMap.get(act.account_id);
+                    actChannel = acc?.canal_id || "";
+                }
+                if (actChannel !== filterChannel) return false;
+            }
+
             return true;
         });
-    }, [activities, filterType, filterClassification, filterSubclassification]);
+    }, [activities, filterType, filterClassification, filterSubclassification, debouncedSearchQuery, canViewAll, user, collaborativeOppIds, filterUser, filterStatus, filterChannel, opportunities, accounts]);
 
     // For agenda/all views: filter by selected date + sort
     const filteredActivities = useMemo(() => {
@@ -154,7 +246,7 @@ function ActivitiesContent() {
     }, [globallyFilteredActivities]);
 
     return (
-        <div className="flex flex-col h-[calc(100vh-2rem)] space-y-4">
+        <div data-testid="activities-page" className="flex flex-col space-y-4 pb-20">
             {/* Header */}
             <header className="flex flex-col md:flex-row md:items-center justify-between p-6 bg-white rounded-2xl border border-slate-200 shadow-sm gap-4">
                 <div className="flex items-center gap-4">
@@ -168,77 +260,173 @@ function ActivitiesContent() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                    {/* Filters */}
-                    <div className="flex bg-slate-50 p-1 rounded-xl border border-slate-100 items-center">
-                        <div className="px-2 text-slate-400">
-                            {classifications.length === 0 ? <Loader2 className="w-4 h-4 animate-spin" /> : <Filter className="w-4 h-4" />}
-                        </div>
-                        <select
-                            value={filterType}
-                            onChange={(e) => setFilterType(e.target.value)}
-                            className="bg-transparent text-sm font-semibold text-slate-600 focus:outline-none p-1.5"
-                        >
-                            <option value="">Tipos...</option>
-                            <option value="EVENTO">Eventos</option>
-                            <option value="TAREA">Tareas</option>
-                        </select>
-
-                        {(filterType || availableClassifications.length > 0) && (
-                            <>
-                                <div className="w-px h-4 bg-slate-200 mx-1"></div>
-                                <select
-                                    value={filterClassification}
-                                    onChange={(e) => setFilterClassification(e.target.value)}
-                                    className="bg-transparent text-sm font-semibold text-slate-600 focus:outline-none p-1.5 max-w-[150px] truncate"
-                                >
-                                    <option value="">Clasificación...</option>
-                                    {availableClassifications.map(c => (
-                                        <option key={c.id} value={String(c.id)}>{c.nombre}</option>
-                                    ))}
-                                </select>
-                            </>
-                        )}
-
-                        {availableSubclassifications.length > 0 && (
-                            <>
-                                <div className="w-px h-4 bg-slate-200 mx-1"></div>
-                                <select
-                                    value={filterSubclassification}
-                                    onChange={(e) => setFilterSubclassification(e.target.value)}
-                                    className="bg-transparent text-sm font-semibold text-slate-600 focus:outline-none p-1.5 max-w-[150px] truncate"
-                                >
-                                    <option value="">Subclasificación...</option>
-                                    {availableSubclassifications.map(s => (
-                                        <option key={s.id} value={String(s.id)}>{s.nombre}</option>
-                                    ))}
-                                </select>
-                            </>
-                        )}
-
-                        {(filterType || filterClassification || filterSubclassification) && (
-                            <button
-                                onClick={() => { setFilterType(""); setFilterClassification(""); setFilterSubclassification(""); }}
-                                className="ml-2 px-2 text-xs text-red-500 hover:text-red-700 font-bold"
-                            >
-                                &times;
-                            </button>
-                        )}
+                    {/* Search Input */}
+                    <div className="relative">
+                        <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                            type="text"
+                            data-testid="activities-search"
+                            placeholder="Buscar por cliente, oportunidad o asunto..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            className="bg-white border text-slate-600 border-slate-200 font-semibold text-sm rounded-xl pl-9 pr-4 py-2 w-full sm:w-64 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                        />
                     </div>
 
+                    {/* Advanced Filters: Only visible in "All" view */}
+                    {view === 'all' && (
+                        <>
+                            {/* Vendedor (Admin/Coordinador only) */}
+                            {(role === 'ADMIN' || role === 'COORDINADOR') && (
+                                <div className="flex bg-slate-50 p-1 rounded-xl border border-slate-100 items-center">
+                                    <div className="px-2 text-slate-400">
+                                        <UserIcon className="w-4 h-4" />
+                                    </div>
+                                    <SearchableSelect
+                                        options={users.map(u => ({ label: u.full_name || '', value: u.id }))}
+                                        value={filterUser}
+                                        onChange={(val) => setFilterUser(val)}
+                                        placeholder="Vendedor..."
+                                        triggerClassName="w-full sm:w-40"
+                                    />
+                                </div>
+                            )}
+
+                            {/* Channel Selector */}
+                            <div className="flex bg-slate-50 p-1 rounded-xl border border-slate-100 items-center">
+                                <div className="px-2 text-slate-400">
+                                    <Zap className="w-4 h-4" />
+                                </div>
+                                <select
+                                    value={filterChannel}
+                                    onChange={(e) => setFilterChannel(e.target.value)}
+                                    className="bg-transparent text-sm font-semibold text-slate-600 focus:outline-none p-1.5"
+                                >
+                                    <option value="">Canal...</option>
+                                    <option value="OBRAS_NAC">Obras Nac</option>
+                                    <option value="OBRAS_INT">Obras Int</option>
+                                    <option value="DIST_NAC">Dist Nac</option>
+                                    <option value="DIST_INT">Dist Int</option>
+                                    <option value="PROPIO">Propio</option>
+                                </select>
+                            </div>
+
+                            {/* Status Toggle */}
+                            <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
+                                <button
+                                    onClick={() => setFilterStatus("all")}
+                                    className={cn(
+                                        "px-3 py-1.5 rounded-lg text-[10px] uppercase font-black transition-all",
+                                        filterStatus === "all" ? "bg-white text-blue-600 shadow-sm" : "text-slate-400 hover:text-slate-600"
+                                    )}
+                                >
+                                    Todos
+                                </button>
+                                <button
+                                    onClick={() => setFilterStatus("pending")}
+                                    className={cn(
+                                        "px-3 py-1.5 rounded-lg text-[10px] uppercase font-black transition-all",
+                                        filterStatus === "pending" ? "bg-white text-amber-600 shadow-sm" : "text-slate-400 hover:text-slate-600"
+                                    )}
+                                >
+                                    Pendientes
+                                </button>
+                                <button
+                                    onClick={() => setFilterStatus("completed")}
+                                    className={cn(
+                                        "px-3 py-1.5 rounded-lg text-[10px] uppercase font-black transition-all",
+                                        filterStatus === "completed" ? "bg-white text-emerald-600 shadow-sm" : "text-slate-400 hover:text-slate-600"
+                                    )}
+                                >
+                                    Hechas
+                                </button>
+                            </div>
+
+                            {/* Type/Clasif Pill */}
+                            <div className="flex bg-slate-50 p-1 rounded-xl border border-slate-100 items-center">
+                                <div className="px-2 text-slate-400">
+                                    {classifications.length === 0 ? <Loader2 className="w-4 h-4 animate-spin" /> : <Filter className="w-4 h-4" />}
+                                </div>
+                                <select
+                                    data-testid="activities-filter-type"
+                                    value={filterType}
+                                    onChange={(e) => setFilterType(e.target.value)}
+                                    className="bg-transparent text-sm font-semibold text-slate-600 focus:outline-none p-1.5"
+                                >
+                                    <option value="">Tipo...</option>
+                                    <option value="EVENTO">Evento</option>
+                                    <option value="TAREA">Tarea</option>
+                                </select>
+
+                                {(filterType || availableClassifications.length > 0) && (
+                                    <>
+                                        <div className="w-px h-4 bg-slate-200 mx-1"></div>
+                                        <select
+                                            value={filterClassification}
+                                            onChange={(e) => setFilterClassification(e.target.value)}
+                                            className="bg-transparent text-sm font-semibold text-slate-600 focus:outline-none p-1.5 max-w-[150px] truncate"
+                                        >
+                                            <option value="">Clasificación...</option>
+                                            {availableClassifications.map(c => (
+                                                <option key={c.id} value={String(c.id)}>{c.nombre}</option>
+                                            ))}
+                                        </select>
+                                    </>
+                                )}
+
+                                {availableSubclassifications.length > 0 && (
+                                    <>
+                                        <div className="w-px h-4 bg-slate-200 mx-1"></div>
+                                        <select
+                                            value={filterSubclassification}
+                                            onChange={(e) => setFilterSubclassification(e.target.value)}
+                                            className="bg-transparent text-sm font-semibold text-slate-600 focus:outline-none p-1.5 max-w-[150px] truncate"
+                                        >
+                                            <option value="">Subclasificación...</option>
+                                            {availableSubclassifications.map(s => (
+                                                <option key={s.id} value={String(s.id)}>{s.nombre}</option>
+                                            ))}
+                                        </select>
+                                    </>
+                                )}
+                            </div>
+                        </>
+                    )}
+
+                    {/* Clear Filters Button */}
+                    {(searchQuery || filterType || filterClassification || filterSubclassification || filterUser || filterStatus !== "all" || filterChannel) && (
+                        <button
+                            onClick={() => {
+                                setSearchQuery("");
+                                setFilterType("");
+                                setFilterClassification("");
+                                setFilterSubclassification("");
+                                setFilterUser("");
+                                setFilterStatus("all");
+                                setFilterChannel("");
+                            }}
+                            className="p-2 text-slate-400 hover:text-red-500 transition-colors"
+                            title="Limpiar filtros"
+                        >
+                            <X size={20} />
+                        </button>
+                    )}
+
                     <button
+                        data-testid="activities-create-button"
                         onClick={() => setIsModalOpen(true)}
                         className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-blue-200 transition-all hover:scale-105 active:scale-95 ml-auto md:ml-0"
                     >
                         <Plus className="w-5 h-5" />
-                        <span className="hidden sm:inline">Nueva Actividad</span>
+                        <span className="hidden lg:inline">Nueva Actividad</span>
                     </button>
                 </div>
             </header>
 
-            <div className="flex flex-1 gap-6 overflow-hidden">
+            <div className="flex flex-1 gap-6">
                 {/* Agenda / Month View */}
-                <div className="flex-1 bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm flex flex-col">
-                    <div className="p-6 border-b border-slate-100 flex items-center justify-between overflow-x-auto gap-4">
+                <div className="flex-1 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col">
+                    <div className="p-6 border-b border-slate-100 flex items-center justify-between gap-4">
                         <div className="flex items-center gap-6">
                             <button
                                 onClick={() => setView(view === 'agenda' ? 'month' : 'agenda')}
@@ -253,6 +441,7 @@ function ActivitiesContent() {
                             {view !== 'all' && (
                                 <div className="flex items-center gap-4 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-100">
                                     <button
+                                        data-testid="activities-page-prev"
                                         onClick={handlePrev}
                                         className="p-1 hover:bg-white hover:shadow-sm rounded-lg text-slate-400 hover:text-blue-600 transition-all"
                                     >
@@ -265,6 +454,7 @@ function ActivitiesContent() {
                                         }
                                     </span>
                                     <button
+                                        data-testid="activities-page-next"
                                         onClick={handleNext}
                                         className="p-1 hover:bg-white hover:shadow-sm rounded-lg text-slate-400 hover:text-blue-600 transition-all"
                                     >
@@ -304,12 +494,14 @@ function ActivitiesContent() {
                         </div>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto p-6 bg-slate-50/50">
+                    <div className="flex-1 p-6 bg-slate-50/50">
                         {view === 'agenda' || view === 'all' ? (
                             filteredActivities && filteredActivities.length > 0 ? (
-                                <div className="space-y-4">
-                                    {filteredActivities.map((act) => {
+                                <div data-testid="activities-list" className="space-y-4">
+                                    {filteredActivities.slice(0, displayLimit).map((act) => {
                                         const opp = opportunities?.find(o => o.id === act.opportunity_id);
+                                        const searchAcc = act.account_id ? accounts.find(a => a.id === act.account_id) : (opp?.account_id ? accounts.find(a => a.id === opp.account_id) : null);
+
                                         const today = new Date();
                                         today.setHours(0, 0, 0, 0);
                                         // Safety check
@@ -414,22 +606,41 @@ function ActivitiesContent() {
                                                             <p className="text-sm text-slate-500 mt-2 line-clamp-2">{act.descripcion}</p>
                                                         )}
 
-                                                        {(opp || act.opportunity_id) && (
-                                                            <div className="mt-4 flex items-center gap-3">
-                                                                <div className="flex items-center gap-1.5 bg-blue-50 text-blue-600 px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider">
+                                                        <div className="mt-4 flex flex-wrap gap-3">
+                                                            {searchAcc && (
+                                                                <div className="flex items-center gap-1.5 bg-slate-50 text-slate-600 px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider border border-slate-100">
                                                                     <Building2 className="w-3 h-3" />
-                                                                    {opp?.nombre || 'Oportunidad'}
+                                                                    {searchAcc.nombre}
                                                                 </div>
-                                                            </div>
-                                                        )}
+                                                            )}
+                                                            {opp && (
+                                                                <div className="flex items-center gap-1.5 bg-blue-50 text-blue-600 px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider border border-blue-100">
+                                                                    <Briefcase className="w-3 h-3" />
+                                                                    {opp.nombre}
+                                                                </div>
+                                                            )}
+                                                        </div>
                                                     </div>
                                                 </div>
                                             </div>
                                         );
                                     })}
+
+                                    {/* Load More Button */}
+                                    {filteredActivities.length > displayLimit && (
+                                        <div className="flex justify-center pt-8 pb-12">
+                                            <button
+                                                onClick={() => setDisplayLimit(prev => prev + 20)}
+                                                className="bg-white border-2 border-slate-100 text-slate-600 hover:text-blue-600 hover:border-blue-200 px-8 py-3 rounded-2xl font-black text-sm transition-all shadow-sm flex items-center gap-2 group"
+                                            >
+                                                Cargar más actividades
+                                                <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                             ) : (
-                                <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-4">
+                                <div data-testid="activities-empty-state" className="flex flex-col items-center justify-center h-full text-slate-400 gap-4">
                                     <div className="bg-slate-50 p-6 rounded-full">
                                         <Clock className="w-12 h-12 text-slate-200" />
                                     </div>
@@ -646,7 +857,6 @@ function ActivitiesContent() {
                         setIsModalOpen(false);
                         setSelectedActivity(null);
                     }}
-                    opportunities={opportunities}
                     initialData={selectedActivity}
                 />
             )}
