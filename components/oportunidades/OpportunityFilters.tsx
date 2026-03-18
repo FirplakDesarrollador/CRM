@@ -51,7 +51,7 @@ export function OpportunityFilters({ onFilterChange }: OpportunityFiltersProps) 
     const [selectedSubclass, setSelectedSubclass] = useState<number | null>(null);
     const [selectedSegment, setSelectedSegment] = useState<number | null>(null);
     const [selectedPhase, setSelectedPhase] = useState<number | null>(null);
-    const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+    const [statusFilter, setStatusFilter] = useState<StatusFilter>('open');
 
     const [loadingMetadata, setLoadingMetadata] = useState(true);
 
@@ -199,11 +199,11 @@ export function OpportunityFilters({ onFilterChange }: OpportunityFiltersProps) 
         setSelectedSubclass(null);
         setSelectedSegment(null);
         setSelectedPhase(null);
-        setStatusFilter('all');
-        onFilterChange({ channelId: null, subclassificationId: null, segmentId: null, phaseId: null, statusFilter: 'all' });
+        setStatusFilter('open');
+        onFilterChange({ channelId: null, subclassificationId: null, segmentId: null, phaseId: null, statusFilter: 'open' });
     };
 
-    const hasActiveFilters = selectedChannel || selectedSubclass || selectedSegment || selectedPhase || statusFilter !== 'all';
+    const hasActiveFilters = selectedChannel || selectedSubclass || selectedSegment || selectedPhase || statusFilter !== 'open';
 
     if (loadingMetadata) return <div className="text-xs text-slate-400">Cargando filtros...</div>;
 
