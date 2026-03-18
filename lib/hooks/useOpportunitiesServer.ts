@@ -44,7 +44,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
     const [subclassificationFilter, setSubclassificationFilter] = useState<number | null>(null);
     const [segmentFilter, setSegmentFilter] = useState<number | null>(null);
     const [phaseFilter, setPhaseFilter] = useState<number | null>(null);
-    const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+    const [statusFilter, setStatusFilter] = useState<StatusFilter>('open');
     const [accountIdFilter, setAccountIdFilter] = useState<string | null>(null);
 
     // PERF FIX: Phase IDs only stored in refs (not state) to avoid triggering refetches
@@ -348,6 +348,29 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
     useEffect(() => {
         fetchOpportunities(false);
     }, [fetchOpportunities]);
+
+    // OPTIMISTIC UI: Listen to broadcasted local mutations
+    useEffect(() => {
+        const handleOptimisticUpdate = (e: any) => {
+            const { entityType, entityId, updates } = e.detail;
+            if (entityType === 'CRM_Oportunidades') {
+                setData(prev => {
+                    const exists = prev.find(item => item.id === entityId);
+                    if (exists) {
+                        return prev.map(item => item.id === entityId ? { ...item, ...updates } : item);
+                    }
+                    // For inserts (new opportunities), prepend them
+                    // We mock missing joined data until the next real server fetch
+                    return [{ id: entityId, ...updates }, ...prev] as any[];
+                });
+            }
+        };
+        
+        if (typeof window !== 'undefined') {
+            window.addEventListener('crm-optimistic-update', handleOptimisticUpdate);
+            return () => window.removeEventListener('crm-optimistic-update', handleOptimisticUpdate);
+        }
+    }, []);
 
     const loadMore = () => {
         if (!loading && hasMore) {

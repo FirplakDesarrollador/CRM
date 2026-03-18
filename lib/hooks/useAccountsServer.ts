@@ -252,6 +252,27 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
         fetchAccounts(false);
     }, [fetchAccounts]);
 
+    // OPTIMISTIC UI: Listen to broadcasted local mutations for instant UI updates
+    useEffect(() => {
+        const handleOptimisticUpdate = (e: any) => {
+            const { entityType, entityId, updates } = e.detail;
+            if (entityType === 'CRM_Cuentas') {
+                setData(prev => {
+                    const exists = prev.find(item => item.id === entityId);
+                    if (exists) {
+                        return prev.map(item => item.id === entityId ? { ...item, ...updates } : item);
+                    }
+                    return [{ id: entityId, ...updates }, ...prev] as any[];
+                });
+            }
+        };
+        
+        if (typeof window !== 'undefined') {
+            window.addEventListener('crm-optimistic-update', handleOptimisticUpdate);
+            return () => window.removeEventListener('crm-optimistic-update', handleOptimisticUpdate);
+        }
+    }, []);
+
     const loadMore = () => {
         if (!loading && hasMore) {
             fetchAccounts(true);

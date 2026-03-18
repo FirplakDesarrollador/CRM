@@ -7,7 +7,7 @@ import { DetailHeader } from "@/components/ui/DetailHeader";
 import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { db, LocalQuote } from "@/lib/db";
-import { Save, AlertTriangle, Truck, Receipt, Calendar, Search, Plus, Trash2, Loader2, Package } from "lucide-react";
+import { Save, AlertTriangle, Truck, Receipt, Calendar, Search, Plus, Trash2, Loader2, Package, Download } from "lucide-react";
 import { cn } from "@/components/ui/utils";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useConfig } from "@/lib/hooks/useConfig";
@@ -22,6 +22,16 @@ export default function QuoteEditorPage() {
 
     const [activeSection, setActiveSection] = useState<'items' | 'sap'>('items');
 
+    const handleDownloadPdf = async () => {
+        if (!quote) return;
+        const opp = await db.opportunities.get(quote.opportunity_id);
+        const acc = opp ? await db.accounts.get(opp.account_id) : null;
+        const quoteItems = await db.quoteItems.where('cotizacion_id').equals(quoteId).toArray();
+        
+        const { generateQuotePdf } = await import("@/lib/pdfGenerator");
+        await generateQuotePdf(quote, quoteItems, acc, opp);
+    };
+
     if (!quote) return <div className="p-8">Cargando cotización...</div>;
 
     return (
@@ -31,6 +41,9 @@ export default function QuoteEditorPage() {
                 subtitle="Borrador"
                 status={quote.status}
                 backHref={`/oportunidades/${oppId}`}
+                actions={[
+                    { label: "Descargar PDF", icon: Download, onClick: handleDownloadPdf }
+                ]}
             />
 
             <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
