@@ -4,6 +4,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, LocalContact } from "@/lib/db";
 import { useState, useMemo, useEffect } from "react";
 import { ContactForm } from "@/components/contactos/ContactForm";
+import Link from "next/link";
 import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
 import { Edit2, Trash2, Phone, Mail, User, Building, Search, Plus, CloudUpload, Loader2 } from "lucide-react";
 import { useContacts } from "@/lib/hooks/useContacts";
@@ -109,12 +110,23 @@ export default function ContactsPage() {
     if (selectedAccountIdForCreate || editingContact) {
         return (
             <div className="p-6 max-w-2xl mx-auto">
-                <button
-                    onClick={resetView}
-                    className="mb-4 text-sm text-blue-600 hover:underline"
-                >
-                    ← Volver al listado
-                </button>
+                <div className="flex justify-between items-center mb-4">
+                    <button
+                        onClick={resetView}
+                        className="text-sm text-blue-600 hover:underline"
+                    >
+                        ← Volver al listado
+                    </button>
+                    {(editingContact || selectedAccountIdForCreate) && (
+                        <Link
+                            href={`/cuentas?id=${editingContact ? editingContact.account_id : selectedAccountIdForCreate}`}
+                            className="flex items-center gap-1.5 text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1.5 rounded-full border border-blue-100 hover:bg-blue-100 transition-colors"
+                        >
+                            <Building size={12} />
+                            Ver Cuenta: {editingContact?.account_name || accountMap.get(editingContact?.account_id || selectedAccountIdForCreate) || 'Cuenta'}
+                        </Link>
+                    )}
+                </div>
                 <ContactForm
                     accountId={editingContact ? editingContact.account_id : selectedAccountIdForCreate}
                     existingContact={editingContact}
@@ -215,6 +227,15 @@ export default function ContactsPage() {
                                     </div>
 
                                     <div className="flex flex-col gap-4 flex-1">
+                                        {/* Account Link */}
+                                        <Link
+                                            href={`/cuentas?id=${contact.account_id}`}
+                                            className="flex items-center gap-1.5 text-sm text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 px-2.5 py-1.5 rounded-xl w-fit hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-all cursor-pointer group/acc border border-blue-100 dark:border-blue-800 shadow-sm"
+                                        >
+                                            <Building size={14} className="group-hover/acc:scale-110 transition-transform" />
+                                            <span className="font-bold truncate max-w-[200px]">{accountName || 'Cuenta Desconocida'}</span>
+                                        </Link>
+
                                         <div className="space-y-1 pr-16 relative">
                                             <div className="flex items-center gap-2 flex-wrap">
                                                 <span className="font-extrabold text-xl text-slate-900 dark:text-slate-50 leading-tight">
@@ -234,12 +255,6 @@ export default function ContactsPage() {
                                             <div className="flex items-center gap-1.5 text-slate-500 dark:text-slate-400 font-bold text-xs uppercase tracking-tight">
                                                 <span className="truncate">{contact.cargo || "Sin cargo registrado"}</span>
                                             </div>
-                                        </div>
-
-                                        {/* Account Link */}
-                                        <div className="flex items-center gap-1.5 text-sm text-blue-600 dark:text-blue-400 mb-2 bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded w-fit">
-                                            <Building size={14} />
-                                            <span className="font-medium truncate max-w-[200px]">{accountName || 'Cuenta Desconocida'}</span>
                                         </div>
 
                                         {/* Contact Details */}
