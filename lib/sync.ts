@@ -1318,109 +1318,131 @@ export class SyncEngine {
             }
 
             // Pull Quotes (CRM_Cotizaciones) - SMART MERGE
-            // PERF OPTIMIZATION: Disable full sync.
-            /*
-            const { data: quotes, error: quotesError } = await supabase
-                .from('CRM_Cotizaciones')
-                .select('*')
-                .eq('is_deleted', false);
-    
-            if (quotesError) throw quotesError;
-    
-            if (quotes && quotes.length > 0) {
-                const pendingQuoteIds = new Set(
-                    (await db.outbox
-                        .where('entity_type').equals('CRM_Cotizaciones')
-                        .and(item => item.status === 'PENDING' || item.status === 'SYNCING')
-                        .toArray()
-                    ).map(item => item.entity_id)
-                );
-    
-                let mergedCount = 0;
-                let skippedCount = 0;
-    
-                for (const q of quotes) {
-                    if (pendingQuoteIds.has(q.id)) {
-                        skippedCount++;
-                        continue;
-                    }
-    
-                    await db.quotes.put({
-                        id: q.id,
-                        opportunity_id: q.opportunity_id,
-                        numero_cotizacion: q.numero_cotizacion,
-                        total_amount: q.total_amount,
-                        currency_id: q.currency_id,
-                        status: q.status,
-                        is_winner: q.is_winner,
-                        es_pedido: q.es_pedido,
-                        fecha_minima_requerida: q.fecha_minima_requerida,
-                        fecha_facturacion: q.fecha_facturacion,
-                        tipo_facturacion: q.tipo_facturacion,
-                        notas_sap: q.notas_sap,
-                        formas_pago: q.formas_pago,
-                        facturacion_electronica: q.facturacion_electronica,
-                        orden_compra: q.orden_compra,
-                        incoterm: q.incoterm,
-                        created_by: q.created_by,
-                        updated_by: q.updated_by,
-                        updated_at: q.updated_at
-                    });
-                    mergedCount++;
+            try {
+                let quotesQuery = supabase
+                    .from('CRM_Cotizaciones')
+                    .select('*')
+                    .eq('is_deleted', false);
+        
+                if (lastSync) {
+                    quotesQuery = quotesQuery.gte('updated_at', lastSync);
+                } else {
+                    quotesQuery = quotesQuery.order('updated_at', { ascending: false }).limit(3000);
                 }
-                console.log(`[Sync] Merged ${mergedCount} quotes (${skippedCount} with pending changes skipped).`);
-            }
-            */
 
-            // PERF OPTIMIZATION: Disable full sync for CRM_CotizacionItems
-            // Quote items are loaded on-demand when viewing a specific quote
-            // This dramatically improves app startup time
-            /*
-            const { data: quoteItems, error: itemsError } = await supabase
-                .from('CRM_CotizacionItems')
-                .select('*')
-                .eq('is_deleted', false);
-    
-            if (itemsError) throw itemsError;
-    
-            if (quoteItems && quoteItems.length > 0) {
-                const pendingItemIds = new Set(
-                    (await db.outbox
-                        .where('entity_type').equals('CRM_CotizacionItems')
-                        .and(item => item.status === 'PENDING' || item.status === 'SYNCING')
-                        .toArray()
-                    ).map(item => item.entity_id)
-                );
-    
-                let mergedCount = 0;
-                let skippedCount = 0;
-    
-                for (const i of quoteItems) {
-                    if (pendingItemIds.has(i.id)) {
-                        skippedCount++;
-                        continue;
+                const { data: quotes, error: quotesError } = await quotesQuery;
+        
+                if (quotesError) throw quotesError;
+        
+                if (quotes && quotes.length > 0) {
+                    const pendingQuoteIds = new Set(
+                        (await db.outbox
+                            .where('entity_type').equals('CRM_Cotizaciones')
+                            .and(item => item.status === 'PENDING' || item.status === 'SYNCING')
+                            .toArray()
+                        ).map(item => item.entity_id)
+                    );
+        
+                    let mergedCount = 0;
+                    let skippedCount = 0;
+                    const quotesToPut = [];
+        
+                    for (const q of quotes) {
+                        if (pendingQuoteIds.has(q.id)) {
+                            skippedCount++;
+                            continue;
+                        }
+        
+                        quotesToPut.push({
+                            id: q.id,
+                            opportunity_id: q.opportunity_id,
+                            numero_cotizacion: q.numero_cotizacion,
+                            total_amount: q.total_amount,
+                            currency_id: q.currency_id,
+                            status: q.status,
+                            is_winner: q.is_winner,
+                            es_pedido: q.es_pedido,
+                            fecha_minima_requerida: q.fecha_minima_requerida,
+                            fecha_facturacion: q.fecha_facturacion,
+                            tipo_facturacion: q.tipo_facturacion,
+                            notas_sap: q.notas_sap,
+                            formas_pago: q.formas_pago,
+                            facturacion_electronica: q.facturacion_electronica,
+                            orden_compra: q.orden_compra,
+                            incoterm: q.incoterm,
+                            segmento_id: q.segmento_id,
+                            created_by: q.created_by,
+                            updated_by: q.updated_by,
+                            updated_at: q.updated_at
+                        });
+                        mergedCount++;
                     }
-    
-                    await db.quoteItems.put({
-                        id: i.id,
-                        cotizacion_id: i.cotizacion_id,
-                        producto_id: i.producto_id,
-                        cantidad: i.cantidad,
-                        precio_unitario: i.precio_unitario,
-                        discount_pct: i.discount_pct,
-                        max_discount_pct: i.max_discount_pct,
-                        final_unit_price: i.final_unit_price,
-                        subtotal: i.subtotal,
-                        descripcion_linea: i.descripcion_linea,
-                        created_by: i.created_by,
-                        updated_by: i.updated_by,
-                        updated_at: i.updated_at
-                    });
-                    mergedCount++;
+                    if (quotesToPut.length > 0) await db.quotes.bulkPut(quotesToPut);
+                    console.log(`[Sync] Merged ${mergedCount} quotes (${skippedCount} with pending changes skipped).`);
                 }
-                console.log(`[Sync] Merged ${mergedCount} quote items (${skippedCount} with pending changes skipped).`);
+            } catch (qErr: any) {
+                console.error('[Sync] Failed to pull quotes:', qErr.message);
             }
-            */
+
+            // Pull Quote Items (CRM_CotizacionItems)
+            try {
+                let itemsQuery = supabase
+                    .from('CRM_CotizacionItems')
+                    .select('*')
+                    .eq('is_deleted', false);
+        
+                if (lastSync) {
+                    itemsQuery = itemsQuery.gte('updated_at', lastSync);
+                } else {
+                    itemsQuery = itemsQuery.order('updated_at', { ascending: false }).limit(5000);
+                }
+
+                const { data: quoteItems, error: itemsError } = await itemsQuery;
+        
+                if (itemsError) throw itemsError;
+        
+                if (quoteItems && quoteItems.length > 0) {
+                    const pendingItemIds = new Set(
+                        (await db.outbox
+                            .where('entity_type').equals('CRM_CotizacionItems')
+                            .and(item => item.status === 'PENDING' || item.status === 'SYNCING')
+                            .toArray()
+                        ).map(item => item.entity_id)
+                    );
+        
+                    let mergedCount = 0;
+                    let skippedCount = 0;
+                    const itemsToPut = [];
+        
+                    for (const i of quoteItems) {
+                        if (pendingItemIds.has(i.id)) {
+                            skippedCount++;
+                            continue;
+                        }
+        
+                        itemsToPut.push({
+                            id: i.id,
+                            cotizacion_id: i.cotizacion_id,
+                            producto_id: i.producto_id,
+                            cantidad: i.cantidad,
+                            precio_unitario: i.precio_unitario,
+                            discount_pct: i.discount_pct,
+                            max_discount_pct: i.max_discount_pct,
+                            final_unit_price: i.final_unit_price,
+                            subtotal: i.subtotal,
+                            descripcion_linea: i.descripcion_linea,
+                            created_by: i.created_by,
+                            updated_by: i.updated_by,
+                            updated_at: i.updated_at
+                        });
+                        mergedCount++;
+                    }
+                    if (itemsToPut.length > 0) await db.quoteItems.bulkPut(itemsToPut);
+                    console.log(`[Sync] Merged ${mergedCount} quote items (${skippedCount} with pending changes skipped).`);
+                }
+            } catch (qiErr: any) {
+                console.error('[Sync] Failed to pull quote items:', qiErr.message);
+            }
 
             // Pull Activities (CRM_Actividades) - SMART MERGE with incremental sync
             // Re-enabled to ensure activities persist across browser sessions
@@ -1534,6 +1556,13 @@ export class SyncEngine {
 
             await db.outbox.bulkAdd(items);
             this.updatePendingCount();
+
+            // Despachar evento global para Optimistic UI
+            if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('crm-optimistic-update', {
+                    detail: { entityType: entityTable, entityId, updates: changes }
+                }));
+            }
 
             // Trigger Sync in background (non-blocking for immediate local UI feedback)
             this.triggerSync().catch(err => {
