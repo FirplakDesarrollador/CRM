@@ -7,10 +7,11 @@ import { DetailHeader } from "@/components/ui/DetailHeader";
 import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { db, LocalQuote } from "@/lib/db";
-import { Save, AlertTriangle, Truck, Receipt, Calendar, Search, Plus, Trash2, Loader2, Package, Download } from "lucide-react";
+import { Save, AlertTriangle, Truck, Receipt, Calendar, Search, Plus, Trash2, Loader2, Package, Download, Send } from "lucide-react";
 import { cn } from "@/components/ui/utils";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useConfig } from "@/lib/hooks/useConfig";
+import { SendQuoteModal } from "@/components/quotes/SendQuoteModal";
 
 export default function QuoteEditorPage() {
     const params = useParams();
@@ -21,6 +22,15 @@ export default function QuoteEditorPage() {
     const quote = quotes?.find(q => q.id === quoteId);
 
     const [activeSection, setActiveSection] = useState<'items' | 'sap'>('items');
+    const [isSendModalOpen, setIsSendModalOpen] = useState(false);
+
+    const sendContext = useLiveQuery(async () => {
+        if (!quote) return null;
+        const opp = await db.opportunities.get(quote.opportunity_id);
+        const acc = opp ? await db.accounts.get(opp.account_id) : null;
+        const qItems = await db.quoteItems.where('cotizacion_id').equals(quoteId).toArray();
+        return { opp, acc, qItems };
+    }, [quote]);
 
     const handleDownloadPdf = async () => {
         if (!quote) return;
@@ -42,6 +52,7 @@ export default function QuoteEditorPage() {
                 status={quote.status}
                 backHref={`/oportunidades/${oppId}`}
                 actions={[
+                    { label: "Enviar Cotización", icon: Send, onClick: () => setIsSendModalOpen(true) },
                     { label: "Descargar PDF", icon: Download, onClick: handleDownloadPdf }
                 ]}
             />
@@ -104,6 +115,16 @@ export default function QuoteEditorPage() {
                     />
                 )}
 
+                {isSendModalOpen && sendContext && (
+                    <SendQuoteModal 
+                        isOpen={isSendModalOpen} 
+                        onClose={() => setIsSendModalOpen(false)} 
+                        quote={quote} 
+                        account={sendContext.acc} 
+                        opportunity={sendContext.opp} 
+                        quoteItems={sendContext.qItems} 
+                    />
+                )}
             </div>
         </div>
     );

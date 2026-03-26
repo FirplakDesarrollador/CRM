@@ -3,7 +3,7 @@ import autoTable from 'jspdf-autotable';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 
-export async function generateQuotePdf(quote: any, items: any[], account: any, opportunity: any) {
+export async function generateQuotePdf(quote: any, items: any[], account: any, opportunity: any, save = true): Promise<string | void> {
     const doc = new jsPDF('p', 'pt', 'a4');
     
     // Configuración de fuentes y colores
@@ -264,5 +264,14 @@ export async function generateQuotePdf(quote: any, items: any[], account: any, o
     doc.setFont('helvetica', 'normal');
     doc.text(`Autopista Sur, Calle 29 No. 41-15 Itagui – Antioquia. PBX 444 17 71. Fax. 281 76 07. www.firplak.com`, pageWidth / 2, finalY, { align: 'center' });
 
-    doc.save(`Cotizacion_${quote.numero_cotizacion || 'Borrador'}.pdf`);
+    if (save) {
+        doc.save(`Cotizacion_${quote.numero_cotizacion || 'Borrador'}.pdf`);
+    } else {
+        // En lugar de guardar, retornamos el contenido en base64 (string)
+        // doc.output('datauristring') devuelve algo como "data:application/pdf;filename=generated.pdf;base64,JVBER..."
+        // Para Graph API, generalmente enviamos solo el base64 sin el prefijo "data:..."
+        const dataUriString = doc.output('datauristring');
+        const base64Content = dataUriString.split(',')[1];
+        return base64Content;
+    }
 }

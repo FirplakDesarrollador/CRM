@@ -3,15 +3,15 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/components/ui/utils";
-import { Home, Briefcase, Building2, Calendar, Menu } from "lucide-react";
+import { Home, Briefcase, Building2, Calendar, Settings } from "lucide-react";
 
 // Mobile shows fewer items directly, others in "Menu"
 const MOBILE_NAV = [
     { label: "Inicio", href: "/", icon: Home },
-    { label: "Opport.", href: "/oportunidades", icon: Briefcase },
+    { label: "Oportunidades", href: "/oportunidades", icon: Briefcase },
     { label: "Cuentas", href: "/cuentas", icon: Building2 },
-    { label: "Agenda", href: "/actividades", icon: Calendar },
-    { label: "Menú", href: "/configuracion", icon: Menu }, // Simplified for now
+    { label: "Actividades", href: "/actividades", icon: Calendar },
+    { label: "Configuración", href: "/configuracion", icon: Settings }, // Matches sidebar label
 ];
 
 export function MobileNav() {
