@@ -1,12 +1,13 @@
 "use client";
 
 import React, { useState } from 'react';
-import { useForm } from 'react-hook-form';
+import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useUsers, User, CreateUserData, UpdateUserData } from '@/lib/hooks/useUsers';
 import { UserRole } from '@/lib/hooks/useCurrentUser';
 import { X, Loader2 } from 'lucide-react';
+import { MultiSelect } from '@/components/ui/MultiSelect';
 
 const userSchema = z.object({
     email: z.string().email('Email inválido'),
@@ -14,6 +15,7 @@ const userSchema = z.object({
     full_name: z.string().min(2, 'El nombre debe tener al menos 2 caracteres'),
     role: z.enum(['ADMIN', 'COORDINADOR', 'VENDEDOR']),
     allowed_modules: z.array(z.string()).optional(),
+    coordinadores: z.array(z.string()).optional(),
 });
 
 type UserFormData = z.infer<typeof userSchema>;
@@ -35,7 +37,7 @@ const AVAILABLE_MODULES = [
 ];
 
 export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
-    const { createUser, updateUser } = useUsers();
+    const { createUser, updateUser, users } = useUsers();
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -43,6 +45,7 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
         register,
         handleSubmit,
         watch,
+        control,
         formState: { errors },
     } = useForm<UserFormData>({
         resolver: zodResolver(userSchema),
@@ -51,11 +54,20 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
             full_name: user.full_name || '',
             role: user.role,
             allowed_modules: user.allowed_modules || [],
+            coordinadores: user.coordinadores || [],
         } : {
             role: 'VENDEDOR',
             allowed_modules: [],
+            coordinadores: [],
         },
     });
+
+    const coordinatorOptions = users
+        .filter(u => (u.role === 'COORDINADOR' || u.role === 'ADMIN') && u.id !== user?.id)
+        .map(u => ({
+            label: u.full_name || u.email,
+            value: u.id,
+        }));
 
     const onSubmit = async (data: UserFormData) => {
         setIsSubmitting(true);
@@ -68,6 +80,7 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
                     full_name: data.full_name,
                     role: data.role,
                     allowed_modules: data.allowed_modules,
+                    coordinadores: data.coordinadores,
                 };
 
                 const result = await updateUser(user.id, updates);
@@ -89,6 +102,7 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
                     full_name: data.full_name,
                     role: data.role,
                     allowed_modules: data.allowed_modules,
+                    coordinadores: data.coordinadores,
                 };
 
                 const result = await createUser(createData);
@@ -109,9 +123,9 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
 
     return (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-lg shadow-xl max-w-md w-full">
+            <div className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
                 {/* Header */}
-                <div className="flex items-center justify-between p-6 border-b border-slate-200">
+                <div className="flex items-center justify-between p-6 border-b border-slate-200 sticky top-0 bg-white z-10">
                     <h2 className="text-xl font-bold text-slate-900">
                         {user ? 'Editar Usuario' : 'Crear Nuevo Usuario'}
                     </h2>
@@ -203,6 +217,31 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
                         </p>
                     </div>
 
+                    {/* Coordinators */}
+                    <div>
+                        <label className="block text-sm font-semibold text-slate-700 mb-2">
+                            Coordinadores Asignados
+                            <span className="block text-xs font-normal text-slate-500 mt-0.5">
+                                Usuarios que podrán ver la información de este usuario.
+                            </span>
+                        </label>
+                        <Controller
+                            control={control}
+                            name="coordinadores"
+                            render={({ field }) => (
+                                <MultiSelect
+                                    options={coordinatorOptions}
+                                    selected={field.value || []}
+                                    onChange={field.onChange}
+                                    placeholder="Seleccionar coordinadores..."
+                                />
+                            )}
+                        />
+                        <p className="mt-1 text-xs text-slate-500">
+                            Solo se muestran usuarios con rol COORDINADOR o ADMIN.
+                        </p>
+                    </div>
+
                     {/* Access Control */}
                     {watch('role') !== 'ADMIN' && (
                         <div>
@@ -229,7 +268,7 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
                     )}
 
                     {/* Actions */}
-                    <div className="flex gap-3 pt-4">
+                    <div className="flex gap-3 pt-4 sticky bottom-0 bg-white pb-2">
                         <button
                             type="button"
                             onClick={onClose}

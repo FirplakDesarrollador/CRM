@@ -1,0 +1,304 @@
+﻿
+> crm-app@1.0.7.3 build
+> next build --webpack
+
+node.exe : ÔÜá 
+Warning: Next.js 
+inferred your 
+workspace root, but 
+it may not be 
+correct.
+En línea: 1 
+Carácter: 1
++ & "C:\Program Files
+\nodejs/node.exe" 
+"C:\Program 
+Files\nodejs/node_mo 
+...
++ ~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~
+    + CategoryInfo   
+           : NotSpe  
+  cified: (ÔÜá War   
+ ning: Ne...not b    
+e correct.:Strin    
+g) [], RemoteExc    
+eption
+    + FullyQualified 
+   ErrorId : Native  
+  CommandError
+ 
+ We detected 
+multiple lockfiles 
+and selected the 
+directory of C:\Users
+\analista2.desarrollo
+\package-lock.json 
+as the root 
+directory.
+ To silence this 
+warning, set `outputF
+ileTracingRoot` in 
+your Next.js config, 
+or consider removing 
+one of the lockfiles 
+if it's not needed.
+   See https://nextjs
+.org/docs/app/api-ref
+erence/config/next-co
+nfig-js/output#caveat
+s for more 
+information.
+ Detected additional 
+lockfiles: 
+   * C:\Users\analist
+a2.desarrollo\Desktop
+\proyectos\CrmA\CRM\p
+ackage-lock.json
+
+Ôû▓ Next.js 16.1.1 (webpack)
+- Environments: .env
+
+  Creating an optimized production build ...
+ Ô£ô (pwa) Compiling for server...
+ Ô£ô (pwa) Compiling for server...
+ Ô£ô (pwa) Compiling for client (static)...
+ Ôùï (pwa) Service worker: C:\Users\analista2.desarrollo\Desktop\proyectos\CrmA\CRM\public\sw.js
+ Ôùï (pwa)   URL: /sw.js
+ Ôùï (pwa)   Scope: /
+Ô£ô Compiled successfully in 5.1s
+  Skipping validation of types
+  Collecting page data using 13 workers ...
+Supabase URL (Browser Client): https://lnphhmowklqiomownurw.supabase.co
+Supabase URL (Browser Client): https://lnphhmowklqiomownurw.supabase.co
+  Generating static pages using 13 workers (0/20) ...
+Supabase URL (Browser Client): https://lnphhmowklqiomownurw.supabase.co
+Supabase URL (Browser Client): https://lnphhmowklqiomownurw.supabase.co
+ÔÜá Unsupported 
+metadata themeColor 
+is configured in 
+metadata export in 
+/_not-found. Please 
+move it to viewport 
+export instead.
+Read more: https://ne
+xtjs.org/docs/app/api
+-reference/functions/
+generate-viewport
+ÔÜá Unsupported 
+metadata viewport is 
+configured in 
+metadata export in 
+/_not-found. Please 
+move it to viewport 
+export instead.
+Read more: https://ne
+xtjs.org/docs/app/api
+-reference/functions/
+generate-viewport
+ÔÜá Unsupported 
+metadata themeColor 
+is configured in 
+metadata export in 
+/. Please move it to 
+viewport export 
+instead.
+Read more: https://ne
+xtjs.org/docs/app/api
+-reference/functions/
+generate-viewport
+ÔÜá Unsupported 
+metadata viewport is 
+configured in 
+metadata export in 
+/. Please move it to 
+viewport export 
+instead.
+Read more: https://ne
+xtjs.org/docs/app/api
+-reference/functions/
+generate-viewport
+ÔÜá Unsupported 
+metadata themeColor 
+is configured in 
+metadata export in 
+/usuarios. Please 
+move it to viewport 
+export instead.
+Read more: https://ne
+xtjs.org/docs/app/api
+-reference/functions/
+generate-viewport
+ÔÜá Unsupported 
+metadata viewport is 
+configured in 
+metadata export in 
+/usuarios. Please 
+move it to viewport 
+export instead.
+Read more: https://ne
+xtjs.org/docs/app/api
+-reference/functions/
+generate-viewport
+ÔÜá Unsupported 
+metadata themeColor 
+is configured in 
+metadata export in 
+/actividades. Please 
+move it to viewport 
+export instead.
+Read more: https://ne
+xtjs.org/docs/app/api
+-reference/functions/
+generate-viewport
+ÔÜá Unsupported 
+metadata viewport is 
+configured in 
+metadata export in 
+/actividades. Please 
+move it to viewport 
+export instead.
+Read more: https://ne
+xtjs.org/docs/app/api
+-reference/functions/
+generate-viewport
+ÔÜá Unsupported 
+metadata themeColor 
+is configured in 
+metadata export in /c
+onfiguracion/metas. 
+Please move it to 
+viewport export 
+instead.
+Read more: https://ne
+xtjs.org/docs/app/api
+-reference/functions/
+generate-viewport
+ÔÜá Unsupported 
+metadata viewport is 
+configured in 
+metadata export in /c
+onfiguracion/metas. 
+Please move it to 
+viewport export 
+instead.
+Read more: https://ne
+xtjs.org/docs/app/api
+-reference/functions/
+generate-viewport
+ÔÜá Unsupported 
+metadata themeColor 
+is configured in 
+metadata export in 
+/configuracion. 
+Please move it to 
+viewport export 
+instead.
+Read more: https://ne
+xtjs.org/docs/app/api
+-reference/functions/
+generate-viewport
+ÔÜá Unsupported 
+metadata viewport is 
+configured in 
+metadata export in 
+/configuracion. 
+Please move it to 
+viewport export 
+instead.
+Read more: https://ne
+xtjs.org/docs/app/api
+-reference/functions/
+generate-viewport
+Ô¿» 
+useSearchParams() 
+should be wrapped in 
+a suspense boundary 
+at page 
+"/configuracion". 
+Read more: https://ne
+xtjs.org/docs/message
+s/missing-suspense-wi
+th-csr-bailout
+    at Q (C:\Users\an
+alista2.desarrollo\De
+sktop\proyectos\CrmA\
+CRM\.next\server\chun
+ks\471.js:2:2111)
+    at o (C:\Users\an
+alista2.desarrollo\De
+sktop\proyectos\CrmA\
+CRM\.next\server\chun
+ks\471.js:11:50282)
+    at gR (C:\Users\a
+nalista2.desarrollo\D
+esktop\proyectos\CrmA
+\CRM\.next\server\app
+\configuracion\page.j
+s:2:337153)
+    at an (C:\Users\a
+nalista2.desarrollo\D
+esktop\proyectos\CrmA
+\CRM\node_modules\nex
+t\dist\compiled\next-
+server\app-page.runti
+me.prod.js:2:84360)
+    at ai (C:\Users\a
+nalista2.desarrollo\D
+esktop\proyectos\CrmA
+\CRM\node_modules\nex
+t\dist\compiled\next-
+server\app-page.runti
+me.prod.js:2:86179)
+    at al (C:\Users\a
+nalista2.desarrollo\D
+esktop\proyectos\CrmA
+\CRM\node_modules\nex
+t\dist\compiled\next-
+server\app-page.runti
+me.prod.js:2:107953)
+    at as (C:\Users\a
+nalista2.desarrollo\D
+esktop\proyectos\CrmA
+\CRM\node_modules\nex
+t\dist\compiled\next-
+server\app-page.runti
+me.prod.js:2:105368)
+    at aa (C:\Users\a
+nalista2.desarrollo\D
+esktop\proyectos\CrmA
+\CRM\node_modules\nex
+t\dist\compiled\next-
+server\app-page.runti
+me.prod.js:2:84712)
+    at ai (C:\Users\a
+nalista2.desarrollo\D
+esktop\proyectos\CrmA
+\CRM\node_modules\nex
+t\dist\compiled\next-
+server\app-page.runti
+me.prod.js:2:86228)
+    at ai (C:\Users\a
+nalista2.desarrollo\D
+esktop\proyectos\CrmA
+\CRM\node_modules\nex
+t\dist\compiled\next-
+server\app-page.runti
+me.prod.js:2:104708)
+Error occurred 
+prerendering page 
+"/configuracion". 
+Read more: https://ne
+xtjs.org/docs/message
+s/prerender-error
+Export encountered 
+an error on 
+/configuracion/page: 
+/configuracion, 
+exiting the build.
+Ô¿» Next.js build 
+worker exited with 
+code: 1 and signal: 
+null

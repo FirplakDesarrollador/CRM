@@ -1,0 +1,2 @@
+numero_articulo,descripcion,lista_base_cop,lista_base_exportaciones,lista_base_obras,distribuidor_pvp_iva,pvp_sin_iva,descuentos_volumen
+EJEMPLO-001,Producto de Prueba,150000,45.50,140000,178500,150000,"{""DIST_NAC"": [{""min_qty"": 10, ""discount_pct"": 5}]}"

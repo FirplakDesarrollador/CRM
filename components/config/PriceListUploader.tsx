@@ -2,8 +2,8 @@
 
 import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Upload, FileSpreadsheet, AlertCircle, CheckCircle, Loader2, X } from 'lucide-react';
-import * as XLSX from 'xlsx';
+import { Upload, FileSpreadsheet, Download, AlertCircle, CheckCircle, Loader2, X } from 'lucide-react';
+
 import { cn } from '@/components/ui/utils';
 
 export function PriceListUploader() {
@@ -27,6 +27,9 @@ export function PriceListUploader() {
 
         reader.onload = async (evt) => {
             try {
+                // Dynamically import xlsx only when needed
+                const XLSX = await import('xlsx');
+
                 const bstr = evt.target?.result;
                 const workbook = XLSX.read(bstr, { type: 'binary' });
                 const sheetName = workbook.SheetNames[0];
@@ -150,6 +153,14 @@ export function PriceListUploader() {
                 <div>
                     <h3 className="font-bold text-slate-900 text-lg">Carga Masiva de Precios</h3>
                     <p className="text-sm text-slate-500">Actualiza la tabla de precios mediante archivo Excel o CSV.</p>
+                    <a
+                        href="/plantilla_precios.csv"
+                        download="plantilla_precios.csv"
+                        className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-600 hover:text-emerald-700 mt-2 bg-emerald-50 px-2.5 py-1.5 rounded-lg border border-emerald-100 transition-all hover:bg-emerald-100"
+                    >
+                        <Download className="w-3 h-3" />
+                        Descargar Plantilla CSV
+                    </a>
                 </div>
             </div>
 

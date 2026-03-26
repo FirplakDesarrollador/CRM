@@ -1,6 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { syncEngine } from '@/lib/sync';
+import { db } from '@/lib/db';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 
 export type AccountServer = {
     id: string;
@@ -11,12 +13,18 @@ export type AccountServer = {
     canal_id: string;
     subclasificacion_id?: number | null;
     es_premium: boolean;
+    nivel_premium?: 'ORO' | 'PLATA' | 'BRONCE' | null;
     telefono: string | null;
+    email: string | null;
     direccion: string | null;
     ciudad: string | null;
     created_by: string | null;
+    owner_user_id?: string | null;
     creator_name?: string | null;
+    owner_name?: string | null;
     updated_at: string;
+    contact_count?: number;
+    _hasPendingSync?: boolean;
 };
 
 type UseAccountsServerProps = {
@@ -30,26 +38,80 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
     const [page, setPage] = useState<number>(1);
     const [hasMore, setHasMore] = useState<boolean>(true);
 
+    const pageRef = useRef(1);
+
     // Filters
     const [searchTerm, setSearchTerm] = useState<string>("");
     const [assignedUserId, setAssignedUserId] = useState<string | null>(null);
 
-    // User Context (needed if we want to filter by permissions, though Accounts are usually global in this CRM)
-    const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-
-    useEffect(() => {
-        syncEngine.getCurrentUser().then(({ data: { user } }) => {
-            if (user) setCurrentUserId(user?.id);
-        });
-    }, []);
+    // User Context
+    const { user, isVendedor } = useCurrentUser();
+    const currentUserId = user?.id;
 
     const fetchAccounts = useCallback(async (isLoadMore = false) => {
         setLoading(true);
         try {
             // Calculate range
-            const currentPage = isLoadMore ? page + 1 : 1;
+            const currentPage = isLoadMore ? pageRef.current + 1 : 1;
             const from = (currentPage - 1) * pageSize;
             const to = from + pageSize - 1;
+
+            if (!navigator.onLine) {
+                console.log("[useAccountsServer] Device is offline. Falling back to local Dexie database...");
+                let localAccounts = await db.accounts.toArray();
+
+                // Role filtering
+                if (isVendedor && currentUserId) {
+                    localAccounts = localAccounts.filter((a: any) => a.owner_user_id === currentUserId);
+                }
+
+                // Filtering
+                if (searchTerm) {
+                    const lowerSearch = searchTerm.toLowerCase();
+                    localAccounts = localAccounts.filter(a =>
+                        a.nombre.toLowerCase().includes(lowerSearch) ||
+                        (a.nit_base && a.nit_base.toLowerCase().includes(lowerSearch))
+                    );
+                }
+
+                if (assignedUserId) {
+                    localAccounts = localAccounts.filter(a => a.owner_user_id === assignedUserId || a.created_by === assignedUserId);
+                }
+
+                // Sorting
+                localAccounts.sort((a, b) => {
+                    const dateA = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+                    const dateB = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+                    return dateB - dateA; // DESC
+                });
+
+                const totalCount = localAccounts.length;
+                const paginatedAccounts = localAccounts.slice(from, to + 1);
+
+                const flattenedResults = paginatedAccounts.map(item => ({
+                    ...item,
+                    owner_name: 'Usuario Offline',
+                    creator_name: 'Usuario Offline',
+                    contact_count: 0
+                }));
+
+                if (isLoadMore) {
+                    setData(prev => {
+                        const existingIds = new Set(prev.map(i => i.id));
+                        const newItems = flattenedResults.filter(i => !existingIds.has(i.id));
+                        return [...prev, ...newItems] as any;
+                    });
+                    setPage(currentPage);
+                    pageRef.current = currentPage;
+                } else {
+                    setData(flattenedResults as any);
+                    setPage(1);
+                    pageRef.current = 1;
+                }
+                setCount(totalCount);
+                setHasMore(from + paginatedAccounts.length < totalCount);
+                return;
+            }
 
             let query = supabase
                 .from('CRM_Cuentas')
@@ -62,19 +124,37 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                     canal_id,
                     subclasificacion_id,
                     es_premium,
+                    nivel_premium,
                     telefono,
+                    email,
                     direccion,
                     ciudad,
+                    departamento_id,
+                    ciudad_id,
                     created_by,
-                    updated_at
-                `, { count: 'exact' });
+                    created_at,
+                    owner_user_id,
+                    updated_at,
+                    contacts:CRM_Contactos(count)
+                `, { count: 'exact' })
+                .eq('is_deleted', false);
+
+            // Role filtering
+            if (isVendedor && currentUserId) {
+                query = query.eq('owner_user_id', currentUserId);
+            }
 
             if (searchTerm) {
-                query = query.or(`nombre.ilike.%${searchTerm}%,nit.ilike.%${searchTerm}%`);
+                query = query.or(`nombre.ilike.%${searchTerm}%,nit_base.ilike.%${searchTerm}%`);
             }
 
             if (assignedUserId) {
-                query = query.eq('created_by', assignedUserId);
+                // Filter by OWNER ID now, not just creator
+                // But let's support both or transition?
+                // Request says "detect the id of the seller who owns".
+                // So filters should probably use owner_user_id.
+                // For backward compat, owner_user_id defaults to created_by, so safe to use owner_user_id.
+                query = query.eq('owner_user_id', assignedUserId);
             }
 
             // Order
@@ -83,16 +163,62 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
             // Paging
             query = query.range(from, to);
 
+            // --- OPTIMISTIC UI: Fetch pending local changes FIRST ---
+            // Doing this before `await query` prevents a race condition where syncEngine 
+            // completes and deletes the outbox record while the Supabase query is inflight,
+            // resulting in stale Supabase data and no pending changes.
+            const pendingChanges = await db.outbox
+                .where('entity_type').equals('CRM_Cuentas')
+                .and(item => item.status === 'PENDING' || item.status === 'SYNCING')
+                .toArray();
+
             const { data: result, error, count: totalCount } = await query;
 
             if (error) throw error;
 
             console.log(`[useAccountsServer] Fetched ${result?.length} accounts. Order: updated_at DESC`, result?.slice(0, 3));
 
-            const flattenedResults = (result as any[]).map(item => ({
-                ...item,
-                creator_name: item.creator?.full_name || null
-            }));
+            // Collect unique owner IDs to resolve names
+            const ownerIds = [...new Set(
+                (result as any[]).map(item => item.owner_user_id || item.created_by).filter(Boolean)
+            )];
+
+            // Fetch owner names from CRM_Usuarios
+            let ownerMap: Record<string, string> = {};
+            if (ownerIds.length > 0) {
+                const { data: usuarios } = await supabase
+                    .from('CRM_Usuarios')
+                    .select('id, full_name')
+                    .in('id', ownerIds);
+                if (usuarios) {
+                    ownerMap = Object.fromEntries(usuarios.map(u => [u.id, u.full_name || '']));
+                }
+            }
+
+            // Group changes by entity_id for successful queries
+            const resultIds = result ? (result as any[]).map(r => r.id) : [];
+            const optimisticUpdates: Record<string, Record<string, any>> = {};
+            for (const change of pendingChanges) {
+                if (resultIds.includes(change.entity_id)) {
+                    if (!optimisticUpdates[change.entity_id]) {
+                        optimisticUpdates[change.entity_id] = {};
+                    }
+                    optimisticUpdates[change.entity_id][change.field_name] = change.new_value;
+                }
+            }
+            // --------------------------------------------------
+
+            const flattenedResults = (result as any[]).map(item => {
+                const pending = optimisticUpdates[item.id];
+                const finalItem = pending ? { ...item, ...pending, _hasPendingSync: true } : item;
+                
+                return {
+                    ...finalItem,
+                    owner_name: ownerMap[finalItem.owner_user_id] || ownerMap[finalItem.created_by] || null,
+                    creator_name: ownerMap[finalItem.created_by] || null,
+                    contact_count: finalItem.contacts?.[0]?.count || 0
+                };
+            });
 
             if (isLoadMore) {
                 setData(prev => {
@@ -101,9 +227,11 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                     return [...prev, ...newItems];
                 });
                 setPage(currentPage);
+                pageRef.current = currentPage;
             } else {
                 setData(flattenedResults as any);
                 setPage(1);
+                pageRef.current = 1;
             }
 
             if (totalCount !== null) {
@@ -116,13 +244,34 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
         } finally {
             setLoading(false);
         }
-    }, [currentUserId, pageSize, searchTerm, assignedUserId, page]);
+    }, [currentUserId, pageSize, searchTerm, assignedUserId, isVendedor]);
 
     // Initial Fetch & Filter Fetch
     useEffect(() => {
         // Reset page when filters change
         fetchAccounts(false);
-    }, [searchTerm, assignedUserId, fetchAccounts]); // Added fetchAccounts here
+    }, [fetchAccounts]);
+
+    // OPTIMISTIC UI: Listen to broadcasted local mutations for instant UI updates
+    useEffect(() => {
+        const handleOptimisticUpdate = (e: any) => {
+            const { entityType, entityId, updates } = e.detail;
+            if (entityType === 'CRM_Cuentas') {
+                setData(prev => {
+                    const exists = prev.find(item => item.id === entityId);
+                    if (exists) {
+                        return prev.map(item => item.id === entityId ? { ...item, ...updates } : item);
+                    }
+                    return [{ id: entityId, ...updates }, ...prev] as any[];
+                });
+            }
+        };
+        
+        if (typeof window !== 'undefined') {
+            window.addEventListener('crm-optimistic-update', handleOptimisticUpdate);
+            return () => window.removeEventListener('crm-optimistic-update', handleOptimisticUpdate);
+        }
+    }, []);
 
     const loadMore = () => {
         if (!loading && hasMore) {
