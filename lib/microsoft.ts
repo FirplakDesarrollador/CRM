@@ -12,12 +12,12 @@ const SCOPES = [
     'openid',
     'profile',
     'email',
+    'User.Read',
+    'Mail.Send',
     'Tasks.ReadWrite',
-    'Tasks.ReadWrite.Shared',
-    'Group.Read.All',
     'Calendars.ReadWrite',
-    'User.Read.All',
-    'People.Read'
+    'Group.Read.All',
+    'Group.ReadWrite.All'
 ].join(' ');
 
 // Encryption helper
@@ -953,3 +953,71 @@ export async function findMicrosoftEvent(accessToken: string, subject: string, s
     const data = await response.json();
     return data.value && data.value.length > 0 ? data.value[0] : null;
 }
+
+/**
+ * Send an email using Microsoft Graph API, with an optional attachment.
+ */
+export async function sendMicrosoftEmail(accessToken: string, emailDetails: {
+    toRecipients: string[];
+    subject: string;
+    body: string;
+    attachment?: {
+        name: string;
+        contentBytes: string; // Base64 encoded string
+    };
+}) {
+    if (!accessToken) throw new Error('Access token is required');
+
+    console.log(`[Microsoft API] Sending email: ${emailDetails.subject}...`);
+
+    const message: any = {
+        message: {
+            subject: emailDetails.subject,
+            body: {
+                contentType: 'HTML',
+                content: emailDetails.body
+            },
+            toRecipients: emailDetails.toRecipients.map((email: string) => ({
+                emailAddress: { address: email }
+            }))
+        },
+        saveToSentItems: true
+    };
+
+    if (emailDetails.attachment) {
+        message.message.attachments = [
+            {
+                '@odata.type': '#microsoft.graph.fileAttachment',
+                name: emailDetails.attachment.name,
+                contentType: 'application/pdf',
+                contentBytes: emailDetails.attachment.contentBytes
+            }
+        ];
+    }
+
+    const response = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(message)
+    });
+
+    if (!response.ok) {
+        let errorText = await response.text();
+        try {
+            const jsonError = JSON.parse(errorText);
+            const errorMsg = jsonError.error?.message || errorText;
+            const errorCode = jsonError.error?.code || 'Unknown';
+            console.error('[Microsoft API] Error details:', response.status, jsonError);
+            throw new Error(`Graph API error (${errorCode}): ${errorMsg}`);
+        } catch(e: any) {
+            console.error('[Microsoft API] Raw error response:', response.status, errorText);
+            throw new Error(e.message || `Graph API returned ${response.status}: ${errorText}`);
+        }
+    }
+
+    return true;
+}
+
