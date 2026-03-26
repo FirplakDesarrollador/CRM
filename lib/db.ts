@@ -29,6 +29,7 @@ export interface LocalCuenta {
     es_premium?: boolean;
     nivel_premium?: 'ORO' | 'PLATA' | 'BRONCE' | null; // Nuevo campo jerárquico
     telefono?: string;
+    email?: string; // Added field
     direccion?: string;
     ciudad?: string; // Legacy/Text field
     ciudad_id?: number | null;

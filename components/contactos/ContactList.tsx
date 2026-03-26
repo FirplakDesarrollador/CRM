@@ -1,8 +1,11 @@
+"use client";
+
 import { useContacts } from "@/lib/hooks/useContacts";
 import { useState } from "react";
 import { ContactForm } from "./ContactForm";
 import { LocalContact } from "@/lib/db";
 import { Edit2, Trash2, Phone, Mail, User, Search } from "lucide-react";
+import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
 
 interface ContactListProps {
     accountId: string;
@@ -13,6 +16,11 @@ export function ContactList({ accountId }: ContactListProps) {
     const [isEditing, setIsEditing] = useState(false);
     const [editingContact, setEditingContact] = useState<LocalContact | undefined>(undefined);
     const [searchTerm, setSearchTerm] = useState("");
+
+    // Modal State
+    const [showDeleteModal, setShowDeleteModal] = useState(false);
+    const [contactToDelete, setContactToDelete] = useState<LocalContact | null>(null);
+    const [isDeleting, setIsDeleting] = useState(false);
 
     const handleEdit = (contact: LocalContact) => {
         setEditingContact(contact);
@@ -27,6 +35,26 @@ export function ContactList({ accountId }: ContactListProps) {
     const handleSuccess = () => {
         setIsEditing(false);
         setEditingContact(undefined);
+    };
+
+    const handleDeleteClick = (contact: LocalContact) => {
+        setContactToDelete(contact);
+        setShowDeleteModal(true);
+    };
+
+    const handleConfirmDelete = async () => {
+        if (!contactToDelete) return;
+        setIsDeleting(true);
+        try {
+            await deleteContact(contactToDelete.id);
+            setShowDeleteModal(false);
+            setContactToDelete(null);
+        } catch (error) {
+            console.error("Error deleting contact:", error);
+            alert("No se pudo eliminar el contacto. Inténtalo de nuevo.");
+        } finally {
+            setIsDeleting(false);
+        }
     };
 
     // Filter contacts based on search term
@@ -53,7 +81,7 @@ export function ContactList({ accountId }: ContactListProps) {
     }
 
     return (
-        <div className="space-y-4">
+        <div className="space-y-4" data-testid="contacts-list-container">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <h3 className="text-lg font-semibold">Contactos</h3>
                 <div className="flex flex-1 w-full sm:w-auto sm:justify-end gap-2">
@@ -69,6 +97,7 @@ export function ContactList({ accountId }: ContactListProps) {
                     <button
                         onClick={handleCreate}
                         className="px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 whitespace-nowrap"
+                        data-testid="contact-new-button"
                     >
                         <User size={16} />
                         <span className="hidden sm:inline">Nuevo</span>
@@ -77,27 +106,31 @@ export function ContactList({ accountId }: ContactListProps) {
             </div>
 
             {!filteredContacts || filteredContacts.length === 0 ? (
-                <div className="text-center py-8 text-gray-500 italic bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-dashed">
+                <div className="text-center py-8 text-gray-500 italic bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-dashed" data-testid="contacts-empty-state">
                     {searchTerm ? "No se encontraron contactos que coincidan con tu búsqueda." : "No hay contactos registrados."}
                 </div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4" data-testid="contacts-grid">
                     {filteredContacts.map(contact => (
-                        <div key={contact.id} className="group p-5 border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-2xl shadow-sm relative hover:shadow-lg hover:border-[#254153]/20 transition-all duration-300 flex flex-col h-full">
+                        <div 
+                            key={contact.id} 
+                            data-testid={`contact-card-${contact.id}`}
+                            className="group p-5 border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-2xl shadow-sm relative hover:shadow-lg hover:border-[#254153]/20 transition-all duration-300 flex flex-col h-full"
+                        >
                             <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
                                 <button
                                     onClick={() => handleEdit(contact)}
                                     className="p-2 text-blue-600 hover:bg-blue-600 hover:text-white bg-blue-50 rounded-xl transition-all shadow-sm"
                                     title="Editar"
+                                    data-testid={`contact-edit-${contact.id}`}
                                 >
                                     <Edit2 size={14} />
                                 </button>
                                 <button
-                                    onClick={() => {
-                                        if (confirm('¿Eliminar contacto?')) deleteContact(contact.id);
-                                    }}
+                                    onClick={() => handleDeleteClick(contact)}
                                     className="p-2 text-red-600 hover:bg-red-600 hover:text-white bg-red-50 rounded-xl transition-all shadow-sm"
                                     title="Eliminar"
+                                    data-testid={`contact-delete-${contact.id}`}
                                 >
                                     <Trash2 size={14} />
                                 </button>
@@ -145,6 +178,17 @@ export function ContactList({ accountId }: ContactListProps) {
                     ))}
                 </div>
             )}
+
+            <ConfirmationModal
+                isOpen={showDeleteModal}
+                onClose={() => !isDeleting && setShowDeleteModal(false)}
+                onConfirm={handleConfirmDelete}
+                title="Eliminar Contacto"
+                message={`¿Estás seguro de que deseas eliminar a ${contactToDelete?.nombre}? Esta acción no se puede deshacer.`}
+                confirmLabel="Eliminar"
+                variant="danger"
+                isLoading={isDeleting}
+            />
         </div>
     );
 }

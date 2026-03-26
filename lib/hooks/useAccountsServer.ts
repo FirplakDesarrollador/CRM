@@ -15,6 +15,7 @@ export type AccountServer = {
     es_premium: boolean;
     nivel_premium?: 'ORO' | 'PLATA' | 'BRONCE' | null;
     telefono: string | null;
+    email: string | null;
     direccion: string | null;
     ciudad: string | null;
     created_by: string | null;
@@ -23,6 +24,7 @@ export type AccountServer = {
     owner_name?: string | null;
     updated_at: string;
     contact_count?: number;
+    _hasPendingSync?: boolean;
 };
 
 type UseAccountsServerProps = {
@@ -124,6 +126,7 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                     es_premium,
                     nivel_premium,
                     telefono,
+                    email,
                     direccion,
                     ciudad,
                     departamento_id,
@@ -160,6 +163,15 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
             // Paging
             query = query.range(from, to);
 
+            // --- OPTIMISTIC UI: Fetch pending local changes FIRST ---
+            // Doing this before `await query` prevents a race condition where syncEngine 
+            // completes and deletes the outbox record while the Supabase query is inflight,
+            // resulting in stale Supabase data and no pending changes.
+            const pendingChanges = await db.outbox
+                .where('entity_type').equals('CRM_Cuentas')
+                .and(item => item.status === 'PENDING' || item.status === 'SYNCING')
+                .toArray();
+
             const { data: result, error, count: totalCount } = await query;
 
             if (error) throw error;
@@ -183,12 +195,30 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                 }
             }
 
-            const flattenedResults = (result as any[]).map(item => ({
-                ...item,
-                owner_name: ownerMap[item.owner_user_id] || ownerMap[item.created_by] || null,
-                creator_name: ownerMap[item.created_by] || null,
-                contact_count: item.contacts?.[0]?.count || 0
-            }));
+            // Group changes by entity_id for successful queries
+            const resultIds = result ? (result as any[]).map(r => r.id) : [];
+            const optimisticUpdates: Record<string, Record<string, any>> = {};
+            for (const change of pendingChanges) {
+                if (resultIds.includes(change.entity_id)) {
+                    if (!optimisticUpdates[change.entity_id]) {
+                        optimisticUpdates[change.entity_id] = {};
+                    }
+                    optimisticUpdates[change.entity_id][change.field_name] = change.new_value;
+                }
+            }
+            // --------------------------------------------------
+
+            const flattenedResults = (result as any[]).map(item => {
+                const pending = optimisticUpdates[item.id];
+                const finalItem = pending ? { ...item, ...pending, _hasPendingSync: true } : item;
+                
+                return {
+                    ...finalItem,
+                    owner_name: ownerMap[finalItem.owner_user_id] || ownerMap[finalItem.created_by] || null,
+                    creator_name: ownerMap[finalItem.created_by] || null,
+                    contact_count: finalItem.contacts?.[0]?.count || 0
+                };
+            });
 
             if (isLoadMore) {
                 setData(prev => {
@@ -221,6 +251,27 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
         // Reset page when filters change
         fetchAccounts(false);
     }, [fetchAccounts]);
+
+    // OPTIMISTIC UI: Listen to broadcasted local mutations for instant UI updates
+    useEffect(() => {
+        const handleOptimisticUpdate = (e: any) => {
+            const { entityType, entityId, updates } = e.detail;
+            if (entityType === 'CRM_Cuentas') {
+                setData(prev => {
+                    const exists = prev.find(item => item.id === entityId);
+                    if (exists) {
+                        return prev.map(item => item.id === entityId ? { ...item, ...updates } : item);
+                    }
+                    return [{ id: entityId, ...updates }, ...prev] as any[];
+                });
+            }
+        };
+        
+        if (typeof window !== 'undefined') {
+            window.addEventListener('crm-optimistic-update', handleOptimisticUpdate);
+            return () => window.removeEventListener('crm-optimistic-update', handleOptimisticUpdate);
+        }
+    }, []);
 
     const loadMore = () => {
         if (!loading && hasMore) {

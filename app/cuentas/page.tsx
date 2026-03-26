@@ -5,9 +5,10 @@ import { AccountForm } from "@/components/cuentas/AccountForm";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
-import { Plus, Search, Building, Users, User, Pencil, Filter, Medal, Trash2 } from "lucide-react";
+import { Plus, Search, Building, Users, User, Pencil, Filter, Medal, Trash2, CloudUpload } from "lucide-react";
 import { UserPickerFilter } from "@/components/cuentas/UserPickerFilter";
 import { useAccounts } from "@/lib/hooks/useAccounts";
+import { db } from "@/lib/db";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 
 function AccountsContent() {
@@ -52,7 +53,7 @@ function AccountsContent() {
         if (!id) return;
 
         const findAndOpen = async () => {
-            // 1. Check if already in current list
+            // 1. Check if already in current list (already has optimistic updates)
             const existing = accounts.find(a => a.id === id);
             if (existing) {
                 setEditingAccount(existing);
@@ -60,7 +61,19 @@ function AccountsContent() {
                 return;
             }
 
-            // 2. If not, fetch specifically from server (JIT Sync for Accounts)
+            // 2. Try local IndexedDB first for optimistic instant load
+            try {
+                const localAcc = await db.accounts.get(id);
+                if (localAcc) {
+                    setEditingAccount(localAcc);
+                    setShowCreate(false);
+                    return;
+                }
+            } catch(e) {
+                console.warn("[AccountsPage] local DB fetch failed", e);
+            }
+
+            // 3. If not, fetch specifically from server (Fallback)
             try {
                 const { data: acc, error } = await supabase
                     .from('CRM_Cuentas')
@@ -88,8 +101,19 @@ function AccountsContent() {
         return () => clearTimeout(timer);
     }, [inputValue, setSearchTerm]);
 
-    const handleEdit = (acc: any) => {
-        setEditingAccount(acc);
+    const handleEdit = async (acc: any) => {
+        try {
+            // ALWAYS fetch the freshest local state for editing! 
+            // Avoids showing stale data if the list hasn't finished its optimistic UI refresh.
+            const localAcc = await db.accounts.get(acc.id);
+            if (localAcc) {
+                setEditingAccount(localAcc);
+            } else {
+                setEditingAccount(acc);
+            }
+        } catch(e) {
+            setEditingAccount(acc);
+        }
         setShowCreate(false);
         document.getElementById('main-content')?.scrollTo({ top: 0, behavior: 'smooth' });
     };
@@ -195,8 +219,15 @@ function AccountsContent() {
                         {accounts.map(acc => (
                             <div key={acc.id} data-testid={`accounts-row-${acc.id}`} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 hover:border-blue-300 transition-all group relative">
                                 <div className="flex justify-between items-start mb-2">
-                                    <div className={`p-2 rounded-lg ${acc.id_cuenta_principal ? 'bg-purple-50 text-purple-600' : 'bg-blue-50 text-blue-600'}`}>
-                                        <Building className="w-5 h-5" />
+                                    <div className="flex relative">
+                                        <div className={`p-2 rounded-lg ${acc.id_cuenta_principal ? 'bg-purple-50 text-purple-600' : 'bg-blue-50 text-blue-600'}`}>
+                                            <Building className="w-5 h-5" />
+                                        </div>
+                                        {acc._hasPendingSync && (
+                                            <div className="absolute -top-1 -right-1 bg-amber-100 text-amber-600 rounded-full p-0.5 animate-pulse" title="Sincronizando cambios...">
+                                                <CloudUpload className="w-3 h-3" />
+                                            </div>
+                                        )}
                                     </div>
                                     <div className="flex items-center gap-2">
                                         {acc.nivel_premium === 'ORO' && (
