@@ -55,18 +55,14 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
     const [phasesReady, setPhasesReady] = useState(false); // State to trigger re-render
 
     // User Context - uses useCurrentUser to respect viewMode
-    const { role: userRole } = useCurrentUser();
-    const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+    const { user, role: userRole, isVendedor } = useCurrentUser();
+    const currentUserId = user?.id || null;
     const [subordinateIds, setSubordinateIds] = useState<string[]>([]);
 
     // PERF FIX: Use ref for page to avoid including it in useCallback deps
     const pageRef = useRef(1);
 
-    useEffect(() => {
-        syncEngine.getCurrentUser().then(({ data: { user } }) => {
-            if (user) setCurrentUserId(user?.id);
-        });
-    }, []);
+    // USER ID is now retrieved directly from useCurrentUser
 
     // Fetch subordinates for team view if user is a coordinator
     useEffect(() => {
@@ -148,6 +144,14 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                 // Map helpers
                 const accMap = new Map(allAccounts.map(a => [a.id, a]));
                 const phaseMap = new Map(allPhases.map(p => [p.id, p]));
+                
+                // Role filtering for offline
+                if (isVendedor && currentUserId) {
+                    localOpps = localOpps.filter(o => 
+                        o.owner_user_id === currentUserId || 
+                        (!o.owner_user_id && o.created_by === currentUserId)
+                    );
+                }
 
                 // Filtering
                 if (searchTerm) {
@@ -299,7 +303,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                 query = query.eq('owner_user_id', accountOwnerId);
             } else {
                 if (userFilter === 'mine') {
-                    query = query.eq('owner_user_id', currentUserId);
+                    query = query.or(`owner_user_id.eq.${currentUserId},and(owner_user_id.is.null,created_by.eq.${currentUserId})`);
                 } else if (userFilter === 'team') {
                     if (userRole === 'COORDINADOR') {
                         const ids = [currentUserId, ...subordinateIds].filter(Boolean);

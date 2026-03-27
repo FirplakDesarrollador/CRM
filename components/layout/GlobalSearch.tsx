@@ -71,16 +71,10 @@ export function GlobalSearch() {
                 router.push(`/oportunidades/${result.id}`);
                 break;
             case 'account':
-                router.push(`/cuentas/${result.id}`); // Assuming accounts page exists
+                router.push(`/cuentas?id=${result.id}`);
                 break;
             case 'contact':
-                // router.push(`/contactos/${result.id}`); 
-                // Mostly contacts open in a modal or account context? 
-                // For now, let's assume dedicated page or just log it if not exists.
-                // Or maybe navigate to Account if contact is orphan?
-                // Let's go to contacts list with filter if detail doesn't exist?
-                // Actually, let's assume /contactos/[id] exists or fallback.
-                router.push(`/contactos/${result.id}`);
+                router.push(`/contactos?id=${result.id}`);
                 break;
         }
     };

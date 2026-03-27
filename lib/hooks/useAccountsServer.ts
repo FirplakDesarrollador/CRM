@@ -62,7 +62,10 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
 
                 // Role filtering
                 if (isVendedor && currentUserId) {
-                    localAccounts = localAccounts.filter((a: any) => a.owner_user_id === currentUserId);
+                    localAccounts = localAccounts.filter((a: any) => 
+                        a.owner_user_id === currentUserId || 
+                        (!a.owner_user_id && a.created_by === currentUserId)
+                    );
                 }
 
                 // Filtering
@@ -141,7 +144,7 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
 
             // Role filtering
             if (isVendedor && currentUserId) {
-                query = query.eq('owner_user_id', currentUserId);
+                query = query.or(`owner_user_id.eq.${currentUserId},and(owner_user_id.is.null,created_by.eq.${currentUserId})`);
             }
 
             if (searchTerm) {

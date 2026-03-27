@@ -178,6 +178,8 @@ export interface LocalOportunidad {
     origen_oportunidad?: string | null;
     url_origen?: string | null;
     fuente_conversion?: string | null;
+    created_by?: string;
+    updated_by?: string;
 }
 
 export class CRMFirplakDB extends Dexie {

@@ -23,9 +23,10 @@ export type ActivityServer = {
 type UseActivitiesServerProps = {
     pageSize?: number;
     opportunityId?: string;
+    accountId?: string;
 };
 
-export function useActivitiesServer({ pageSize = 20, opportunityId }: UseActivitiesServerProps = {}) {
+export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }: UseActivitiesServerProps = {}) {
     const [data, setData] = useState<ActivityServer[]>([]);
     const [count, setCount] = useState<number>(0);
     const [loading, setLoading] = useState<boolean>(true);
@@ -64,6 +65,10 @@ export function useActivitiesServer({ pageSize = 20, opportunityId }: UseActivit
 
                 if (opportunityId) {
                     localActivities = localActivities.filter(a => a.opportunity_id === opportunityId);
+                } else if (accountId) {
+                    const oppsForAccount = allOpps.filter(o => o.account_id === accountId);
+                    const oppsIds = new Set(oppsForAccount.map(o => o.id));
+                    localActivities = localActivities.filter(a => a.account_id === accountId || (a.opportunity_id && oppsIds.has(a.opportunity_id)));
                 } else {
                     localActivities = localActivities.filter(a => a.created_by === currentUserId || a.updated_by === currentUserId);
                 }
@@ -136,6 +141,11 @@ export function useActivitiesServer({ pageSize = 20, opportunityId }: UseActivit
             // Apply Filters
             if (opportunityId) {
                 query = query.eq('opportunity_id', opportunityId);
+            } else if (accountId) {
+                const { data: opps } = await supabase.from('CRM_Oportunidades').select('id').eq('account_id', accountId);
+                const oppIds = opps?.map(o => o.id) || [];
+                const oppIdsString = oppIds.length > 0 ? oppIds.join(',') : 'dummy-no-opps';
+                query = query.or(`account_id.eq.${accountId},opportunity_id.in.(${oppIdsString})`);
             } else {
                 // Only show user's activities unless filtering by opportunity
                 query = query.eq('user_id', currentUserId);
@@ -185,13 +195,13 @@ export function useActivitiesServer({ pageSize = 20, opportunityId }: UseActivit
         } finally {
             setLoading(false);
         }
-    }, [currentUserId, pageSize, searchTerm, typeFilter, showCompleted, opportunityId, page]);
+    }, [currentUserId, pageSize, searchTerm, typeFilter, showCompleted, opportunityId, accountId, page]);
 
     // Initial Fetch & Filter Fetch - Reset on filter change
     useEffect(() => {
         fetchActivities(false);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [searchTerm, typeFilter, showCompleted, opportunityId, currentUserId]);
+    }, [searchTerm, typeFilter, showCompleted, opportunityId, accountId, currentUserId]);
 
     // OPTIMISTIC UI: Listen to broadcasted local mutations
     useEffect(() => {

@@ -21,10 +21,11 @@ interface CreateActivityModalProps {
     onSubmit: (data: any) => void;
     opportunities?: any[];
     initialOpportunityId?: string;
+    initialAccountId?: string;
     initialData?: any;
 }
 
-export function CreateActivityModal({ onClose, onSubmit, opportunities, initialOpportunityId, initialData }: CreateActivityModalProps) {
+export function CreateActivityModal({ onClose, onSubmit, opportunities, initialOpportunityId, initialAccountId, initialData }: CreateActivityModalProps) {
     const isEditing = !!initialData;
     const { register, handleSubmit, watch, setValue, getValues, reset, formState: { dirtyFields } } = useForm({
         defaultValues: {
@@ -40,7 +41,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                 ? toInputDateTime(initialData.fecha_fin)
                 : toInputDateTime(new Date(Date.now() + 3600000)),
             opportunity_id: initialData?.opportunity_id || initialOpportunityId || '',
-            account_id: initialData?.account_id || '',
+            account_id: initialData?.account_id || initialAccountId || '',
             is_completed: !!initialData?.is_completed
         }
     });
@@ -960,13 +961,13 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                         <h2 className="text-xl font-bold text-slate-900">{isEditing ? 'Editar Actividad' : 'Programar Actividad'}</h2>
                         {relatedOpportunity && relatedAccount && (
                             <div className="flex items-center gap-1.5 mt-1 text-sm flex-wrap">
-                                <Link href={`/cuentas/${relatedAccount.id}`} className="text-blue-600 hover:underline font-semibold transition-colors" target="_blank" rel="noopener noreferrer">
+                                <Link href={`/cuentas?id=${relatedAccount.id}`} className="text-blue-600 hover:underline font-semibold transition-colors">
                                     {relatedAccount.nombre}
                                 </Link>
                                 <span className="text-slate-400 font-medium">-</span>
                                 {relatedContact ? (
                                     <div className="flex items-center gap-1">
-                                        <Link href={`/contactos/${relatedContact.id}`} className="text-blue-600 hover:underline font-semibold transition-colors" target="_blank" rel="noopener noreferrer">
+                                        <Link href={`/contactos?id=${relatedContact.id}`} className="text-blue-600 hover:underline font-semibold transition-colors">
                                             {relatedContact.nombre}
                                         </Link>
                                         {relatedContact.telefono && (
@@ -977,7 +978,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                     <span className="italic text-slate-400 font-medium text-xs">Sin contacto princ.</span>
                                 )}
                                 <span className="text-slate-400 font-medium">-</span>
-                                <Link href={`/oportunidades/${relatedOpportunity.id}`} className="text-blue-600 hover:underline font-semibold transition-colors" target="_blank" rel="noopener noreferrer">
+                                <Link href={`/oportunidades/${relatedOpportunity.id}`} className="text-blue-600 hover:underline font-semibold transition-colors">
                                     {relatedOpportunity.nombre}
                                 </Link>
                             </div>

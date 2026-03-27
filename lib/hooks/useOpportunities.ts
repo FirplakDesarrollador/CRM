@@ -4,6 +4,7 @@ import { syncEngine } from "@/lib/sync";
 import { useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { v4 as uuidv4 } from 'uuid';
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 
 // Helper to fetch pricing from server
 async function fetchPricing(productId: string, channelId: string, qty: number) {
@@ -69,14 +70,27 @@ function sanitizeOpportunityForSync(opp: any) {
 }
 
 export function useOpportunities(filters?: { advisor_id?: string | null }) {
+    const { user, isVendedor } = useCurrentUser();
+    const userId = user?.id;
+
     const opportunities = useLiveQuery(
         () => {
+            // Priority 1: Specific advisor filter from Dashboard
             if (filters?.advisor_id) {
                 return db.opportunities.where('owner_user_id').equals(filters.advisor_id).toArray();
             }
+
+            // Priority 2: Vendedor role restriction
+            if (isVendedor && userId) {
+                return db.opportunities.filter(o => 
+                    o.owner_user_id === userId || 
+                    (!o.owner_user_id && o.created_by === userId)
+                ).toArray();
+            }
+
             return db.opportunities.toArray();
         },
-        [filters?.advisor_id]
+        [isVendedor, userId, filters?.advisor_id]
     );
 
     const createOpportunity = async (data: any) => {
@@ -311,11 +325,27 @@ async function performOpportunityUpdate(id: string, updates: any) {
 
 
 export function useQuotes(opportunityId?: string) {
+    const { user, isVendedor } = useCurrentUser();
+    const userId = user?.id;
+
     const quotes = useLiveQuery(
-        () => opportunityId
-            ? db.quotes.where('opportunity_id').equals(opportunityId).toArray()
-            : db.quotes.toArray(),
-        [opportunityId]
+        async () => {
+            if (opportunityId) {
+                return db.quotes.where('opportunity_id').equals(opportunityId).toArray();
+            }
+
+            const allQuotes = await db.quotes.toArray();
+
+            // Priority 2: Vendedor role restriction
+            if (isVendedor && userId) {
+                const myOpps = await db.opportunities.where('owner_user_id').equals(userId).toArray();
+                const myOppIds = new Set(myOpps.map(o => o.id));
+                return allQuotes.filter(q => myOppIds.has(q.opportunity_id) || q.created_by === userId);
+            }
+
+            return allQuotes;
+        },
+        [isVendedor, userId, opportunityId]
     );
 
     const createQuote = async (oppId: string, initialData: Partial<LocalQuote>) => {

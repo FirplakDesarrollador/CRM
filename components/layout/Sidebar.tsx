@@ -7,10 +7,8 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/components/ui/utils";
 import { FirplakLogo, FirplakIsotipo } from "./FirplakLogo";
 import { SyncStatus } from "./SyncStatus";
-import { supabase } from "@/lib/supabase";
 import { useSyncStore } from "@/lib/stores/useSyncStore";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
-import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
 import {
     Home,
     Briefcase,
@@ -19,7 +17,6 @@ import {
     Files,
     Settings,
     Users,
-    LogOut,
     Truck,
     ChevronLeft,
     ChevronRight,
@@ -51,8 +48,6 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
     const pathname = usePathname();
     const { userRole, setUserRole } = useSyncStore();
     const { user, role, isLoading } = useCurrentUser();
-    const [showLogoutConfirm, setShowLogoutConfirm] = React.useState(false);
-    const [isLoggingOut, setIsLoggingOut] = React.useState(false);
 
     // Sync DB Role to UI Store
     React.useEffect(() => {
@@ -76,30 +71,6 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
         });
     }, [role, user?.allowed_modules]);
 
-    const handleLogout = async () => {
-        setIsLoggingOut(true);
-
-        // Clear ALL local data FIRST
-        localStorage.removeItem('cachedUserId');
-        sessionStorage.removeItem('crm_initialSyncDone');
-
-        // Clear Supabase cookies (critical for mobile)
-        document.cookie.split(';').forEach(cookie => {
-            const name = cookie.split('=')[0].trim();
-            if (name.includes('sb-')) {
-                document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/`;
-            }
-        });
-
-        // Fire signOut in background (don't wait for it)
-        supabase.auth.signOut().catch(err => {
-            console.warn('[Sidebar] SignOut background error (ignored):', err);
-        });
-
-        // Redirect IMMEDIATELY - don't wait for Supabase
-        console.log('[Sidebar] Redirecting to login immediately');
-        window.location.replace('/login');
-    };
 
     return (
         <aside
@@ -130,7 +101,7 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
                 {!isCollapsed && (
                     <div className="w-full mt-3 pt-3 border-t border-slate-200/60">
                         <p className="text-xs text-slate-400 text-center font-semibold uppercase tracking-wider">
-                            Versión 1.0.8.9
+                            Versión 1.0.9.0
                         </p>
                     </div>
                 )}
@@ -190,35 +161,6 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
                 <SyncStatus isCollapsed={isCollapsed} />
             </div>
 
-            {/* Logout Section */}
-            <div className="p-4 border-t border-slate-200/60 bg-white">
-                <button
-                    data-testid="nav-logout"
-                    onClick={() => setShowLogoutConfirm(true)}
-                    className={cn(
-                        "flex items-center gap-3 px-4 py-3 text-sm font-semibold text-slate-600 hover:text-red-600 hover:bg-red-50 w-full transition-all rounded-xl group/logout",
-                        isCollapsed && "justify-center px-0 w-14 mx-auto"
-                    )}
-                    title={isCollapsed ? "Cerrar Sesión" : undefined}
-                >
-                    <LogOut className={cn(
-                        "w-5 h-5 shrink-0 transition-transform",
-                        "group-hover/logout:scale-110"
-                    )} />
-                    {!isCollapsed && <span className="whitespace-nowrap">Cerrar Sesión</span>}
-                </button>
-
-                <ConfirmationModal
-                    isOpen={showLogoutConfirm}
-                    onClose={() => setShowLogoutConfirm(false)}
-                    onConfirm={handleLogout}
-                    isLoading={isLoggingOut}
-                    title="Cerrar Sesión"
-                    message="¿Estás seguro de que deseas salir del sistema? No olvides sincronizar tus cambios pendientes."
-                    confirmLabel="Cerrar Sesión"
-                    variant="danger"
-                />
-            </div>
         </aside>
     );
 });

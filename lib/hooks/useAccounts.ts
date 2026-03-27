@@ -18,7 +18,10 @@ export function useAccounts(filters?: { advisor_id?: string | null }) {
 
         // Priority 2: Vendedor role restriction
         if (isVendedor && userId) {
-            return db.accounts.where('owner_user_id').equals(userId).toArray();
+            return db.accounts.filter(a => 
+                a.owner_user_id === userId || 
+                (!a.owner_user_id && a.created_by === userId)
+            ).toArray();
         }
 
         return db.accounts.toArray();

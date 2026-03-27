@@ -39,7 +39,7 @@ export function ContactImportButton({ onContactImported }: ContactImportButtonPr
             <button
                 type="button"
                 onClick={handleClick}
-                className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/50"
+                className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-md transition-colors"
                 title={isNativeSupported ? "Importar desde la agenda del teléfono" : "Importar archivo vCard"}
             >
                 {isNativeSupported ? <Smartphone className="w-4 h-4" /> : <Upload className="w-4 h-4" />}
