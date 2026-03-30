@@ -1,4 +1,5 @@
-"use client";
+"use client"; 
+
 
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, LocalContact } from "@/lib/db";
