@@ -105,7 +105,7 @@ export default function AccountActivitiesTab({ accountId }: { accountId: string 
                                         
                                         {act.tipo_actividad === 'EVENTO' ? (
                                             <div className={cn(
-                                                "flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded flex-shrink-0",
+                                                "flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded shrink-0",
                                                 isOverdue ? "text-red-600 bg-red-100" : "text-blue-600 bg-blue-50"
                                             )}>
                                                 <Clock className="w-3 h-3" />
@@ -113,7 +113,7 @@ export default function AccountActivitiesTab({ accountId }: { accountId: string 
                                             </div>
                                         ) : (
                                             <div className={cn(
-                                                "flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded flex-shrink-0",
+                                                "flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded shrink-0",
                                                 isOverdue ? "text-red-600 bg-red-100" : "text-emerald-600 bg-emerald-50"
                                             )}>
                                                 <ListTodo className="w-3 h-3" />

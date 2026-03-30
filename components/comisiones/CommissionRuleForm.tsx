@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Loader2, Shield, X } from 'lucide-react';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 
 type RuleFormProps = {
     onSubmit: (rule: {
@@ -56,10 +57,17 @@ export function CommissionRuleForm({ onSubmit, initialData, onCancel }: RuleForm
     const [cuentas, setCuentas] = useState<{ id: string; nombre: string; nit: string }[]>([]);
 
     // Load reference data
+    const { user, role } = useCurrentUser();
+
     useEffect(() => {
+        if (!user) return;
         const loadData = async () => {
+            let userQuery = supabase.from('CRM_Usuarios').select('id, full_name').eq('is_active', true);
+            if (role === 'COORDINADOR') {
+                userQuery = userQuery.or(`id.eq.${user.id},coordinadores.cs.{${user.id}}`);
+            }
             const [vendResult, canalResult, catResult] = await Promise.all([
-                supabase.from('CRM_Usuarios').select('id, full_name').eq('is_active', true).order('full_name'),
+                userQuery.order('full_name'),
                 supabase.from('CRM_Canales').select('id, nombre'),
                 supabase.from('CRM_ComisionCategorias').select('id, prefijo, nombre').eq('is_active', true).order('prefijo'),
             ]);
@@ -68,7 +76,7 @@ export function CommissionRuleForm({ onSubmit, initialData, onCancel }: RuleForm
             if (catResult.data) setCategorias(catResult.data);
         };
         loadData();
-    }, []);
+    }, [user, role]);
 
     // Load account names for display when accounts are passed from initialData or changed
     useEffect(() => {

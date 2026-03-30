@@ -35,8 +35,24 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
     const [searchTerm, setSearchTerm] = useState<string>("");
 
     // User Context
-    const { user, isVendedor } = useCurrentUser();
+    const { user, role: userRole, isVendedor } = useCurrentUser();
     const currentUserId = user?.id;
+
+    const [subordinateIds, setSubordinateIds] = useState<string[]>([]);
+
+    useEffect(() => {
+        if (userRole === 'COORDINADOR' && currentUserId) {
+            supabase
+                .from('CRM_Usuarios')
+                .select('id')
+                .contains('coordinadores', [currentUserId])
+                .then(({ data, error }) => {
+                    if (!error && data) {
+                        setSubordinateIds(data.map(u => u.id));
+                    }
+                });
+        }
+    }, [userRole, currentUserId]);
 
     const fetchContacts = useCallback(async (isLoadMore = false) => {
         setLoading(true);
@@ -51,11 +67,13 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
                 let localContacts = await db.contacts.toArray();
                 
                 // Seller restriction for offline
-                if (isVendedor && currentUserId) {
+                if ((isVendedor || userRole === 'COORDINADOR') && currentUserId) {
+                    const idsToMatch = isVendedor ? [currentUserId] : [currentUserId, ...subordinateIds];
+
                     // Get my accounts: Owner OR (No owner and I am creator)
                     const myAccounts = await db.accounts.filter(a => 
-                        a.owner_user_id === currentUserId || 
-                        (!a.owner_user_id && a.created_by === currentUserId)
+                        idsToMatch.includes(a.owner_user_id || 'dummy') || 
+                        (!a.owner_user_id && idsToMatch.includes(a.created_by || 'dummy'))
                     ).toArray();
                     const myAccountIds = new Set(myAccounts.map(a => a.id));
                     
@@ -106,7 +124,8 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
 
             // Build query
             // Use !inner join when filtering by account owner to enforce security
-            const accountSelect = isVendedor ? 'account:CRM_Cuentas!inner(nombre, owner_user_id)' : 'account:CRM_Cuentas(nombre)';
+            const needsAccountFilter = isVendedor || userRole === 'COORDINADOR';
+            const accountSelect = needsAccountFilter ? 'account:CRM_Cuentas!inner(nombre, owner_user_id)' : 'account:CRM_Cuentas(nombre)';
             
             const selectFields = `
                 id,
@@ -127,12 +146,15 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
                 .select(selectFields, { count: 'exact' })
                 .eq('is_deleted', false);
 
-            if (isVendedor && currentUserId) {
+            if ((isVendedor || userRole === 'COORDINADOR') && currentUserId) {
+                const idsToMatch = isVendedor ? [currentUserId] : [currentUserId, ...subordinateIds].filter(Boolean);
+                const idsString = idsToMatch.join(',');
+
                 // Fetch IDs of accounts where user is owner OR (unassigned and user is creator)
                 const { data: myAccounts } = await supabase
                     .from('CRM_Cuentas')
                     .select('id')
-                    .or(`owner_user_id.eq.${currentUserId},and(owner_user_id.is.null,created_by.eq.${currentUserId})`)
+                    .or(`owner_user_id.in.(${idsString}),and(owner_user_id.is.null,created_by.in.(${idsString}))`)
                     .eq('is_deleted', false);
                 
                 const myAccountIds = myAccounts?.map(a => a.id) || [];
@@ -219,7 +241,7 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
         } finally {
             setLoading(false);
         }
-    }, [pageSize, searchTerm, accountId]);
+    }, [pageSize, searchTerm, accountId, isVendedor, userRole, currentUserId, subordinateIds]);
 
     // Initial Fetch & Filter Fetch
     useEffect(() => {

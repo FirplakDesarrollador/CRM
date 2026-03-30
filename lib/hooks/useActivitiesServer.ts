@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { syncEngine } from '@/lib/sync';
 import { db } from '@/lib/db';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 
 export type ActivityServer = {
     id: string;
@@ -39,13 +40,24 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
     const [showCompleted, setShowCompleted] = useState<boolean>(true);
 
     // User Context
-    const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+    const { user, role: userRole, isAdmin } = useCurrentUser();
+    const currentUserId = user?.id;
+
+    const [subordinateIds, setSubordinateIds] = useState<string[]>([]);
 
     useEffect(() => {
-        syncEngine.getCurrentUser().then(({ data: { user } }) => {
-            if (user) setCurrentUserId(user?.id);
-        });
-    }, []);
+        if (userRole === 'COORDINADOR' && currentUserId) {
+            supabase
+                .from('CRM_Usuarios')
+                .select('id')
+                .contains('coordinadores', [currentUserId])
+                .then(({ data, error }) => {
+                    if (!error && data) {
+                        setSubordinateIds(data.map(u => u.id));
+                    }
+                });
+        }
+    }, [userRole, currentUserId]);
 
     const fetchActivities = useCallback(async (isLoadMore = false) => {
         if (!currentUserId) return; // Wait for user
@@ -70,7 +82,14 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
                     const oppsIds = new Set(oppsForAccount.map(o => o.id));
                     localActivities = localActivities.filter(a => a.account_id === accountId || (a.opportunity_id && oppsIds.has(a.opportunity_id)));
                 } else {
-                    localActivities = localActivities.filter(a => a.created_by === currentUserId || a.updated_by === currentUserId);
+                    if (isAdmin) {
+                        // admins see all
+                    } else if (userRole === 'COORDINADOR') {
+                        const idsToMatch = [currentUserId, ...subordinateIds];
+                        localActivities = localActivities.filter(a => idsToMatch.includes(a.created_by || 'dummy') || (a.user_id && idsToMatch.includes(a.user_id)));
+                    } else {
+                        localActivities = localActivities.filter(a => a.created_by === currentUserId || a.updated_by === currentUserId || a.user_id === currentUserId);
+                    }
                 }
 
                 if (searchTerm) {
@@ -147,8 +166,15 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
                 const oppIdsString = oppIds.length > 0 ? oppIds.join(',') : 'dummy-no-opps';
                 query = query.or(`account_id.eq.${accountId},opportunity_id.in.(${oppIdsString})`);
             } else {
-                // Only show user's activities unless filtering by opportunity
-                query = query.eq('user_id', currentUserId);
+                if (isAdmin) {
+                    // admins see all
+                } else if (userRole === 'COORDINADOR') {
+                    const idsToMatch = [currentUserId, ...subordinateIds].filter(Boolean);
+                    const idsString = idsToMatch.join(',');
+                    query = query.or(`user_id.in.(${idsString}),created_by.in.(${idsString})`);
+                } else {
+                    query = query.or(`user_id.eq.${currentUserId},created_by.eq.${currentUserId}`);
+                }
             }
 
             if (searchTerm) {
@@ -195,13 +221,13 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
         } finally {
             setLoading(false);
         }
-    }, [currentUserId, pageSize, searchTerm, typeFilter, showCompleted, opportunityId, accountId, page]);
+    }, [currentUserId, pageSize, searchTerm, typeFilter, showCompleted, opportunityId, accountId, page, isAdmin, userRole, subordinateIds]);
 
     // Initial Fetch & Filter Fetch - Reset on filter change
     useEffect(() => {
         fetchActivities(false);
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [searchTerm, typeFilter, showCompleted, opportunityId, accountId, currentUserId]);
+    }, [searchTerm, typeFilter, showCompleted, opportunityId, accountId, currentUserId, subordinateIds.length]);
 
     // OPTIMISTIC UI: Listen to broadcasted local mutations
     useEffect(() => {

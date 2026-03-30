@@ -129,7 +129,15 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
     const [selectedPlanId, setSelectedPlanId] = useState<string>("");
     const [selectedBucketId, setSelectedBucketId] = useState<string>("");
     const [loadingPlanner, setLoadingPlanner] = useState<boolean>(false);
-    const [checklist, setChecklist] = useState<string[]>([]);
+    const [checklist, setChecklist] = useState<{ id: string; title: string; isChecked: boolean }[]>(() => {
+        if (initialData?._sync_metadata?.checklist) {
+            return initialData._sync_metadata.checklist.map((item: any) => {
+                if (typeof item === 'string') return { id: crypto.randomUUID(), title: item, isChecked: false };
+                return item;
+            });
+        }
+        return [];
+    });
     const [newChecklistItem, setNewChecklistItem] = useState("");
 
     // Deletion State
@@ -198,6 +206,13 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
     }, []);
 
     useEffect(() => {
+        // Guard: solo sincronizar una vez por instancia de actividad.
+        // initialData puede cambiar cuando Dexie persiste ms_planner_id o ms_event_id,
+        // lo que dispararía el sync infinitamente sin este control.
+        if (!initialData?.id) return;
+        if (hasSyncedRef.current === initialData.id) return;
+        hasSyncedRef.current = initialData.id;
+
         async function syncPlannerBidirectional() {
             if (!initialData || !initialData.ms_planner_id) return;
 
@@ -253,6 +268,10 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                             setValue('is_completed', isCompleted, { shouldDirty: true });
                         }
 
+                        if (taskData.details?.checklist) {
+                            setChecklist(Object.entries(taskData.details.checklist).map(([id, item]: [string, any]) => ({ id, title: item.title, isChecked: item.isChecked })));
+                        }
+
                         if (taskData.resolvedAssignees && taskData.resolvedAssignees.length > 0) {
                             setAttendees(taskData.resolvedAssignees);
                         }
@@ -268,7 +287,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                         console.log(`[CreateActivityModal] CRM is newer. Retaining CRM data...`);
                         setMsPlannerId(taskData.id);
                         if (taskData.details?.checklist) {
-                            setChecklist(Object.values(taskData.details.checklist).map((item: any) => item.title));
+                            setChecklist(Object.entries(taskData.details.checklist).map(([id, item]: [string, any]) => ({ id, title: item.title, isChecked: item.isChecked })));
                         }
                         if (taskData.resolvedAssignees && taskData.resolvedAssignees.length > 0) {
                             setAttendees(taskData.resolvedAssignees);
@@ -277,7 +296,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                         // Same timestamps. Just populate UI details
                         setMsPlannerId(taskData.id);
                         if (taskData.details?.checklist) {
-                            setChecklist(Object.values(taskData.details.checklist).map((item: any) => item.title));
+                            setChecklist(Object.entries(taskData.details.checklist).map(([id, item]: [string, any]) => ({ id, title: item.title, isChecked: item.isChecked })));
                         }
                         if (taskData.resolvedAssignees && taskData.resolvedAssignees.length > 0) {
                             setAttendees(taskData.resolvedAssignees);
@@ -503,13 +522,17 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
 
     const addChecklistItem = () => {
         if (newChecklistItem.trim()) {
-            setChecklist([...checklist, newChecklistItem.trim()]);
+            setChecklist([...checklist, { id: crypto.randomUUID(), title: newChecklistItem.trim(), isChecked: false }]);
             setNewChecklistItem("");
         }
     };
 
-    const removeChecklistItem = (index: number) => {
-        setChecklist(checklist.filter((_, i) => i !== index));
+    const removeChecklistItem = (id: string) => {
+        setChecklist(checklist.filter((item) => item.id !== id));
+    };
+
+    const toggleChecklistItem = (id: string, isChecked: boolean) => {
+        setChecklist(checklist.map((item) => item.id === id ? { ...item, isChecked } : item));
     };
 
     // Planner: Load Plans directly when sync is enabled
@@ -530,10 +553,15 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                 .then(data => {
                     const plans = data.plans || [];
                     setPlannerPlans(plans);
-                    // Auto-select "CRM Ventas" plan if it exists, only for NEW tasks
+                    // Auto-select CRM default plan usando el flag isCrmDefault que devuelve la API
+                    // Esto es más confiable que comparar por nombre de texto con 95 planes
                     if (!initialData?.ms_planner_id && !selectedPlanId) {
-                        const defaultPlan = plans.find((p: { title: string }) => p.title === 'CRM Ventas');
-                        if (defaultPlan) setSelectedPlanId(defaultPlan.id);
+                        const defaultPlan = plans.find((p: any) => p.isCrmDefault)
+                            || plans.find((p: any) => p.title === 'CRM Ventas'); // fallback
+                        if (defaultPlan) {
+                            console.log('[Planner] Auto-selecting plan:', defaultPlan.title, defaultPlan.id);
+                            setSelectedPlanId(defaultPlan.id);
+                        }
                     }
                 })
                 .catch(err => console.error('[Planner] Error loading plans:', err))
@@ -1309,16 +1337,32 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
 
                                     {checklist.length > 0 && (
                                         <div className="bg-slate-50/50 border border-slate-100 rounded-xl p-2 space-y-1 mt-2">
-                                            {checklist.map((item, index) => (
-                                                <div key={index} className="flex items-center justify-between p-2 bg-white border border-slate-100 rounded-lg group animate-in slide-in-from-left-2 shadow-sm">
-                                                    <div className="flex items-center gap-2">
-                                                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                                                        <span className="text-sm text-slate-700">{item}</span>
+                                            {checklist.map((item) => (
+                                                <div key={item.id} className="flex items-center justify-between p-2 bg-white border border-slate-100 rounded-lg group animate-in slide-in-from-left-2 shadow-sm gap-2">
+                                                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                                                        <input 
+                                                            type="checkbox" 
+                                                            checked={item.isChecked} 
+                                                            onChange={(e) => toggleChecklistItem(item.id, e.target.checked)}
+                                                            className="w-4 h-4 rounded-sm border-slate-300 text-emerald-600 focus:ring-emerald-500/20 cursor-pointer"
+                                                        />
+                                                        <input 
+                                                            type="text" 
+                                                            value={item.title}
+                                                            onChange={(e) => {
+                                                                const newTitle = e.target.value;
+                                                                setChecklist(checklist.map((c) => c.id === item.id ? { ...c, title: newTitle } : c));
+                                                            }}
+                                                            className={cn(
+                                                                "text-sm flex-1 bg-transparent border-none p-0 focus:ring-0 truncate",
+                                                                item.isChecked ? "text-slate-400 line-through" : "text-slate-700"
+                                                            )}
+                                                        />
                                                     </div>
                                                     <button
                                                         type="button"
-                                                        onClick={() => removeChecklistItem(index)}
-                                                        className="text-slate-300 hover:text-red-500 transition-colors p-1"
+                                                        onClick={() => removeChecklistItem(item.id)}
+                                                        className="text-slate-300 hover:text-red-500 transition-colors p-1 shrink-0"
                                                     >
                                                         <X className="w-3.5 h-3.5" />
                                                     </button>
