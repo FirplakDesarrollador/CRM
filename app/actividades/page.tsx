@@ -91,6 +91,14 @@ function ActivitiesContent() {
     const accounts = useLiveQuery(() => db.accounts.toArray()) || [];
     const opportunities = useLiveQuery(() => db.opportunities.toArray()) || [];
 
+    const availableUsersForFilter = useMemo(() => {
+        if (role === 'ADMIN') return users;
+        if (role === 'COORDINADOR' && user?.id) {
+            return users.filter(u => u.id === user.id || u.coordinadores?.includes(user.id));
+        }
+        return [];
+    }, [users, role, user]);
+
     // Deep linking: detect id in URL and open edit modal
     useEffect(() => {
         const id = searchParams.get('id');
@@ -283,7 +291,7 @@ function ActivitiesContent() {
                                         <UserIcon className="w-4 h-4" />
                                     </div>
                                     <SearchableSelect
-                                        options={users.map(u => ({ label: u.full_name || '', value: u.id }))}
+                                        options={availableUsersForFilter.map(u => ({ label: u.full_name || '', value: u.id }))}
                                         value={filterUser}
                                         onChange={(val) => setFilterUser(val)}
                                         placeholder="Vendedor..."

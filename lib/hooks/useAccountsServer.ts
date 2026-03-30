@@ -45,8 +45,24 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
     const [assignedUserId, setAssignedUserId] = useState<string | null>(null);
 
     // User Context
-    const { user, isVendedor } = useCurrentUser();
+    const { user, role: userRole, isVendedor } = useCurrentUser();
     const currentUserId = user?.id;
+
+    const [subordinateIds, setSubordinateIds] = useState<string[]>([]);
+
+    useEffect(() => {
+        if (userRole === 'COORDINADOR' && currentUserId) {
+            supabase
+                .from('CRM_Usuarios')
+                .select('id')
+                .contains('coordinadores', [currentUserId])
+                .then(({ data, error }) => {
+                    if (!error && data) {
+                        setSubordinateIds(data.map(u => u.id));
+                    }
+                });
+        }
+    }, [userRole, currentUserId]);
 
     const fetchAccounts = useCallback(async (isLoadMore = false) => {
         setLoading(true);
@@ -62,7 +78,17 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
 
                 // Role filtering
                 if (isVendedor && currentUserId) {
-                    localAccounts = localAccounts.filter((a: any) => a.owner_user_id === currentUserId);
+                    localAccounts = localAccounts.filter((a: any) => 
+                        a.owner_user_id === currentUserId || 
+                        (!a.owner_user_id && a.created_by === currentUserId)
+                    );
+                } else if (userRole === 'COORDINADOR' && currentUserId) {
+                    localAccounts = localAccounts.filter((a: any) => 
+                        a.owner_user_id === currentUserId || 
+                        (!a.owner_user_id && a.created_by === currentUserId) ||
+                        (a.owner_user_id && subordinateIds.includes(a.owner_user_id)) ||
+                        (!a.owner_user_id && a.created_by && subordinateIds.includes(a.created_by))
+                    );
                 }
 
                 // Filtering
@@ -141,7 +167,11 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
 
             // Role filtering
             if (isVendedor && currentUserId) {
-                query = query.eq('owner_user_id', currentUserId);
+                query = query.or(`owner_user_id.eq.${currentUserId},and(owner_user_id.is.null,created_by.eq.${currentUserId})`);
+            } else if (userRole === 'COORDINADOR' && currentUserId) {
+                const ids = [currentUserId, ...subordinateIds].filter(Boolean);
+                const idsString = ids.join(',');
+                query = query.or(`owner_user_id.in.(${idsString}),and(owner_user_id.is.null,created_by.in.(${idsString}))`);
             }
 
             if (searchTerm) {
@@ -244,7 +274,7 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
         } finally {
             setLoading(false);
         }
-    }, [currentUserId, pageSize, searchTerm, assignedUserId, isVendedor]);
+    }, [currentUserId, pageSize, searchTerm, assignedUserId, isVendedor, userRole, subordinateIds]);
 
     // Initial Fetch & Filter Fetch
     useEffect(() => {

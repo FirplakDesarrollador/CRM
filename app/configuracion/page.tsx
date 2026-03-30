@@ -447,10 +447,12 @@ function ConfigPageContent() {
                 {/* Session Card */}
                 <div className="md:col-span-2 bg-white rounded-3xl border border-slate-200 shadow-sm p-6">
                     <div className="flex items-center gap-2 mb-4">
-                        <LogOut className="w-5 h-5 text-slate-600" />
-                        <h3 className="font-bold text-slate-900">Sesión</h3>
+                        <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center text-slate-600">
+                            <Settings className="w-5 h-5" />
+                        </div>
+                        <h3 className="font-bold text-slate-900">Perfil de Usuario</h3>
                     </div>
-                    <p className="text-sm text-slate-500 mb-6">Administra tu acceso a la aplicación.</p>
+                    <p className="text-sm text-slate-500 mb-6">Administra tu perfil y preferencias de vista.</p>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         {/* User Info */}
@@ -513,16 +515,10 @@ function ConfigPageContent() {
                             </div>
                         </div>
 
-                        {/* Logout Button */}
-                        <div className="flex flex-col justify-center">
-                            <button
-                                onClick={confirmLogout}
-                                className="w-full flex items-center justify-center gap-2 px-4 py-4 bg-red-50 text-red-700 hover:bg-red-100 rounded-xl text-sm font-bold transition-colors border border-red-200"
-                            >
-                                <LogOut className="w-4 h-4" />
-                                Cerrar Sesión
-                            </button>
-                            <p className="text-xs text-slate-400 text-center mt-3">Asegúrate de sincronizar antes de salir.</p>
+                        <div className="flex flex-col justify-center gap-2">
+                             <p className="text-xs text-slate-500 font-medium bg-slate-50 p-4 rounded-xl border border-slate-100 italic">
+                                Puedes cambiar entre modo Administrador y Vendedor para previsualizar cómo ven la plataforma tus colaboradores.
+                             </p>
                         </div>
                     </div>
                 </div>
@@ -713,6 +709,26 @@ function ConfigPageContent() {
                     </button>
                 </div>
             )}
+
+            {/* Logout Tile */}
+            <div className="bg-red-50/30 rounded-3xl border border-red-100 p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex items-center gap-4">
+                    <div className="bg-red-100 p-3 rounded-2xl text-red-600">
+                        <LogOut className="w-6 h-6" />
+                    </div>
+                    <div>
+                        <h3 className="font-bold text-slate-900 text-lg">Cerrar Sesión</h3>
+                        <p className="text-sm text-slate-500">Salir de la aplicación de forma segura</p>
+                    </div>
+                </div>
+                <button
+                    onClick={confirmLogout}
+                    className="bg-red-600 hover:bg-red-700 text-white px-8 py-3 rounded-xl text-sm font-bold shadow-md shadow-red-100 transition-all flex items-center justify-center gap-2"
+                >
+                    <LogOut className="w-4 h-4" />
+                    Cerrar Sesión Ahora
+                </button>
+            </div>
 
 
             <ConfirmationModal

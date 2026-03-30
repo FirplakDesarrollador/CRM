@@ -6,6 +6,9 @@ import { Search, User as UserIcon, Check, X, ChevronDown } from "lucide-react";
 import { cn } from "@/components/ui/utils";
 import { useOnClickOutside } from "@/lib/hooks/useOnClickOutside";
 
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { useMemo } from "react";
+
 interface UserPickerFilterProps {
     onUserSelect: (userId: string | null) => void;
     selectedUserId: string | null;
@@ -13,6 +16,7 @@ interface UserPickerFilterProps {
 
 export function UserPickerFilter({ onUserSelect, selectedUserId }: UserPickerFilterProps) {
     const { users, isLoading } = useUsers();
+    const { user: currentUser, role } = useCurrentUser();
     const [isOpen, setIsOpen] = useState(false);
     const [search, setSearch] = useState("");
     const containerRef = useRef<HTMLDivElement>(null);
@@ -22,7 +26,15 @@ export function UserPickerFilter({ onUserSelect, selectedUserId }: UserPickerFil
 
     const selectedUser = users.find(u => u.id === selectedUserId);
 
-    const filteredUsers = users.filter(u =>
+    const availableUsers = useMemo(() => {
+        if (role === 'ADMIN') return users;
+        if (role === 'COORDINADOR' && currentUser?.id) {
+            return users.filter(u => u.id === currentUser.id || u.coordinadores?.includes(currentUser.id));
+        }
+        return [];
+    }, [users, role, currentUser]);
+
+    const filteredUsers = availableUsers.filter(u =>
         u.full_name?.toLowerCase().includes(search.toLowerCase()) ||
         u.email.toLowerCase().includes(search.toLowerCase())
     );

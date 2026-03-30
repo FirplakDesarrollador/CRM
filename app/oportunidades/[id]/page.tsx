@@ -4,7 +4,7 @@ import { useOpportunities, useQuotes, useQuoteItems } from "@/lib/hooks/useOppor
 import { DetailHeader } from "@/components/ui/DetailHeader";
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { FileText, Plus, AlertCircle, Check, Trash2, Loader2, Truck, Package, Building, ChevronRight, TrendingUp, User } from "lucide-react";
+import { FileText, Plus, AlertCircle, Check, Trash2, Loader2, Truck, Package, Building, ChevronRight, TrendingUp, User, Users } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { db } from "@/lib/db";
@@ -172,26 +172,27 @@ export default function OpportunityDetailPage() {
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
 
                 {/* Sub-Tabs Nav */}
-                <div className="flex space-x-6 border-b border-slate-200 mb-6 w-full overflow-x-auto">
+                <div className="flex space-x-2 border-b border-slate-200 mb-6 w-full overflow-x-auto">
                     {[
-                        'resumen',
-                        'colaboradores',
-                        'cotizaciones',
-                        'productos',
-                        'actividades',
-                        ...(userRole === 'ADMIN' || userRole === 'COORDINADOR' ? ['asignado'] : [])
-                    ].map(tab => (
+                        { id: 'resumen', label: 'Resumen', icon: TrendingUp },
+                        { id: 'colaboradores', label: 'Colaboradores', icon: Users },
+                        { id: 'cotizaciones', label: 'Cotizaciones', icon: FileText },
+                        { id: 'productos', label: 'Productos', icon: Package },
+                        { id: 'actividades', label: 'Actividades', icon: ListTodo },
+                        ...(userRole === 'ADMIN' || userRole === 'COORDINADOR' ? [{ id: 'asignado', label: 'Asignado', icon: User }] : [])
+                    ].map((tab, idx) => (
                         <button
-                            key={tab}
-                            onClick={() => setActiveTab(tab as any)}
+                            key={tab.id}
+                            onClick={() => setActiveTab(tab.id as any)}
                             className={cn(
-                                "pb-3 text-sm font-medium border-b-2 capitalize transition-colors",
-                                activeTab === tab
+                                "flex items-center gap-1.5 px-2.5 pb-3 text-[13px] font-medium border-b-2 transition-colors whitespace-nowrap",
+                                activeTab === tab.id
                                     ? "border-blue-600 text-blue-600"
-                                    : "border-transparent text-slate-500 hover:text-slate-800"
+                                    : "border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300"
                             )}
                         >
-                            {tab}
+                            <tab.icon size={14} />
+                            {tab.label}
                         </button>
                     ))}
                 </div>

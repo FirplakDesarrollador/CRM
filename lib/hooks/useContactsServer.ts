@@ -35,8 +35,24 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
     const [searchTerm, setSearchTerm] = useState<string>("");
 
     // User Context
-    const { user, isVendedor } = useCurrentUser();
+    const { user, role: userRole, isVendedor } = useCurrentUser();
     const currentUserId = user?.id;
+
+    const [subordinateIds, setSubordinateIds] = useState<string[]>([]);
+
+    useEffect(() => {
+        if (userRole === 'COORDINADOR' && currentUserId) {
+            supabase
+                .from('CRM_Usuarios')
+                .select('id')
+                .contains('coordinadores', [currentUserId])
+                .then(({ data, error }) => {
+                    if (!error && data) {
+                        setSubordinateIds(data.map(u => u.id));
+                    }
+                });
+        }
+    }, [userRole, currentUserId]);
 
     const fetchContacts = useCallback(async (isLoadMore = false) => {
         setLoading(true);
@@ -50,6 +66,21 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
                 console.log("[useContactsServer] Device is offline. Falling back to local Dexie database...");
                 let localContacts = await db.contacts.toArray();
                 
+                // Seller restriction for offline
+                if ((isVendedor || userRole === 'COORDINADOR') && currentUserId) {
+                    const idsToMatch = isVendedor ? [currentUserId] : [currentUserId, ...subordinateIds];
+
+                    // Get my accounts: Owner OR (No owner and I am creator)
+                    const myAccounts = await db.accounts.filter(a => 
+                        idsToMatch.includes(a.owner_user_id || 'dummy') || 
+                        (!a.owner_user_id && idsToMatch.includes(a.created_by || 'dummy'))
+                    ).toArray();
+                    const myAccountIds = new Set(myAccounts.map(a => a.id));
+                    
+                    // Filter contacts: MUST belong to my accounts
+                    localContacts = localContacts.filter(c => myAccountIds.has(c.account_id));
+                }
+
                 if (accountId) {
                     localContacts = localContacts.filter(c => c.account_id === accountId);
                 }
@@ -92,6 +123,10 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
             }
 
             // Build query
+            // Use !inner join when filtering by account owner to enforce security
+            const needsAccountFilter = isVendedor || userRole === 'COORDINADOR';
+            const accountSelect = needsAccountFilter ? 'account:CRM_Cuentas!inner(nombre, owner_user_id)' : 'account:CRM_Cuentas(nombre)';
+            
             const selectFields = `
                 id,
                 account_id,
@@ -103,13 +138,36 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
                 created_at,
                 created_by,
                 updated_at,
-                account:CRM_Cuentas(nombre)
+                ${accountSelect}
             `;
 
             let query = supabase
                 .from('CRM_Contactos')
                 .select(selectFields, { count: 'exact' })
                 .eq('is_deleted', false);
+
+            if ((isVendedor || userRole === 'COORDINADOR') && currentUserId) {
+                const idsToMatch = isVendedor ? [currentUserId] : [currentUserId, ...subordinateIds].filter(Boolean);
+                const idsString = idsToMatch.join(',');
+
+                // Fetch IDs of accounts where user is owner OR (unassigned and user is creator)
+                const { data: myAccounts } = await supabase
+                    .from('CRM_Cuentas')
+                    .select('id')
+                    .or(`owner_user_id.in.(${idsString}),and(owner_user_id.is.null,created_by.in.(${idsString}))`)
+                    .eq('is_deleted', false);
+                
+                const myAccountIds = myAccounts?.map(a => a.id) || [];
+                
+                if (myAccountIds.length > 0) {
+                    // Contact MUST belong to an account I own/control
+                    query = query.in('account_id', myAccountIds);
+                } else {
+                    // I don't own any accounts, so I shouldn't see any contacts in strict mode
+                    // Filtering by a non-existent ID to ensure empty list
+                    query = query.eq('id', '00000000-0000-0000-0000-000000000000');
+                }
+            }
 
             if (accountId) {
                 query = query.eq('account_id', accountId);
@@ -183,7 +241,7 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
         } finally {
             setLoading(false);
         }
-    }, [pageSize, searchTerm, accountId]);
+    }, [pageSize, searchTerm, accountId, isVendedor, userRole, currentUserId, subordinateIds]);
 
     // Initial Fetch & Filter Fetch
     useEffect(() => {

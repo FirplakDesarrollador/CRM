@@ -511,7 +511,7 @@ export async function createPlannerTask(accessToken: string, taskDetails: {
     dueDateTime?: string;
     assigneeIds?: string[];
     notes?: string;
-    checklist?: string[];
+    checklist?: ({ id?: string; title: string; isChecked?: boolean } | string)[];
 }) {
     console.log('[Microsoft] Creating Planner task...', {
         planId: taskDetails.planId,
@@ -592,12 +592,15 @@ export async function createPlannerTask(accessToken: string, taskDetails: {
                 if (taskDetails.checklist && taskDetails.checklist.length > 0) {
                     updateBody.checklist = {};
                     taskDetails.checklist.forEach((item, index) => {
+                        const title = typeof item === 'string' ? item : item.title;
+                        const isChecked = typeof item === 'string' ? false : (item.isChecked || false);
+                        
                         // Planner checklist items need a unique ID (random string works) and an OrderHint
                         const itemId = `item_${index}_${Math.random().toString(36).substring(7)}`;
                         updateBody.checklist[itemId] = {
                             '@odata.type': '#microsoft.graph.plannerChecklistItem',
-                            title: item,
-                            isChecked: false,
+                            title: title,
+                            isChecked: isChecked,
                             orderHint: ' !' // ' !' is used to specify auto-ordering
                         };
                     });
@@ -743,31 +746,54 @@ export async function updatePlannerTask(accessToken: string, taskId: string, upd
                     if (updateData.checklist) {
                         detailsUpdate.checklist = {};
 
-                        // Map of existing items by title
-                        const existingByTitle = new Map<string, { id: string, isChecked: boolean }>();
+                        // Map of existing items by ID and by title as fallback
+                        const existingById = new Map<string, { id: string, title: string, isChecked: boolean }>();
+                        const existingByTitle = new Map<string, { id: string, title: string, isChecked: boolean }>();
                         for (const [key, val] of Object.entries<any>(existingChecklist)) {
-                            existingByTitle.set(val.title, { id: key, isChecked: val.isChecked });
+                            const itemData = { id: key, title: val.title, isChecked: val.isChecked };
+                            existingById.set(key, itemData);
+                            existingByTitle.set(val.title, itemData);
                         }
 
-                        updateData.checklist.forEach((itemTitle: string, index: number) => {
-                            const existing = existingByTitle.get(itemTitle);
+                        updateData.checklist.forEach((itemParam: any, index: number) => {
+                            const isString = typeof itemParam === 'string';
+                            const title = isString ? itemParam : itemParam.title;
+                            const isChecked = isString ? false : (itemParam.isChecked || false);
+                            const id = !isString ? itemParam.id : undefined;
+
+                            // Try to match by ID first, then by exact Title
+                            let existing = id ? existingById.get(id) : undefined;
+                            if (!existing) {
+                                existing = existingByTitle.get(title);
+                            }
+
                             if (existing) {
-                                // Keep it, remove from map so we don't delete it
-                                existingByTitle.delete(itemTitle);
+                                // Important: Remove it from tracking maps so it doesn't get deleted
+                                existingById.delete(existing.id);
+                                existingByTitle.delete(existing.title);
+
+                                // Update if state changed
+                                if (existing.isChecked !== isChecked || existing.title !== title) {
+                                    detailsUpdate.checklist[existing.id] = {
+                                        '@odata.type': '#microsoft.graph.plannerChecklistItem',
+                                        title: title,
+                                        isChecked: isChecked
+                                    };
+                                }
                             } else {
                                 // Create new
                                 const itemId = `item_${index}_${Math.random().toString(36).substring(7)}`;
                                 detailsUpdate.checklist[itemId] = {
                                     '@odata.type': '#microsoft.graph.plannerChecklistItem',
-                                    title: itemTitle,
-                                    isChecked: false,
+                                    title: title,
+                                    isChecked: isChecked,
                                     orderHint: ' !'
                                 };
                             }
                         });
 
-                        // Now everything left in existingByTitle should be deleted
-                        for (const { id } of existingByTitle.values()) {
+                        // Now everything left in existingById should be deleted
+                        for (const { id } of existingById.values()) {
                             detailsUpdate.checklist[id] = null;
                         }
                     }

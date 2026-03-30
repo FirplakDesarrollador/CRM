@@ -137,9 +137,9 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel }:
     };
 
     return (
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-6 p-8 border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-3xl shadow-xl shadow-slate-200/50 dark:shadow-none">
-            <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-4">
-                <h3 className="text-2xl font-black text-slate-800 dark:text-slate-100 tracking-tight">
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-6 p-8 border border-slate-200 bg-white rounded-3xl shadow-xl shadow-slate-200/50">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-4">
+                <h3 className="text-2xl font-black text-slate-800 tracking-tight">
                     {existingContact ? 'Editar Contacto' : 'Nuevo Contacto'}
                 </h3>
                 {!existingContact && <ContactImportButton onContactImported={handleImport} />}
@@ -150,7 +150,7 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel }:
                     <label className="block text-xs font-black uppercase text-slate-500 tracking-widest ml-1">Nombre Completo *</label>
                     <input
                         {...register("nombre", { required: "El nombre es obligatorio" })}
-                        className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 rounded-2xl focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] transition-all outline-none font-bold text-slate-700 dark:text-slate-200"
+                        className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] transition-all outline-none font-bold text-slate-700"
                         placeholder="Ej. Juan Pérez"
                     />
                     {errors.nombre && <span className="text-red-500 font-bold text-[10px] uppercase ml-1 tracking-wider">{errors.nombre.message}</span>}
@@ -160,7 +160,7 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel }:
                     <label className="block text-xs font-black uppercase text-slate-500 tracking-widest ml-1">Cargo / Posición</label>
                     <input
                         {...register("cargo")}
-                        className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 rounded-2xl focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] transition-all outline-none font-bold text-slate-700 dark:text-slate-200"
+                        className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] transition-all outline-none font-bold text-slate-700"
                         placeholder="Ej. Gerente Comercial"
                     />
                 </div>
@@ -170,7 +170,7 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel }:
                     <input
                         type="email"
                         {...register("email")}
-                        className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 rounded-2xl focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] transition-all outline-none font-bold text-slate-700 dark:text-slate-200"
+                        className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] transition-all outline-none font-bold text-slate-700"
                         placeholder="ejemplo@correo.com"
                     />
                 </div>
@@ -179,25 +179,25 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel }:
                     <label className="block text-xs font-black uppercase text-slate-500 tracking-widest ml-1">Teléfono Móvil</label>
                     <input
                         {...register("telefono")}
-                        className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 rounded-2xl focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] transition-all outline-none font-bold text-slate-700 dark:text-slate-200"
+                        className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] transition-all outline-none font-bold text-slate-700"
                         placeholder="+57 300 123 4567"
                     />
                 </div>
             </div>
 
-            <div className="flex items-center gap-3 p-4 bg-emerald-50/50 dark:bg-emerald-900/10 rounded-2xl border border-emerald-100 dark:border-emerald-900/20">
+            <div className="flex items-center gap-3 p-4 bg-emerald-50/50 rounded-2xl border border-emerald-100">
                 <input
                     type="checkbox"
                     id="es_principal"
                     {...register("es_principal")}
                     className="h-5 w-5 rounded-lg border-slate-300 text-emerald-600 focus:ring-emerald-500 transition-all cursor-pointer"
                 />
-                <label htmlFor="es_principal" className="text-sm font-black text-emerald-800 dark:text-emerald-400 cursor-pointer">
+                <label htmlFor="es_principal" className="text-sm font-black text-emerald-800 cursor-pointer">
                     Marcar como Contacto Principal de la cuenta
                 </label>
             </div>
 
-            <div className="flex justify-end gap-3 pt-6 border-t border-slate-100 dark:border-slate-800">
+            <div className="flex justify-end gap-3 pt-6 border-t border-slate-100">
                 <button
                     type="button"
                     onClick={onCancel}

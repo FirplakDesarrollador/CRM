@@ -30,7 +30,7 @@ type UseCommissionRulesProps = {
 };
 
 export function useCommissionRules({ pageSize = 20 }: UseCommissionRulesProps = {}) {
-    const { user } = useCurrentUser();
+    const { user, role } = useCurrentUser();
     const currentUserId = user?.id || null;
 
     const [data, setData] = useState<CommissionRule[]>([]);
@@ -38,6 +38,22 @@ export function useCommissionRules({ pageSize = 20 }: UseCommissionRulesProps = 
     const [loading, setLoading] = useState(true);
     const [page, setPage] = useState(1);
     const [hasMore, setHasMore] = useState(true);
+
+    const [subordinateIds, setSubordinateIds] = useState<string[]>([]);
+
+    useEffect(() => {
+        if (role === 'COORDINADOR' && currentUserId) {
+            supabase
+                .from('CRM_Usuarios')
+                .select('id')
+                .contains('coordinadores', [currentUserId])
+                .then(({ data, error }) => {
+                    if (!error && data) {
+                        setSubordinateIds(data.map(u => u.id));
+                    }
+                });
+        }
+    }, [role, currentUserId]);
 
     // Filters
     const [canalFilter, setCanalFilter] = useState<string | null>(null);
@@ -69,6 +85,11 @@ export function useCommissionRules({ pageSize = 20 }: UseCommissionRulesProps = 
             if (categoriaFilter) query = query.eq('categoria_id', categoriaFilter);
             if (activeFilter !== null) query = query.eq('is_active', activeFilter);
 
+            if (role === 'COORDINADOR') {
+                const ids = [currentUserId, ...subordinateIds].filter(Boolean);
+                query = query.or(`vendedor_id.is.null,vendedor_id.in.(${ids.join(',')})`);
+            }
+
             query = query.order('created_at', { ascending: false }).range(from, to);
 
             const { data: result, error, count: totalCount } = await query;
@@ -96,11 +117,11 @@ export function useCommissionRules({ pageSize = 20 }: UseCommissionRulesProps = 
         } finally {
             setLoading(false);
         }
-    }, [currentUserId, pageSize, page, canalFilter, vendedorFilter, categoriaFilter, activeFilter]);
+    }, [currentUserId, pageSize, page, canalFilter, vendedorFilter, categoriaFilter, activeFilter, role, subordinateIds]);
 
     useEffect(() => {
         fetchRules(false);
-    }, [currentUserId, canalFilter, vendedorFilter, categoriaFilter, activeFilter]);
+    }, [currentUserId, canalFilter, vendedorFilter, categoriaFilter, activeFilter, role, subordinateIds]);
 
     const createRule = async (rule: {
         nombre: string;
