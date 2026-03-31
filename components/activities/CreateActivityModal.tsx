@@ -46,6 +46,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         }
     });
 
+    const watchedAccountId = watch('account_id');
     const watchedOpportunityId = watch('opportunity_id');
 
     const relatedOpportunity = useLiveQuery(
@@ -54,8 +55,12 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
     );
 
     const relatedAccount = useLiveQuery(
-        () => relatedOpportunity?.account_id ? db.accounts.get(relatedOpportunity.account_id) : undefined,
-        [relatedOpportunity?.account_id]
+        () => {
+            if (relatedOpportunity?.account_id) return db.accounts.get(relatedOpportunity.account_id);
+            if (watchedAccountId) return db.accounts.get(watchedAccountId);
+            return undefined;
+        },
+        [relatedOpportunity?.account_id, watchedAccountId]
     );
 
     const relatedContact = useLiveQuery(
@@ -589,21 +594,99 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                 .then(data => {
                     const buckets = data.buckets || [];
                     setPlannerBuckets(buckets);
-                    // Auto-select "Proyecto CRM" bucket if it exists, only for NEW tasks
-                    if (!initialData?.ms_planner_id && !selectedBucketId) {
-                        const defaultBucket = buckets.find((b: { name: string }) => b.name === 'Proyecto CRM');
-                        if (defaultBucket) {
-                            setSelectedBucketId(defaultBucket.id);
-                        } else if (buckets.length === 1) {
-                            // If only one bucket, select it
-                            setSelectedBucketId(buckets[0].id);
-                        }
-                    }
                 })
                 .catch(err => console.error('[Planner] Error loading buckets:', err))
                 .finally(() => setLoadingPlanner(false));
         }
-    }, [selectedPlanId]);
+    }, [selectedPlanId, initialData?.ms_planner_id]);
+
+    // Ref to track if we already auto-selected a bucket for this modal instance
+    const autoSelectedBucketRef = useRef<boolean>(false);
+
+    // Auto-select bucket based on mapped account/opportunity canal
+    useEffect(() => {
+        if (initialData?.ms_planner_id) return;
+        if (plannerBuckets.length === 0) return;
+        if (autoSelectedBucketRef.current) return;
+
+        // KEY FIX: If there's an opportunity OR explicitly selected account linked, 
+        // WAIT for the account to load before making any selection.
+        if ((watchedOpportunityId || watchedAccountId) && relatedAccount === undefined) {
+            console.log('[Planner BucketAutoSelect] Linked entity present but account not yet loaded — waiting...');
+            return;
+        }
+
+        // === DIAGNOSTIC LOGGING ===
+        console.log('[Planner BucketAutoSelect] Available buckets:', plannerBuckets.map(b => `"${b.name}"`).join(', '));
+        console.log('[Planner BucketAutoSelect] relatedAccount:', relatedAccount ? { id: relatedAccount.id, nombre: (relatedAccount as any).nombre, canal_id: relatedAccount.canal_id } : null);
+        console.log('[Planner BucketAutoSelect] watchedOpportunityId:', watchedOpportunityId);
+        console.log('[Planner BucketAutoSelect] watchedAccountId:', watchedAccountId);
+
+        let targetBucketName = 'To do';
+
+        if (relatedAccount && (relatedAccount as any).canal_id) {
+            const canal = String((relatedAccount as any).canal_id).toUpperCase().trim();
+            console.log('[Planner BucketAutoSelect] canal_id resolved to:', canal);
+
+            if (canal === 'TIENDA' || canal.includes('TIENDA')) {
+                targetBucketName = 'Tienda';
+            } else if (canal === 'DIST_INT' || (canal.includes('INTERNACIONAL') && canal.includes('DIST'))) {
+                targetBucketName = 'Distribución internacional';
+            } else if (canal === 'OBRAS_INT' || (canal.includes('INTERNACIONAL') && canal.includes('OBRA'))) {
+                targetBucketName = 'Obras internacional';
+            } else if (canal === 'PROPIO' || canal === 'E-COMMERCE' || canal === 'CLIENTE' || canal.includes('PROPIO') || canal.includes('CLIENTE')) {
+                targetBucketName = 'e-commerce';
+            } else if (canal === 'DIST_NAC' || (canal.includes('DISTRIB') && !canal.includes('INTER'))) {
+                targetBucketName = 'Distribución';
+            } else if (canal === 'OBRAS_NAC' || (canal.includes('OBRA') && !canal.includes('INTER'))) {
+                targetBucketName = 'Obras';
+            }
+            console.log('[Planner BucketAutoSelect] Resolved target bucket name:', targetBucketName);
+        } else {
+            console.log('[Planner BucketAutoSelect] No canal_id found — defaulting to "To do"');
+        }
+
+        // Robust matching logic
+        const getMatch = (targetName: string) => {
+            const normalizedTarget = targetName.toLowerCase().trim();
+            
+            // 1. PRIORIDAD: Coincidencia exacta (evita match codicioso de 'Distribución' con 'Distribución internacional')
+            const exactMatch = plannerBuckets.find(b => b.name.toLowerCase().trim() === normalizedTarget);
+            if (exactMatch) return exactMatch;
+
+            // 2. FALLBACK: Coincidencias parciales
+            return plannerBuckets.find(b => {
+                const name = b.name.toLowerCase().trim();
+                return name.includes(normalizedTarget) || normalizedTarget.includes(name);
+            });
+        };
+
+        let matchedBucket = getMatch(targetBucketName);
+        console.log('[Planner BucketAutoSelect] Primary match:', matchedBucket?.name ?? 'NO MATCH');
+
+        if (!matchedBucket && targetBucketName !== 'To do') {
+            const keyword = targetBucketName.split(' ')[0];
+            matchedBucket = getMatch(keyword);
+            console.log('[Planner BucketAutoSelect] Keyword fallback ("' + keyword + '"):', matchedBucket?.name ?? 'NO MATCH');
+        }
+
+        if (!matchedBucket && targetBucketName !== 'To do') {
+            matchedBucket = getMatch('To do');
+            console.log('[Planner BucketAutoSelect] "To do" fallback:', matchedBucket?.name ?? 'NO MATCH');
+        }
+
+        if (!matchedBucket && plannerBuckets.length > 0) {
+            matchedBucket = plannerBuckets[0];
+            console.log('[Planner BucketAutoSelect] First-bucket last-resort:', matchedBucket?.name);
+        }
+
+        if (matchedBucket) {
+            console.log('[Planner BucketAutoSelect] FINAL SELECTION →', matchedBucket.name);
+            autoSelectedBucketRef.current = true;
+            setSelectedBucketId(matchedBucket.id);
+        }
+    }, [plannerBuckets, relatedAccount, watchedOpportunityId, watchedAccountId, initialData?.ms_planner_id]);
+
 
     const handleActualSubmit = async (data: any) => {
         setIsSubmitting(true);
@@ -1408,19 +1491,9 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                                 <label className="text-xs font-bold text-slate-500 uppercase">
                                                     Plan <span className="text-red-500">*</span>
                                                 </label>
-                                                <select
-                                                    value={selectedPlanId}
-                                                    onChange={(e) => setSelectedPlanId(e.target.value)}
-                                                    disabled={loadingPlanner}
-                                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-                                                >
-                                                    <option value="">
-                                                        {loadingPlanner ? 'Cargando planes...' : plannerPlans.length === 0 ? 'No hay planes disponibles' : 'Seleccione un plan...'}
-                                                    </option>
-                                                    {plannerPlans.map((p) => (
-                                                        <option key={p.id} value={p.id}>{p.title}</option>
-                                                    ))}
-                                                </select>
+                                                <div className="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-3 text-slate-600 font-medium select-none cursor-not-allowed">
+                                                    {loadingPlanner ? 'Cargando planes...' : (plannerPlans.find(p => p.id === selectedPlanId)?.title || 'CRM Ventas')}
+                                                </div>
                                             </div>
                                             {/* Bucket Selector */}
                                             {selectedPlanId && (
