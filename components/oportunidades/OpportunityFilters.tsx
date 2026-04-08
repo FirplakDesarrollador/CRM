@@ -37,12 +37,22 @@ interface OpportunityFiltersProps {
         segmentId: number | null;
         phaseId: number | null;
         statusFilter: StatusFilter;
+        startDate: string | null;
+        endDate: string | null;
+        startClosingDate: string | null;
+        endClosingDate: string | null;
     }) => void;
     initialChannelId?: string | null;
     initialStatusFilter?: StatusFilter;
+    initialDates?: {
+        startDate: string | null;
+        endDate: string | null;
+        startClosingDate: string | null;
+        endClosingDate: string | null;
+    };
 }
 
-export function OpportunityFilters({ onFilterChange, initialChannelId, initialStatusFilter }: OpportunityFiltersProps) {
+export function OpportunityFilters({ onFilterChange, initialChannelId, initialStatusFilter, initialDates }: OpportunityFiltersProps) {
     const [channels, setChannels] = useState<Channel[]>([]);
     const [subclasses, setSubclasses] = useState<Subclasificacion[]>([]);
     const [segments, setSegments] = useState<Segment[]>([]);
@@ -54,6 +64,11 @@ export function OpportunityFilters({ onFilterChange, initialChannelId, initialSt
     const [selectedSegment, setSelectedSegment] = useState<number | null>(null);
     const [selectedPhase, setSelectedPhase] = useState<number | null>(null);
     const [statusFilter, setStatusFilter] = useState<StatusFilter>(initialStatusFilter || 'open');
+
+    const [startDate, setStartDate] = useState<string | null>(initialDates?.startDate || null);
+    const [endDate, setEndDate] = useState<string | null>(initialDates?.endDate || null);
+    const [startClosingDate, setStartClosingDate] = useState<string | null>(initialDates?.startClosingDate || null);
+    const [endClosingDate, setEndClosingDate] = useState<string | null>(initialDates?.endClosingDate || null);
 
     const [loadingMetadata, setLoadingMetadata] = useState(true);
 
@@ -89,13 +104,17 @@ export function OpportunityFilters({ onFilterChange, initialChannelId, initialSt
 
                 // If initial filters were set (e.g., from URL on back navigation),
                 // notify the parent so the hook fetches with correct filters
-                if (initialChannelId || (initialStatusFilter && initialStatusFilter !== 'open')) {
+                if (initialChannelId || (initialStatusFilter && initialStatusFilter !== 'open') || initialDates) {
                     onFilterChange({
                         channelId: initialChannelId || null,
                         subclassificationId: null,
                         segmentId: null,
                         phaseId: null,
-                        statusFilter: initialStatusFilter || 'open'
+                        statusFilter: initialStatusFilter || 'open',
+                        startDate: initialDates?.startDate || null,
+                        endDate: initialDates?.endDate || null,
+                        startClosingDate: initialDates?.startClosingDate || null,
+                        endClosingDate: initialDates?.endClosingDate || null
                     });
                 }
 
@@ -145,7 +164,11 @@ export function OpportunityFilters({ onFilterChange, initialChannelId, initialSt
             subclassificationId: selectedSubclass,
             segmentId: selectedSegment,
             phaseId: null,
-            statusFilter: status
+            statusFilter: status,
+            startDate,
+            endDate,
+            startClosingDate,
+            endClosingDate
         });
     };
 
@@ -162,7 +185,11 @@ export function OpportunityFilters({ onFilterChange, initialChannelId, initialSt
             subclassificationId: null,
             segmentId: null,
             phaseId: null,
-            statusFilter
+            statusFilter,
+            startDate,
+            endDate,
+            startClosingDate,
+            endClosingDate
         });
     };
 
@@ -176,7 +203,11 @@ export function OpportunityFilters({ onFilterChange, initialChannelId, initialSt
             subclassificationId: val,
             segmentId: null,
             phaseId: selectedPhase,
-            statusFilter
+            statusFilter,
+            startDate,
+            endDate,
+            startClosingDate,
+            endClosingDate
         });
     };
 
@@ -188,7 +219,11 @@ export function OpportunityFilters({ onFilterChange, initialChannelId, initialSt
             subclassificationId: selectedSubclass,
             segmentId: val,
             phaseId: selectedPhase,
-            statusFilter
+            statusFilter,
+            startDate,
+            endDate,
+            startClosingDate,
+            endClosingDate
         });
     };
 
@@ -204,7 +239,11 @@ export function OpportunityFilters({ onFilterChange, initialChannelId, initialSt
             subclassificationId: selectedSubclass,
             segmentId: selectedSegment,
             phaseId: val,
-            statusFilter: val ? 'open' : statusFilter
+            statusFilter: val ? 'open' : statusFilter,
+            startDate,
+            endDate,
+            startClosingDate,
+            endClosingDate
         });
     };
 
@@ -214,15 +253,30 @@ export function OpportunityFilters({ onFilterChange, initialChannelId, initialSt
         setSelectedSegment(null);
         setSelectedPhase(null);
         setStatusFilter('open');
-        onFilterChange({ channelId: null, subclassificationId: null, segmentId: null, phaseId: null, statusFilter: 'open' });
+        setStartDate(null);
+        setEndDate(null);
+        setStartClosingDate(null);
+        setEndClosingDate(null);
+        onFilterChange({ 
+            channelId: null, 
+            subclassificationId: null, 
+            segmentId: null, 
+            phaseId: null, 
+            statusFilter: 'open',
+            startDate: null,
+            endDate: null,
+            startClosingDate: null,
+            endClosingDate: null
+        });
     };
 
-    const hasActiveFilters = selectedChannel || selectedSubclass || selectedSegment || selectedPhase || statusFilter !== 'open';
+    const hasActiveFilters = selectedChannel || selectedSubclass || selectedSegment || selectedPhase || statusFilter !== 'open' || startDate || endDate || startClosingDate || endClosingDate;
 
     if (loadingMetadata) return <div className="text-xs text-slate-400">Cargando filtros...</div>;
 
     return (
-        <div data-testid="opportunities-filters" className="flex flex-wrap items-center gap-3">
+        <div data-testid="opportunities-filters" className="space-y-3">
+            <div className="flex flex-wrap items-center gap-3">
             {/* Status Filter Pills - Quick access to closed states */}
             <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
                 <button
@@ -277,6 +331,101 @@ export function OpportunityFilters({ onFilterChange, initialChannelId, initialSt
                     <XCircle className="w-3 h-3" />
                     Perdidas
                 </button>
+            </div>
+
+            {/* Date Filters */}
+            <div className="flex flex-wrap items-center gap-2 border border-slate-200 rounded-lg px-3 py-1.5 bg-white shadow-sm overflow-x-auto whitespace-nowrap">
+                <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-500 uppercase tracking-tight">Creación:</span>
+                    <input 
+                        type="date"
+                        className="text-xs bg-slate-50 border border-slate-200 rounded px-2 py-1 focus:ring-1 focus:ring-blue-500 outline-none"
+                        value={startDate || ""}
+                        onChange={(e) => {
+                            const val = e.target.value || null;
+                            setStartDate(val);
+                            onFilterChange({
+                                channelId: selectedChannel,
+                                subclassificationId: selectedSubclass,
+                                segmentId: selectedSegment,
+                                phaseId: selectedPhase,
+                                statusFilter,
+                                startDate: val,
+                                endDate,
+                                startClosingDate,
+                                endClosingDate
+                            });
+                        }}
+                    />
+                    <span className="text-slate-300 text-xs text-center min-w-[12px]">-</span>
+                    <input 
+                        type="date"
+                        className="text-xs bg-slate-50 border border-slate-200 rounded px-2 py-1 focus:ring-1 focus:ring-blue-500 outline-none"
+                        value={endDate || ""}
+                        onChange={(e) => {
+                            const val = e.target.value || null;
+                            setEndDate(val);
+                            onFilterChange({
+                                channelId: selectedChannel,
+                                subclassificationId: selectedSubclass,
+                                segmentId: selectedSegment,
+                                phaseId: selectedPhase,
+                                statusFilter,
+                                startDate,
+                                endDate: val,
+                                startClosingDate,
+                                endClosingDate
+                            });
+                        }}
+                    />
+                </div>
+
+                <div className="w-px h-6 bg-slate-200 mx-1"></div>
+
+                <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-500 uppercase tracking-tight">Cierre:</span>
+                    <input 
+                        type="date"
+                        className="text-xs bg-slate-50 border border-slate-200 rounded px-2 py-1 focus:ring-1 focus:ring-blue-500 outline-none"
+                        value={startClosingDate || ""}
+                        onChange={(e) => {
+                            const val = e.target.value || null;
+                            setStartClosingDate(val);
+                            onFilterChange({
+                                channelId: selectedChannel,
+                                subclassificationId: selectedSubclass,
+                                segmentId: selectedSegment,
+                                phaseId: selectedPhase,
+                                statusFilter,
+                                startDate,
+                                endDate,
+                                startClosingDate: val,
+                                endClosingDate
+                            });
+                        }}
+                    />
+                    <span className="text-slate-300 text-xs text-center min-w-[12px]">-</span>
+                    <input 
+                        type="date"
+                        className="text-xs bg-slate-50 border border-slate-200 rounded px-2 py-1 focus:ring-1 focus:ring-blue-500 outline-none"
+                        value={endClosingDate || ""}
+                        onChange={(e) => {
+                            const val = e.target.value || null;
+                            setEndClosingDate(val);
+                            onFilterChange({
+                                channelId: selectedChannel,
+                                subclassificationId: selectedSubclass,
+                                segmentId: selectedSegment,
+                                phaseId: selectedPhase,
+                                statusFilter,
+                                startDate,
+                                endDate,
+                                startClosingDate,
+                                endClosingDate: val
+                            });
+                        }}
+                    />
+                </div>
             </div>
 
             {/* Hierarchical Filters */}
@@ -370,6 +519,7 @@ export function OpportunityFilters({ onFilterChange, initialChannelId, initialSt
                     Limpiar filtros
                 </button>
             )}
+            </div>
         </div>
     );
 }

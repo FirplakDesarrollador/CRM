@@ -36,16 +36,20 @@ export function useProductSearch(searchTerm: string, categoriaPrefijo?: string) 
 
                 const term = searchTerm ? searchTerm.trim() : '';
                 const prefix = categoriaPrefijo ? categoriaPrefijo.trim() : '';
+                const keywords = term.split(/\s+/).filter(k => k.length > 0);
 
                 if (prefix) {
-                    // Si hay prefijo, traemos los productos de la categoría (con mayor límite) y filtramos localmente para evitar
-                    // conflictos de múltiples filtros en la misma columna en la API PostgREST.
-                    // ATENCIÓN: El prefijo puede no estar al inicio del SKU (ej. BAN02 vs VBAN02), por eso usamos ilike con '%prefix%'
+                    // Si hay prefijo, traemos los productos de la categoría (con mayor límite) y filtramos localmente
                     query = query.ilike('numero_articulo', `%${prefix}%`).limit(200);
-                } else if (term) {
-                    // Si no hay prefijo, pero sí término de búsqueda, buscamos normalmente limitando a 50
-                    const safeTerm = term.replace(/"/g, ''); 
-                    query = query.or(`numero_articulo.ilike.%${safeTerm}%,descripcion.ilike.%${safeTerm}%`).limit(50);
+                } else if (keywords.length > 0) {
+                    // Búsqueda inteligente: cada palabra debe estar en la descripción O en el número de artículo (AND entre palabras)
+                    keywords.forEach(keyword => {
+                        const safeKeyword = keyword.replace(/"/g, '');
+                        if (safeKeyword.length > 0) {
+                            query = query.or(`numero_articulo.ilike.%${safeKeyword}%,descripcion.ilike.%${safeKeyword}%`);
+                        }
+                    });
+                    query = query.limit(50);
                 } else {
                     query = query.limit(50);
                 }
@@ -59,13 +63,15 @@ export function useProductSearch(searchTerm: string, categoriaPrefijo?: string) 
                 
                 let finalData = data || [];
                 
-                // Si ambos están presentes, filtramos el término a partir de la caché de la categoría
-                if (term && prefix) {
-                    const lowerTerm = term.toLowerCase();
-                    finalData = finalData.filter(p => 
-                        (p.numero_articulo && p.numero_articulo.toLowerCase().includes(lowerTerm)) || 
-                        (p.descripcion && p.descripcion.toLowerCase().includes(lowerTerm))
-                    );
+                // Si hay prefijo y términos adicionales, filtramos localmente asegurando que TODAS las palabras estén presentes
+                if (keywords.length > 0 && prefix) {
+                    finalData = finalData.filter(p => {
+                        return keywords.every(k => {
+                            const lowerK = k.toLowerCase();
+                            return (p.numero_articulo?.toLowerCase().includes(lowerK)) || 
+                                   (p.descripcion?.toLowerCase().includes(lowerK));
+                        });
+                    });
                 }
 
                 setProducts(finalData);

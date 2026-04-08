@@ -199,27 +199,27 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
         const channel = context?.channel || 'DIST_NAC';
         let price = 0;
 
-        // Selección de precio según canal
+        // Selección de precio según canal con conversión forzada a número
         switch (channel) {
             case 'OBRAS_NAC':
-                price = product.lista_base_obras || 0;
+                price = Number(product.lista_base_obras) || 0;
                 break;
             case 'OBRAS_INT':
             case 'DIST_INT':
-                price = product.lista_base_exportaciones || 0;
+                price = Number(product.lista_base_exportaciones) || 0;
                 break;
             case 'DIST_NAC':
-                price = product.lista_base_cop || 0;
+                price = Number(product.lista_base_cop) || 0;
                 break;
             case 'PROPIO':
-                price = product.distribuidor_pvp_iva || 0;
+                price = Number(product.distribuidor_pvp_iva) || 0;
                 break;
             default:
-                price = product.lista_base_cop || 0;
+                price = Number(product.lista_base_cop) || 0;
         }
 
         // Fallback robusto if 0
-        if (price === 0) price = product.lista_base_cop || 0;
+        if (price === 0) price = Number(product.lista_base_cop) || Number(product.pvp_sin_iva) || 0;
 
         await addItem(quote.id, {
             producto_id: product.id,
@@ -325,9 +325,22 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
                                     <div className="p-8 text-center text-slate-500">No se encontraron productos</div>
                                 ) : (
                                     searchResults.map((product) => {
-                                        const displayPrice = quote.currency_id === 'USD'
-                                            ? product.lista_base_exportaciones
-                                            : (product.lista_base_cop || product.pvp_sin_iva);
+                                        const channel = context?.channel || 'DIST_NAC';
+                                        let displayPrice = 0;
+
+                                        if (quote.currency_id === 'USD') {
+                                            displayPrice = Number(product.lista_base_exportaciones) || 0;
+                                        } else {
+                                            switch (channel) {
+                                                case 'OBRAS_NAC': displayPrice = Number(product.lista_base_obras) || 0; break;
+                                                case 'PROPIO': displayPrice = Number(product.distribuidor_pvp_iva) || 0; break;
+                                                case 'DIST_NAC': 
+                                                default: displayPrice = Number(product.lista_base_cop) || 0;
+                                            }
+                                        }
+
+                                        // Fallback final robusto si no hay precio en el canal
+                                        if (Number(displayPrice) === 0) displayPrice = Number(product.lista_base_cop) || Number(product.pvp_sin_iva) || 0;
 
                                         return (
                                             <button

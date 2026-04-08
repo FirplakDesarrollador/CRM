@@ -47,6 +47,12 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('open');
     const [accountIdFilter, setAccountIdFilter] = useState<string | null>(null);
 
+    // Date Filters
+    const [startDate, setStartDate] = useState<string | null>(null);
+    const [endDate, setEndDate] = useState<string | null>(null);
+    const [startClosingDate, setStartClosingDate] = useState<string | null>(null);
+    const [endClosingDate, setEndClosingDate] = useState<string | null>(null);
+
     // PERF FIX: Phase IDs only stored in refs (not state) to avoid triggering refetches
     const wonPhaseIdsRef = useRef<number[]>([]);
     const lostPhaseIdsRef = useRef<number[]>([]);
@@ -187,6 +193,24 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                     localOpps = localOpps.filter(o => o.account_id === accountIdFilter);
                 }
 
+                // Date Filters offline
+                if (startDate) {
+                    localOpps = localOpps.filter(o => o.created_at && new Date(o.created_at) >= new Date(startDate));
+                }
+                if (endDate) {
+                    const end = new Date(endDate);
+                    end.setHours(23, 59, 59, 999);
+                    localOpps = localOpps.filter(o => o.created_at && new Date(o.created_at) <= end);
+                }
+                if (startClosingDate) {
+                    localOpps = localOpps.filter(o => o.fecha_cierre_estimada && new Date(o.fecha_cierre_estimada) >= new Date(startClosingDate));
+                }
+                if (endClosingDate) {
+                    const end = new Date(endClosingDate);
+                    end.setHours(23, 59, 59, 999);
+                    localOpps = localOpps.filter(o => o.fecha_cierre_estimada && new Date(o.fecha_cierre_estimada) <= end);
+                }
+
                 if (accountOwnerId) {
                     localOpps = localOpps.filter(o => o.owner_user_id === accountOwnerId);
                 } else {
@@ -254,6 +278,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                     currency_id,
                     owner_user_id,
                     updated_at,
+                    created_at,
                     fecha_cierre_estimada,
                     segmento_id,
                     ${accountRelation},
@@ -297,6 +322,21 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
 
             if (accountIdFilter) {
                 query = query.eq('account_id', accountIdFilter);
+            }
+
+            // Date Filters
+            if (startDate) {
+                query = query.gte('created_at', startDate);
+            }
+            if (endDate) {
+                // To include the whole day
+                query = query.lte('created_at', `${endDate}T23:59:59`);
+            }
+            if (startClosingDate) {
+                query = query.gte('fecha_cierre_estimada', startClosingDate);
+            }
+            if (endClosingDate) {
+                query = query.lte('fecha_cierre_estimada', `${endClosingDate}T23:59:59`);
             }
 
             if (accountOwnerId) {
@@ -346,7 +386,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
         } finally {
             setLoading(false);
         }
-    }, [currentUserId, subordinateIds, pageSize, userFilter, searchTerm, accountIdFilter, accountOwnerId, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, phasesReady]);
+    }, [currentUserId, subordinateIds, pageSize, userFilter, searchTerm, accountIdFilter, accountOwnerId, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, phasesReady, startDate, endDate, startClosingDate, endClosingDate]);
 
     // Initial Fetch & Filter Fetch - no longer depends on phase IDs (read from refs)
     useEffect(() => {
@@ -399,6 +439,10 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
         setPhaseFilter,
         setStatusFilter,
         setAccountIdFilter,
+        setStartDate,
+        setEndDate,
+        setStartClosingDate,
+        setEndClosingDate,
 
         refresh: () => fetchOpportunities(false)
     };

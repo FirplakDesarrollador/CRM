@@ -30,7 +30,11 @@ function OpportunitiesContent() {
         setSubclassificationFilter,
         setSegmentFilter,
         setPhaseFilter,
-        setStatusFilter
+        setStatusFilter,
+        setStartDate,
+        setEndDate,
+        setStartClosingDate,
+        setEndClosingDate
     } = useOpportunitiesServer({ pageSize: 20 });
 
     const [inputValue, setInputValue] = useState(() => {
@@ -79,6 +83,46 @@ function OpportunitiesContent() {
         return 'open';
     });
 
+    const [startDate, setStartDateState] = useState<string | null>(() => {
+        const fromUrl = searchParams.get('start');
+        if (fromUrl) return fromUrl;
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_oportunidades_state');
+            if (saved) return new URLSearchParams(saved).get('start') || null;
+        }
+        return null;
+    });
+
+    const [endDate, setEndDateState] = useState<string | null>(() => {
+        const fromUrl = searchParams.get('end');
+        if (fromUrl) return fromUrl;
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_oportunidades_state');
+            if (saved) return new URLSearchParams(saved).get('end') || null;
+        }
+        return null;
+    });
+
+    const [startClosingDate, setStartClosingDateState] = useState<string | null>(() => {
+        const fromUrl = searchParams.get('startClose');
+        if (fromUrl) return fromUrl;
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_oportunidades_state');
+            if (saved) return new URLSearchParams(saved).get('startClose') || null;
+        }
+        return null;
+    });
+
+    const [endClosingDate, setEndClosingDateState] = useState<string | null>(() => {
+        const fromUrl = searchParams.get('endClose');
+        if (fromUrl) return fromUrl;
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_oportunidades_state');
+            if (saved) return new URLSearchParams(saved).get('endClose') || null;
+        }
+        return null;
+    });
+
     // On mount: apply initial filter values from URL to the server hook
     // This is critical for the "back button" scenario where URL has params but hook starts fresh
     useEffect(() => {
@@ -86,10 +130,21 @@ function OpportunitiesContent() {
         const initialSearch = searchParams.get('search') || '';
         const initialOwner = searchParams.get('owner') || null;
 
-        // Apply tab, search, owner to hook (channel/status are handled by OpportunityFilters on init)
+        // Apply tab, search, owner to hook (channel/status/dates are handled by OpportunityFilters on init)
         if (initialSearch) setSearchTerm(initialSearch);
         if (initialOwner) setAccountOwnerId(initialOwner);
         setUserFilter(initialTab === 'team' ? 'team' : 'mine');
+        
+        // Initial dates for the hook
+        const start = searchParams.get('start') || startDate;
+        const end = searchParams.get('end') || endDate;
+        const startClose = searchParams.get('startClose') || startClosingDate;
+        const endClose = searchParams.get('endClose') || endClosingDate;
+        
+        if (start) setStartDate(start);
+        if (end) setEndDate(end);
+        if (startClose) setStartClosingDate(startClose);
+        if (endClose) setEndClosingDate(endClose);
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []); // Run only on mount
 
@@ -131,6 +186,18 @@ function OpportunitiesContent() {
             if (statusFilter && statusFilter !== 'open') params.set('status', statusFilter);
             else params.delete('status');
             
+            if (startDate) params.set('start', startDate);
+            else params.delete('start');
+            
+            if (endDate) params.set('end', endDate);
+            else params.delete('end');
+            
+            if (startClosingDate) params.set('startClose', startClosingDate);
+            else params.delete('startClose');
+            
+            if (endClosingDate) params.set('endClose', endClosingDate);
+            else params.delete('endClose');
+            
             const queryString = params.toString();
             
             // Save to sessionStorage for cross-module persistence
@@ -144,18 +211,29 @@ function OpportunitiesContent() {
             router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
         }, 500);
         return () => clearTimeout(timer);
-    }, [inputValue, tab, selectedAccountOwnerId, selectedChannel, statusFilter, searchParams, setSearchTerm, router]);
+    }, [inputValue, tab, selectedAccountOwnerId, selectedChannel, statusFilter, startDate, endDate, startClosingDate, endClosingDate, searchParams, setSearchTerm, router]);
 
-    const handleFilterChange = useCallback(({ channelId, subclassificationId, segmentId, phaseId, statusFilter: newStatus }: { channelId: string | null; subclassificationId: number | null; segmentId: number | null; phaseId: number | null; statusFilter: any }) => {
+    const handleFilterChange = useCallback(({ 
+        channelId, subclassificationId, segmentId, phaseId, statusFilter: newStatus,
+        startDate: sD, endDate: eD, startClosingDate: sCD, endClosingDate: eCD
+    }: any) => {
         setSelectedChannel(channelId);
         setStatusFilterState(newStatus);
+        setStartDateState(sD);
+        setEndDateState(eD);
+        setStartClosingDateState(sCD);
+        setEndClosingDateState(eCD);
         
         setChannelFilter(channelId);
         setSubclassificationFilter(subclassificationId);
         setSegmentFilter(segmentId);
         setPhaseFilter(phaseId);
         setStatusFilter(newStatus);
-    }, [setChannelFilter, setSubclassificationFilter, setSegmentFilter, setPhaseFilter, setStatusFilter]);
+        setStartDate(sD);
+        setEndDate(eD);
+        setStartClosingDate(sCD);
+        setEndClosingDate(eCD);
+    }, [setChannelFilter, setSubclassificationFilter, setSegmentFilter, setPhaseFilter, setStatusFilter, setStartDate, setEndDate, setStartClosingDate, setEndClosingDate]);
 
     // PERF FIX: Stable callback references
     const handleTabChange = useCallback((newTab: 'mine' | 'collab' | 'team') => {
@@ -251,6 +329,12 @@ function OpportunitiesContent() {
                         onFilterChange={handleFilterChange}
                         initialChannelId={selectedChannel}
                         initialStatusFilter={statusFilter}
+                        initialDates={{
+                            startDate,
+                            endDate,
+                            startClosingDate,
+                            endClosingDate
+                        }}
                     />
                 </div>
             </div>

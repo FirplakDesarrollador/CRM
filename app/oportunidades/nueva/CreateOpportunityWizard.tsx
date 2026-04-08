@@ -322,25 +322,25 @@ export default function CreateOpportunityWizard() {
         const channel = selectedAccount?.canal_id || 'DIST_NAC';
         let price = 0;
 
-        // Strict Price Selection
+        // Strict Price Selection with Number casting
         switch (channel) {
             case 'OBRAS_NAC':
-                price = product.lista_base_obras || 0;
+                price = Number(product.lista_base_obras) || 0;
                 break;
             case 'OBRAS_INT':
             case 'DIST_INT':
-                price = product.lista_base_exportaciones || 0;
+                price = Number(product.lista_base_exportaciones) || 0;
                 break;
             case 'PROPIO':
-                price = product.distribuidor_pvp_iva || 0;
+                price = Number(product.distribuidor_pvp_iva) || 0;
                 break;
             case 'DIST_NAC':
             default:
-                price = product.lista_base_cop || 0;
+                price = Number(product.lista_base_cop) || 0;
         }
 
-        // Fallback if 0
-        if (price === 0) price = product.lista_base_cop || 0;
+        // Fallback robusto if 0
+        if (price === 0) price = Number(product.lista_base_cop) || Number(product.pvp_sin_iva) || 0;
 
         const existing = items.find((i: any) => i.product_id === product.id);
         if (existing) {
@@ -732,13 +732,13 @@ export default function CreateOpportunityWizard() {
                                             const channel = selectedAccount?.canal_id || 'DIST_NAC';
                                             let displayPrice = 0;
                                             switch (channel) {
-                                                case 'OBRAS_NAC': displayPrice = product.lista_base_obras || 0; break;
+                                                case 'OBRAS_NAC': displayPrice = Number(product.lista_base_obras) || 0; break;
                                                 case 'OBRAS_INT':
-                                                case 'DIST_INT': displayPrice = product.lista_base_exportaciones || 0; break;
-                                                case 'PROPIO': displayPrice = product.distribuidor_pvp_iva || 0; break;
-                                                default: displayPrice = product.lista_base_cop || 0;
+                                                case 'DIST_INT': displayPrice = Number(product.lista_base_exportaciones) || 0; break;
+                                                case 'PROPIO': displayPrice = Number(product.distribuidor_pvp_iva) || 0; break;
+                                                default: displayPrice = Number(product.lista_base_cop) || 0;
                                             }
-                                            if (displayPrice === 0) displayPrice = product.lista_base_cop || 0;
+                                            if (Number(displayPrice) === 0) displayPrice = Number(product.lista_base_cop) || Number(product.pvp_sin_iva) || 0;
 
                                             return (
                                                 <button
