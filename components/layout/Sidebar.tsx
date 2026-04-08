@@ -14,7 +14,7 @@ import {
     Briefcase,
     Building2,
     Calendar,
-    Files,
+    FileSpreadsheet,
     Settings,
     Users,
     Truck,
@@ -34,7 +34,7 @@ const NAV_ITEMS = [
     { label: "Pedidos", href: "/pedidos", icon: Truck },
     { label: "Comisiones", href: "/comisiones", icon: DollarSign },
     { label: "Indicadores", href: "/indicadores", icon: BarChart3 },
-    { label: "Archivos", href: "/archivos", icon: Files },
+    { label: "Informes", href: "/informes", icon: FileSpreadsheet, requiredRole: 'ADMIN' },
     { label: "Usuarios", href: "/usuarios", icon: UserCircle, requiredRole: 'ADMIN' },
     { label: "Configuración", href: "/configuracion", icon: Settings },
 ];
