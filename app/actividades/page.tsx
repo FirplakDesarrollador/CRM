@@ -67,21 +67,139 @@ function ActivitiesContent() {
     }, [classifications.length]);
 
     const [selectedDate, setSelectedDate] = useState(new Date());
-    const [view, setView] = useState<'agenda' | 'month' | 'all'>('agenda');
+    const [view, setView] = useState<'agenda' | 'month' | 'all'>(() => {
+        const fromUrl = searchParams.get('view');
+        if (fromUrl) return (fromUrl as any);
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_actividades_state');
+            if (saved) return (new URLSearchParams(saved).get('view') as any) || 'agenda';
+        }
+        return 'agenda';
+    });
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedActivity, setSelectedActivity] = useState<LocalActivity | null>(null);
 
     // Filters
-    const [searchQuery, setSearchQuery] = useState("");
+    const [searchQuery, setSearchQuery] = useState(() => {
+        const fromUrl = searchParams.get('search');
+        if (fromUrl) return fromUrl;
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_actividades_state');
+            if (saved) return new URLSearchParams(saved).get('search') || "";
+        }
+        return "";
+    });
     const debouncedSearchQuery = useDebounce(searchQuery, 400);
-    const [filterType, setFilterType] = useState<string>("");
-    const [filterClassification, setFilterClassification] = useState<string>("");
-    const [filterSubclassification, setFilterSubclassification] = useState<string>("");
+    const [filterType, setFilterType] = useState<string>(() => {
+        const fromUrl = searchParams.get('type');
+        if (fromUrl) return fromUrl;
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_actividades_state');
+            if (saved) return new URLSearchParams(saved).get('type') || "";
+        }
+        return "";
+    });
+    const [filterClassification, setFilterClassification] = useState<string>(() => {
+        const fromUrl = searchParams.get('classification');
+        if (fromUrl) return fromUrl;
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_actividades_state');
+            if (saved) return new URLSearchParams(saved).get('classification') || "";
+        }
+        return "";
+    });
+    const [filterSubclassification, setFilterSubclassification] = useState<string>(() => {
+        const fromUrl = searchParams.get('subclassification');
+        if (fromUrl) return fromUrl;
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_actividades_state');
+            if (saved) return new URLSearchParams(saved).get('subclassification') || "";
+        }
+        return "";
+    });
 
     // NEW Filters
-    const [filterUser, setFilterUser] = useState<string>("");
-    const [filterStatus, setFilterStatus] = useState<"all" | "completed" | "pending">("all");
-    const [filterChannel, setFilterChannel] = useState<string>("");
+    const [filterUser, setFilterUser] = useState<string>(() => {
+        const fromUrl = searchParams.get('user');
+        if (fromUrl) return fromUrl;
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_actividades_state');
+            if (saved) return new URLSearchParams(saved).get('user') || "";
+        }
+        return "";
+    });
+    const [filterStatus, setFilterStatus] = useState<"all" | "completed" | "pending">(() => {
+        const fromUrl = searchParams.get('status');
+        if (fromUrl) return (fromUrl as any);
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_actividades_state');
+            if (saved) return (new URLSearchParams(saved).get('status') as any) || 'all';
+        }
+        return 'all';
+    });
+    const [filterChannel, setFilterChannel] = useState<string>(() => {
+        const fromUrl = searchParams.get('channel');
+        if (fromUrl) return fromUrl;
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_actividades_state');
+            if (saved) return new URLSearchParams(saved).get('channel') || "";
+        }
+        return "";
+    });
+
+    // Restore state from sessionStorage if navigating from sidebar (empty query)
+    useEffect(() => {
+        if (typeof window !== 'undefined' && searchParams.toString() === '') {
+            const savedState = sessionStorage.getItem('crm_actividades_state');
+            if (savedState) {
+                router.replace(`/actividades?${savedState}`, { scroll: false });
+            }
+        }
+    }, [searchParams, router]);
+
+    // Sync all filters to URL to persist across "back" navigations
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            const params = new URLSearchParams(Array.from(searchParams.entries()));
+            
+            if (view !== 'agenda') params.set('view', view);
+            else params.delete('view');
+            
+            if (searchQuery) params.set('search', searchQuery);
+            else params.delete('search');
+            
+            if (filterType) params.set('type', filterType);
+            else params.delete('type');
+            
+            if (filterClassification) params.set('classification', filterClassification);
+            else params.delete('classification');
+            
+            if (filterSubclassification) params.set('subclassification', filterSubclassification);
+            else params.delete('subclassification');
+            
+            if (filterUser) params.set('user', filterUser);
+            else params.delete('user');
+            
+            if (filterStatus !== 'all') params.set('status', filterStatus);
+            else params.delete('status');
+            
+            if (filterChannel) params.set('channel', filterChannel);
+            else params.delete('channel');
+
+            const queryString = params.toString();
+            
+            // Save to sessionStorage for cross-module persistence
+            if (queryString) {
+                sessionStorage.setItem('crm_actividades_state', queryString);
+            } else if (searchParams.toString() !== '') {
+                sessionStorage.removeItem('crm_actividades_state');
+            }
+
+            const query = queryString ? `?${queryString}` : window.location.pathname;
+            router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
+        }, 500);
+        return () => clearTimeout(timer);
+    }, [view, searchQuery, filterType, filterClassification, filterSubclassification, filterUser, filterStatus, filterChannel, searchParams, router]);
 
     // Performance: Display limit for pagination
     const [displayLimit, setDisplayLimit] = useState(20);
@@ -826,8 +944,11 @@ function ActivitiesContent() {
                     onClose={() => {
                         setIsModalOpen(false);
                         setSelectedActivity(null);
-                        // Clear URL parameter to prevent modal from reopening
-                        router.replace('/actividades', { scroll: false });
+                        // Clear URL parameter to prevent modal from reopening while preserving filters
+                        const params = new URLSearchParams(Array.from(searchParams.entries()));
+                        params.delete('id');
+                        const query = params.toString() ? `?${params.toString()}` : window.location.pathname;
+                        router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
                     }}
                     onSubmit={async (data: any) => {
                         console.log("[ActivitiesPage] Modal Submitted Data:", data);
@@ -840,6 +961,10 @@ function ActivitiesContent() {
                         }
                         setIsModalOpen(false);
                         setSelectedActivity(null);
+                        const params = new URLSearchParams(Array.from(searchParams.entries()));
+                        params.delete('id');
+                        const query = params.toString() ? `?${params.toString()}` : window.location.pathname;
+                        router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
                     }}
                     initialData={selectedActivity}
                 />

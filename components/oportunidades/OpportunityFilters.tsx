@@ -38,20 +38,22 @@ interface OpportunityFiltersProps {
         phaseId: number | null;
         statusFilter: StatusFilter;
     }) => void;
+    initialChannelId?: string | null;
+    initialStatusFilter?: StatusFilter;
 }
 
-export function OpportunityFilters({ onFilterChange }: OpportunityFiltersProps) {
+export function OpportunityFilters({ onFilterChange, initialChannelId, initialStatusFilter }: OpportunityFiltersProps) {
     const [channels, setChannels] = useState<Channel[]>([]);
     const [subclasses, setSubclasses] = useState<Subclasificacion[]>([]);
     const [segments, setSegments] = useState<Segment[]>([]);
     const [phases, setPhases] = useState<Phase[]>([]);
 
     // Selection state
-    const [selectedChannel, setSelectedChannel] = useState<string | null>(null);
+    const [selectedChannel, setSelectedChannel] = useState<string | null>(initialChannelId || null);
     const [selectedSubclass, setSelectedSubclass] = useState<number | null>(null);
     const [selectedSegment, setSelectedSegment] = useState<number | null>(null);
     const [selectedPhase, setSelectedPhase] = useState<number | null>(null);
-    const [statusFilter, setStatusFilter] = useState<StatusFilter>('open');
+    const [statusFilter, setStatusFilter] = useState<StatusFilter>(initialStatusFilter || 'open');
 
     const [loadingMetadata, setLoadingMetadata] = useState(true);
 
@@ -85,6 +87,18 @@ export function OpportunityFilters({ onFilterChange }: OpportunityFiltersProps) 
                     setChannels(uniqueChannels.map(c => ({ id: c, nombre: channelNames[c] || c })));
                 }
 
+                // If initial filters were set (e.g., from URL on back navigation),
+                // notify the parent so the hook fetches with correct filters
+                if (initialChannelId || (initialStatusFilter && initialStatusFilter !== 'open')) {
+                    onFilterChange({
+                        channelId: initialChannelId || null,
+                        subclassificationId: null,
+                        segmentId: null,
+                        phaseId: null,
+                        statusFilter: initialStatusFilter || 'open'
+                    });
+                }
+
             } catch (err) {
                 console.error("Error loading filter metadata", err);
             } finally {
@@ -93,7 +107,7 @@ export function OpportunityFilters({ onFilterChange }: OpportunityFiltersProps) 
         };
 
         loadMetadata();
-    }, []);
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Derived options based on selection
     const availableSubclasses = useMemo(() => {

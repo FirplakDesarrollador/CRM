@@ -1,11 +1,12 @@
-
 import { useContacts } from "@/lib/hooks/useContacts";
 import { db, LocalContact } from "@/lib/db";
 import { useForm } from "react-hook-form";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { ContactImportButton } from "./ContactImportButton";
 import { ParsedContact } from "@/lib/vcard";
+import { AccountSelector } from "./AccountSelector";
+import { Building } from "lucide-react";
 
 interface ContactFormProps {
     accountId: string;
@@ -17,20 +18,24 @@ interface ContactFormProps {
 export function ContactForm({ accountId, existingContact, onSuccess, onCancel }: ContactFormProps) {
     const { createContact, updateContact, contacts } = useContacts(accountId);
 
-    // Initialize default values based on existingContact
-    const defaultValues: Partial<LocalContact> = existingContact ? {
-        nombre: existingContact.nombre,
-        cargo: existingContact.cargo || "",
-        email: existingContact.email || "",
-        telefono: existingContact.telefono || "",
-        es_principal: existingContact.es_principal || false
-    } : {
-        es_principal: false
+    const defaultValues: Partial<LocalContact> = {
+        nombre: existingContact?.nombre || "",
+        cargo: existingContact?.cargo || "",
+        email: existingContact?.email || "",
+        account_id: existingContact?.account_id || accountId || "",
+        telefono: existingContact?.telefono || "",
+        es_principal: existingContact?.es_principal || false,
     };
 
-    const { register, handleSubmit, reset, setValue, formState: { errors, isSubmitting } } = useForm<LocalContact>({
-        defaultValues
+    const { register, handleSubmit, reset, setValue, watch, formState: { errors, isSubmitting } } = useForm<LocalContact>({
+        defaultValues: defaultValues as any
     });
+
+    useEffect(() => {
+        reset(defaultValues as any);
+    }, [existingContact?.id, accountId, reset]);
+
+    const selectedAccountId = watch("account_id");
 
     const handleImport = (imported: ParsedContact) => {
         // Deduplication Check
@@ -48,37 +53,23 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel }:
         if (imported.title) setValue("cargo", imported.title);
         if (imported.email) setValue("email", imported.email);
         if (imported.tel) setValue("telefono", imported.tel);
-        if (imported.org) {
-            // We don't have an explicit 'Company' field in LocalContact visible in this form usually, 
-            // but if we did, we would set it. 
-            // For now, let's append it to notes or ignore if not present in form.
-            // LocalContact doesn't seem to have 'notes' or 'organization' in the interface shown in creating/editing.
-        }
     };
 
-    // Clean reset when switching between add/edit or changing contacts
-    useEffect(() => {
-        if (existingContact) {
-            reset({
-                nombre: existingContact.nombre,
-                cargo: existingContact.cargo || "",
-                email: existingContact.email || "",
-                telefono: existingContact.telefono || "",
-                es_principal: existingContact.es_principal || false
-            });
-        } else {
-            reset({
-                nombre: "",
-                cargo: "",
-                email: "",
-                telefono: "",
-                es_principal: false
-            });
-        }
-    }, [existingContact, reset]);
-
-    const onSubmit = async (data: LocalContact) => {
+    const onSubmit = async (formData: LocalContact) => {
         try {
+            // MERGE: Ensure selectedAccountId from watch is prioritized over current formData to avoid hook-form delays
+            const data = { ...formData, account_id: selectedAccountId || formData.account_id };
+            console.log("[ContactForm] Final submission data:", { 
+                id: existingContact?.id, 
+                name: data.nombre, 
+                account_id: data.account_id 
+            });
+
+            if (!data.account_id) {
+                alert("Debes seleccionar una cuenta para el contacto");
+                return;
+            }
+
             // Check for duplicates
             const checkDuplicates = async () => {
                 // Build OR query components
@@ -127,7 +118,7 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel }:
             if (existingContact) {
                 await updateContact(existingContact.id, data);
             } else {
-                await createContact({ ...data, account_id: accountId });
+                await createContact(data);
             }
             onSuccess();
         } catch (error) {
@@ -146,6 +137,22 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel }:
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-3 md:col-span-2">
+                    <label className="text-sm font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mb-1">
+                        <Building size={14} className="text-[#254153]" />
+                        Cuenta Vinculada
+                    </label>
+                    <input type="hidden" {...register("account_id")} />
+                    <AccountSelector
+                        value={selectedAccountId || ""}
+                        initialAccountName={(existingContact as any)?.account_name}
+                        onChange={(val) => {
+                            console.log("[ContactForm] Changing account_id to:", val);
+                            setValue("account_id", val, { shouldDirty: true, shouldValidate: true });
+                        }}
+                    />
+                </div>
+
                 <div className="space-y-2">
                     <label className="block text-xs font-black uppercase text-slate-500 tracking-widest ml-1">Nombre Completo *</label>
                     <input

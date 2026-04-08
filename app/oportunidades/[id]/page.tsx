@@ -98,6 +98,18 @@ export default function OpportunityDetailPage() {
     }, [id, opportunity, opportunities, isFetchingServer, serverOpportunity]);
 
     const [activeTab, setActiveTab] = useState<'resumen' | 'colaboradores' | 'cotizaciones' | 'productos' | 'actividades' | 'asignado'>('resumen');
+    
+    // Save state for cross-module restoration
+    useEffect(() => {
+        if (id) {
+            // We only save the ID part, the list page will handle the rest.
+            // We need to preserve existing filters if possible, but at minimum the ID.
+            const saved = sessionStorage.getItem('crm_oportunidades_state');
+            const params = new URLSearchParams(saved || '');
+            params.set('id', id);
+            sessionStorage.setItem('crm_oportunidades_state', params.toString());
+        }
+    }, [id]);
 
     // Modal state for delete confirmation
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -158,7 +170,7 @@ export default function OpportunityDetailPage() {
                             opportunity.estado_id === 4 ? 'Cancelada' :
                                 (phaseMap.get(opportunity.fase_id) || opportunity.fase || 'Prospecto')
                 }
-                backHref="/oportunidades"
+                backHref="/oportunidades?view=list"
                 actions={[
                     ...(userRole === 'ADMIN' || userRole === 'COORDINADOR' ? [{
                         label: "Eliminar Oportunidad",

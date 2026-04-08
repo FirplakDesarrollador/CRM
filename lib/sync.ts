@@ -874,19 +874,26 @@ export class SyncEngine {
             const badAccountOutboxItems = await db.outbox.where('entity_id').equals(badAccountId).and(i => i.entity_type === 'CRM_Cuentas').toArray();
             await db.outbox.bulkDelete(badAccountOutboxItems.map(i => i.id));
 
+            // -- NEW: Repair Contacts references --
+            console.log(`[Sync-Heal] Repairing contact references for bad account ${badAccountId} -> ${realAccountId}`);
+            const contactsToFix = await db.contacts.where('account_id').equals(badAccountId).toArray();
+            for (const contact of contactsToFix) {
+                await db.contacts.update(contact.id, { account_id: realAccountId });
+            }
+
             // Find all opportunities in Dexie that point to the BAD account and update them
             const opportunitiesToFix = await db.opportunities.where('account_id').equals(badAccountId).toArray();
             for (const opp of opportunitiesToFix) {
                 await db.opportunities.update(opp.id, { account_id: realAccountId });
             }
 
-            // Find outbox items referencing the bad account ID and update them to the real ID
-            const outboxOpportunities = await db.outbox
+            // Find outbox items referencing the bad account ID as a value and update them to the real ID
+            const outboxValueFixes = await db.outbox
                 .where('field_name').equals('account_id')
                 .and(i => i.new_value === badAccountId)
                 .toArray();
 
-            for (const item of outboxOpportunities) {
+            for (const item of outboxValueFixes) {
                 await db.outbox.update(item.id, { new_value: realAccountId, status: 'PENDING', error: undefined, retry_count: 0 });
             }
 
@@ -896,7 +903,7 @@ export class SyncEngine {
                 .toArray();
 
             for (const item of failedOutboxItems) {
-                if (['CRM_Oportunidades', 'CRM_Cotizaciones', 'CRM_CotizacionItems', 'CRM_Oportunidades_Colaboradores'].includes(item.entity_type)) {
+                if (['CRM_Contactos', 'CRM_Oportunidades', 'CRM_Cotizaciones', 'CRM_CotizacionItems', 'CRM_Oportunidades_Colaboradores'].includes(item.entity_type)) {
                     await db.outbox.update(item.id, { status: 'PENDING', retry_count: 0, error: undefined });
                 }
             }
@@ -904,7 +911,7 @@ export class SyncEngine {
             // Delete the bad account from local DEXIE to prevent UI rendering it
             await db.accounts.delete(badAccountId);
 
-            console.log(`[Sync-Heal] Repaired duplicate account. Triggering sync again.`);
+            console.log(`[Sync-Heal] Repaired duplicate account (Contacts, Opps & Outbox). Triggering sync again.`);
             this.triggerSync();
         } catch (e) {
             console.error(`[Sync-Heal] Error resolving duplicate account:`, e);

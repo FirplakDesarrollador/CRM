@@ -2,7 +2,7 @@
 
 import { useAccountsServer, AccountServer } from "@/lib/hooks/useAccountsServer";
 import { AccountForm } from "@/components/cuentas/AccountForm";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { Suspense, useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { Plus, Search, Building, Users, User, Pencil, Filter, Medal, Trash2, CloudUpload } from "lucide-react";
@@ -13,6 +13,7 @@ import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 
 function AccountsContent() {
     const searchParams = useSearchParams();
+    const router = useRouter();
     const {
         data: accounts,
         loading,
@@ -26,7 +27,15 @@ function AccountsContent() {
     const { deleteAccount } = useAccounts();
     const { isAdmin, hasCoordinatorAccess } = useCurrentUser();
 
-    const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+    const [selectedUserId, setSelectedUserId] = useState<string | null>(() => {
+        const fromUrl = searchParams.get('user');
+        if (fromUrl) return fromUrl;
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_cuentas_state');
+            if (saved) return new URLSearchParams(saved).get('user') || null;
+        }
+        return null;
+    });
 
     // PERF FIX: Stable callback reference
     const handleUserSelect = useCallback((userId: string | null) => {
@@ -36,16 +45,28 @@ function AccountsContent() {
 
     const [showCreate, setShowCreate] = useState(false);
     const [editingAccount, setEditingAccount] = useState<any>(null);
-    const [inputValue, setInputValue] = useState("");
+    const [inputValue, setInputValue] = useState(() => {
+        const fromUrl = searchParams.get('search');
+        if (fromUrl) return fromUrl;
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_cuentas_state');
+            if (saved) return new URLSearchParams(saved).get('search') || "";
+        }
+        return "";
+    });
 
-    // Initialize search from URL
+    // Initialize search & filters from URL
     useEffect(() => {
         const query = searchParams.get('search');
         if (query) {
             setInputValue(query);
             setSearchTerm(query);
         }
-    }, [searchParams, setSearchTerm]);
+        const userQuery = searchParams.get('user');
+        if (userQuery) {
+            setAssignedUserId(userQuery);
+        }
+    }, [searchParams, setSearchTerm, setAssignedUserId]);
 
     // Deep linking for edit: Automatically fetch and open account by ID from URL
     useEffect(() => {
@@ -93,13 +114,49 @@ function AccountsContent() {
         findAndOpen();
     }, [searchParams, accounts]);
 
-    // Debounce Search
+    // Restore state from sessionStorage if navigating from sidebar (empty query)
+    useEffect(() => {
+        if (typeof window !== 'undefined' && searchParams.toString() === '') {
+            const savedState = sessionStorage.getItem('crm_cuentas_state');
+            if (savedState) {
+                router.replace(`/cuentas?${savedState}`, { scroll: false });
+            }
+        }
+    }, [searchParams, router]);
+
+    // Debounce Search & URL Sync
     useEffect(() => {
         const timer = setTimeout(() => {
             setSearchTerm(inputValue);
+            
+            // Sync to URL to persist across "back" navigations
+            const params = new URLSearchParams(Array.from(searchParams.entries()));
+            if (inputValue) params.set('search', inputValue);
+            else params.delete('search');
+            
+            if (selectedUserId) params.set('user', selectedUserId);
+            else params.delete('user');
+
+            if (editingAccount?.id) params.set('id', editingAccount.id);
+            else params.delete('id');
+            
+            const queryString = params.toString();
+            
+            // Save to sessionStorage for cross-module persistence
+            // NOTE: We only save if there's a current selection or filter, 
+            // OR if we're explicitly clearing because of user action (not just initial mount).
+            if (queryString) {
+                sessionStorage.setItem('crm_cuentas_state', queryString);
+            } else if (searchParams.toString() !== '') {
+                // If the URL was NOT empty but now resulting params are, it means user cleared something.
+                sessionStorage.removeItem('crm_cuentas_state');
+            }
+
+            const query = queryString ? `?${queryString}` : window.location.pathname;
+            router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
         }, 500);
         return () => clearTimeout(timer);
-    }, [inputValue, setSearchTerm]);
+    }, [inputValue, selectedUserId, editingAccount?.id, searchParams, setSearchTerm, router]);
 
     const handleEdit = async (acc: any) => {
         try {
@@ -115,6 +172,14 @@ function AccountsContent() {
             setEditingAccount(acc);
         }
         setShowCreate(false);
+
+        // Sync to URL immediately for selection persistence
+        const params = new URLSearchParams(Array.from(searchParams.entries()));
+        params.set('id', acc.id);
+        const queryString = params.toString();
+        sessionStorage.setItem('crm_cuentas_state', queryString);
+        router.replace(`${window.location.pathname}?${queryString}`, { scroll: false });
+
         document.getElementById('main-content')?.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
@@ -122,6 +187,17 @@ function AccountsContent() {
         refresh(); // Refresh list FIRST
         setShowCreate(false);
         setEditingAccount(null);
+        
+        // Clear ID from URL
+        const params = new URLSearchParams(Array.from(searchParams.entries()));
+        params.delete('id');
+        const queryString = params.toString();
+        if (queryString) {
+            sessionStorage.setItem('crm_cuentas_state', queryString);
+        } else {
+            sessionStorage.removeItem('crm_cuentas_state');
+        }
+        router.replace(queryString ? `${window.location.pathname}?${queryString}` : window.location.pathname, { scroll: false });
     };
 
     const handleDelete = async (e: React.MouseEvent, acc: any) => {
@@ -186,6 +262,15 @@ function AccountsContent() {
                         <button data-testid="accounts-form-close" onClick={() => {
                             setShowCreate(false);
                             setEditingAccount(null);
+                            const params = new URLSearchParams(Array.from(searchParams.entries()));
+                            params.delete('id');
+                            const queryString = params.toString();
+                            if (queryString) {
+                                sessionStorage.setItem('crm_cuentas_state', queryString);
+                            } else {
+                                sessionStorage.removeItem('crm_cuentas_state');
+                            }
+                            router.replace(queryString ? `${window.location.pathname}?${queryString}` : window.location.pathname, { scroll: false });
                         }} className="text-blue-400 hover:text-blue-700">✕</button>
                     </div>
                     <AccountForm

@@ -1,7 +1,8 @@
 "use client";
 
 import { useOpportunitiesServer } from "@/lib/hooks/useOpportunitiesServer";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Suspense } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { Plus, Search, Filter, Briefcase, User } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/components/ui/utils";
@@ -10,8 +11,10 @@ import { UserPickerFilter } from "@/components/cuentas/UserPickerFilter";
 import { OpportunityFilters } from "@/components/oportunidades/OpportunityFilters";
 import { formatColombiaDate, isDateOverdue } from "@/lib/date-utils";
 
-export default function OpportunitiesPage() {
+function OpportunitiesContent() {
     const { role: userRole } = useCurrentUser();
+    const searchParams = useSearchParams();
+    const router = useRouter();
 
     // Server Side Hook
     const {
@@ -30,18 +33,129 @@ export default function OpportunitiesPage() {
         setStatusFilter
     } = useOpportunitiesServer({ pageSize: 20 });
 
-    const [selectedAccountOwnerId, setSelectedAccountOwnerId] = useState<string | null>(null);
+    const [inputValue, setInputValue] = useState(() => {
+        const fromUrl = searchParams.get('search');
+        if (fromUrl) return fromUrl;
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_oportunidades_state');
+            if (saved) return new URLSearchParams(saved).get('search') || "";
+        }
+        return "";
+    });
+    const [selectedAccountOwnerId, setSelectedAccountOwnerId] = useState<string | null>(() => {
+        const fromUrl = searchParams.get('owner');
+        if (fromUrl) return fromUrl;
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_oportunidades_state');
+            if (saved) return new URLSearchParams(saved).get('owner') || null;
+        }
+        return null;
+    });
+    const [tab, setTab] = useState<'mine' | 'collab' | 'team'>(() => {
+        const fromUrl = searchParams.get('tab');
+        if (fromUrl) return (fromUrl as any);
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_oportunidades_state');
+            if (saved) return (new URLSearchParams(saved).get('tab') as any) || 'mine';
+        }
+        return 'mine';
+    });
+    const [selectedChannel, setSelectedChannel] = useState<string | null>(() => {
+        const fromUrl = searchParams.get('channel');
+        if (fromUrl) return fromUrl;
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_oportunidades_state');
+            if (saved) return new URLSearchParams(saved).get('channel') || null;
+        }
+        return null;
+    });
+    const [statusFilter, setStatusFilterState] = useState<'all' | 'open' | 'won' | 'lost'>(() => {
+        const fromUrl = searchParams.get('status');
+        if (fromUrl) return (fromUrl as any);
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_oportunidades_state');
+            if (saved) return (new URLSearchParams(saved).get('status') as any) || 'open';
+        }
+        return 'open';
+    });
 
-    const [tab, setTab] = useState<'mine' | 'collab' | 'team'>('mine');
-    const [inputValue, setInputValue] = useState("");
+    // On mount: apply initial filter values from URL to the server hook
+    // This is critical for the "back button" scenario where URL has params but hook starts fresh
+    useEffect(() => {
+        const initialTab = (searchParams.get('tab') as any) || 'mine';
+        const initialSearch = searchParams.get('search') || '';
+        const initialOwner = searchParams.get('owner') || null;
 
-    // Debounce Search
+        // Apply tab, search, owner to hook (channel/status are handled by OpportunityFilters on init)
+        if (initialSearch) setSearchTerm(initialSearch);
+        if (initialOwner) setAccountOwnerId(initialOwner);
+        setUserFilter(initialTab === 'team' ? 'team' : 'mine');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []); // Run only on mount
+
+    // Restore state from sessionStorage if navigating from sidebar (empty query)
+    useEffect(() => {
+        if (typeof window !== 'undefined' && searchParams.toString() === '') {
+            const savedState = sessionStorage.getItem('crm_oportunidades_state');
+            if (savedState) {
+                const savedParams = new URLSearchParams(savedState);
+                const savedId = savedParams.get('id');
+                if (savedId) {
+                    router.replace(`/oportunidades/${savedId}`, { scroll: false });
+                } else {
+                    router.replace(`/oportunidades?${savedState}`, { scroll: false });
+                }
+            }
+        }
+    }, [searchParams, router]);
+
+    // Sync to URL
     useEffect(() => {
         const timer = setTimeout(() => {
             setSearchTerm(inputValue);
+            
+            const params = new URLSearchParams(Array.from(searchParams.entries()));
+            
+            if (inputValue) params.set('search', inputValue);
+            else params.delete('search');
+            
+            if (tab && tab !== 'mine') params.set('tab', tab);
+            else params.delete('tab');
+            
+            if (selectedAccountOwnerId) params.set('owner', selectedAccountOwnerId);
+            else params.delete('owner');
+
+            if (selectedChannel) params.set('channel', selectedChannel);
+            else params.delete('channel');
+
+            if (statusFilter && statusFilter !== 'open') params.set('status', statusFilter);
+            else params.delete('status');
+            
+            const queryString = params.toString();
+            
+            // Save to sessionStorage for cross-module persistence
+            if (queryString) {
+                sessionStorage.setItem('crm_oportunidades_state', queryString);
+            } else if (searchParams.toString() !== '') {
+                sessionStorage.removeItem('crm_oportunidades_state');
+            }
+            
+            const query = queryString ? `?${queryString}` : window.location.pathname;
+            router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
         }, 500);
         return () => clearTimeout(timer);
-    }, [inputValue, setSearchTerm]);
+    }, [inputValue, tab, selectedAccountOwnerId, selectedChannel, statusFilter, searchParams, setSearchTerm, router]);
+
+    const handleFilterChange = useCallback(({ channelId, subclassificationId, segmentId, phaseId, statusFilter: newStatus }: { channelId: string | null; subclassificationId: number | null; segmentId: number | null; phaseId: number | null; statusFilter: any }) => {
+        setSelectedChannel(channelId);
+        setStatusFilterState(newStatus);
+        
+        setChannelFilter(channelId);
+        setSubclassificationFilter(subclassificationId);
+        setSegmentFilter(segmentId);
+        setPhaseFilter(phaseId);
+        setStatusFilter(newStatus);
+    }, [setChannelFilter, setSubclassificationFilter, setSegmentFilter, setPhaseFilter, setStatusFilter]);
 
     // PERF FIX: Stable callback references
     const handleTabChange = useCallback((newTab: 'mine' | 'collab' | 'team') => {
@@ -53,14 +167,6 @@ export default function OpportunitiesPage() {
         setSelectedAccountOwnerId(userId);
         setAccountOwnerId(userId);
     }, [setAccountOwnerId]);
-
-    const handleFilterChange = useCallback(({ channelId, subclassificationId, segmentId, phaseId, statusFilter }: { channelId: string | null; subclassificationId: number | null; segmentId: number | null; phaseId: number | null; statusFilter: any }) => {
-        setChannelFilter(channelId);
-        setSubclassificationFilter(subclassificationId);
-        setSegmentFilter(segmentId);
-        setPhaseFilter(phaseId);
-        setStatusFilter(statusFilter);
-    }, [setChannelFilter, setSubclassificationFilter, setSegmentFilter, setPhaseFilter, setStatusFilter]);
 
     return (
         <div data-testid="opportunities-page" className="space-y-4">
@@ -143,6 +249,8 @@ export default function OpportunitiesPage() {
                 <div className="pb-2">
                     <OpportunityFilters
                         onFilterChange={handleFilterChange}
+                        initialChannelId={selectedChannel}
+                        initialStatusFilter={statusFilter}
                     />
                 </div>
             </div>
@@ -165,7 +273,17 @@ export default function OpportunitiesPage() {
                     {opportunities.map(opp => {
                         const isOverdue = isDateOverdue(opp.fecha_cierre_estimada);
                         return (
-                            <Link key={opp.id} href={`/oportunidades/${opp.id}`} data-testid={`opportunities-row-${opp.id}`}>
+                            <Link 
+                                key={opp.id} 
+                                href={`/oportunidades/${opp.id}`} 
+                                data-testid={`opportunities-row-${opp.id}`}
+                                onClick={() => {
+                                    // Save state immediately before navigating
+                                    const params = new URLSearchParams(Array.from(searchParams.entries()));
+                                    params.set('id', opp.id);
+                                    sessionStorage.setItem('crm_oportunidades_state', params.toString());
+                                }}
+                            >
                                 <div className={cn(
                                     "p-4 rounded-xl shadow-sm border transition-all cursor-pointer flex justify-between items-center group",
                                     isOverdue
@@ -226,5 +344,13 @@ export default function OpportunitiesPage() {
                 </div>
             )}
         </div>
+    );
+}
+
+export default function OpportunitiesPage() {
+    return (
+        <Suspense fallback={<div className="p-8 text-center text-slate-400">Cargando aplicación...</div>}>
+            <OpportunitiesContent />
+        </Suspense>
     );
 }
