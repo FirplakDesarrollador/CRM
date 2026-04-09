@@ -3,7 +3,7 @@
 
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, LocalContact } from "@/lib/db";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useState, useMemo, useEffect, Suspense, useCallback } from "react";
 import { ContactForm } from "@/components/contactos/ContactForm";
 import Link from "next/link";
@@ -16,6 +16,7 @@ import { supabase } from "@/lib/supabase";
 
 function ContactsContent() {
     const searchParams = useSearchParams();
+    const router = useRouter();
     const {
         data: contacts,
         loading,
@@ -29,7 +30,15 @@ function ContactsContent() {
     const { deleteContact } = useContacts();
 
     // UI States
-    const [searchTerm, setSearchTermValue] = useState("");
+    const [inputValue, setInputValue] = useState(() => {
+        const fromUrl = searchParams.get('search');
+        if (fromUrl) return fromUrl;
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_contactos_state');
+            if (saved) return new URLSearchParams(saved).get('search') || "";
+        }
+        return "";
+    });
     const [isCreating, setIsCreating] = useState(false);
     const [selectedAccountIdForCreate, setSelectedAccountIdForCreate] = useState<string>("");
     const [editingContact, setEditingContact] = useState<any>(undefined);
@@ -80,6 +89,16 @@ function ContactsContent() {
         findAndOpen();
     }, [searchParams, contacts]);
 
+    // Restore state from sessionStorage if navigating from sidebar (empty query)
+    useEffect(() => {
+        if (typeof window !== 'undefined' && searchParams.toString() === '') {
+            const savedState = sessionStorage.getItem('crm_contactos_state');
+            if (savedState) {
+                router.replace(`/contactos?${savedState}`, { scroll: false });
+            }
+        }
+    }, [searchParams, router]);
+
     // Modal State
     const [contactToDelete, setContactToDelete] = useState<any | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
@@ -105,17 +124,43 @@ function ContactsContent() {
         return map;
     }, [accounts]);
 
-    // Handle Search Debounce
+    // Handle Search Debounce & URL Sync
     useEffect(() => {
         const timer = setTimeout(() => {
-            setSearchTerm(searchTerm);
+            setSearchTerm(inputValue);
+            
+            // Sync to URL to persist across "back" navigations
+            const params = new URLSearchParams(Array.from(searchParams.entries()));
+            if (inputValue) params.set('search', inputValue);
+            else params.delete('search');
+            
+            const queryString = params.toString();
+            
+            // Save to sessionStorage for cross-module persistence
+            if (queryString) {
+                sessionStorage.setItem('crm_contactos_state', queryString);
+            } else if (searchParams.toString() !== '') {
+                sessionStorage.removeItem('crm_contactos_state');
+            }
+
+            const query = queryString ? `?${queryString}` : window.location.pathname;
+            router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
         }, 500);
         return () => clearTimeout(timer);
-    }, [searchTerm, setSearchTerm]);
+    }, [inputValue, searchParams, setSearchTerm, router]);
 
     // Handle Edit
     const handleEdit = (contact: any) => {
         setEditingContact(contact);
+
+        // Sync to URL immediately for selection persistence
+        const params = new URLSearchParams(Array.from(searchParams.entries()));
+        params.set('id', contact.id);
+        const queryString = params.toString();
+        sessionStorage.setItem('crm_contactos_state', queryString);
+        router.replace(`${window.location.pathname}?${queryString}`, { scroll: false });
+
+        document.getElementById('main-content')?.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
     // Close Modals/Forms
@@ -124,6 +169,17 @@ function ContactsContent() {
         setSelectedAccountIdForCreate("");
         setEditingContact(undefined);
         refresh();
+
+        // Clear ID from URL
+        const params = new URLSearchParams(Array.from(searchParams.entries()));
+        params.delete('id');
+        const queryString = params.toString();
+        if (queryString) {
+            sessionStorage.setItem('crm_contactos_state', queryString);
+        } else {
+            sessionStorage.removeItem('crm_contactos_state');
+        }
+        router.replace(queryString ? `${window.location.pathname}?${queryString}` : window.location.pathname, { scroll: false });
     };
 
     // --- VIEW: Create Contact Flow (Step 1: Select Account) ---
@@ -227,8 +283,8 @@ function ContactsContent() {
                     type="text"
                     data-testid="contacts-search"
                     placeholder="Buscar por nombre, cuenta o email..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTermValue(e.target.value)}
+                    value={inputValue}
+                    onChange={(e) => setInputValue(e.target.value)}
                     className="w-full pl-12 pr-4 py-4 border border-slate-200 rounded-2xl shadow-sm focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] bg-white transition-all outline-none text-slate-700 font-medium placeholder:text-slate-400"
                 />
             </div>
@@ -246,9 +302,9 @@ function ContactsContent() {
                         <User size={40} className="text-slate-300" />
                     </div>
                     <p className="text-lg font-bold text-slate-600">
-                        {searchTerm ? "No se encontraron coincidencias" : "No hay contactos registrados"}
+                        {inputValue ? "No se encontraron coincidencias" : "No hay contactos registrados"}
                     </p>
-                    <p className="text-sm">{searchTerm ? "Prueba con otros términos de búsqueda" : "Empieza por añadir tu primer contacto"}</p>
+                    <p className="text-sm">{inputValue ? "Prueba con otros términos de búsqueda" : "Empieza por añadir tu primer contacto"}</p>
                 </div>
             ) : (
                 <>
@@ -256,12 +312,17 @@ function ContactsContent() {
                         {contacts.map(contact => {
                             const accountName = contact.account_name || accountMap.get(contact.account_id);
                             return (
-                                <div key={contact.id} data-testid={`contacts-row-${contact.id}`} className="group bg-white border border-slate-200 rounded-2xl p-5 shadow-sm hover:shadow-xl hover:shadow-slate-200/50 transition-all duration-300 relative flex flex-col h-full">
+                                <div 
+                                    key={contact.id} 
+                                    data-testid={`contacts-row-${contact.id}`} 
+                                    onClick={() => handleEdit(contact)}
+                                    className="group bg-white border border-slate-200 rounded-2xl p-5 shadow-sm hover:shadow-xl hover:shadow-slate-200/50 transition-all duration-300 relative flex flex-col h-full cursor-pointer"
+                                >
                                     {/* Actions Overlay */}
                                     <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
                                         <button
                                             data-testid={`contacts-edit-${contact.id}`}
-                                            onClick={() => handleEdit(contact)}
+                                            onClick={(e) => { e.stopPropagation(); handleEdit(contact); }}
                                             className="p-2 text-blue-600 bg-blue-50 hover:bg-blue-600 hover:text-white rounded-xl transition-all shadow-sm"
                                             title="Editar"
                                         >
@@ -269,7 +330,7 @@ function ContactsContent() {
                                         </button>
                                         <button
                                             data-testid={`contacts-delete-${contact.id}`}
-                                            onClick={() => setContactToDelete(contact)}
+                                            onClick={(e) => { e.stopPropagation(); setContactToDelete(contact); }}
                                             className="p-2 text-red-600 bg-red-50 hover:bg-red-600 hover:text-white rounded-xl transition-all shadow-sm"
                                             title="Eliminar"
                                         >
@@ -281,7 +342,8 @@ function ContactsContent() {
                                         {/* Account Link */}
                                         <Link
                                             href={`/cuentas?id=${contact.account_id}`}
-                            className="flex items-center gap-1.5 text-sm text-blue-600 bg-blue-50 px-2.5 py-1.5 rounded-xl w-fit hover:bg-blue-100 transition-all cursor-pointer group/acc border border-blue-100 shadow-sm"
+                                            onClick={(e) => e.stopPropagation()}
+                                            className="flex items-center gap-1.5 text-sm text-blue-600 bg-blue-50 px-2.5 py-1.5 rounded-xl w-fit hover:bg-blue-100 transition-all cursor-pointer group/acc border border-blue-100 shadow-sm"
                                         >
                                             <Building size={14} className="group-hover/acc:scale-110 transition-transform" />
                                             <span className="font-bold truncate max-w-[200px]">{accountName || 'Cuenta Desconocida'}</span>
@@ -313,6 +375,7 @@ function ContactsContent() {
                                             {contact.email && (
                                                 <a
                                                     href={`mailto:${contact.email}`}
+                                                    onClick={(e) => e.stopPropagation()}
                                                     className="flex items-center gap-3 text-slate-600 hover:text-[#254153] transition-colors group/link"
                                                 >
                                                     <div className="bg-slate-100 p-2 rounded-lg group-hover/link:bg-blue-50 transition-colors">
@@ -324,6 +387,7 @@ function ContactsContent() {
                                             {contact.telefono && (
                                                 <a
                                                     href={`tel:${contact.telefono}`}
+                                                    onClick={(e) => e.stopPropagation()}
                                                     className="flex items-center gap-3 text-slate-600 hover:text-[#254153] transition-colors group/link"
                                                 >
                                                     <div className="bg-slate-100 p-2 rounded-lg group-hover/link:bg-emerald-50 transition-colors">

@@ -45,30 +45,35 @@ export function useContacts(accountId?: string) {
 
     const updateContact = async (id: string, updates: Partial<LocalContact>) => {
         const fullUpdates = { ...updates, updated_at: new Date().toISOString() };
-        const currentContact = await db.contacts.get(id);
+        
+        // Use db.contacts.get to check local existence, but if not found, we'll still proceed with a PUT
+        const currentLocal = await db.contacts.get(id);
 
-        if (!currentContact) {
-            console.error("Contact not found for update:", id);
-            return;
-        }
-
-        // Handle principal switch
         if (fullUpdates.es_principal) {
-            await db.contacts
-                .where('account_id').equals(currentContact.account_id)
-                .modify({ es_principal: false });
+            // Priority: use provided account_id, fallback to current local, then to initial hook accountId
+            const targetAccountId = fullUpdates.account_id || currentLocal?.account_id || accountId;
+            if (targetAccountId) {
+                await db.contacts
+                    .where('account_id').equals(targetAccountId)
+                    .modify({ es_principal: false });
+            }
         }
 
-        await db.contacts.update(id, fullUpdates);
-
-        // Prepare sync payload with required fields for UPSERT safety
-        // The RPC likely attempts an insert if it can't find the row (or purely for validation),
-        // so we must provide NOT NULL fields like account_id.
-        const syncPayload = { ...fullUpdates };
-        if (!syncPayload.account_id) syncPayload.account_id = currentContact.account_id;
-        if (!syncPayload.created_by && currentContact.created_by) syncPayload.created_by = currentContact.created_by;
-
-        await syncEngine.queueMutation('CRM_Contactos', id, syncPayload);
+        // --- THE FIX ---
+        // Instead of .update (which fails if ID doesn't exist), use .put for Upsert-safety.
+        // We merge with current local state if it exists, otherwise we rely on updates + required fields.
+        if (currentLocal) {
+            const merged = { ...currentLocal, ...fullUpdates };
+            await db.contacts.put(merged);
+            await syncEngine.queueMutation('CRM_Contactos', id, fullUpdates);
+        } else {
+            // If not in Dexie, it probably came from a global server search.
+            // We must ensure the record exists in Dexie for the sync engine to track it.
+            // We assume updates contains enough info or we'll fetch it from the outbox/server logic later.
+            const newRecord = { id, ...fullUpdates } as LocalContact;
+            await db.contacts.put(newRecord);
+            await syncEngine.queueMutation('CRM_Contactos', id, fullUpdates);
+        }
     };
 
     const deleteContact = async (id: string) => {

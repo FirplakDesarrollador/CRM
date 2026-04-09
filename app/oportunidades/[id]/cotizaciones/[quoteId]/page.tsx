@@ -12,6 +12,7 @@ import { cn } from "@/components/ui/utils";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useConfig } from "@/lib/hooks/useConfig";
 import { SendQuoteModal } from "@/components/quotes/SendQuoteModal";
+import { useCommissionCategories } from "@/lib/hooks/useCommissionCategories";
 
 export default function QuoteEditorPage() {
     const params = useParams();
@@ -133,7 +134,9 @@ export default function QuoteEditorPage() {
 function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItemsChange: () => void }) {
     const { items, addItem, updateItem, removeItem } = useQuoteItems(quote.id);
     const [searchTerm, setSearchTerm] = useState("");
-    const { products: searchResults, isLoading: isSearching } = useProductSearch(searchTerm);
+    const [selectedPrefix, setSelectedPrefix] = useState<string>("");
+    const { products: searchResults, isLoading: isSearching } = useProductSearch(searchTerm, selectedPrefix);
+    const { data: categories } = useCommissionCategories();
 
     // Contexto de Canal y Oportunidad
     const context = useLiveQuery(async () => {
@@ -196,27 +199,27 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
         const channel = context?.channel || 'DIST_NAC';
         let price = 0;
 
-        // Selección de precio según canal
+        // Selección de precio según canal con conversión forzada a número
         switch (channel) {
             case 'OBRAS_NAC':
-                price = product.lista_base_obras || 0;
+                price = Number(product.lista_base_obras) || 0;
                 break;
             case 'OBRAS_INT':
             case 'DIST_INT':
-                price = product.lista_base_exportaciones || 0;
+                price = Number(product.lista_base_exportaciones) || 0;
                 break;
             case 'DIST_NAC':
-                price = product.lista_base_cop || 0;
+                price = Number(product.lista_base_cop) || 0;
                 break;
             case 'PROPIO':
-                price = product.distribuidor_pvp_iva || 0;
+                price = Number(product.distribuidor_pvp_iva) || 0;
                 break;
             default:
-                price = product.lista_base_cop || 0;
+                price = Number(product.lista_base_cop) || 0;
         }
 
         // Fallback robusto if 0
-        if (price === 0) price = product.lista_base_cop || 0;
+        if (price === 0) price = Number(product.lista_base_cop) || Number(product.pvp_sin_iva) || 0;
 
         await addItem(quote.id, {
             producto_id: product.id,
@@ -285,57 +288,85 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
                 </div>
 
                 {/* Add Product Search */}
-                <div className="relative mb-6">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                        <Search className="w-4 h-4 text-slate-400" />
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                    <div className="md:col-span-1">
+                        <select
+                            className="w-full p-3 border border-slate-200 rounded-xl bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500 transition-all text-sm outline-none"
+                            value={selectedPrefix}
+                            onChange={(e) => setSelectedPrefix(e.target.value)}
+                        >
+                            <option value="">Todas las categorías</option>
+                            {categories.filter(c => c.is_active).map(c => (
+                                <option key={c.id} value={c.prefijo}>{c.nombre}</option>
+                            ))}
+                        </select>
                     </div>
-                    <input
-                        type="text"
-                        className="block w-full pl-10 pr-3 py-3 border border-slate-200 rounded-xl bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500 transition-all text-sm"
-                        placeholder="Buscar más productos para agregar..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                    />
-
-                    {searchTerm && (
-                        <div className="absolute z-20 w-full mt-2 bg-white border border-slate-200 rounded-xl shadow-2xl max-h-80 overflow-y-auto overflow-x-hidden">
-                            {isSearching ? (
-                                <div className="p-8 text-center text-slate-500 flex items-center justify-center gap-2">
-                                    <Loader2 className="w-5 h-5 animate-spin" />
-                                    Buscando en lista de precios...
-                                </div>
-                            ) : searchResults.length === 0 ? (
-                                <div className="p-8 text-center text-slate-500">No se encontraron productos</div>
-                            ) : (
-                                searchResults.map((product) => {
-                                    const displayPrice = quote.currency_id === 'USD'
-                                        ? product.lista_base_exportaciones
-                                        : (product.lista_base_cop || product.pvp_sin_iva);
-
-                                    return (
-                                        <button
-                                            key={product.id}
-                                            onClick={() => handleAddProduct(product)}
-                                            className="w-full text-left px-5 py-4 hover:bg-blue-50 flex items-center justify-between border-b border-slate-50 last:border-0 transition-colors"
-                                        >
-                                            <div className="max-w-[70%]">
-                                                <div className="font-semibold text-slate-900 line-clamp-2 leading-tight">{product.descripcion}</div>
-                                                <div className="text-xs text-slate-500 mt-1">{product.numero_articulo}</div>
-                                            </div>
-                                            <div className="flex items-center gap-4">
-                                                <div className="text-sm font-bold text-slate-900 whitespace-nowrap">
-                                                    {quote.currency_id} {new Intl.NumberFormat(quote.currency_id === 'USD' ? 'en-US' : 'es-CO', { style: 'currency', currency: quote.currency_id || 'COP' }).format(displayPrice || 0)}
-                                                </div>
-                                                <div className="p-2 bg-blue-100 text-blue-700 rounded-full group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                                                    <Plus className="w-4 h-4" />
-                                                </div>
-                                            </div>
-                                        </button>
-                                    );
-                                })
-                            )}
+                    
+                    <div className="md:col-span-2 relative">
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <Search className="w-4 h-4 text-slate-400" />
                         </div>
-                    )}
+                        <input
+                            type="text"
+                            className="block w-full pl-10 pr-3 py-3 border border-slate-200 rounded-xl bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500 transition-all text-sm"
+                            placeholder="Buscar más productos para agregar..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                        />
+
+                        {(searchTerm || selectedPrefix) && (
+                            <div className="absolute z-20 w-full mt-2 bg-white border border-slate-200 rounded-xl shadow-2xl max-h-80 overflow-y-auto overflow-x-hidden">
+                                {isSearching ? (
+                                    <div className="p-8 text-center text-slate-500 flex items-center justify-center gap-2">
+                                        <Loader2 className="w-5 h-5 animate-spin" />
+                                        Buscando en lista de precios...
+                                    </div>
+                                ) : searchResults.length === 0 ? (
+                                    <div className="p-8 text-center text-slate-500">No se encontraron productos</div>
+                                ) : (
+                                    searchResults.map((product) => {
+                                        const channel = context?.channel || 'DIST_NAC';
+                                        let displayPrice = 0;
+
+                                        if (quote.currency_id === 'USD') {
+                                            displayPrice = Number(product.lista_base_exportaciones) || 0;
+                                        } else {
+                                            switch (channel) {
+                                                case 'OBRAS_NAC': displayPrice = Number(product.lista_base_obras) || 0; break;
+                                                case 'PROPIO': displayPrice = Number(product.distribuidor_pvp_iva) || 0; break;
+                                                case 'DIST_NAC': 
+                                                default: displayPrice = Number(product.lista_base_cop) || 0;
+                                            }
+                                        }
+
+                                        // Fallback final robusto si no hay precio en el canal
+                                        if (Number(displayPrice) === 0) displayPrice = Number(product.lista_base_cop) || Number(product.pvp_sin_iva) || 0;
+
+                                        return (
+                                            <button
+                                                key={product.id}
+                                                onClick={() => handleAddProduct(product)}
+                                                className="w-full text-left px-5 py-4 hover:bg-blue-50 flex items-center justify-between border-b border-slate-50 last:border-0 transition-colors"
+                                            >
+                                                <div className="max-w-[70%]">
+                                                    <div className="font-semibold text-slate-900 line-clamp-2 leading-tight">{product.descripcion}</div>
+                                                    <div className="text-xs text-slate-500 mt-1">{product.numero_articulo}</div>
+                                                </div>
+                                                <div className="flex items-center gap-4">
+                                                    <div className="text-sm font-bold text-slate-900 whitespace-nowrap">
+                                                        {quote.currency_id} {new Intl.NumberFormat(quote.currency_id === 'USD' ? 'en-US' : 'es-CO', { style: 'currency', currency: quote.currency_id || 'COP' }).format(displayPrice || 0)}
+                                                    </div>
+                                                    <div className="p-2 bg-blue-100 text-blue-700 rounded-full group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                                                        <Plus className="w-4 h-4" />
+                                                    </div>
+                                                </div>
+                                            </button>
+                                        );
+                                    })
+                                )}
+                            </div>
+                        )}
+                    </div>
                 </div>
 
                 {/* Items List */}

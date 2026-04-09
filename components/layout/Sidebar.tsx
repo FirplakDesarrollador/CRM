@@ -14,7 +14,7 @@ import {
     Briefcase,
     Building2,
     Calendar,
-    Files,
+    FileSpreadsheet,
     Settings,
     Users,
     Truck,
@@ -34,7 +34,7 @@ const NAV_ITEMS = [
     { label: "Pedidos", href: "/pedidos", icon: Truck },
     { label: "Comisiones", href: "/comisiones", icon: DollarSign },
     { label: "Indicadores", href: "/indicadores", icon: BarChart3 },
-    { label: "Archivos", href: "/archivos", icon: Files },
+    { label: "Informes", href: "/informes", icon: FileSpreadsheet, requiredRole: 'ADMIN' },
     { label: "Usuarios", href: "/usuarios", icon: UserCircle, requiredRole: 'ADMIN' },
     { label: "Configuración", href: "/configuracion", icon: Settings },
 ];
@@ -46,7 +46,9 @@ export interface SidebarProps {
 
 export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar }: SidebarProps) {
     const pathname = usePathname();
-    const { userRole, setUserRole } = useSyncStore();
+    // PERF FIX: Use selectors to avoid re-rendering on every sync state change (e.g., isSyncing, pendingCount)
+    // This was likely causing the "multiple clicks" issue as Sidebar re-rendered while clicking.
+    const setUserRole = useSyncStore((state) => state.setUserRole);
     const { user, role, isLoading } = useCurrentUser();
 
     // Sync DB Role to UI Store
@@ -58,18 +60,21 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
         }
     }, [role, isLoading, setUserRole]);
 
+    // PERF FIX: Memoize modules list to avoid re-calculating visibleNavItems on every render
+    const allowedModules = React.useMemo(() => user?.allowed_modules || [], [user?.allowed_modules]);
+
     // Filter nav items using effective role (respects viewMode)
     const visibleNavItems = React.useMemo(() => {
         return NAV_ITEMS.filter(item => {
             if (item.href === '/usuarios' && role !== 'ADMIN') return false;
             if (role === 'ADMIN') return true;
-            if (user?.allowed_modules && user.allowed_modules.length > 0) {
-                return user.allowed_modules.includes(item.href);
+            if (allowedModules.length > 0) {
+                return allowedModules.includes(item.href);
             }
             if (item.requiredRole && item.requiredRole !== role) return false;
             return true;
         });
-    }, [role, user?.allowed_modules]);
+    }, [role, allowedModules]);
 
 
     return (
@@ -101,7 +106,7 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
                 {!isCollapsed && (
                     <div className="w-full mt-3 pt-3 border-t border-slate-200/60">
                         <p className="text-xs text-slate-400 text-center font-semibold uppercase tracking-wider">
-                            Versión 1.0.9.2
+                            Versión 1.0.9.3
                         </p>
                     </div>
                 )}
@@ -136,7 +141,6 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
                                     : "text-slate-600 hover:bg-slate-100 hover:text-[#254153]",
                                 isCollapsed && "justify-center px-0 w-14 mx-auto"
                             )}
-                            prefetch={false}
                         >
                             <item.icon className={cn(
                                 "w-5 h-5 shrink-0 transition-transform",

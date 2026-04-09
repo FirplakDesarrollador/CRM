@@ -4,11 +4,26 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/db";
 import { Truck, Search, Calendar, FileText, ChevronRight } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useState, useEffect, Suspense } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { cn } from "@/components/ui/utils";
 
-export default function PedidosPage() {
-    const [search, setSearch] = useState("");
+function PedidosContent() {
+    const searchParams = useSearchParams();
+    const router = useRouter();
+    const [search, setSearch] = useState(searchParams.get('search') || "");
+
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            const params = new URLSearchParams(Array.from(searchParams.entries()));
+            if (search) params.set('search', search);
+            else params.delete('search');
+            
+            const query = params.toString() ? `?${params.toString()}` : window.location.pathname;
+            router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
+        }, 500);
+        return () => clearTimeout(timer);
+    }, [search, searchParams, router]);
 
     // Fetch quotes marked as 'es_pedido'
     const pedidos = useLiveQuery(async () => {
@@ -114,5 +129,13 @@ export default function PedidosPage() {
                 </div>
             </div>
         </div>
+    );
+}
+
+export default function PedidosPage() {
+    return (
+        <Suspense fallback={<div className="p-8 text-center text-slate-400">Cargando pedidos...</div>}>
+            <PedidosContent />
+        </Suspense>
     );
 }

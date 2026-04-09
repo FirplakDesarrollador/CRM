@@ -9,7 +9,9 @@ import { FirplakIsotipo } from "./FirplakLogo";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 
 export function TopBar() {
-    const { isSyncing, pendingCount, error: syncError } = useSyncStore();
+    const isSyncing = useSyncStore((state) => state.isSyncing);
+    const pendingCount = useSyncStore((state) => state.pendingCount);
+    const syncError = useSyncStore((state) => state.error);
     const { user } = useCurrentUser();
 
     // Derive initials from Zustand store (no network call needed)

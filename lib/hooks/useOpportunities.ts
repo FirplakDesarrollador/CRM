@@ -551,23 +551,24 @@ export function useQuoteItems(quoteId?: string) {
                             .single();
 
                         if (prodData) {
-                            // Apply Strict Logic
+                            // Apply Strict Logic — Number() needed because Supabase returns numeric(x,y) as strings
                             switch (channelId) {
                                 case 'OBRAS_NAC':
-                                    unitPrice = prodData.lista_base_obras || 0;
+                                    unitPrice = Number(prodData.lista_base_obras) || 0;
                                     break;
                                 case 'OBRAS_INT':
                                 case 'DIST_INT':
-                                    unitPrice = prodData.lista_base_exportaciones || 0;
+                                    unitPrice = Number(prodData.lista_base_exportaciones) || 0;
                                     break;
                                 case 'PROPIO':
-                                    unitPrice = prodData.distribuidor_pvp_iva || 0;
+                                    unitPrice = Number(prodData.distribuidor_pvp_iva) || 0;
                                     break;
                                 case 'DIST_NAC':
                                 default:
-                                    unitPrice = prodData.lista_base_cop || 0;
+                                    unitPrice = Number(prodData.lista_base_cop) || 0;
                             }
-                            if (unitPrice === 0) unitPrice = prodData.lista_base_cop || 0; // Fallback
+                            // Fallback robusto: lista_base_cop → pvp_sin_iva
+                            if (unitPrice === 0) unitPrice = Number(prodData.lista_base_cop) || Number(prodData.pvp_sin_iva) || 0;
 
                             // 2. Fetch Volume Discount Limit via RPC
                             const { data: pricing } = await supabase.rpc('get_recommended_pricing', {
