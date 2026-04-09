@@ -61,6 +61,36 @@ export default function InformesPage() {
             const entidadDef = ENTIDADES.find(e => e.id === selectedEntidad);
             if (!entidadDef) throw new Error("Entidad no válida");
 
+            // 1. Cargar Catálogos para Mapeo (Lookups)
+            const [
+              { data: users },
+              { data: segments },
+              { data: lossReasons },
+              { data: departments },
+              { data: cities }
+            ] = await Promise.all([
+              supabase.from('CRM_Usuarios').select('id, full_name, email'),
+              supabase.from('CRM_Segmentos').select('id, nombre'),
+              supabase.from('CRM_RazonesPerdida').select('id, descripcion'),
+              supabase.from('CRM_Departamentos').select('id, nombre'),
+              supabase.from('CRM_Ciudades').select('id, nombre')
+            ]);
+
+            const userMap = new Map<string, string>();
+            users?.forEach(u => userMap.set(u.id, u.full_name || u.email || '-'));
+
+            const segmentMap = new Map<number, string>();
+            segments?.forEach(s => segmentMap.set(s.id, s.nombre));
+
+            const lossReasonMap = new Map<number, string>();
+            lossReasons?.forEach(l => lossReasonMap.set(l.id, l.descripcion));
+
+            const deptMap = new Map<number, string>();
+            departments?.forEach(d => deptMap.set(d.id, d.nombre));
+
+            const cityMap = new Map<number, string>();
+            cities?.forEach(c => cityMap.set(c.id, c.nombre));
+
             // Configuración de columnas y joins por entidad
             let selectStr = '*';
             let columns: ExportColumn<any>[] = [];
@@ -71,33 +101,43 @@ export default function InformesPage() {
                     *,
                     cuenta:CRM_Cuentas(nombre),
                     fase:CRM_FasesOportunidad(nombre),
-                    estado_info:CRM_EstadosOportunidad(nombre),
-                    vendedor:CRM_Usuarios!CRM_Oportunidades_owner_user_id_fkey(full_name)
+                    estado_info:CRM_EstadosOportunidad(nombre)
                 `;
                 columns = [
                     { header: 'ID', key: 'id' },
-                    { header: 'NOMBRE OPORTUNIDAD', key: 'nombre', width: 30 },
-                    { header: 'CUENTA', key: 'cuenta_nombre', width: 30 },
-                    { header: 'FASE', key: 'fase_nombre' },
-                    { header: 'ESTADO', key: 'estado_nombre' },
-                    { header: 'VALOR', key: 'amount' },
-                    { header: 'MONEDA', key: 'currency_id' },
+                    { header: 'FECHA CREACIÓN', key: 'created_at', width: 20 },
+                    { header: 'NOMBRE OPORTUNIDAD', key: 'nombre', width: 35 },
+                    { header: 'CUENTA', key: 'cuenta_nombre', width: 35 },
                     { header: 'VENDEDOR', key: 'vendedor_nombre', width: 25 },
-                    { header: 'FECHA CIERRE', key: 'fecha_cierre_estimada' },
-                    { header: 'CREADO EL', key: 'created_at' }
+                    { header: 'ESTADO', key: 'estado_nombre', width: 15 },
+                    { header: 'FASE ACTUAL', key: 'fase_nombre', width: 20 },
+                    { header: 'VALOR', key: 'amount', width: 15 },
+                    { header: 'MONEDA', key: 'currency_id', width: 10 },
+                    { header: 'PROBABILIDAD (%)', key: 'probability', width: 15 },
+                    { header: 'FECHA CIERRE EST.', key: 'fecha_cierre_estimada', width: 18 },
+                    { header: 'SEGMENTO', key: 'segmento_nombre', width: 25 },
+                    { header: 'ORIGEN', key: 'origen_oportunidad', width: 20 },
+                    { header: 'DEPARTAMENTO', key: 'departamento_nombre', width: 20 },
+                    { header: 'CIUDAD', key: 'ciudad_nombre', width: 20 },
+                    { header: 'RAZÓN PÉRDIDA', key: 'razon_perdida_label', width: 30 },
+                    { header: 'COMENTARIOS PÉRDIDA', key: 'comentarios_perdida', width: 40 },
+                    { header: 'CREADO POR', key: 'creador_nombre', width: 25 }
                 ];
                 flattenFn = (item: any) => ({
                     ...item,
                     cuenta_nombre: item.cuenta?.nombre || '-',
                     fase_nombre: item.fase?.nombre || '-',
                     estado_nombre: item.estado_info?.nombre || '-',
-                    vendedor_nombre: item.vendedor?.full_name || '-'
+                    vendedor_nombre: userMap.get(item.owner_user_id) || '-',
+                    creador_nombre: userMap.get(item.created_by) || '-',
+                    segmento_nombre: segmentMap.get(item.segmento_id) || '-',
+                    departamento_nombre: deptMap.get(item.departamento_id) || '-',
+                    ciudad_nombre: cityMap.get(item.ciudad_id) || '-',
+                    // Resolve legacy text reason or new ID-based reason
+                    razon_perdida_label: item.razon_perdida_id ? (lossReasonMap.get(item.razon_perdida_id) || item.razon_perdida) : (item.razon_perdida || '-')
                 });
             } else if (selectedEntidad === 'cuentas') {
-                selectStr = `
-                    *,
-                    vendedor:CRM_Usuarios!CRM_Cuentas_owner_user_id_fkey(full_name)
-                `;
+                selectStr = '*';
                 columns = [
                     { header: 'ID', key: 'id' },
                     { header: 'NIT', key: 'nit' },
@@ -106,18 +146,19 @@ export default function InformesPage() {
                     { header: 'TELÉFONO', key: 'telefono' },
                     { header: 'EMAIL', key: 'email', width: 30 },
                     { header: 'CIUDAD', key: 'ciudad' },
+                    { header: 'DEPARTAMENTO', key: 'departamento_nombre', width: 20 },
                     { header: 'VENDEDOR ASIGNADO', key: 'vendedor_nombre', width: 25 },
                     { header: 'CREADO EL', key: 'created_at' }
                 ];
                 flattenFn = (item: any) => ({
                     ...item,
-                    vendedor_nombre: item.vendedor?.full_name || '-'
+                    vendedor_nombre: userMap.get(item.owner_user_id) || '-',
+                    departamento_nombre: deptMap.get(item.departamento_id) || '-'
                 });
             } else if (selectedEntidad === 'contactos') {
                 selectStr = `
                     *,
-                    cuenta:CRM_Cuentas(nombre),
-                    vendedor:CRM_Usuarios!CRM_Contactos_user_id_fkey(full_name)
+                    cuenta:CRM_Cuentas(nombre)
                 `;
                 columns = [
                     { header: 'ID', key: 'id' },
@@ -133,13 +174,12 @@ export default function InformesPage() {
                     ...item,
                     nombre_completo: `${item.nombres || ''} ${item.apellidos || ''}`.trim(),
                     cuenta_nombre: item.cuenta?.nombre || '-',
-                    vendedor_nombre: item.vendedor?.full_name || '-'
+                    vendedor_nombre: userMap.get(item.user_id || item.created_by) || '-'
                 });
             } else if (selectedEntidad === 'cotizaciones') {
                 selectStr = `
                     *,
-                    oportunidad:CRM_Oportunidades(nombre),
-                    vendedor:CRM_Usuarios!CRM_Cotizaciones_user_id_fkey(full_name)
+                    oportunidad:CRM_Oportunidades(nombre)
                 `;
                 columns = [
                     { header: 'CÓDIGO', key: 'codigo' },
@@ -154,7 +194,7 @@ export default function InformesPage() {
                 flattenFn = (item: any) => ({
                     ...item,
                     oportunidad_nombre: item.oportunidad?.nombre || '-',
-                    vendedor_nombre: item.vendedor?.full_name || '-'
+                    vendedor_nombre: userMap.get(item.user_id || item.created_by) || '-'
                 });
             }
 
