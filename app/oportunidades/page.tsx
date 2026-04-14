@@ -464,7 +464,7 @@ function OpportunitiesContent() {
                                             </td>
                                             <td className="px-3 py-2.5 text-center">
                                                 <span className="text-xs text-slate-500 whitespace-nowrap">
-                                                    {opp.created_at ? new Date(opp.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) : "-"}
+                                                    {opp.created_at ? new Date(opp.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' }) : "-"}
                                                 </span>
                                             </td>
                                             <td className="px-3 py-2.5 text-right">
