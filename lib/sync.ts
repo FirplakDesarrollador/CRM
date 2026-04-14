@@ -58,8 +58,10 @@ export class SyncEngine {
             }
 
             await this.resetStuckItems(); // Unlock items stuck in 'SYNCING'
+            await this.yield();
             await this.pushChanges(user); // Push local changes FIRST to preserve UX
-            await this.pullChanges(user); // Then pull server data (which typically includes our changes now)
+            await this.yield();
+            await this.pullChanges(user); // Then pull server data
             useSyncStore.getState().setLastSyncTime(new Date().toISOString());
             console.log('[Sync] Completed.');
         } catch (err: any) {
@@ -104,6 +106,13 @@ export class SyncEngine {
                 console.error('[Sync] Failed to check remaining items:', retryErr);
             }
         }
+    }
+
+    /**
+     * Yields control back to the browser to keep the UI responsive
+     */
+    private async yield() {
+        return new Promise(resolve => setTimeout(resolve, 0));
     }
 
     /**
@@ -1015,6 +1024,8 @@ export class SyncEngine {
                 console.warn('[Sync] Failed to clean up deleted accounts:', cleanErr);
             }
 
+            await this.yield();
+
             // Pull Phases (CRM_FasesOportunidad)
             try {
                 const { data: phases, error: phasesError } = await supabase
@@ -1042,6 +1053,7 @@ export class SyncEngine {
             } catch (pErr: any) {
                 console.error('[Sync] Failed to pull phases:', pErr.message);
             }
+            await this.yield();
 
             // Pull Subclassifications (CRM_Subclasificacion)
             try {
@@ -1066,6 +1078,7 @@ export class SyncEngine {
             } catch (sErr: any) {
                 console.error('[Sync] Failed to pull subclassifications:', sErr.message);
             }
+            await this.yield();
 
             // Pull Activity Classifications
             try {
@@ -1185,6 +1198,7 @@ export class SyncEngine {
             } catch (countryErr: any) {
                 console.error('[Sync] Failed to pull countries:', countryErr.message);
             }
+            await this.yield();
 
             // Pull Cities (CRM_Ciudades)
             try {

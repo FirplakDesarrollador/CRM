@@ -19,7 +19,7 @@ const ENTIDADES = [
 
 type EntidadType = typeof ENTIDADES[number]['id'];
 
-const CANALES = ['Retail', 'Constructoras', 'Grandes Superficies', 'Institucional', 'Exportaciones', 'E-commerce', 'Showroom'];
+// const CANALES = ['Retail', 'Constructoras', 'Grandes Superficies', 'Institucional', 'Exportaciones', 'E-commerce', 'Showroom'];
 const ESTADOS_OPPORTUNIDADES = ['Abierta', 'Ganada', 'Perdida', 'Suspendida'];
 
 export default function InformesPage() {
@@ -27,12 +27,22 @@ export default function InformesPage() {
     const { users } = useUsers();
     
     const [selectedEntidad, setSelectedEntidad] = useState<EntidadType>('oportunidades');
+    const [availableCanales, setAvailableCanales] = useState<{id: string, nombre: string}[]>([]);
     const [dateFrom, setDateFrom] = useState('');
     const [dateTo, setDateTo] = useState('');
     const [selectedUser, setSelectedUser] = useState('');
     const [selectedCanal, setSelectedCanal] = useState('');
     const [selectedEstado, setSelectedEstado] = useState('');
     const [isExporting, setIsExporting] = useState(false);
+
+    // Cargar canales para el filtro
+    React.useEffect(() => {
+        const fetchCanales = async () => {
+            const { data } = await supabase.from('CRM_Canales').select('id, nombre');
+            if (data) setAvailableCanales(data);
+        };
+        fetchCanales();
+    }, []);
 
     if (isLoadingUser) {
         return (
@@ -67,13 +77,15 @@ export default function InformesPage() {
               { data: segments },
               { data: lossReasons },
               { data: departments },
-              { data: cities }
+              { data: cities },
+              { data: canales }
             ] = await Promise.all([
               supabase.from('CRM_Usuarios').select('id, full_name, email'),
               supabase.from('CRM_Segmentos').select('id, nombre'),
               supabase.from('CRM_RazonesPerdida').select('id, descripcion'),
               supabase.from('CRM_Departamentos').select('id, nombre'),
-              supabase.from('CRM_Ciudades').select('id, nombre')
+              supabase.from('CRM_Ciudades').select('id, nombre'),
+              supabase.from('CRM_Canales').select('id, nombre')
             ]);
 
             const userMap = new Map<string, string>();
@@ -91,6 +103,9 @@ export default function InformesPage() {
             const cityMap = new Map<number, string>();
             cities?.forEach(c => cityMap.set(c.id, c.nombre));
 
+            const canalMap = new Map<string, string>();
+            canales?.forEach(c => canalMap.set(c.id, c.nombre));
+
             // Configuración de columnas y joins por entidad
             let selectStr = '*';
             let columns: ExportColumn<any>[] = [];
@@ -100,7 +115,7 @@ export default function InformesPage() {
                 selectStr = `
                     *,
                     cuenta:CRM_Cuentas(nombre),
-                    fase:CRM_FasesOportunidad(nombre),
+                    fase:CRM_FasesOportunidad(nombre, canal_id),
                     estado_info:CRM_EstadosOportunidad(nombre)
                 `;
                 columns = [
@@ -108,6 +123,7 @@ export default function InformesPage() {
                     { header: 'FECHA CREACIÓN', key: 'created_at', width: 20 },
                     { header: 'NOMBRE OPORTUNIDAD', key: 'nombre', width: 35 },
                     { header: 'CUENTA', key: 'cuenta_nombre', width: 35 },
+                    { header: 'CANAL', key: 'canal_nombre' },
                     { header: 'VENDEDOR', key: 'vendedor_nombre', width: 25 },
                     { header: 'ESTADO', key: 'estado_nombre', width: 15 },
                     { header: 'FASE ACTUAL', key: 'fase_nombre', width: 20 },
@@ -131,6 +147,7 @@ export default function InformesPage() {
                     vendedor_nombre: userMap.get(item.owner_user_id) || '-',
                     creador_nombre: userMap.get(item.created_by) || '-',
                     segmento_nombre: segmentMap.get(item.segmento_id) || '-',
+                    canal_nombre: item.fase?.canal_id ? (canalMap.get(item.fase.canal_id) || '-') : '-',
                     departamento_nombre: deptMap.get(item.departamento_id) || '-',
                     ciudad_nombre: cityMap.get(item.ciudad_id) || '-',
                     // Resolve legacy text reason or new ID-based reason
@@ -142,18 +159,20 @@ export default function InformesPage() {
                     { header: 'ID', key: 'id' },
                     { header: 'NIT', key: 'nit' },
                     { header: 'NOMBRE CUENTA', key: 'nombre', width: 40 },
-                    { header: 'CANAL', key: 'canal' },
+                    { header: 'CANAL', key: 'canal_nombre' },
                     { header: 'TELÉFONO', key: 'telefono' },
                     { header: 'EMAIL', key: 'email', width: 30 },
-                    { header: 'CIUDAD', key: 'ciudad' },
+                    { header: 'CIUDAD', key: 'ciudad_nombre' },
                     { header: 'DEPARTAMENTO', key: 'departamento_nombre', width: 20 },
                     { header: 'VENDEDOR ASIGNADO', key: 'vendedor_nombre', width: 25 },
                     { header: 'CREADO EL', key: 'created_at' }
                 ];
                 flattenFn = (item: any) => ({
                     ...item,
+                    canal_nombre: canalMap.get(item.canal_id) || '-',
                     vendedor_nombre: userMap.get(item.owner_user_id) || '-',
-                    departamento_nombre: deptMap.get(item.departamento_id) || '-'
+                    departamento_nombre: deptMap.get(item.departamento_id) || '-',
+                    ciudad_nombre: cityMap.get(item.ciudad_id) || item.ciudad || '-'
                 });
             } else if (selectedEntidad === 'contactos') {
                 selectStr = `
@@ -216,9 +235,19 @@ export default function InformesPage() {
             }
 
             // Canal y Estado (dependiendo de la entidad)
-            if (selectedEntidad === 'oportunidades' || selectedEntidad === 'cuentas') {
-                if (selectedCanal) query = query.eq('canal', selectedCanal);
-                if (selectedEstado && selectedEntidad === 'oportunidades') query = query.eq('estado', selectedEstado);
+            if (selectedCanal) {
+                if (selectedEntidad === 'cuentas') {
+                    query = query.eq('canal_id', selectedCanal);
+                } else if (selectedEntidad === 'oportunidades') {
+                    // Filtrar por el canal de la fase asociada
+                    const { data: faseData } = await supabase.from('CRM_FasesOportunidad').select('id').eq('canal_id', selectedCanal);
+                    const faseIds = faseData?.map(f => f.id) || [];
+                    query = query.in('fase_id', faseIds);
+                }
+            }
+
+            if (selectedEstado && selectedEntidad === 'oportunidades') {
+                query = query.eq('estado', selectedEstado);
             }
 
             // Execute Query
@@ -374,8 +403,8 @@ export default function InformesPage() {
                                     className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-sm"
                                 >
                                     <option value="">Todos los canales</option>
-                                    {CANALES.map(c => (
-                                        <option key={c} value={c}>{c}</option>
+                                    {availableCanales.map(c => (
+                                        <option key={c.id} value={c.id}>{c.nombre}</option>
                                     ))}
                                 </select>
                             </div>

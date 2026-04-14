@@ -53,13 +53,13 @@ export function MobileNav() {
                             )}
                         >
                             <div className={cn(
-                                "p-1.5 rounded-xl transition-colors",
+                                "p-1.5 rounded-xl transition-colors pointer-events-none",
                                 isActive && "bg-blue-50"
                             )}>
-                                <item.icon className={cn("w-5 h-5", isActive && "stroke-[2.5px]")} />
+                                <item.icon className="w-5 h-5" />
                             </div>
                             <span className={cn(
-                                "text-[10px] font-semibold transition-all",
+                                "text-[10px] font-semibold transition-all pointer-events-none",
                                 isActive ? "opacity-100 scale-100" : "opacity-70 scale-95"
                             )}>
                                 {item.label}

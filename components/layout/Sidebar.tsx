@@ -44,10 +44,42 @@ export interface SidebarProps {
     toggleSidebar: () => void;
 }
 
+interface NavItemProps {
+    item: typeof NAV_ITEMS[0];
+    isActive: boolean;
+    isCollapsed: boolean;
+}
+
+const NavItem = React.memo(function NavItem({ item, isActive, isCollapsed }: NavItemProps) {
+    return (
+        <Link
+            href={item.href}
+            data-testid={`nav-${item.href.replace('/', '') || 'home'}`}
+            title={isCollapsed ? item.label : undefined}
+            className={cn(
+                "flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-sm font-semibold group/item relative",
+                isActive
+                    ? "bg-linear-to-r from-[#254153] to-[#1a2f3d] text-white shadow-lg shadow-[#254153]/20"
+                    : "text-slate-600 hover:bg-slate-100 hover:text-[#254153]",
+                isCollapsed && "justify-center px-0 w-14 mx-auto"
+            )}
+        >
+            <item.icon className={cn(
+                "w-5 h-5 shrink-0 transition-transform pointer-events-none",
+                !isActive && "group-hover/item:scale-110"
+            )} />
+            {!isCollapsed && (
+                <span className="whitespace-nowrap pointer-events-none">{item.label}</span>
+            )}
+            {isActive && !isCollapsed && (
+                <div className="absolute right-3 w-1.5 h-1.5 bg-white rounded-full"></div>
+            )}
+        </Link>
+    );
+});
+
 export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar }: SidebarProps) {
     const pathname = usePathname();
-    // PERF FIX: Use selectors to avoid re-rendering on every sync state change (e.g., isSyncing, pendingCount)
-    // This was likely causing the "multiple clicks" issue as Sidebar re-rendered while clicking.
     const setUserRole = useSyncStore((state) => state.setUserRole);
     const { user, role, isLoading } = useCurrentUser();
 
@@ -60,11 +92,9 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
         }
     }, [role, isLoading, setUserRole]);
 
-    // PERF FIX: Memoize modules list to avoid re-calculating visibleNavItems on every render
-    const allowedModules = React.useMemo(() => user?.allowed_modules || [], [user?.allowed_modules]);
-
-    // Filter nav items using effective role (respects viewMode)
+    // Filter nav items using effective role
     const visibleNavItems = React.useMemo(() => {
+        const allowedModules = user?.allowed_modules || [];
         return NAV_ITEMS.filter(item => {
             if (item.href === '/usuarios' && role !== 'ADMIN') return false;
             if (role === 'ADMIN') return true;
@@ -74,7 +104,7 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
             if (item.requiredRole && item.requiredRole !== role) return false;
             return true;
         });
-    }, [role, allowedModules]);
+    }, [role, user?.allowed_modules]);
 
 
     return (
@@ -106,12 +136,12 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
                 {!isCollapsed && (
                     <div className="w-full mt-3 pt-3 border-t border-slate-200/60">
                         <p className="text-xs text-slate-400 text-center font-semibold uppercase tracking-wider">
-                            Versión 1.0.9.3
+                            Versión 1.0.9.4
                         </p>
                     </div>
                 )}
 
-                {/* Collapse/Expand Button - Subtle Design */}
+                {/* Collapse/Expand Button */}
                 <button
                     data-testid="sidebar-toggle"
                     onClick={toggleSidebar}
@@ -126,35 +156,14 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
 
             {/* Navigation Section */}
             <nav className="flex-1 p-4 space-y-1.5 overflow-y-auto overflow-x-hidden">
-                {visibleNavItems.map((item) => {
-                    const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href));
-                    return (
-                        <Link
-                            key={item.href}
-                            href={item.href}
-                            data-testid={`nav-${item.href.replace('/', '') || 'home'}`}
-                            title={isCollapsed ? item.label : undefined}
-                            className={cn(
-                                "flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-sm font-semibold group/item relative",
-                                isActive
-                                    ? "bg-linear-to-r from-[#254153] to-[#1a2f3d] text-white shadow-lg shadow-[#254153]/20"
-                                    : "text-slate-600 hover:bg-slate-100 hover:text-[#254153]",
-                                isCollapsed && "justify-center px-0 w-14 mx-auto"
-                            )}
-                        >
-                            <item.icon className={cn(
-                                "w-5 h-5 shrink-0 transition-transform",
-                                !isActive && "group-hover/item:scale-110"
-                            )} />
-                            {!isCollapsed && (
-                                <span className="whitespace-nowrap">{item.label}</span>
-                            )}
-                            {isActive && !isCollapsed && (
-                                <div className="absolute right-3 w-1.5 h-1.5 bg-white rounded-full"></div>
-                            )}
-                        </Link>
-                    );
-                })}
+                {visibleNavItems.map((item) => (
+                    <NavItem 
+                        key={item.href}
+                        item={item}
+                        isActive={pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href))}
+                        isCollapsed={isCollapsed}
+                    />
+                ))}
             </nav>
 
             {/* Sync Status Section */}
@@ -168,3 +177,4 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
         </aside>
     );
 });
+

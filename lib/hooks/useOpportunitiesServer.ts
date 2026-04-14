@@ -19,6 +19,7 @@ export type OpportunityServer = {
     account?: { nombre: string; canal_id?: string } | null; // Joined data
     fase_data?: { nombre: string } | null; // Joined data
     estado_data?: { nombre: string } | null; // Joined data
+    vendedor?: { full_name: string } | null; // Joined data
 };
 
 type StatusFilter = 'all' | 'open' | 'won' | 'lost';
@@ -52,6 +53,10 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
     const [endDate, setEndDate] = useState<string | null>(null);
     const [startClosingDate, setStartClosingDate] = useState<string | null>(null);
     const [endClosingDate, setEndClosingDate] = useState<string | null>(null);
+    
+    // Sorting
+    const [sortField, setSortField] = useState<string>('updated_at');
+    const [sortAsc, setSortAsc] = useState<boolean>(false);
 
     // PERF FIX: Phase IDs only stored in refs (not state) to avoid triggering refetches
     const wonPhaseIdsRef = useRef<number[]>([]);
@@ -186,7 +191,10 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                 } else if (statusFilter === 'lost' && lostPhaseIdsRef.current.length > 0) {
                     localOpps = localOpps.filter(o => lostPhaseIdsRef.current.includes(o.fase_id as number));
                 } else if (statusFilter === 'open' && closedPhaseIdsRef.current.length > 0) {
-                    localOpps = localOpps.filter(o => !closedPhaseIdsRef.current.includes(o.fase_id as number));
+                    localOpps = localOpps.filter(o => 
+                        !closedPhaseIdsRef.current.includes(o.fase_id as number) && 
+                        ![2,3,4,11,14].includes(o.estado_id as number)
+                    );
                 }
 
                 if (accountIdFilter) {
@@ -227,9 +235,29 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
 
                 // Sorting
                 localOpps.sort((a, b) => {
-                    const dateA = a.updated_at ? new Date(a.updated_at).getTime() : 0;
-                    const dateB = b.updated_at ? new Date(b.updated_at).getTime() : 0;
-                    return dateB - dateA;
+                    let valA: any;
+                    let valB: any;
+
+                    if (sortField === 'nombre') {
+                        valA = a.nombre || "";
+                        valB = b.nombre || "";
+                    } else if (sortField === 'amount') {
+                        valA = a.amount || 0;
+                        valB = b.amount || 0;
+                    } else if (sortField === 'fecha_cierre_estimada') {
+                        valA = a.fecha_cierre_estimada ? new Date(a.fecha_cierre_estimada).getTime() : 0;
+                        valB = b.fecha_cierre_estimada ? new Date(b.fecha_cierre_estimada).getTime() : 0;
+                    } else if (sortField === 'account_nombre') {
+                        valA = a.account?.nombre || "";
+                        valB = b.account?.nombre || "";
+                    } else {
+                        valA = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+                        valB = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+                    }
+
+                    if (valA < valB) return sortAsc ? -1 : 1;
+                    if (valA > valB) return sortAsc ? 1 : -1;
+                    return 0;
                 });
 
                 const totalCount = localOpps.length;
@@ -283,7 +311,8 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                     segmento_id,
                     ${accountRelation},
                     fase_data:CRM_FasesOportunidad(nombre),
-                    estado_data:CRM_EstadosOportunidad(nombre)
+                    estado_data:CRM_EstadosOportunidad(nombre),
+                    vendedor:CRM_Usuarios!owner_user_id(full_name)
                 `, { count: 'exact' })
                 .eq('is_deleted', false);
 
@@ -315,9 +344,10 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
             } else if (statusFilter === 'lost' && lostPhaseIdsRef.current.length > 0) {
                 query = query.in('fase_id', lostPhaseIdsRef.current);
             } else if (statusFilter === 'open' && closedPhaseIdsRef.current.length > 0) {
-                // To be robust, also handle the case where fase_id might be null (though we just repaired it)
-                // but the primary logic is to exclude all known closed phases
+                // Exclude all known closed phases
                 query = query.not('fase_id', 'in', `(${closedPhaseIdsRef.current.join(',')})`);
+                // Also exclude explicit closed states (11: Cerrado Ganado, 14: Cerrado Perdido, 2: Ganada, 3: Perdida, 4: Cancelada)
+                query = query.not('estado_id', 'in', '(2,3,4,11,14)');
             }
 
             if (accountIdFilter) {
@@ -355,7 +385,13 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
             }
 
             // Order
-            query = query.order('updated_at', { ascending: false });
+            if (sortField === 'account_nombre') {
+                query = query.order('nombre', { foreignTable: 'CRM_Cuentas', ascending: sortAsc });
+            } else if (sortField === 'vendedor_nombre') {
+                query = query.order('full_name', { foreignTable: 'CRM_Usuarios', ascending: sortAsc });
+            } else {
+                query = query.order(sortField as any, { ascending: sortAsc });
+            }
 
             // Paging
             query = query.range(from, to);
@@ -386,7 +422,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
         } finally {
             setLoading(false);
         }
-    }, [currentUserId, subordinateIds, pageSize, userFilter, searchTerm, accountIdFilter, accountOwnerId, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, phasesReady, startDate, endDate, startClosingDate, endClosingDate]);
+    }, [currentUserId, subordinateIds, pageSize, userFilter, searchTerm, accountIdFilter, accountOwnerId, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, phasesReady, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc]);
 
     // Initial Fetch & Filter Fetch - no longer depends on phase IDs (read from refs)
     useEffect(() => {
@@ -443,6 +479,10 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
         setEndDate,
         setStartClosingDate,
         setEndClosingDate,
+        setSortField,
+        setSortAsc,
+        sortField,
+        sortAsc,
 
         refresh: () => fetchOpportunities(false)
     };

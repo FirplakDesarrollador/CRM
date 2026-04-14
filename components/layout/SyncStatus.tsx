@@ -10,7 +10,10 @@ export interface SyncStatusProps {
 }
 
 export function SyncStatus({ isCollapsed }: SyncStatusProps) {
-    const { isSyncing, pendingCount, lastSyncTime, error } = useSyncStore();
+    const isSyncing = useSyncStore(state => state.isSyncing);
+    const pendingCount = useSyncStore(state => state.pendingCount);
+    const lastSyncTime = useSyncStore(state => state.lastSyncTime);
+    const error = useSyncStore(state => state.error);
     const [isOnline, setIsOnline] = useState(true);
 
     useEffect(() => {
