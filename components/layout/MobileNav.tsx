@@ -1,6 +1,8 @@
 "use client";
 
+import React, { memo } from "react";
 import Link from "next/link";
+
 import { usePathname } from "next/navigation";
 import { cn } from "@/components/ui/utils";
 import { 
@@ -31,7 +33,7 @@ const MOBILE_NAV = [
     { label: "Configuración", href: "/configuracion", icon: Settings },
 ];
 
-export function MobileNav() {
+export const MobileNav = memo(function MobileNav() {
     const pathname = usePathname();
 
     return (
@@ -46,20 +48,21 @@ export function MobileNav() {
                         <Link
                             key={item.href}
                             href={item.href}
+                            prefetch={true}
                             data-testid={`mobile-nav-${item.href.replace('/', '') || 'home'}`}
                             className={cn(
-                                "flex flex-col items-center justify-center min-w-[72px] h-full space-y-1 transition-all snap-start",
-                                isActive ? "text-blue-600" : "text-slate-500 hover:text-slate-900"
+                                "flex flex-col items-center justify-center min-w-[72px] h-full space-y-1 transition-[color,transform] duration-200 snap-start",
+                                isActive ? "text-blue-600" : "text-slate-500 active:text-slate-900"
                             )}
                         >
                             <div className={cn(
-                                "p-1.5 rounded-xl transition-colors",
+                                "p-1.5 rounded-xl transition-colors duration-200 pointer-events-none",
                                 isActive && "bg-blue-50"
                             )}>
-                                <item.icon className={cn("w-5 h-5", isActive && "stroke-[2.5px]")} />
+                                <item.icon className="w-5 h-5" />
                             </div>
                             <span className={cn(
-                                "text-[10px] font-semibold transition-all",
+                                "text-[10px] font-semibold transition-[opacity,transform] duration-200 pointer-events-none",
                                 isActive ? "opacity-100 scale-100" : "opacity-70 scale-95"
                             )}>
                                 {item.label}
@@ -70,4 +73,4 @@ export function MobileNav() {
             </div>
         </nav>
     );
-}
+});

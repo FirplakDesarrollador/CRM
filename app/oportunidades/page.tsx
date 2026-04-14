@@ -3,7 +3,7 @@
 import { useOpportunitiesServer } from "@/lib/hooks/useOpportunitiesServer";
 import { useState, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Plus, Search, Filter, Briefcase, User } from "lucide-react";
+import { Plus, Search, Filter, Briefcase, User, ArrowUpDown, ChevronUp, ChevronDown } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/components/ui/utils";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
@@ -34,7 +34,11 @@ function OpportunitiesContent() {
         setStartDate,
         setEndDate,
         setStartClosingDate,
-        setEndClosingDate
+        setEndClosingDate,
+        setSortField,
+        setSortAsc,
+        sortField,
+        sortAsc
     } = useOpportunitiesServer({ pageSize: 20 });
 
     const [inputValue, setInputValue] = useState(() => {
@@ -55,6 +59,22 @@ function OpportunitiesContent() {
         }
         return null;
     });
+
+    const handleSort = (field: string) => {
+        if (sortField === field) {
+            setSortAsc(!sortAsc);
+        } else {
+            setSortField(field);
+            setSortAsc(true);
+        }
+    };
+
+    const SortIcon = ({ field }: { field: string }) => {
+        if (sortField !== field) return <ArrowUpDown className="w-3 h-3 ml-1 opacity-20 group-hover:opacity-100 transition-opacity" />;
+        return sortAsc 
+            ? <ChevronUp className="w-3 h-3 ml-1 text-blue-600" /> 
+            : <ChevronDown className="w-3 h-3 ml-1 text-blue-600" />;
+    };
     const [tab, setTab] = useState<'mine' | 'collab' | 'team'>(() => {
         const fromUrl = searchParams.get('tab');
         if (fromUrl) return (fromUrl as any);
@@ -353,73 +373,135 @@ function OpportunitiesContent() {
                     <p className="text-slate-500 mb-4">Crea una nueva oportunidad o ajusta los filtros.</p>
                 </div>
             ) : (
-                <div data-testid="opportunities-list" className="grid gap-3">
-                    {opportunities.map(opp => {
-                        const isOverdue = isDateOverdue(opp.fecha_cierre_estimada);
-                        return (
-                            <Link 
-                                key={opp.id} 
-                                href={`/oportunidades/${opp.id}`} 
-                                data-testid={`opportunities-row-${opp.id}`}
-                                onClick={() => {
-                                    // Save state immediately before navigating
-                                    const params = new URLSearchParams(Array.from(searchParams.entries()));
-                                    params.set('id', opp.id);
-                                    sessionStorage.setItem('crm_oportunidades_state', params.toString());
-                                }}
-                            >
-                                <div className={cn(
-                                    "p-4 rounded-xl shadow-sm border transition-all cursor-pointer flex justify-between items-center group",
-                                    isOverdue
-                                        ? "bg-red-50 border-red-200 hover:border-red-400"
-                                        : "bg-white border-slate-200 hover:border-blue-400"
-                                )}>
-                                    <div>
-                                        <h3 className={cn(
-                                            "font-bold",
-                                            isOverdue ? "text-red-900" : "text-slate-800"
-                                        )}>{opp.nombre || "Sin nombre"}</h3>
-                                        <div className="flex flex-col gap-0.5 mt-1">
-                                            <p className="text-sm text-blue-600 font-medium">
-                                                {/* Note: Account name comes from join now */}
-                                                {opp.account?.nombre || "Sin cuenta"}
-                                            </p>
-                                            <p className="text-xs text-slate-500">
-                                                {/* Phase mapping would need server-side join or client-side map if Phases are small. 
-                                                For now we show ID or TODO: map it 
-                                            */}
-                                                {opp.fase_data?.nombre || 'Prospecto'} • {opp.estado_data?.nombre || 'Abierta'} • {opp.currency_id || 'COP'} {new Intl.NumberFormat().format(opp.amount || 0)}
-                                                {opp.fecha_cierre_estimada && (
+                <div data-testid="opportunities-list" className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                            <thead className="bg-slate-50 border-b border-slate-200">
+                                <tr>
+                                    <th 
+                                        onClick={() => handleSort('account_nombre')}
+                                        className="px-3 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider cursor-pointer group hover:bg-slate-100/50 transition-colors"
+                                    >
+                                        <div className="flex items-center">Cuenta <SortIcon field="account_nombre" /></div>
+                                    </th>
+                                    <th 
+                                        onClick={() => handleSort('nombre')}
+                                        className="px-3 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider cursor-pointer group hover:bg-slate-100/50 transition-colors"
+                                    >
+                                        <div className="flex items-center">Nombre <SortIcon field="nombre" /></div>
+                                    </th>
+                                    <th 
+                                        onClick={() => handleSort('created_at')}
+                                        className="px-3 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-center cursor-pointer group hover:bg-slate-100/50 transition-colors"
+                                    >
+                                        <div className="flex items-center justify-center">Creada <SortIcon field="created_at" /></div>
+                                    </th>
+                                    <th 
+                                        onClick={() => handleSort('amount')}
+                                        className="px-3 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-right cursor-pointer group hover:bg-slate-100/50 transition-colors"
+                                    >
+                                        <div className="flex items-center justify-end">Valor <SortIcon field="amount" /></div>
+                                    </th>
+                                    <th 
+                                        onClick={() => handleSort('fecha_cierre_estimada')}
+                                        className="px-3 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-center cursor-pointer group hover:bg-slate-100/50 transition-colors"
+                                    >
+                                        <div className="flex items-center justify-center">Cierre <SortIcon field="fecha_cierre_estimada" /></div>
+                                    </th>
+                                    <th 
+                                        onClick={() => handleSort('vendedor_nombre')}
+                                        className="px-3 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider cursor-pointer group hover:bg-slate-100/50 transition-colors"
+                                    >
+                                        <div className="flex items-center">Vendedor <SortIcon field="vendedor_nombre" /></div>
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {opportunities.map(opp => {
+                                    const isOverdue = isDateOverdue(opp.fecha_cierre_estimada);
+                                    return (
+                                        <tr 
+                                            key={opp.id} 
+                                            onClick={() => {
+                                                const params = new URLSearchParams(Array.from(searchParams.entries()));
+                                                params.set('id', opp.id);
+                                                sessionStorage.setItem('crm_oportunidades_state', params.toString());
+                                                router.push(`/oportunidades/${opp.id}`);
+                                            }}
+                                            className={cn(
+                                                "group cursor-pointer transition-colors",
+                                                isOverdue ? "bg-red-50/50 hover:bg-red-50" : "hover:bg-slate-50"
+                                            )}
+                                            data-testid={`opportunities-row-${opp.id}`}
+                                        >
+                                            <td className="px-3 py-2.5">
+                                                <span className="text-xs font-medium text-blue-600 truncate block max-w-[130px]" title={opp.account?.nombre || ""}>
+                                                    {opp.account?.nombre || "Sin cuenta"}
+                                                </span>
+                                            </td>
+                                            <td className="px-3 py-2.5">
+                                                <div className="flex flex-col gap-0.5">
                                                     <span className={cn(
-                                                        "ml-2 font-normal",
-                                                        isOverdue
-                                                            ? "text-red-600 font-bold items-center gap-1 inline-flex"
-                                                            : "text-slate-400"
-                                                    )}>
-                                                        • Cierre: {formatColombiaDate(opp.fecha_cierre_estimada, "dd/MM/yyyy")}
-                                                        {isOverdue && (
-                                                            <span className="relative flex h-2 w-2 ml-1">
-                                                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                                                                <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
-                                                            </span>
-                                                        )}
+                                                        "text-xs font-bold truncate block max-w-[160px]",
+                                                        isOverdue ? "text-red-900" : "text-slate-900"
+                                                    )} title={opp.nombre || ""}>
+                                                        {opp.nombre || "Sin nombre"}
                                                     </span>
-                                                )}
-                                            </p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </Link>
-                        )
-                    })}
+                                                    <div className="flex items-center gap-1.5">
+                                                        <span className="text-[9px] px-1 py-0.5 rounded-full bg-slate-100 text-slate-500 font-bold uppercase whitespace-nowrap">
+                                                            {opp.fase_data?.nombre || 'Pros.'}
+                                                        </span>
+                                                        <span className={cn(
+                                                            "text-[9px] px-1 py-0.5 rounded-full font-bold uppercase whitespace-nowrap",
+                                                            (opp.estado_data?.nombre?.toLowerCase().includes('ganada') || opp.estado_data?.nombre?.toLowerCase().includes('ganado')) ? "bg-emerald-100 text-emerald-700" :
+                                                            (opp.estado_data?.nombre?.toLowerCase().includes('perdida') || opp.estado_data?.nombre?.toLowerCase().includes('perdido') || opp.estado_data?.nombre?.toLowerCase().includes('cancelada')) ? "bg-red-100 text-red-700" :
+                                                            "bg-blue-100 text-blue-700"
+                                                        )}>
+                                                            {opp.estado_data?.nombre || 'Abierta'}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            <td className="px-3 py-2.5 text-center">
+                                                <span className="text-xs text-slate-500 whitespace-nowrap">
+                                                    {opp.created_at ? new Date(opp.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' }) : "-"}
+                                                </span>
+                                            </td>
+                                            <td className="px-3 py-2.5 text-right">
+                                                <span className="text-xs font-semibold text-slate-700 whitespace-nowrap">
+                                                    {new Intl.NumberFormat('es-CO', { style: 'currency', currency: opp.currency_id === '2' ? 'USD' : 'COP', maximumFractionDigits: 0 }).format(opp.amount || 0)}
+                                                </span>
+                                            </td>
+                                            <td className="px-3 py-2.5 text-center">
+                                                <div className={cn(
+                                                    "inline-flex items-center gap-1 px-2 py-0.5 rounded flex-col",
+                                                    isOverdue ? "bg-red-50 text-red-600" : "text-slate-500"
+                                                )}>
+                                                    <span className="text-[11px] font-medium leading-none">
+                                                        {opp.fecha_cierre_estimada ? new Date(opp.fecha_cierre_estimada).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) : "-"}
+                                                    </span>
+                                                    {isOverdue && <span className="text-[8px] font-bold uppercase leading-none">Vencido</span>}
+                                                </div>
+                                            </td>
+                                            <td className="px-3 py-2.5">
+                                                <span className="text-xs text-slate-600 truncate block max-w-[110px]" title={opp.vendedor?.full_name || ""}>
+                                                    {opp.vendedor?.full_name || "Sin asignar"}
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    )
+                                })}
+                            </tbody>
+                        </table>
+                    </div>
 
                     {hasMore && (
-                        <div className="pt-4 flex justify-center">
+                        <div className="p-4 border-t border-slate-100 flex justify-center bg-slate-50/50">
                             <button
                                 data-testid="opportunities-load-more"
                                 onClick={() => loadMore()}
                                 disabled={loading}
-                                className="px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg text-sm font-medium hover:bg-slate-50 disabled:opacity-50"
+                                className="px-6 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-50 hover:text-blue-600 transition-all shadow-sm disabled:opacity-50"
                             >
                                 {loading ? 'Cargando...' : 'Cargar más resultados'}
                             </button>

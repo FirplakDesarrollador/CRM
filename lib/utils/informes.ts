@@ -59,11 +59,11 @@ export const downloadCSV = <T extends Record<string, any>>(
 
   const rows = data.map(item => {
     return columns.map(col => {
-      let val = item[col.key as keyof T];
-      if (val === null || val === undefined) val = '';
+      const value = item[col.key as keyof T];
+      const stringValue = (value === null || value === undefined) ? '' : String(value);
       // Escape quotes
-      val = String(val).replace(/"/g, '""');
-      return `"${val}"`;
+      const escapedValue = stringValue.replace(/"/g, '""');
+      return `"${escapedValue}"`;
     }).join(delimiter);
   });
 

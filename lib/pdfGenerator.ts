@@ -249,10 +249,29 @@ export async function generateQuotePdf(quote: any, items: any[], account: any, o
     doc.text(doc.splitTextToSize(legalText, pageWidth - margin * 2), margin, finalY);
     finalY += 35;
 
+    // Obtener nombre del asesor si es posible
+    let advisorName = opportunity?.owner_user_id || 'Generado desde CRM';
+    if (opportunity?.owner_user_id) {
+        try {
+            const { supabase } = await import('@/lib/supabase');
+            const { data: userData } = await supabase
+                .from('CRM_Usuarios')
+                .select('full_name')
+                .eq('id', opportunity.owner_user_id)
+                .single();
+            
+            if (userData?.full_name) {
+                advisorName = userData.full_name;
+            }
+        } catch (e) {
+            console.warn('No se pudo obtener el nombre del asesor:', e);
+        }
+    }
+
     doc.setFontSize(9);
     doc.setFont('helvetica', 'bold');
     doc.text(`ACEPTADO : _____________________________`, margin, finalY);
-    doc.text(`ASESOR : ${opportunity?.owner_user_id || 'Generado desde CRM'}`, 300, finalY);
+    doc.text(`ASESOR : ${advisorName}`, 300, finalY);
     finalY += 15;
     doc.text(`CC./NIT No.                       Contacto : ${account?.telefono || ''}`, margin, finalY);
     finalY += 30;
