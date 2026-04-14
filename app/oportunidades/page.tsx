@@ -380,31 +380,37 @@ function OpportunitiesContent() {
                                 <tr>
                                     <th 
                                         onClick={() => handleSort('account_nombre')}
-                                        className="px-5 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider cursor-pointer group hover:bg-slate-100/50 transition-colors"
+                                        className="px-3 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider cursor-pointer group hover:bg-slate-100/50 transition-colors"
                                     >
                                         <div className="flex items-center">Cuenta <SortIcon field="account_nombre" /></div>
                                     </th>
                                     <th 
                                         onClick={() => handleSort('nombre')}
-                                        className="px-5 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider cursor-pointer group hover:bg-slate-100/50 transition-colors"
+                                        className="px-3 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider cursor-pointer group hover:bg-slate-100/50 transition-colors"
                                     >
                                         <div className="flex items-center">Nombre <SortIcon field="nombre" /></div>
                                     </th>
                                     <th 
+                                        onClick={() => handleSort('created_at')}
+                                        className="px-3 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-center cursor-pointer group hover:bg-slate-100/50 transition-colors"
+                                    >
+                                        <div className="flex items-center justify-center">Creada <SortIcon field="created_at" /></div>
+                                    </th>
+                                    <th 
                                         onClick={() => handleSort('amount')}
-                                        className="px-5 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right cursor-pointer group hover:bg-slate-100/50 transition-colors"
+                                        className="px-3 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-right cursor-pointer group hover:bg-slate-100/50 transition-colors"
                                     >
                                         <div className="flex items-center justify-end">Valor <SortIcon field="amount" /></div>
                                     </th>
                                     <th 
                                         onClick={() => handleSort('fecha_cierre_estimada')}
-                                        className="px-5 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center cursor-pointer group hover:bg-slate-100/50 transition-colors"
+                                        className="px-3 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-center cursor-pointer group hover:bg-slate-100/50 transition-colors"
                                     >
-                                        <div className="flex items-center justify-center">Cierre Estimado <SortIcon field="fecha_cierre_estimada" /></div>
+                                        <div className="flex items-center justify-center">Cierre <SortIcon field="fecha_cierre_estimada" /></div>
                                     </th>
                                     <th 
                                         onClick={() => handleSort('vendedor_nombre')}
-                                        className="px-5 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider cursor-pointer group hover:bg-slate-100/50 transition-colors"
+                                        className="px-3 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider cursor-pointer group hover:bg-slate-100/50 transition-colors"
                                     >
                                         <div className="flex items-center">Vendedor <SortIcon field="vendedor_nombre" /></div>
                                     </th>
@@ -428,25 +434,25 @@ function OpportunitiesContent() {
                                             )}
                                             data-testid={`opportunities-row-${opp.id}`}
                                         >
-                                            <td className="px-5 py-4">
-                                                <span className="text-sm font-medium text-blue-600 truncate block max-w-[200px]">
+                                            <td className="px-3 py-2.5">
+                                                <span className="text-xs font-medium text-blue-600 truncate block max-w-[130px]" title={opp.account?.nombre || ""}>
                                                     {opp.account?.nombre || "Sin cuenta"}
                                                 </span>
                                             </td>
-                                            <td className="px-5 py-4">
+                                            <td className="px-3 py-2.5">
                                                 <div className="flex flex-col gap-0.5">
                                                     <span className={cn(
-                                                        "text-sm font-bold truncate block max-w-[250px]",
+                                                        "text-xs font-bold truncate block max-w-[160px]",
                                                         isOverdue ? "text-red-900" : "text-slate-900"
-                                                    )}>
+                                                    )} title={opp.nombre || ""}>
                                                         {opp.nombre || "Sin nombre"}
                                                     </span>
-                                                    <div className="flex items-center gap-2">
-                                                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 font-bold uppercase">
-                                                            {opp.fase_data?.nombre || 'Prospecto'}
+                                                    <div className="flex items-center gap-1.5">
+                                                        <span className="text-[9px] px-1 py-0.5 rounded-full bg-slate-100 text-slate-500 font-bold uppercase whitespace-nowrap">
+                                                            {opp.fase_data?.nombre || 'Pros.'}
                                                         </span>
                                                         <span className={cn(
-                                                            "text-[10px] px-1.5 py-0.5 rounded-full font-bold uppercase",
+                                                            "text-[9px] px-1 py-0.5 rounded-full font-bold uppercase whitespace-nowrap",
                                                             (opp.estado_data?.nombre?.toLowerCase().includes('ganada') || opp.estado_data?.nombre?.toLowerCase().includes('ganado')) ? "bg-emerald-100 text-emerald-700" :
                                                             (opp.estado_data?.nombre?.toLowerCase().includes('perdida') || opp.estado_data?.nombre?.toLowerCase().includes('perdido') || opp.estado_data?.nombre?.toLowerCase().includes('cancelada')) ? "bg-red-100 text-red-700" :
                                                             "bg-blue-100 text-blue-700"
@@ -456,33 +462,29 @@ function OpportunitiesContent() {
                                                     </div>
                                                 </div>
                                             </td>
-                                            <td className="px-5 py-4 text-right">
-                                                <span className="text-sm font-semibold text-slate-700 whitespace-nowrap">
-                                                    {opp.currency_id || 'COP'} {new Intl.NumberFormat().format(opp.amount || 0)}
+                                            <td className="px-3 py-2.5 text-center">
+                                                <span className="text-xs text-slate-500 whitespace-nowrap">
+                                                    {opp.created_at ? new Date(opp.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) : "-"}
                                                 </span>
                                             </td>
-                                            <td className="px-5 py-4 text-center">
-                                                {opp.fecha_cierre_estimada ? (
-                                                    <div className="inline-flex items-center justify-center gap-1.5 px-3 py-1 rounded-full border border-slate-100 bg-slate-50/50">
-                                                        <span className={cn(
-                                                            "text-xs",
-                                                            isOverdue ? "text-red-600 font-bold" : "text-slate-500"
-                                                        )}>
-                                                            {formatColombiaDate(opp.fecha_cierre_estimada, "dd/MM/yyyy")}
-                                                        </span>
-                                                        {isOverdue && (
-                                                            <span className="relative flex h-2 w-2">
-                                                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                                                                <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
-                                                            </span>
-                                                        )}
-                                                    </div>
-                                                ) : (
-                                                    <span className="text-sm text-slate-300">-</span>
-                                                )}
+                                            <td className="px-3 py-2.5 text-right">
+                                                <span className="text-xs font-semibold text-slate-700 whitespace-nowrap">
+                                                    {new Intl.NumberFormat('es-CO', { style: 'currency', currency: opp.currency_id === 2 ? 'USD' : 'COP', maximumFractionDigits: 0 }).format(opp.amount || 0)}
+                                                </span>
                                             </td>
-                                            <td className="px-5 py-4">
-                                                <span className="text-sm text-slate-600 truncate block max-w-[150px]">
+                                            <td className="px-3 py-2.5 text-center">
+                                                <div className={cn(
+                                                    "inline-flex items-center gap-1 px-2 py-0.5 rounded flex-col",
+                                                    isOverdue ? "bg-red-50 text-red-600" : "text-slate-500"
+                                                )}>
+                                                    <span className="text-[11px] font-medium leading-none">
+                                                        {opp.fecha_cierre_estimada ? new Date(opp.fecha_cierre_estimada).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) : "-"}
+                                                    </span>
+                                                    {isOverdue && <span className="text-[8px] font-bold uppercase leading-none">Vencido</span>}
+                                                </div>
+                                            </td>
+                                            <td className="px-3 py-2.5">
+                                                <span className="text-xs text-slate-600 truncate block max-w-[110px]" title={opp.vendedor?.full_name || ""}>
                                                     {opp.vendedor?.full_name || "Sin asignar"}
                                                 </span>
                                             </td>

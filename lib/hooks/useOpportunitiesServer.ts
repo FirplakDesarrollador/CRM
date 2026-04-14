@@ -247,6 +247,9 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                     } else if (sortField === 'fecha_cierre_estimada') {
                         valA = a.fecha_cierre_estimada ? new Date(a.fecha_cierre_estimada).getTime() : 0;
                         valB = b.fecha_cierre_estimada ? new Date(b.fecha_cierre_estimada).getTime() : 0;
+                    } else if (sortField === 'created_at') {
+                        valA = a.created_at ? new Date(a.created_at).getTime() : 0;
+                        valB = b.created_at ? new Date(b.created_at).getTime() : 0;
                     } else if (sortField === 'account_nombre') {
                         valA = a.account?.nombre || "";
                         valB = b.account?.nombre || "";

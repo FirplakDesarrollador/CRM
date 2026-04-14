@@ -9,6 +9,7 @@ import { FirplakLogo, FirplakIsotipo } from "./FirplakLogo";
 import { SyncStatus } from "./SyncStatus";
 import { useSyncStore } from "@/lib/stores/useSyncStore";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { shallow } from "zustand/shallow";
 import {
     Home,
     Briefcase,
@@ -54,10 +55,12 @@ const NavItem = React.memo(function NavItem({ item, isActive, isCollapsed }: Nav
     return (
         <Link
             href={item.href}
+            prefetch={true}
             data-testid={`nav-${item.href.replace('/', '') || 'home'}`}
             title={isCollapsed ? item.label : undefined}
             className={cn(
-                "flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-sm font-semibold group/item relative",
+                "flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold group/item relative",
+                "transition-[background-color,color,box-shadow,transform] duration-200",
                 isActive
                     ? "bg-linear-to-r from-[#254153] to-[#1a2f3d] text-white shadow-lg shadow-[#254153]/20"
                     : "text-slate-600 hover:bg-slate-100 hover:text-[#254153]",
@@ -83,12 +86,26 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
     const setUserRole = useSyncStore((state) => state.setUserRole);
     const { user, role, isLoading } = useCurrentUser();
 
+    // Memoized Logo to prevent expensive re-renders on navigation
+    const LogoSection = React.useMemo(() => (
+        <div className="w-full flex justify-center mb-2">
+            {isCollapsed ? (
+                <div className="w-12 h-12 bg-linear-to-br from-[#254153] to-[#1a2f3d] rounded-2xl flex items-center justify-center shadow-lg transition-all p-2.5 text-white">
+                    <FirplakIsotipo className="w-full h-full" />
+                </div>
+            ) : (
+                <div className="flex items-center justify-center py-2 h-12">
+                    <FirplakLogo className="h-full w-auto text-[#254153]" />
+                </div>
+            )}
+        </div>
+    ), [isCollapsed]);
+
     // Sync DB Role to UI Store
     React.useEffect(() => {
         if (!isLoading && role) {
-            if (role === 'ADMIN') setUserRole('ADMIN');
-            else if (role === 'COORDINADOR') setUserRole('COORDINATOR');
-            else setUserRole('SALES');
+            const normalizedRole = role === 'ADMIN' ? 'ADMIN' : role === 'COORDINADOR' ? 'COORDINATOR' : 'SALES';
+            setUserRole(normalizedRole);
         }
     }, [role, isLoading, setUserRole]);
 
@@ -121,17 +138,7 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
                 isCollapsed ? "p-4" : "p-6"
             )}>
                 {/* Logo */}
-                <div className="w-full flex justify-center mb-2">
-                    {isCollapsed ? (
-                        <div className="w-12 h-12 bg-linear-to-br from-[#254153] to-[#1a2f3d] rounded-2xl flex items-center justify-center shadow-lg transition-all p-2.5 text-white">
-                            <FirplakIsotipo className="w-full h-full" />
-                        </div>
-                    ) : (
-                        <div className="flex items-center justify-center py-2 h-12">
-                            <FirplakLogo className="h-full w-auto text-[#254153]" />
-                        </div>
-                    )}
-                </div>
+                {LogoSection}
 
                 {!isCollapsed && (
                     <div className="w-full mt-3 pt-3 border-t border-slate-200/60">

@@ -3,13 +3,13 @@
 import { useSyncStore } from "@/lib/stores/useSyncStore";
 import { Cloud, CloudOff, RefreshCw, AlertCircle, CheckCircle2 } from "lucide-react";
 import { cn } from "@/components/ui/utils";
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 
 export interface SyncStatusProps {
     isCollapsed?: boolean;
 }
 
-export function SyncStatus({ isCollapsed }: SyncStatusProps) {
+export const SyncStatus = memo(function SyncStatus({ isCollapsed }: SyncStatusProps) {
     const isSyncing = useSyncStore(state => state.isSyncing);
     const pendingCount = useSyncStore(state => state.pendingCount);
     const lastSyncTime = useSyncStore(state => state.lastSyncTime);
@@ -79,4 +79,4 @@ export function SyncStatus({ isCollapsed }: SyncStatusProps) {
             )}
         </div>
     );
-}
+});
