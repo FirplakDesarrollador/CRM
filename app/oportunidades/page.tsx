@@ -469,7 +469,7 @@ function OpportunitiesContent() {
                                             </td>
                                             <td className="px-3 py-2.5 text-right">
                                                 <span className="text-xs font-semibold text-slate-700 whitespace-nowrap">
-                                                    {new Intl.NumberFormat('es-CO', { style: 'currency', currency: opp.currency_id === 2 ? 'USD' : 'COP', maximumFractionDigits: 0 }).format(opp.amount || 0)}
+                                                    {new Intl.NumberFormat('es-CO', { style: 'currency', currency: opp.currency_id === '2' ? 'USD' : 'COP', maximumFractionDigits: 0 }).format(opp.amount || 0)}
                                                 </span>
                                             </td>
                                             <td className="px-3 py-2.5 text-center">

@@ -14,8 +14,10 @@ export type OpportunityServer = {
     currency_id: string;
     owner_user_id: string;
     updated_at: string;
+    created_at: string;
     fecha_cierre_estimada?: string | null;
     segmento_id?: number | null;
+    estado_id?: number | null;
     account?: { nombre: string; canal_id?: string } | null; // Joined data
     fase_data?: { nombre: string } | null; // Joined data
     estado_data?: { nombre: string } | null; // Joined data
@@ -251,8 +253,8 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                         valA = a.created_at ? new Date(a.created_at).getTime() : 0;
                         valB = b.created_at ? new Date(b.created_at).getTime() : 0;
                     } else if (sortField === 'account_nombre') {
-                        valA = a.account?.nombre || "";
-                        valB = b.account?.nombre || "";
+                        valA = accMap.get(a.account_id)?.nombre || "";
+                        valB = accMap.get(b.account_id)?.nombre || "";
                     } else {
                         valA = a.updated_at ? new Date(a.updated_at).getTime() : 0;
                         valB = b.updated_at ? new Date(b.updated_at).getTime() : 0;
