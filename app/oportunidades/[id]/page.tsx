@@ -279,6 +279,8 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     const [localComentariosPerdida, setLocalComentariosPerdida] = useState(opportunity.comentarios_perdida || "");
     const [isSavingLossReason, setIsSavingLossReason] = useState(false);
     const [isSavingComentarios, setIsSavingComentarios] = useState(false);
+    const [localComentarios, setLocalComentarios] = useState(opportunity.comentarios || "");
+    const [isSavingComentariosMain, setIsSavingComentariosMain] = useState(false);
 
     // Modal state (kept for backward compat but no longer used for blocking)
     const [isLossReasonModalOpen, setIsLossReasonModalOpen] = useState(false);
@@ -312,7 +314,8 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
         setLocalFuente(opportunity.fuente_conversion || "");
         setLocalRazonPerdida(opportunity.razon_perdida || "");
         setLocalComentariosPerdida(opportunity.comentarios_perdida || "");
-    }, [opportunity.segmento_id, opportunity.fecha_cierre_estimada, opportunity.origen_oportunidad, opportunity.url_origen, opportunity.fuente_conversion, opportunity.razon_perdida, opportunity.comentarios_perdida]);
+        setLocalComentarios(opportunity.comentarios || "");
+    }, [opportunity.segmento_id, opportunity.fecha_cierre_estimada, opportunity.origen_oportunidad, opportunity.url_origen, opportunity.fuente_conversion, opportunity.razon_perdida, opportunity.comentarios_perdida, opportunity.comentarios]);
 
     useEffect(() => {
         const fetchSegments = async () => {
@@ -846,6 +849,35 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                         </div>
                                     )}
                                 </div>
+                            </div>
+                        </div>
+
+                        {/* Comentarios Section */}
+                        <div className="pt-4 border-t border-slate-100">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Comentarios</label>
+                            <div className="relative group">
+                                <textarea
+                                    value={localComentarios}
+                                    onChange={(e) => setLocalComentarios(e.target.value)}
+                                    onBlur={async () => {
+                                        if (localComentarios !== (opportunity.comentarios || "")) {
+                                            setIsSavingComentariosMain(true);
+                                            try {
+                                                await updateOpportunity(opportunity.id, { comentarios: localComentarios });
+                                            } finally {
+                                                setIsSavingComentariosMain(false);
+                                            }
+                                        }
+                                    }}
+                                    rows={3}
+                                    className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none placeholder:text-slate-400 resize-none"
+                                    placeholder="Agregue comentarios generales aquí..."
+                                />
+                                {isSavingComentariosMain && (
+                                    <div className="absolute right-3 top-3">
+                                        <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                    </div>
+                                )}
                             </div>
                         </div>
 

@@ -34,6 +34,7 @@ const schema = z.object({
     url_origen: z.string().optional().nullable(),
     fuente_conversion: z.string().optional().nullable(),
     probability: z.coerce.number().min(0).max(100).default(0).optional().nullable(),
+    comentarios: z.string().optional().nullable(),
     items: z.array(z.object({
         product_id: z.string(),
         cantidad: z.number().min(1),
@@ -170,6 +171,7 @@ export default function CreateOpportunityWizard() {
             url_origen: '',
             fuente_conversion: '',
             probability: 0,
+            comentarios: '',
             items: []
         }
     });
@@ -658,6 +660,16 @@ export default function CreateOpportunityWizard() {
                                 <label className="text-sm font-medium">Fecha Cierre Estimada</label>
                                 <input type="date" {...register("fecha_cierre_estimada")} className="w-full p-2 border rounded-lg" />
                             </div>
+                        </div>
+                        
+                        <div>
+                            <label className="text-sm font-medium">Comentarios / Observaciones</label>
+                            <textarea 
+                                {...register("comentarios")} 
+                                className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-none" 
+                                rows={3} 
+                                placeholder="Notas adicionales sobre esta oportunidad..."
+                            />
                         </div>
 
                         {/* Fifth Row - Orígenes */}

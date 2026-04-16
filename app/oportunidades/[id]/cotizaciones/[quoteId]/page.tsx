@@ -4,6 +4,7 @@ import { useParams } from "next/navigation";
 import { useQuotes, useQuoteItems } from "@/lib/hooks/useOpportunities";
 import { useProductSearch, PriceListProduct } from "@/lib/hooks/useProducts";
 import { DetailHeader } from "@/components/ui/DetailHeader";
+import { generateQuotePdf } from "@/lib/pdfGenerator";
 import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { db, LocalQuote } from "@/lib/db";
@@ -30,17 +31,53 @@ export default function QuoteEditorPage() {
         const opp = await db.opportunities.get(quote.opportunity_id);
         const acc = opp ? await db.accounts.get(opp.account_id) : null;
         const qItems = await db.quoteItems.where('cotizacion_id').equals(quoteId).toArray();
-        return { opp, acc, qItems };
+        
+        // Cargar nombres de asesor y códigos SAP en lote para evitar latencia
+        let advisorName = "";
+        let enrichedItems = qItems;
+
+        try {
+            const { supabase } = await import('@/lib/supabase');
+            
+            // 1. Fetch Advisor Name
+            if (opp?.owner_user_id) {
+                const { data: uData } = await supabase.from('CRM_Usuarios').select('full_name').eq('id', opp.owner_user_id).single();
+                advisorName = uData?.full_name || "";
+            }
+
+            // 2. Fetch SAP Article Numbers (numero_articulo)
+            const productIds = qItems.map(i => i.producto_id).filter(Boolean);
+            if (productIds.length > 0) {
+                const { data: pData } = await supabase
+                    .from('CRM_ListaDePrecios')
+                    .select('id, numero_articulo')
+                    .in('id', productIds);
+                
+                if (pData) {
+                    enrichedItems = qItems.map(item => ({
+                        ...item,
+                        numero_articulo: pData.find(p => p.id === item.producto_id)?.numero_articulo || item.producto_id
+                    }));
+                }
+            }
+        } catch (e) {
+            console.error("Error pre-fetching PDF data", e);
+        }
+
+        return { opp, acc, qItems: enrichedItems, advisorName };
     }, [quote]);
 
-    const handleDownloadPdf = async () => {
-        if (!quote) return;
-        const opp = await db.opportunities.get(quote.opportunity_id);
-        const acc = opp ? await db.accounts.get(opp.account_id) : null;
-        const quoteItems = await db.quoteItems.where('cotizacion_id').equals(quoteId).toArray();
+    const handleDownloadPdf = () => {
+        if (!quote || !sendContext) return;
         
-        const { generateQuotePdf } = await import("@/lib/pdfGenerator");
-        await generateQuotePdf(quote, quoteItems, acc, opp);
+        generateQuotePdf(
+            quote, 
+            sendContext.qItems, 
+            sendContext.acc, 
+            sendContext.opp, 
+            true, 
+            sendContext.advisorName
+        );
     };
 
     if (!quote) return <div className="p-8">Cargando cotización...</div>;
@@ -137,6 +174,30 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
     const [selectedPrefix, setSelectedPrefix] = useState<string>("");
     const { products: searchResults, isLoading: isSearching } = useProductSearch(searchTerm, selectedPrefix);
     const { data: categories } = useCommissionCategories();
+    const [comentarios, setComentarios] = useState(quote.comentarios || "");
+    const [isSaving, setIsSaving] = useState(false);
+
+    useEffect(() => {
+        setComentarios(quote.comentarios || "");
+    }, [quote.comentarios]);
+
+    const handleSaveComments = async () => {
+        if (comentarios === quote.comentarios) return;
+        setIsSaving(true);
+        try {
+            const { updateQuote } = await import("@/lib/hooks/useOpportunities");
+            // Nota: El hook useQuotes ya está instanciado en el padre, pero aquí no tenemos acceso a sus setters.
+            // Usamos db directamente para asegurar persistencia y disparar sync.
+            await db.quotes.update(quote.id, { 
+                comentarios,
+                updated_at: new Date().toISOString()
+            });
+        } catch (error) {
+            console.error("Error saving quote comments:", error);
+        } finally {
+            setIsSaving(false);
+        }
+    };
 
     // Contexto de Canal y Oportunidad
     const context = useLiveQuery(async () => {
@@ -454,6 +515,27 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
                         ))
                     )}
                 </div>
+            </div>
+
+            {/* Comentarios de la Cotización */}
+            <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-bold text-lg flex items-center gap-2">
+                        Comentarios / Notas Internas
+                        {isSaving && <Loader2 className="w-3 h-3 animate-spin text-blue-500" />}
+                    </h3>
+                </div>
+                <textarea
+                    value={comentarios}
+                    onChange={(e) => setComentarios(e.target.value)}
+                    onBlur={handleSaveComments}
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 transition-all text-sm outline-none resize-none"
+                    placeholder="Agregue notas adicionales sobre esta cotización..."
+                    rows={4}
+                />
+                <p className="text-[10px] text-slate-400 mt-2 italic text-right">
+                    Los cambios se guardan automáticamente al hacer clic fuera del campo.
+                </p>
             </div>
         </div>
     );

@@ -148,7 +148,8 @@ const withPWA = withPWAInit({
                 },
             },
             {
-                urlPattern: /.*/i,
+                // Excluir blob: URLs para que las descargas de PDF (y otros blobs) funcionen correctamente
+                urlPattern: /^(?!blob:).*/i,
                 handler: "StaleWhileRevalidate",
                 options: {
                     cacheName: "others",
