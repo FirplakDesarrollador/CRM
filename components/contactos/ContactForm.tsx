@@ -25,6 +25,7 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel }:
         account_id: existingContact?.account_id || accountId || "",
         telefono: existingContact?.telefono || "",
         es_principal: existingContact?.es_principal || false,
+        comentarios: existingContact?.comentarios || "",
     };
 
     const { register, handleSubmit, reset, setValue, watch, formState: { errors, isSubmitting } } = useForm<LocalContact>({
@@ -188,6 +189,16 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel }:
                         {...register("telefono")}
                         className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] transition-all outline-none font-bold text-slate-700"
                         placeholder="+57 300 123 4567"
+                    />
+                </div>
+
+                <div className="space-y-2 md:col-span-2">
+                    <label className="block text-xs font-black uppercase text-slate-500 tracking-widest ml-1">Comentarios</label>
+                    <textarea
+                        {...register("comentarios")}
+                        className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] transition-all outline-none font-bold text-slate-700 resize-none"
+                        placeholder="Información adicional sobre el contacto..."
+                        rows={3}
                     />
                 </div>
             </div>

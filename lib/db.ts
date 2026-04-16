@@ -41,6 +41,7 @@ export interface LocalCuenta {
     created_by?: string;
     updated_by?: string;
     updated_at?: string;
+    comentarios?: string;
 }
 
 export interface LocalPais {
@@ -62,6 +63,7 @@ export interface LocalCiudad {
 
 // Types for Quotes
 export interface LocalQuote {
+    comentarios?: string;
     id: string;
     opportunity_id: string;
     numero_cotizacion: string;
@@ -116,6 +118,7 @@ export interface LocalQuoteItem {
 
 // Types for Contacts
 export interface LocalContact {
+    comentarios?: string;
     id: string;
     account_id: string;
     nombre: string;
@@ -180,6 +183,7 @@ export interface LocalOportunidad {
     fuente_conversion?: string | null;
     created_by?: string;
     updated_by?: string;
+    comentarios?: string;
 }
 
 export class CRMFirplakDB extends Dexie {

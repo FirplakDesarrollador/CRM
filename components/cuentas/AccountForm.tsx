@@ -36,6 +36,7 @@ const accountSchema = z.object({
     ciudad: z.string().nullable().optional(), // Keep for backward compat
     es_premium: z.boolean().optional(),
     nivel_premium: z.enum(['ORO', 'PLATA', 'BRONCE']).nullable().optional(),
+    comentarios: z.string().nullable().optional(),
 });
 
 type AccountFormData = z.infer<typeof accountSchema>;
@@ -206,7 +207,8 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             ciudad_id: account?.ciudad_id ? String(account.ciudad_id) : "",
             ciudad: account?.ciudad || "",
             es_premium: account?.es_premium || false,
-            nivel_premium: account?.nivel_premium || null
+            nivel_premium: account?.nivel_premium || null,
+            comentarios: account?.comentarios || ""
         }
     });
 
@@ -229,7 +231,8 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                 ciudad_id: account.ciudad_id ? String(account.ciudad_id) : "",
                 ciudad: account.ciudad || "",
                 es_premium: account.es_premium || false,
-                nivel_premium: account.nivel_premium || null
+                nivel_premium: account.nivel_premium || null,
+                comentarios: account.comentarios || ""
             }, { keepDefaultValues: true });
         }
     }, [account, reset, isDirty]);
@@ -364,7 +367,8 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                 ciudad_id: data.ciudad_id ? Number(data.ciudad_id) : null,
                 ciudad: data.ciudad_id ? citiesList.find(c => String(c.id) === data.ciudad_id)?.nombre : (data.ciudad || null),
                 es_premium: !!data.nivel_premium,
-                nivel_premium: data.nivel_premium || null
+                nivel_premium: data.nivel_premium || null,
+                comentarios: data.comentarios || null
             };
 
             // DEBUG: Log the final payload
@@ -727,6 +731,17 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                             <input {...register("email")} type="email" className="w-full border p-2 rounded" placeholder="correo@ejemplo.com" />
                             {errors.email && <span className="text-red-500 text-xs">{errors.email.message}</span>}
                         </div>
+                    </div>
+
+                    {/* Comentarios */}
+                    <div className="space-y-1">
+                        <label className="text-sm font-medium">Comentarios</label>
+                        <textarea
+                            {...register("comentarios")}
+                            rows={3}
+                            className="w-full border p-2 rounded bg-white focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+                            placeholder="Agregue información adicional aquí..."
+                        />
                     </div>
 
                     {assignedUserName && (

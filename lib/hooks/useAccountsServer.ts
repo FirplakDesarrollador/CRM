@@ -23,7 +23,9 @@ export type AccountServer = {
     creator_name?: string | null;
     owner_name?: string | null;
     updated_at: string;
+    created_at: string;
     contact_count?: number;
+    potencial_venta?: number;
     _hasPendingSync?: boolean;
 };
 
@@ -35,7 +37,6 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
     const [data, setData] = useState<AccountServer[]>([]);
     const [count, setCount] = useState<number>(0);
     const [loading, setLoading] = useState<boolean>(true);
-    const [page, setPage] = useState<number>(1);
     const [hasMore, setHasMore] = useState<boolean>(true);
 
     const pageRef = useRef(1);
@@ -43,6 +44,15 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
     // Filters
     const [searchTerm, setSearchTerm] = useState<string>("");
     const [assignedUserId, setAssignedUserId] = useState<string | null>(null);
+    const [channelFilter, setChannelFilter] = useState<string | null>(null);
+    const [subclassificationFilter, setSubclassificationFilter] = useState<number | null>(null);
+    const [nivelPremiumFilter, setNivelPremiumFilter] = useState<string | null>(null);
+    const [startDate, setStartDate] = useState<string | null>(null);
+    const [endDate, setEndDate] = useState<string | null>(null);
+
+    // Sorting
+    const [sortField, setSortField] = useState<string>('updated_at');
+    const [sortAsc, setSortAsc] = useState<boolean>(false);
 
     // User Context
     const { user, role: userRole, isVendedor } = useCurrentUser();
@@ -75,6 +85,7 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
             if (!navigator.onLine) {
                 console.log("[useAccountsServer] Device is offline. Falling back to local Dexie database...");
                 let localAccounts = await db.accounts.toArray();
+                const allOpps = await db.opportunities.toArray();
 
                 // Role filtering
                 if (isVendedor && currentUserId) {
@@ -91,7 +102,7 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                     );
                 }
 
-                // Filtering
+                // Filters
                 if (searchTerm) {
                     const lowerSearch = searchTerm.toLowerCase();
                     localAccounts = localAccounts.filter(a =>
@@ -101,14 +112,61 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                 }
 
                 if (assignedUserId) {
-                    localAccounts = localAccounts.filter(a => a.owner_user_id === assignedUserId || a.created_by === assignedUserId);
+                    localAccounts = localAccounts.filter(a => a.owner_user_id === assignedUserId);
                 }
 
-                // Sorting
+                if (channelFilter) {
+                    localAccounts = localAccounts.filter(a => a.canal_id === channelFilter);
+                }
+
+                if (subclassificationFilter) {
+                    localAccounts = localAccounts.filter(a => a.subclasificacion_id === subclassificationFilter);
+                }
+
+                if (nivelPremiumFilter) {
+                    localAccounts = localAccounts.filter(a => a.nivel_premium === nivelPremiumFilter);
+                }
+
+                if (startDate) {
+                    localAccounts = localAccounts.filter(a => a.created_at && new Date(a.created_at) >= new Date(startDate));
+                }
+                if (endDate) {
+                    const end = new Date(endDate);
+                    end.setHours(23, 59, 59, 999);
+                    localAccounts = localAccounts.filter(a => a.created_at && new Date(a.created_at) <= end);
+                }
+
+                // Sorting offline
                 localAccounts.sort((a, b) => {
-                    const dateA = a.updated_at ? new Date(a.updated_at).getTime() : 0;
-                    const dateB = b.updated_at ? new Date(b.updated_at).getTime() : 0;
-                    return dateB - dateA; // DESC
+                    let valA: any;
+                    let valB: any;
+
+                    if (sortField === 'nombre') {
+                        valA = a.nombre || "";
+                        valB = b.nombre || "";
+                    } else if (sortField === 'nit') {
+                        valA = a.nit_base || "";
+                        valB = b.nit_base || "";
+                    } else if (sortField === 'canal_id') {
+                        valA = a.canal_id || "";
+                        valB = b.canal_id || "";
+                    } else if (sortField === 'ciudad') {
+                        valA = a.ciudad || "";
+                        valB = b.ciudad || "";
+                    } else if (sortField === 'potencial_venta') {
+                        valA = a.potencial_venta || 0;
+                        valB = b.potencial_venta || 0;
+                    } else if (sortField === 'created_at') {
+                        valA = a.created_at ? new Date(a.created_at).getTime() : 0;
+                        valB = b.created_at ? new Date(b.created_at).getTime() : 0;
+                    } else {
+                        valA = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+                        valB = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+                    }
+
+                    if (valA < valB) return sortAsc ? -1 : 1;
+                    if (valA > valB) return sortAsc ? 1 : -1;
+                    return 0;
                 });
 
                 const totalCount = localAccounts.length;
@@ -118,7 +176,10 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                     ...item,
                     owner_name: 'Usuario Offline',
                     creator_name: 'Usuario Offline',
-                    contact_count: 0
+                    contact_count: 0,
+                    potencial_venta: allOpps
+                        .filter(o => o.account_id === item.id)
+                        .reduce((sum, o) => sum + (o.amount || o.valor || 0), 0)
                 }));
 
                 if (isLoadMore) {
@@ -127,11 +188,9 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                         const newItems = flattenedResults.filter(i => !existingIds.has(i.id));
                         return [...prev, ...newItems] as any;
                     });
-                    setPage(currentPage);
                     pageRef.current = currentPage;
                 } else {
                     setData(flattenedResults as any);
-                    setPage(1);
                     pageRef.current = 1;
                 }
                 setCount(totalCount);
@@ -140,29 +199,8 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
             }
 
             let query = supabase
-                .from('CRM_Cuentas')
-                .select(`
-                    id, 
-                    nombre, 
-                    nit,
-                    nit_base,
-                    id_cuenta_principal,
-                    canal_id,
-                    subclasificacion_id,
-                    es_premium,
-                    nivel_premium,
-                    telefono,
-                    email,
-                    direccion,
-                    ciudad,
-                    departamento_id,
-                    ciudad_id,
-                    created_by,
-                    created_at,
-                    owner_user_id,
-                    updated_at,
-                    contacts:CRM_Contactos(count)
-                `, { count: 'exact' })
+                .from('CRM_VistaCuentasConPotencial')
+                .select('*', { count: 'exact' })
                 .eq('is_deleted', false);
 
             // Role filtering
@@ -179,24 +217,35 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
             }
 
             if (assignedUserId) {
-                // Filter by OWNER ID now, not just creator
-                // But let's support both or transition?
-                // Request says "detect the id of the seller who owns".
-                // So filters should probably use owner_user_id.
-                // For backward compat, owner_user_id defaults to created_by, so safe to use owner_user_id.
                 query = query.eq('owner_user_id', assignedUserId);
             }
 
+            if (channelFilter) {
+                query = query.eq('canal_id', channelFilter);
+            }
+
+            if (subclassificationFilter) {
+                query = query.eq('subclasificacion_id', subclassificationFilter);
+            }
+
+            if (nivelPremiumFilter) {
+                query = query.eq('nivel_premium', nivelPremiumFilter);
+            }
+
+            if (startDate) {
+                query = query.gte('created_at', startDate);
+            }
+            if (endDate) {
+                query = query.lte('created_at', `${endDate}T23:59:59`);
+            }
+
             // Order
-            query = query.order('updated_at', { ascending: false }).order('created_at', { ascending: false }).order('id', { ascending: false });
+            query = query.order(sortField as any, { ascending: sortAsc });
+            if (sortField !== 'id') query = query.order('id', { ascending: false });
 
             // Paging
             query = query.range(from, to);
 
-            // --- OPTIMISTIC UI: Fetch pending local changes FIRST ---
-            // Doing this before `await query` prevents a race condition where syncEngine 
-            // completes and deletes the outbox record while the Supabase query is inflight,
-            // resulting in stale Supabase data and no pending changes.
             const pendingChanges = await db.outbox
                 .where('entity_type').equals('CRM_Cuentas')
                 .and(item => item.status === 'PENDING' || item.status === 'SYNCING')
@@ -206,14 +255,11 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
 
             if (error) throw error;
 
-            console.log(`[useAccountsServer] Fetched ${result?.length} accounts. Order: updated_at DESC`, result?.slice(0, 3));
-
             // Collect unique owner IDs to resolve names
             const ownerIds = [...new Set(
                 (result as any[]).map(item => item.owner_user_id || item.created_by).filter(Boolean)
             )];
 
-            // Fetch owner names from CRM_Usuarios
             let ownerMap: Record<string, string> = {};
             if (ownerIds.length > 0) {
                 const { data: usuarios } = await supabase
@@ -236,7 +282,6 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                     optimisticUpdates[change.entity_id][change.field_name] = change.new_value;
                 }
             }
-            // --------------------------------------------------
 
             const flattenedResults = (result as any[]).map(item => {
                 const pending = optimisticUpdates[item.id];
@@ -246,7 +291,8 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                     ...finalItem,
                     owner_name: ownerMap[finalItem.owner_user_id] || ownerMap[finalItem.created_by] || null,
                     creator_name: ownerMap[finalItem.created_by] || null,
-                    contact_count: finalItem.contacts?.[0]?.count || 0
+                    contact_count: finalItem.contact_count || 0,
+                    potencial_venta: finalItem.potencial_venta || 0
                 };
             });
 
@@ -256,11 +302,9 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                     const newItems = flattenedResults.filter(i => !existingIds.has(i.id));
                     return [...prev, ...newItems];
                 });
-                setPage(currentPage);
                 pageRef.current = currentPage;
             } else {
                 setData(flattenedResults as any);
-                setPage(1);
                 pageRef.current = 1;
             }
 
@@ -274,15 +318,14 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
         } finally {
             setLoading(false);
         }
-    }, [currentUserId, pageSize, searchTerm, assignedUserId, isVendedor, userRole, subordinateIds]);
+    }, [currentUserId, pageSize, searchTerm, assignedUserId, isVendedor, userRole, subordinateIds, channelFilter, subclassificationFilter, nivelPremiumFilter, startDate, endDate, sortField, sortAsc]);
 
     // Initial Fetch & Filter Fetch
     useEffect(() => {
-        // Reset page when filters change
         fetchAccounts(false);
     }, [fetchAccounts]);
 
-    // OPTIMISTIC UI: Listen to broadcasted local mutations for instant UI updates
+    // OPTIMISTIC UI
     useEffect(() => {
         const handleOptimisticUpdate = (e: any) => {
             const { entityType, entityId, updates } = e.detail;
@@ -317,6 +360,15 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
         loadMore,
         setSearchTerm,
         setAssignedUserId,
+        setChannelFilter,
+        setSubclassificationFilter,
+        setNivelPremiumFilter,
+        setStartDate,
+        setEndDate,
+        setSortField,
+        setSortAsc,
+        sortField,
+        sortAsc,
         refresh: () => fetchAccounts(false)
     };
 }

@@ -1,9 +1,10 @@
+import { saveAs } from 'file-saver';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 
-export async function generateQuotePdf(quote: any, items: any[], account: any, opportunity: any, save = true): Promise<string | void> {
+export async function generateQuotePdf(quote: any, items: any[], account: any, opportunity: any, save = true, advisorName?: string): Promise<string | void> {
     const doc = new jsPDF('p', 'pt', 'a4');
     
     // Configuración de fuentes y colores
@@ -141,7 +142,7 @@ export async function generateQuotePdf(quote: any, items: any[], account: any, o
         const formatter = new Intl.NumberFormat(quote.currency_id === 'USD' ? 'en-US' : 'es-CO');
         
         return [
-            item.producto_id || 'N/A', // O número de artículo si lo tenemos guardado
+            item.numero_articulo || item.producto_id || 'N/A', 
             qty.toString(), 
             item.descripcion_linea || 'Artículo', 
             formatter.format(unitPrice), 
@@ -209,7 +210,7 @@ export async function generateQuotePdf(quote: any, items: any[], account: any, o
     finalY += 60;
     doc.setFontSize(9);
     doc.setFont('helvetica', 'bold');
-    doc.text('VALIDEZ DE LA OFERTA 2 DÍAS', margin, finalY);
+    doc.text('VALIDEZ DE LA OFERTA 15 DÍAS HABILES', margin, finalY);
     finalY += 20;
 
     // PLANOS PARA HIDROMASAJES
@@ -241,7 +242,17 @@ export async function generateQuotePdf(quote: any, items: any[], account: any, o
     
     doc.setFont('helvetica', 'bold');
     doc.text(`NOTAS: ${quote.notas_sap || ''}`, margin, finalY);
-    finalY += 25;
+    finalY += 15;
+    
+    if (quote.comentarios) {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        const splitComentarios = doc.splitTextToSize(`OBSERVACIONES: ${quote.comentarios}`, pageWidth - margin * 2);
+        doc.text(splitComentarios, margin, finalY);
+        finalY += (splitComentarios.length * 10) + 5;
+    }
+    
+    finalY += 10;
 
     doc.setFontSize(7);
     doc.setFont('helvetica', 'normal');
@@ -249,9 +260,11 @@ export async function generateQuotePdf(quote: any, items: any[], account: any, o
     doc.text(doc.splitTextToSize(legalText, pageWidth - margin * 2), margin, finalY);
     finalY += 35;
 
-    // Obtener nombre del asesor si es posible
-    let advisorName = opportunity?.owner_user_id || 'Generado desde CRM';
-    if (opportunity?.owner_user_id) {
+    // Obtener nombre del asesor
+    let displayAdvisorName = advisorName || opportunity?.owner_user_id || 'Generado desde CRM';
+    
+    // Solo buscamos si no se nos pasó ya el nombre para evitar retrasos asíncronos que bloquean el nombre del archivo en Chrome
+    if (!advisorName && opportunity?.owner_user_id) {
         try {
             const { supabase } = await import('@/lib/supabase');
             const { data: userData } = await supabase
@@ -261,7 +274,7 @@ export async function generateQuotePdf(quote: any, items: any[], account: any, o
                 .single();
             
             if (userData?.full_name) {
-                advisorName = userData.full_name;
+                displayAdvisorName = userData.full_name;
             }
         } catch (e) {
             console.warn('No se pudo obtener el nombre del asesor:', e);
@@ -271,7 +284,7 @@ export async function generateQuotePdf(quote: any, items: any[], account: any, o
     doc.setFontSize(9);
     doc.setFont('helvetica', 'bold');
     doc.text(`ACEPTADO : _____________________________`, margin, finalY);
-    doc.text(`ASESOR : ${advisorName}`, 300, finalY);
+    doc.text(`ASESOR : ${displayAdvisorName}`, 300, finalY);
     finalY += 15;
     doc.text(`CC./NIT No.                       Contacto : ${account?.telefono || ''}`, margin, finalY);
     finalY += 30;
@@ -284,7 +297,34 @@ export async function generateQuotePdf(quote: any, items: any[], account: any, o
     doc.text(`Autopista Sur, Calle 29 No. 41-15 Itagui – Antioquia. PBX 444 17 71. Fax. 281 76 07. www.firplak.com`, pageWidth / 2, finalY, { align: 'center' });
 
     if (save) {
-        doc.save(`Cotizacion_${quote.numero_cotizacion || 'Borrador'}.pdf`);
+        // Obtenemos los datos como ArrayBuffer para mayor compatibilidad con File System API
+        const pdfArrayBuffer = doc.output('arraybuffer');
+        const safeFileName = `Cotizacion_${(quote.numero_cotizacion || 'Borrador').toString().replace(/[/\\?%*:|"<>]/g, '_')}.pdf`;
+
+        // Intentar usar File System Access API (Nativo de Chrome, evita problemas de nombres UUID)
+        if (typeof window !== 'undefined' && 'showSaveFilePicker' in window) {
+            try {
+                const handle = await (window as any).showSaveFilePicker({
+                    suggestedName: safeFileName,
+                    types: [{
+                        description: 'Documento PDF',
+                        accept: { 'application/pdf': ['.pdf'] },
+                    }],
+                });
+                const writable = await handle.createWritable();
+                await writable.write(pdfArrayBuffer);
+                await writable.close();
+                return;
+            } catch (err: any) {
+                // Si el usuario cancela el diálogo, no hacemos nada
+                if (err.name === 'AbortError') return;
+                console.warn('showSaveFilePicker no disponible o falló, usando fallback:', err);
+            }
+        }
+        
+        // Fallback tradicional si la API no está disponible (ej. navegadores antiguos o no-Chrome)
+        const blob = new Blob([pdfArrayBuffer], { type: 'application/pdf' });
+        saveAs(blob, safeFileName);
     } else {
         // En lugar de guardar, retornamos el contenido en base64 (string)
         // doc.output('datauristring') devuelve algo como "data:application/pdf;filename=generated.pdf;base64,JVBER..."
