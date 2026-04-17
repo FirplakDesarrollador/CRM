@@ -153,7 +153,7 @@ function OpportunitiesContent() {
         // Apply tab, search, owner to hook (channel/status/dates are handled by OpportunityFilters on init)
         if (initialSearch) setSearchTerm(initialSearch);
         if (initialOwner) setAccountOwnerId(initialOwner);
-        setUserFilter(initialTab === 'team' ? 'team' : 'mine');
+        setUserFilter(initialTab);
         
         // Initial dates for the hook
         const start = searchParams.get('start') || startDate;
@@ -258,7 +258,7 @@ function OpportunitiesContent() {
     // PERF FIX: Stable callback references
     const handleTabChange = useCallback((newTab: 'mine' | 'collab' | 'team') => {
         setTab(newTab);
-        setUserFilter(newTab === 'team' ? 'team' : 'mine');
+        setUserFilter(newTab);
     }, [setUserFilter]);
 
     const handleUserSelect = useCallback((userId: string | null) => {

@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 
-export function useAccounts(filters?: { advisor_id?: string | null }) {
+export function useAccounts(filters?: { advisor_id?: string | null, showAll?: boolean }) {
     const { user, isVendedor } = useCurrentUser();
     const userId = user?.id;
 
@@ -16,7 +16,12 @@ export function useAccounts(filters?: { advisor_id?: string | null }) {
             return db.accounts.where('owner_user_id').equals(filters.advisor_id).toArray();
         }
 
-        // Priority 2: Vendedor role restriction
+        // Priority 2: Global visibility (for Opportunity Wizard)
+        if (filters?.showAll) {
+            return db.accounts.toArray();
+        }
+
+        // Priority 3: Vendedor role restriction
         if (isVendedor && userId) {
             return db.accounts.filter(a => 
                 a.owner_user_id === userId || 
@@ -25,7 +30,7 @@ export function useAccounts(filters?: { advisor_id?: string | null }) {
         }
 
         return db.accounts.toArray();
-    }, [isVendedor, userId, filters?.advisor_id]);
+    }, [isVendedor, userId, filters?.advisor_id, filters?.showAll]);
     const isLoading = false; // Background sync handles loading
 
     const createAccount = async (data: Partial<LocalCuenta>) => {

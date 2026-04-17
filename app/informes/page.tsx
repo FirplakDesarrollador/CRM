@@ -15,6 +15,7 @@ const ENTIDADES = [
   { id: 'cuentas', label: 'Cuentas', icon: Building2, table: 'CRM_Cuentas' },
   { id: 'contactos', label: 'Contactos', icon: Users, table: 'CRM_Contactos' },
   { id: 'cotizaciones', label: 'Cotizaciones', icon: TableProperties, table: 'CRM_Cotizaciones' },
+  { id: 'actividades', label: 'Actividades', icon: CalendarIcon, table: 'CRM_Actividades' },
 ] as const;
 
 type EntidadType = typeof ENTIDADES[number]['id'];
@@ -78,14 +79,20 @@ export default function InformesPage() {
               { data: lossReasons },
               { data: departments },
               { data: cities },
-              { data: canales }
+              { data: canales },
+              { data: clasificaciones },
+              { data: subclasificaciones },
+              { data: tiposActividad }
             ] = await Promise.all([
               supabase.from('CRM_Usuarios').select('id, full_name, email'),
               supabase.from('CRM_Segmentos').select('id, nombre'),
               supabase.from('CRM_RazonesPerdida').select('id, descripcion'),
               supabase.from('CRM_Departamentos').select('id, nombre'),
               supabase.from('CRM_Ciudades').select('id, nombre'),
-              supabase.from('CRM_Canales').select('id, nombre')
+              supabase.from('CRM_Canales').select('id, nombre'),
+              supabase.from('CRM_Activity_Clasificacion').select('id, nombre'),
+              supabase.from('CRM_Activity_Subclasificacion').select('id, nombre'),
+              supabase.from('CRM_TiposActividad').select('id, nombre')
             ]);
 
             const userMap = new Map<string, string>();
@@ -105,6 +112,15 @@ export default function InformesPage() {
 
             const canalMap = new Map<string, string>();
             canales?.forEach(c => canalMap.set(c.id, c.nombre));
+
+            const clasificacionMap = new Map<number, string>();
+            clasificaciones?.forEach(c => clasificacionMap.set(c.id, c.nombre));
+
+            const subclasificacionMap = new Map<number, string>();
+            subclasificaciones?.forEach(s => subclasificacionMap.set(s.id, s.nombre));
+
+            const tipoActividadMap = new Map<number, string>();
+            tiposActividad?.forEach(t => tipoActividadMap.set(t.id, t.nombre));
 
             // Configuración de columnas y joins por entidad
             let selectStr = '*';
@@ -214,6 +230,43 @@ export default function InformesPage() {
                     ...item,
                     oportunidad_nombre: item.oportunidad?.nombre || '-',
                     vendedor_nombre: userMap.get(item.user_id || item.created_by) || '-'
+                });
+            } else if (selectedEntidad === 'actividades') {
+                selectStr = `
+                    *,
+                    cuenta:CRM_Cuentas(nombre),
+                    oportunidad:CRM_Oportunidades(nombre, amount),
+                    usuario:CRM_Usuarios(full_name),
+                    clasificacion:CRM_Activity_Clasificacion(nombre),
+                    subclasificacion:CRM_Activity_Subclasificacion(nombre),
+                    tipo_act_info:CRM_TiposActividad(nombre)
+                `;
+                columns = [
+                    { header: 'ASUNTO', key: 'asunto', width: 35 },
+                    { header: 'CLASIFICACIÓN', key: 'clasificacion_nombre', width: 25 },
+                    { header: 'SUBCLASIFICACIÓN', key: 'subclasificacion_nombre', width: 25 },
+                    { header: 'CUENTA', key: 'cuenta_nombre', width: 35 },
+                    { header: 'OPORTUNIDAD', key: 'oportunidad_nombre', width: 35 },
+                    { header: 'MONTO OPORTUNIDAD', key: 'oportunidad_monto', width: 20 },
+                    { header: 'VENDEDOR', key: 'vendedor_nombre', width: 25 },
+                    { header: 'FECHA CREACIÓN', key: 'created_at', width: 20 },
+                    { header: 'FECHA VENCIMIENTO', key: 'fecha_fin', width: 20 },
+                    { header: 'ESTADO', key: 'estado_nombre', width: 15 },
+                    { header: 'TIPO', key: 'tipo_nombre', width: 20 },
+                    { header: 'NOTAS', key: 'descripcion', width: 50 }
+                ];
+                flattenFn = (item: any) => ({
+                    ...item,
+                    asunto: item.asunto || '-',
+                    clasificacion_nombre: item.clasificacion?.nombre || clasificacionMap.get(item.clasificacion_id) || '-',
+                    subclasificacion_nombre: item.subclasificacion?.nombre || subclasificacionMap.get(item.subclasificacion_id) || '-',
+                    cuenta_nombre: item.cuenta?.nombre || '-',
+                    oportunidad_nombre: item.oportunidad?.nombre || '-',
+                    oportunidad_monto: item.oportunidad?.amount || 0,
+                    vendedor_nombre: item.usuario?.full_name || userMap.get(item.user_id) || '-',
+                    estado_nombre: item.is_completed ? 'Completado' : 'No completado',
+                    tipo_nombre: item.tipo_act_info?.nombre || tipoActividadMap.get(item.tipo_actividad_id) || item.tipo_actividad || '-',
+                    descripcion: item.descripcion || '-'
                 });
             }
 

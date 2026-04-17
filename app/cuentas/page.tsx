@@ -321,12 +321,12 @@ function AccountsContent() {
                                             {acc.nivel_premium ? (
                                                 <div className={cn(
                                                     "inline-flex items-center gap-1 px-2 py-0.5 rounded-full border shadow-sm",
-                                                    acc.nivel_premium === 'ORO' ? "bg-amber-50 text-amber-600 border-amber-200" :
-                                                    acc.nivel_premium === 'PLATA' ? "bg-slate-50 text-slate-600 border-slate-200" :
+                                                    acc.nivel_premium === 'PREMIUM' ? "bg-amber-50 text-amber-600 border-amber-200" :
+                                                    acc.nivel_premium === 'DESTACADO' ? "bg-slate-50 text-slate-600 border-slate-200" :
                                                     "bg-orange-50 text-orange-600 border-orange-200"
                                                 )}>
-                                                    <Medal className={cn("w-3 h-3", acc.nivel_premium === 'ORO' ? "fill-amber-400" : acc.nivel_premium === 'PLATA' ? "fill-slate-300" : "fill-orange-400")} />
-                                                    <span className="text-[10px] font-bold">{acc.nivel_premium}</span>
+                                                    <Medal className={cn("w-3 h-3", acc.nivel_premium === 'PREMIUM' ? "fill-amber-400" : acc.nivel_premium === 'DESTACADO' ? "fill-slate-300" : "fill-orange-400")} />
+                                                    <span className="text-[10px] font-bold uppercase">{acc.nivel_premium}</span>
                                                 </div>
                                             ) : (
                                                 <span className="text-[10px] text-slate-300">-</span>

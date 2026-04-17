@@ -35,7 +35,8 @@ const accountSchema = z.object({
     ciudad_id: z.string().nullable().optional(),
     ciudad: z.string().nullable().optional(), // Keep for backward compat
     es_premium: z.boolean().optional(),
-    nivel_premium: z.enum(['ORO', 'PLATA', 'BRONCE']).nullable().optional(),
+    nivel_premium: z.enum(['PREMIUM', 'DESTACADO', 'ACTIVO']).nullable().optional(),
+    ignorar_limites_descuento: z.boolean().optional(),
     comentarios: z.string().nullable().optional(),
 });
 
@@ -49,7 +50,7 @@ interface AccountFormProps {
 
 export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) {
     const { createAccount, updateAccount } = useAccounts();
-    const { role: userRole } = useCurrentUser();
+    const { role: userRole, isAdmin } = useCurrentUser();
     const [parents, setParents] = useState<any[]>([]);
     const [activeTab, setActiveTab] = useState<'info' | 'contacts' | 'opportunities' | 'branches' | 'assigned' | 'activities'>('info');
     const [hasBranches, setHasBranches] = useState(false);
@@ -208,6 +209,7 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             ciudad: account?.ciudad || "",
             es_premium: account?.es_premium || false,
             nivel_premium: account?.nivel_premium || null,
+            ignorar_limites_descuento: account?.ignorar_limites_descuento || false,
             comentarios: account?.comentarios || ""
         }
     });
@@ -232,6 +234,7 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                 ciudad: account.ciudad || "",
                 es_premium: account.es_premium || false,
                 nivel_premium: account.nivel_premium || null,
+                ignorar_limites_descuento: account.ignorar_limites_descuento || false,
                 comentarios: account.comentarios || ""
             }, { keepDefaultValues: true });
         }
@@ -368,6 +371,7 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                 ciudad: data.ciudad_id ? citiesList.find(c => String(c.id) === data.ciudad_id)?.nombre : (data.ciudad || null),
                 es_premium: !!data.nivel_premium,
                 nivel_premium: data.nivel_premium || null,
+                ignorar_limites_descuento: data.ignorar_limites_descuento || false,
                 comentarios: data.comentarios || null
             };
 
@@ -515,19 +519,19 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                                     type="button"
                                     onClick={() => {
                                         const current = watch("nivel_premium");
-                                        const newVal = current === 'ORO' ? null : 'ORO';
+                                        const newVal = current === 'PREMIUM' ? null : 'PREMIUM';
                                         setValue("nivel_premium", newVal);
                                         setValue("es_premium", !!newVal);
                                     }}
                                     className={cn(
                                         "flex-1 flex flex-col items-center justify-center p-3 rounded-lg border-2 transition-all",
-                                        watch("nivel_premium") === 'ORO'
+                                        watch("nivel_premium") === 'PREMIUM'
                                             ? "bg-amber-50 border-amber-400 text-amber-700 shadow-sm"
                                             : "bg-white border-slate-100 text-slate-400 hover:border-amber-200 hover:text-amber-600/70"
                                     )}
                                 >
-                                    <Medal className={cn("w-6 h-6 mb-1", watch("nivel_premium") === 'ORO' ? "fill-amber-400 text-amber-500" : "fill-none")} />
-                                    <span className="text-xs font-bold">ORO</span>
+                                    <Medal className={cn("w-6 h-6 mb-1", watch("nivel_premium") === 'PREMIUM' ? "fill-amber-400 text-amber-500" : "fill-none")} />
+                                    <span className="text-xs font-bold uppercase transition-colors">Premium</span>
                                 </button>
 
                                 {/* PLATA */}
@@ -535,19 +539,19 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                                     type="button"
                                     onClick={() => {
                                         const current = watch("nivel_premium");
-                                        const newVal = current === 'PLATA' ? null : 'PLATA';
+                                        const newVal = current === 'DESTACADO' ? null : 'DESTACADO';
                                         setValue("nivel_premium", newVal);
                                         setValue("es_premium", !!newVal);
                                     }}
                                     className={cn(
                                         "flex-1 flex flex-col items-center justify-center p-3 rounded-lg border-2 transition-all",
-                                        watch("nivel_premium") === 'PLATA'
+                                        watch("nivel_premium") === 'DESTACADO'
                                             ? "bg-slate-100 border-slate-400 text-slate-700 shadow-sm"
                                             : "bg-white border-slate-100 text-slate-400 hover:border-slate-300 hover:text-slate-600/70"
                                     )}
                                 >
-                                    <Medal className={cn("w-6 h-6 mb-1", watch("nivel_premium") === 'PLATA' ? "fill-slate-300 text-slate-500" : "fill-none")} />
-                                    <span className="text-xs font-bold">PLATA</span>
+                                    <Medal className={cn("w-6 h-6 mb-1", watch("nivel_premium") === 'DESTACADO' ? "fill-slate-300 text-slate-500" : "fill-none")} />
+                                    <span className="text-xs font-bold uppercase transition-colors">Destacado</span>
                                 </button>
 
                                 {/* BRONCE */}
@@ -555,25 +559,42 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                                     type="button"
                                     onClick={() => {
                                         const current = watch("nivel_premium");
-                                        const newVal = current === 'BRONCE' ? null : 'BRONCE';
+                                        const newVal = current === 'ACTIVO' ? null : 'ACTIVO';
                                         setValue("nivel_premium", newVal);
                                         setValue("es_premium", !!newVal);
                                     }}
                                     className={cn(
                                         "flex-1 flex flex-col items-center justify-center p-3 rounded-lg border-2 transition-all",
-                                        watch("nivel_premium") === 'BRONCE'
+                                        watch("nivel_premium") === 'ACTIVO'
                                             ? "bg-orange-50 border-orange-400 text-orange-700 shadow-sm"
                                             : "bg-white border-slate-100 text-slate-400 hover:border-orange-200 hover:text-orange-600/70"
                                     )}
                                 >
-                                    <Medal className={cn("w-6 h-6 mb-1", watch("nivel_premium") === 'BRONCE' ? "fill-orange-400 text-orange-600" : "fill-none")} />
-                                    <span className="text-xs font-bold">BRONCE</span>
+                                    <Medal className={cn("w-6 h-6 mb-1", watch("nivel_premium") === 'ACTIVO' ? "fill-orange-400 text-orange-600" : "fill-none")} />
+                                    <span className="text-xs font-bold uppercase transition-colors">Activo</span>
                                 </button>
                             </div>
 
                             {/* Hidden field for es_premium compatibility */}
                             <input type="hidden" {...register("es_premium")} />
                         </div>
+
+                        {/* Toggle Ignorar Límites de Descuento (SOLO ADMIN) */}
+                        {isAdmin && (
+                            <div className="pt-6">
+                                <label className="text-sm font-bold text-slate-700 flex items-center gap-2 mb-2 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        {...register("ignorar_limites_descuento")}
+                                        className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer"
+                                    />
+                                    Ignorar reglas de límite de descuento en oportunidades
+                                </label>
+                                <p className="text-xs text-slate-500">
+                                    Si está activado, en las cotizaciones de esta cuenta no se aplicará la restricción del porcentaje máximo de descuento.
+                                </p>
+                            </div>
+                        )}
                     </div>
 
                     {/* Sales Channel Selector (NEW) */}

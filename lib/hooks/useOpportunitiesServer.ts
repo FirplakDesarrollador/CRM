@@ -39,7 +39,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
 
     // Filters
     const [searchTerm, setSearchTerm] = useState<string>("");
-    const [userFilter, setUserFilter] = useState<'mine' | 'team' | 'all'>('mine');
+    const [userFilter, setUserFilter] = useState<'mine' | 'team' | 'collab' | 'all'>('mine');
     const [accountOwnerId, setAccountOwnerId] = useState<string | null>(null);
 
     // New Hierarchical Filters
@@ -225,7 +225,14 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                     localOpps = localOpps.filter(o => o.owner_user_id === accountOwnerId);
                 } else {
                     if (userFilter === 'mine') {
-                        localOpps = localOpps.filter(o => o.owner_user_id === currentUserId);
+                        localOpps = localOpps.filter(o => 
+                            o.owner_user_id === currentUserId || 
+                            (!o.owner_user_id && o.created_by === currentUserId)
+                        );
+                    } else if (userFilter === 'collab') {
+                        const collabOpps = await db.opportunityCollaborators.where('usuario_id').equals(currentUserId).toArray();
+                        const collabOppIds = new Set(collabOpps.map(c => c.oportunidad_id));
+                        localOpps = localOpps.filter(o => collabOppIds.has(o.id));
                     } else if (userFilter === 'team' && userRole !== 'ADMIN') {
                         if (userRole === 'COORDINADOR') {
                             localOpps = localOpps.filter(o => o.owner_user_id === currentUserId || (o.owner_user_id && subordinateIds.includes(o.owner_user_id)));
@@ -379,6 +386,28 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
             } else {
                 if (userFilter === 'mine') {
                     query = query.or(`owner_user_id.eq.${currentUserId},and(owner_user_id.is.null,created_by.eq.${currentUserId})`);
+                } else if (userFilter === 'collab') {
+                    // Filter by matching in CRM_Oportunidades_Colaboradores
+                    // We use inner join to filter results
+                    query = query.select(`
+                        id,
+                        nombre,
+                        account_id,
+                        fase_id,
+                        amount,
+                        currency_id,
+                        owner_user_id,
+                        updated_at,
+                        created_at,
+                        fecha_cierre_estimada,
+                        segmento_id,
+                        ${accountRelation},
+                        fase_data:CRM_FasesOportunidad(nombre),
+                        estado_data:CRM_EstadosOportunidad(nombre),
+                        vendedor:CRM_Usuarios!owner_user_id(full_name),
+                        colaboradores:CRM_Oportunidades_Colaboradores!inner(usuario_id)
+                    `, { count: 'exact' });
+                    query = query.eq('colaboradores.usuario_id', currentUserId);
                 } else if (userFilter === 'team') {
                     if (userRole === 'COORDINADOR') {
                         const ids = [currentUserId, ...subordinateIds].filter(Boolean);

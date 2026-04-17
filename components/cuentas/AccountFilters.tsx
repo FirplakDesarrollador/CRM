@@ -156,40 +156,40 @@ export function AccountFilters({ onFilterChange, initialChannelId, initialNivelP
                         Todos
                     </button>
                     <button
-                        onClick={() => handleNivelChange('ORO')}
+                        onClick={() => handleNivelChange('PREMIUM')}
                         className={cn(
                             "px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5",
-                            selectedNivel === 'ORO'
+                            selectedNivel === 'PREMIUM'
                                 ? "bg-amber-500 text-white shadow-sm"
                                 : "text-slate-500 hover:text-amber-600"
                         )}
                     >
                         <Medal className="w-3 h-3" />
-                        Oro
+                        Premium
                     </button>
                     <button
-                        onClick={() => handleNivelChange('PLATA')}
+                        onClick={() => handleNivelChange('DESTACADO')}
                         className={cn(
                             "px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5",
-                            selectedNivel === 'PLATA'
+                            selectedNivel === 'DESTACADO'
                                 ? "bg-slate-500 text-white shadow-sm"
                                 : "text-slate-500 hover:text-slate-600"
                         )}
                     >
                         <Medal className="w-3 h-3" />
-                        Plata
+                        Destacado
                     </button>
                     <button
-                        onClick={() => handleNivelChange('BRONCE')}
+                        onClick={() => handleNivelChange('ACTIVO')}
                         className={cn(
                             "px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5",
-                            selectedNivel === 'BRONCE'
+                            selectedNivel === 'ACTIVO'
                                 ? "bg-orange-500 text-white shadow-sm"
                                 : "text-slate-500 hover:text-orange-600"
                         )}
                     >
                         <Medal className="w-3 h-3" />
-                        Bronce
+                        Activo
                     </button>
                 </div>
 

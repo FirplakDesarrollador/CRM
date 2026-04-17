@@ -73,42 +73,72 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel }:
 
             // Check for duplicates
             const checkDuplicates = async () => {
-                // Build OR query components
                 const checks = [];
-                if (data.email) checks.push(`email.eq.${data.email}`);
-                if (data.telefono) checks.push(`telefono.eq.${data.telefono}`);
-                if (data.nombre) checks.push(`nombre.eq.${data.nombre}`); // Global name check per requirement
+                if (data.email) checks.push({ field: 'email', value: data.email });
+                if (data.telefono) checks.push({ field: 'telefono', value: data.telefono });
+                if (data.nombre) checks.push({ field: 'nombre', value: data.nombre });
 
                 if (checks.length === 0) return null;
 
-                let query = supabase
-                    .from('CRM_Contactos')
-                    .select('id, nombre, email, telefono')
-                    .or(checks.join(','));
+                // 1. LOCAL CHECK (Dexie) - Crucial for offline or pending sync items
+                try {
+                    const localResults = await db.contacts.filter(c => {
+                        if (existingContact?.id && c.id === existingContact.id) return false;
+                        
+                        const matchName = data.nombre && c.nombre?.toLowerCase() === data.nombre.toLowerCase();
+                        const matchEmail = data.email && c.email?.toLowerCase() === data.email.toLowerCase();
+                        const matchPhone = data.telefono && c.telefono === data.telefono;
+                        
+                        return !!(matchName || matchEmail || matchPhone);
+                    }).toArray();
 
-                if (existingContact?.id) {
-                    query = query.neq('id', existingContact.id);
+                    if (localResults.length > 0) {
+                        return localResults.map(r => ({ ...r, source: 'local' }));
+                    }
+                } catch (e) {
+                    console.warn("[ContactForm] local duplicate check failed:", e);
                 }
 
-                const { data: duplicates, error } = await query;
-                if (error) {
-                    console.error("Error checking contact duplicates:", error);
+                // 2. SERVER CHECK (Supabase)
+                try {
+                    const orFilters = [];
+                    if (data.email) orFilters.push(`email.eq.${data.email}`);
+                    if (data.telefono) orFilters.push(`telefono.eq.${data.telefono}`);
+                    if (data.nombre) orFilters.push(`nombre.eq.${data.nombre}`);
+
+                    let query = supabase
+                        .from('CRM_Contactos')
+                        .select('id, nombre, email, telefono')
+                        .or(orFilters.join(','));
+
+                    if (existingContact?.id) {
+                        query = query.neq('id', existingContact.id);
+                    }
+
+                    const { data: duplicates, error } = await query;
+                    if (error) throw error;
+                    return duplicates?.map(d => ({ ...d, source: 'server' })) || null;
+                } catch (error: any) {
+                    console.error("Error checking contact duplicates on server:", error);
+                    // If server check fails, we already did local check. 
+                    // We might want to warn the user but local is ok for now.
                     return null;
                 }
-                return duplicates;
             };
 
-            const duplicates = await checkDuplicates();
+            const duplicatesResponse = await checkDuplicates();
 
-            if (duplicates && duplicates.length > 0) {
-                const nameConflict = duplicates.find((d: any) => d.nombre.toLowerCase() === data.nombre.toLowerCase());
-                const emailConflict = data.email ? duplicates.find((d: any) => d.email?.toLowerCase() === data.email?.toLowerCase()) : null;
-                const phoneConflict = data.telefono ? duplicates.find((d: any) => d.telefono === data.telefono) : null;
+            if (duplicatesResponse && duplicatesResponse.length > 0) {
+                const nameConflict = duplicatesResponse.find((d: any) => d.nombre.toLowerCase() === data.nombre.toLowerCase());
+                const emailConflict = data.email ? duplicatesResponse.find((d: any) => d.email?.toLowerCase() === data.email?.toLowerCase()) : null;
+                const phoneConflict = data.telefono ? duplicatesResponse.find((d: any) => d.telefono === data.telefono) : null;
 
                 let errorMessage = "";
-                if (nameConflict) errorMessage += `\n- El nombre "${data.nombre}" ya existe.`;
-                if (emailConflict) errorMessage += `\n- El email "${data.email}" ya existe.`;
-                if (phoneConflict) errorMessage += `\n- El teléfono "${data.telefono}" ya existe.`;
+                const sourceInfo = duplicatesResponse[0].source === 'local' ? " (Pendiente de sincronizar)" : "";
+                
+                if (nameConflict) errorMessage += `\n- El nombre "${data.nombre}" ya existe${sourceInfo}.`;
+                if (emailConflict) errorMessage += `\n- El email "${data.email}" ya existe${sourceInfo}.`;
+                if (phoneConflict) errorMessage += `\n- El teléfono "${data.telefono}" ya existe${sourceInfo}.`;
 
                 if (errorMessage) {
                     alert(`No se puede guardar. Se encontraron contactos duplicados:${errorMessage}`);

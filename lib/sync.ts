@@ -928,6 +928,30 @@ export class SyncEngine {
     }
 
     /**
+     * SELF-HEALING: Resolves issues where a contact is created locally but already exists on Supabase.
+     */
+    private async resolveDuplicateContact(badContactId: string, realContactId: string) {
+        try {
+            console.log(`[Sync-Heal] Starting resolution for duplicated contact: ${badContactId} -> ${realContactId}`);
+            
+            // 1. Repair Outbox Items
+            // Delete all outbox items related to the BAD contact
+            const badOutboxItems = await db.outbox.where('entity_id').equals(badContactId).and(i => i.entity_type === 'CRM_Contactos').toArray();
+            if (badOutboxItems.length > 0) {
+                console.log(`[Sync-Heal] Cleaning up ${badOutboxItems.length} outbox items for bad contact.`);
+                await db.outbox.bulkDelete(badOutboxItems.map(i => i.id));
+            }
+
+            // 2. Clear from local Dexie
+            await db.contacts.delete(badContactId);
+
+            console.log(`[Sync-Heal] Repaired duplicate contact. Removed bad local entry and cleaned its outbox.`);
+        } catch (e) {
+            console.error(`[Sync-Heal] Error resolving duplicate contact:`, e);
+        }
+    }
+
+    /**
      * PULL: Download server data to local IndexedDB
      * Called on app initialization to ensure all browsers have the same data
      */
@@ -1084,7 +1108,8 @@ export class SyncEngine {
             try {
                 const { data: actCls, error: actClsError } = await supabase
                     .from('CRM_Activity_Clasificacion')
-                    .select('*');
+                    .select('*')
+                    .eq('is_deleted', false);
 
                 if (actClsError) throw actClsError;
 
@@ -1092,13 +1117,23 @@ export class SyncEngine {
                     const mapped = actCls.map((c: any) => ({
                         id: c.id,
                         nombre: c.nombre,
-                        tipo_actividad: c.tipo_actividad
+                        tipo_actividad: c.tipo_actividad,
+                        is_deleted: c.is_deleted
                     }));
                     await db.transaction('rw', db.activityClassifications, async () => {
                         await db.activityClassifications.clear();
                         await db.activityClassifications.bulkPut(mapped);
                     });
                     console.log(`[Sync] Pulled ${actCls.length} activity classifications.`);
+                }
+
+                // Cleanup deleted ones
+                const { data: delCls } = await supabase
+                    .from('CRM_Activity_Clasificacion')
+                    .select('id')
+                    .eq('is_deleted', true);
+                if (delCls && delCls.length > 0) {
+                    await db.activityClassifications.bulkDelete(delCls.map(c => c.id));
                 }
             } catch (acErr: any) {
                 console.error('[Sync] Failed to pull activity classifications:', acErr.message);
@@ -1108,7 +1143,8 @@ export class SyncEngine {
             try {
                 const { data: actSubs, error: actSubsError } = await supabase
                     .from('CRM_Activity_Subclasificacion')
-                    .select('*');
+                    .select('*')
+                    .eq('is_deleted', false);
 
                 if (actSubsError) throw actSubsError;
 
@@ -1116,13 +1152,23 @@ export class SyncEngine {
                     const mapped = actSubs.map((s: any) => ({
                         id: s.id,
                         nombre: s.nombre,
-                        clasificacion_id: s.clasificacion_id
+                        clasificacion_id: s.clasificacion_id,
+                        is_deleted: s.is_deleted
                     }));
                     await db.transaction('rw', db.activitySubclassifications, async () => {
                         await db.activitySubclassifications.clear();
                         await db.activitySubclassifications.bulkPut(mapped);
                     });
                     console.log(`[Sync] Pulled ${actSubs.length} activity subclassifications.`);
+                }
+
+                // Cleanup deleted ones
+                const { data: delSubs } = await supabase
+                    .from('CRM_Activity_Subclasificacion')
+                    .select('id')
+                    .eq('is_deleted', true);
+                if (delSubs && delSubs.length > 0) {
+                    await db.activitySubclassifications.bulkDelete(delSubs.map(s => s.id));
                 }
             } catch (asErr: any) {
                 console.error('[Sync] Failed to pull activity subclassifications:', asErr.message);
@@ -1253,12 +1299,34 @@ export class SyncEngine {
 
                 let mergedCount = 0;
                 let skippedCount = 0;
+                let healedCount = 0;
                 const contactsToPut = [];
+
                 for (const c of contacts) {
                     if (pendingContactIds.has(c.id)) {
                         skippedCount++;
                         continue;
                     }
+
+                    // SELF-HEALING: Detect logical duplicates (Same Email + Account, but different ID)
+                    // This happens if a user creates a contact offline that already existed on server.
+                    if (c.email && c.account_id) {
+                        try {
+                            const localDup = await db.contacts
+                                .where('email').equals(c.email)
+                                .and(item => item.account_id === c.account_id && item.id !== c.id)
+                                .first();
+
+                            if (localDup) {
+                                console.warn(`[Sync-Heal] Found logical duplicate contact for ${c.email} in account ${c.account_id}. Resolving...`);
+                                await this.resolveDuplicateContact(localDup.id, c.id);
+                                healedCount++;
+                            }
+                        } catch (err) {
+                            console.warn("[Sync-Heal] Error during contact deduplication check:", err);
+                        }
+                    }
+
                     contactsToPut.push({
                         id: c.id,
                         account_id: c.account_id,
@@ -1278,7 +1346,7 @@ export class SyncEngine {
                     await db.contacts.bulkPut(contactsToPut);
                 }
 
-                console.log(`[Sync] Merged ${mergedCount} contacts (${skippedCount} with pending changes skipped).`);
+                console.log(`[Sync] Merged ${mergedCount} contacts (${skippedCount} skipped, ${healedCount} healed).`);
             }
 
             // Pull Opportunities (CRM_Oportunidades) - SMART MERGE
