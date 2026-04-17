@@ -13,7 +13,7 @@ export type AccountServer = {
     canal_id: string;
     subclasificacion_id?: number | null;
     es_premium: boolean;
-    nivel_premium?: 'ORO' | 'PLATA' | 'BRONCE' | null;
+    nivel_premium?: 'PREMIUM' | 'DESTACADO' | 'ACTIVO' | null;
     telefono: string | null;
     email: string | null;
     direccion: string | null;

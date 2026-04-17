@@ -204,7 +204,10 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
         const opp = await db.opportunities.get(quote.opportunity_id);
         if (!opp) return null;
         const acc = await db.accounts.get(opp.account_id);
-        return { channel: acc?.canal_id || 'DIST_NAC' };
+        return { 
+            channel: acc?.canal_id || 'DIST_NAC',
+            ignorar_limites_descuento: acc?.ignorar_limites_descuento || false
+        };
     });
 
     // Auto-fetch max_discount_pct for items that are missing it (legacy or failed RPC)
@@ -308,7 +311,7 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
         if (!item) return;
 
         let validPct = Math.max(0, Math.min(100, pct));
-        if (item.max_discount_pct && validPct > item.max_discount_pct) {
+        if (!context?.ignorar_limites_descuento && item.max_discount_pct && validPct > item.max_discount_pct) {
             validPct = item.max_discount_pct;
             alert(`El descuento máximo permitido para esta cantidad es ${item.max_discount_pct}%`);
         }
@@ -479,7 +482,11 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
                                     {/* Discount Input */}
                                     <div className="flex flex-col items-end">
                                         <div className="text-xs text-slate-400 font-bold text-[9px] mb-1">
-                                            {item.max_discount_pct ? `Descuento max. ${item.max_discount_pct}%` : 'Descuento (sin escala)'}
+                                            {context?.ignorar_limites_descuento 
+                                                ? 'Descuento (Límite ignorado)' 
+                                                : item.max_discount_pct 
+                                                    ? `Descuento max. ${item.max_discount_pct}%` 
+                                                    : 'Descuento (sin escala)'}
                                         </div>
                                         <div className="flex items-center gap-1">
                                             <input
@@ -491,7 +498,7 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
                                                 onBlur={(e) => handleUpdateDiscount(item.id, parseFloat(e.target.value) || 0)}
                                                 className={cn(
                                                     "w-16 text-right font-medium text-slate-800 border rounded-md py-1 px-2 text-sm focus:ring-2 focus:ring-blue-500",
-                                                    (item.discount_pct || 0) > (item.max_discount_pct || 0) && item.max_discount_pct ? "border-red-500 text-red-600 bg-red-50" : "border-slate-200"
+                                                    !context?.ignorar_limites_descuento && (item.discount_pct || 0) > (item.max_discount_pct || 0) && item.max_discount_pct ? "border-red-500 text-red-600 bg-red-50" : "border-slate-200"
                                                 )}
                                             />
                                             <span className="text-slate-500 text-sm">%</span>

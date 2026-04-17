@@ -27,7 +27,9 @@ export default function Home() {
     advisor_id: null,
     subclasificacion_id: null,
     nivel_premium: null,
-    search_query: null
+    search_query: null,
+    date_from: null,
+    date_to: null
   });
 
   const { opportunities } = useOpportunities({ advisor_id: filters.advisor_id });
@@ -57,6 +59,17 @@ export default function Home() {
         if (!oppNameMatch && !accNameMatch) return false;
       }
 
+      // Date Filters
+      if (filters.date_from || filters.date_to) {
+        const oppDate = new Date(o.created_at);
+        if (filters.date_from && oppDate < new Date(filters.date_from)) return false;
+        if (filters.date_to) {
+          const toDate = new Date(filters.date_to);
+          toDate.setHours(23, 59, 59, 999);
+          if (oppDate > toDate) return false;
+        }
+      }
+
       return true;
     });
 
@@ -69,6 +82,17 @@ export default function Home() {
       if (filters.search_query) {
         const query = filters.search_query.toLowerCase();
         if (!a.nombre?.toLowerCase().includes(query)) return false;
+      }
+
+      // Date Filters for Accounts
+      if (filters.date_from || filters.date_to) {
+        const accDate = new Date(a.created_at);
+        if (filters.date_from && accDate < new Date(filters.date_from)) return false;
+        if (filters.date_to) {
+          const toDate = new Date(filters.date_to);
+          toDate.setHours(23, 59, 59, 999);
+          if (accDate > toDate) return false;
+        }
       }
 
       return true;

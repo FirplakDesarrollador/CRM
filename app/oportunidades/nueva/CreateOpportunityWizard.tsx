@@ -13,7 +13,8 @@ import { useProductSearch, PriceListProduct } from "@/lib/hooks/useProducts";
 import { Trash2, PlusCircle, Search, Loader2 } from "lucide-react";
 import { db } from "@/lib/db";
 import { useLiveQuery } from "dexie-react-hooks";
-import { cn } from "@/components/ui/utils";
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { useConfig } from "@/lib/hooks/useConfig";
 import { CollaboratorSelector, CollaboratorEntry } from "@/components/oportunidades/CollaboratorSelector";
 
 const STEP_LABELS = ["Cuenta", "Datos del Negocio", "Productos", "Equipo"];
@@ -40,13 +41,16 @@ const schema = z.object({
         cantidad: z.number().min(1),
         precio: z.number(),
         nombre: z.string()
-    })).default([])
+    })).default([]),
+    owner_user_id: z.string().optional()
 });
 
 export default function CreateOpportunityWizard() {
     const router = useRouter();
     const { createOpportunity } = useOpportunities();
-    const { accounts } = useAccounts();
+    const { user } = useCurrentUser();
+    const { config } = useConfig();
+    const { accounts } = useAccounts({ showAll: true });
 
     const [step, setStep] = useState(0);
     const [showAccountModal, setShowAccountModal] = useState(false);
@@ -172,7 +176,8 @@ export default function CreateOpportunityWizard() {
             fuente_conversion: '',
             probability: 0,
             comentarios: '',
-            items: []
+            items: [],
+            owner_user_id: ''
         }
     });
 
@@ -214,6 +219,25 @@ export default function CreateOpportunityWizard() {
                 setValue("account_id", acc.id);
                 setSelectedAccount(acc);
                 setAccountSearchTerm(acc.nombre);
+                
+                // Lógica de comisión automática (Igual que en handleSelectAccount)
+                if (user && acc.owner_user_id && acc.owner_user_id !== user.id) {
+                    const creatorPct = Number(config?.commission_creator_default_pct || 5);
+                    setValue("owner_user_id", acc.owner_user_id);
+                    setCollaborators([
+                        {
+                            usuario_id: user.id,
+                            porcentaje: creatorPct,
+                            rol: 'CREADOR',
+                            full_name: user.full_name || user.email
+                        }
+                    ]);
+                    console.log(`[Wizard-JIT] Cuenta de tercero detectada: ${acc.id}. Asignando propietario ${acc.owner_user_id}`);
+                } else {
+                    setValue("owner_user_id", user?.id || '');
+                    setCollaborators([]);
+                }
+
                 // Inherit location from account
                 if (acc.pais_id) {
                     setValue("pais_id", Number(acc.pais_id));
@@ -246,6 +270,24 @@ export default function CreateOpportunityWizard() {
         setSelectedAccount(acc);
         setAccountSearchTerm(acc.nombre);
         setShowAccountDropdown(false);
+
+        // Lógica de comisión automática si el creador no es el dueño de la cuenta
+        if (user && acc.owner_user_id && acc.owner_user_id !== user.id) {
+            const creatorPct = Number(config?.commission_creator_default_pct || 5);
+            setValue("owner_user_id", acc.owner_user_id);
+            setCollaborators([
+                {
+                    usuario_id: user.id,
+                    porcentaje: creatorPct,
+                    rol: 'CREADOR',
+                    full_name: user.full_name || user.email
+                }
+            ]);
+            console.log(`[Wizard] Cuenta de tercero detectada. Dueño: ${acc.owner_user_id}. Asignando ${creatorPct}% al creador.`);
+        } else {
+            setValue("owner_user_id", user?.id);
+            setCollaborators([]);
+        }
 
         // Inherit location from account
         if (acc.pais_id) {
@@ -319,6 +361,7 @@ export default function CreateOpportunityWizard() {
     const items: any[] = watch("items") || [];
     const amount = watch("amount") || 0;
     const currencyId = watch("currency_id");
+    const ownerUserId = watch("owner_user_id"); // Propietario efectivo de la oportunidad
 
     const addProduct = (product: PriceListProduct) => {
         const channel = selectedAccount?.canal_id || 'DIST_NAC';
@@ -370,10 +413,10 @@ export default function CreateOpportunityWizard() {
 
     // Calculate total from items
     useEffect(() => {
-        if (items.length > 0) {
-            const total = items.reduce((acc: number, curr: any) => acc + ((curr.precio || 0) * (curr.cantidad || 1)), 0);
-            setValue("amount", total);
-        }
+        const total = (items || []).reduce((acc: number, curr: any) => 
+            acc + ((Number(curr.precio) || 0) * (Number(curr.cantidad) || 0)), 0
+        );
+        setValue("amount", total);
     }, [items, setValue]);
 
     const onSubmit = async (data: any) => {
@@ -816,10 +859,15 @@ export default function CreateOpportunityWizard() {
                 {step === 3 && (
                     <div className="space-y-4">
                         <h2 className="text-lg font-semibold">Asignación</h2>
-                        <p className="text-sm text-slate-500">Tú serás el propietario (Owner) por defecto.</p>
+                        <p className="text-sm text-slate-500">
+                            {ownerUserId === user?.id 
+                                ? "Tú eres el propietario de esta cuenta." 
+                                : `El propietario de la cuenta es un tercero (${selectedAccount?.nombre || 'otro asesor'}). Se aplicará la división de comisión configurada.`}
+                        </p>
                         <CollaboratorSelector
                             value={collaborators}
                             onChange={setCollaborators}
+                            ownerId={ownerUserId}
                         />
                     </div>
                 )}

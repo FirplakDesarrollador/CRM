@@ -27,7 +27,8 @@ export interface LocalCuenta {
     canal_id: string; // Nuevo campo obligatorio
     subclasificacion_id?: number | null; // Nuevo campo opcional
     es_premium?: boolean;
-    nivel_premium?: 'ORO' | 'PLATA' | 'BRONCE' | null; // Nuevo campo jerárquico
+    nivel_premium?: 'PREMIUM' | 'DESTACADO' | 'ACTIVO' | null; // Nuevo campo jerárquico
+    ignorar_limites_descuento?: boolean; // Toggle para saltar límites de descuento
     telefono?: string;
     email?: string; // Added field
     direccion?: string;
@@ -272,12 +273,14 @@ export interface LocalActivityClassification {
     id: number;
     nombre: string;
     tipo_actividad: 'TAREA' | 'EVENTO';
+    is_deleted?: boolean;
 }
 
 export interface LocalActivitySubclassification {
     id: number;
     nombre: string;
     clasificacion_id: number;
+    is_deleted?: boolean;
 }
 
 export interface LocalLossReason {

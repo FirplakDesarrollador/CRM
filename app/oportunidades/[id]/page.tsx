@@ -1364,8 +1364,8 @@ function ActivitiesTab({ opportunityId }: { opportunityId: string }) {
     const sortedActivities = activities?.sort((a, b) => new Date(b.fecha_inicio).getTime() - new Date(a.fecha_inicio).getTime());
 
     // Catalogs
-    const classifications = useLiveQuery(() => db.activityClassifications.toArray(), []) || [];
-    const subclassifications = useLiveQuery(() => db.activitySubclassifications.toArray(), []) || [];
+    const classifications = useLiveQuery(() => db.activityClassifications.toArray().then(arr => arr.filter(c => !c.is_deleted)), []) || [];
+    const subclassifications = useLiveQuery(() => db.activitySubclassifications.toArray().then(arr => arr.filter(s => !s.is_deleted)), []) || [];
 
     // PROACTIVE SYNC: If catalogs are empty, trigger a pull
     useEffect(() => {
