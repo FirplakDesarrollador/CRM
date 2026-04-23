@@ -60,7 +60,17 @@ export function usePedidos(cotizacionId?: string) {
             'orden_compra': 'EXTRA_Orden de compra/Purchase Order',
             'fecha_minima_requerida': 'EXTRA_Fecha mínima requerida por comercial/cliente',
             'formas_pago': 'EXTRA_Formas de pago',
-            'terminos_pago': 'EXTRA_Terminos de pago/Pay Terms'
+            'terminos_pago': 'EXTRA_Terminos de pago/Pay Terms',
+            'facturacion_electronica': 'EXTRA_Facturación Electrónica',
+            'es_muestra': 'EXTRA_¿Es una muestra?',
+            'aplica_contrato': 'EXTRA_¿Aplica contrato?',
+            'multa_incumplimiento': 'EXTRA_¿Multa por incumplimiento?',
+            'puerto_embarque': 'EXTRA_Puerto embarque/Shipment Port',
+            'puerto_destino': 'EXTRA_Puerto destino/Destination Port',
+            'via_transporte': 'EXTRA_Via/Type of transport',
+            'flete': 'EXTRA_Flete/Freight',
+            'seguro': 'EXTRA_Seguro/Insurance',
+            'cierre_facturacion': 'EXTRA_Cierre Facturación'
         };
 
         Object.entries(sapMapping).forEach(([local, server]) => {
@@ -114,7 +124,17 @@ export function usePedidos(cotizacionId?: string) {
             'orden_compra': 'EXTRA_Orden de compra/Purchase Order',
             'fecha_minima_requerida': 'EXTRA_Fecha mínima requerida por comercial/cliente',
             'formas_pago': 'EXTRA_Formas de pago',
-            'terminos_pago': 'EXTRA_Terminos de pago/Pay Terms'
+            'terminos_pago': 'EXTRA_Terminos de pago/Pay Terms',
+            'facturacion_electronica': 'EXTRA_Facturación Electrónica',
+            'es_muestra': 'EXTRA_¿Es una muestra?',
+            'aplica_contrato': 'EXTRA_¿Aplica contrato?',
+            'multa_incumplimiento': 'EXTRA_¿Multa por incumplimiento?',
+            'puerto_embarque': 'EXTRA_Puerto embarque/Shipment Port',
+            'puerto_destino': 'EXTRA_Puerto destino/Destination Port',
+            'via_transporte': 'EXTRA_Via/Type of transport',
+            'flete': 'EXTRA_Flete/Freight',
+            'seguro': 'EXTRA_Seguro/Insurance',
+            'cierre_facturacion': 'EXTRA_Cierre Facturación'
         };
 
         // Transferimos los valores a las columnas del servidor

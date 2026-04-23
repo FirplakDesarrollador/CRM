@@ -58,24 +58,30 @@ router.replace(...);
 ## [Bug ID: 20260423-01]
 
 Context:
-`lib/sync.ts` y `app/pedidos/page.tsx`. Los pedidos de venta (pedidos) no aparecían en la versión desplegada tras un merge.
+`lib/sync.ts`, `lib/hooks/usePedidos.ts` y `app/pedidos/page.tsx`. Los pedidos de venta (pedidos) no aparecían en la versión desplegada o se veían con campos vacíos.
 
 What I Did:
-Diagnostiqué la falta de los pedidos y descubrí que no estaban siendo sincronizados por el `SyncEngine`.
+Diagnostiqué la visibilidad de los pedidos y el mapeo de campos SAP.
 
 Problem:
-Los pedidos creados en otros dispositivos o ramas no se descargaban (pull) al navegador, resultando en una lista vacía. Además, los filtros de visibilidad ocultaban registros si las entidades relacionadas (oportunidades/cotizaciones) no se habían sincronizado aún.
+1. Los pedidos no se veían en absoluto para usuarios autenticados.
+2. Los campos provenientes de SAP (EXTRA_...) se veían vacíos en la UI.
+3. Al actualizar un pedido, ciertos campos (muestra, flete, etc.) no se guardaban en el servidor.
 
 Root Cause:
-Omisión de las entidades `CRM_Pedidos` y `CRM_PedidoItems` en la configuración de sincronización incremental (`pullChanges` y `TABLE_PRIORITY`). Dependencia rígida de metadatos externos para el filtrado en la UI sin estrategias de fallback.
+1. **RLS (Supabase)**: La tabla `CRM_Pedidos` tenía RLS activado pero NO tenía políticas definidas, bloqueando cualquier consulta de usuarios `authenticated`.
+2. **Mapeo Inverso**: El `SyncEngine` descargaba los campos con prefijo `EXTRA_` pero no los mapeaba a los nombres internos (friendly names) usados por la UI.
+3. **Mapeo Incompleto**: El hook `usePedidos.ts` no incluía todos los campos SAP en su mapeo de salida hacia el servidor.
 
 Fix Applied:
-1. Se añadieron `CRM_Pedidos` y `CRM_PedidoItems` al ciclo de vida del `SyncEngine`.
-2. Se flexibilizó el filtro de visibilidad en `app/pedidos/page.tsx` para mostrar pedidos incluso si el `ownerId` no puede determinarse localmente (permitir por defecto en caso de duda).
+1. Se añadió política RLS "Permissive All" a `CRM_Pedidos`.
+2. Se implementó el mapeo inverso en `SyncEngine.pullChanges` para `CRM_Pedidos`.
+3. Se completó el `sapMapping` en `usePedidos.ts` para incluir todos los campos de negocio (muestra, incoterm, flete, etc.).
 
 Prevention Rule:
-1. Al añadir un nuevo módulo o entidad, es OBLIGATORIO registrarla en `TABLE_PRIORITY` y `pullChanges` dentro de `lib/sync.ts` para asegurar persistencia multi-dispositivo.
-2. Los filtros de visibilidad en la UI deben ser resilientes a la "sincronización parcial". Siempre incluir un fallback (`if (!metadata) return true`) para evitar que los datos "desaparezcan" mientras se completa el proceso de descarga.
+1. **RLS**: Al crear una tabla nueva en Supabase, verificar SIEMPRE las políticas de RLS para el rol `authenticated`. Si no hay políticas, la tabla será invisible.
+2. **Sync Mapping**: Si una entidad usa nombres de columna diferentes entre el servidor (legacy/SAP) y el cliente, el mapeo debe ser bidireccional (Push y Pull).
+3. **Coherencia de Interfaces**: Asegurar que `LocalPedido` en `lib/db.ts` coincida con el mapeo en `usePedidos.ts` y `sync.ts`.
 
 Tags:
-[sync] [visibility] [data-loss] [dexie] [pedidos]
+[sync] [visibility] [rls] [sap-mapping] [pedidos]

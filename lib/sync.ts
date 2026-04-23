@@ -1577,7 +1577,32 @@ export class SyncEngine {
                         skippedCount++;
                         continue;
                     }
-                    pedidosToPut.push(p);
+
+                    // Map SAP fields back to local friendly names
+                    const mapped = {
+                        ...p,
+                        fecha_minima_requerida: p['EXTRA_Fecha mínima requerida por comercial/cliente'],
+                        fecha_facturacion: p['EXTRA_Fecha de facturación'],
+                        tipo_facturacion: p['EXTRA_Tipo de facturación'],
+                        notas_sap: p['EXTRA_Notas'],
+                        formas_pago: p['EXTRA_Formas de pago'],
+                        facturacion_electronica: p['EXTRA_Facturación Electrónica'] === 'Si' || p['EXTRA_Facturación Electrónica'] === 'true' || p['EXTRA_Facturación Electrónica'] === true,
+                        oc_cot: p['EXTRA_OC/COT'],
+                        cierre_facturacion: p['EXTRA_Cierre Facturación'],
+                        es_muestra: p['EXTRA_¿Es una muestra?'] === 'Si' || p['EXTRA_¿Es una muestra?'] === 'true' || p['EXTRA_¿Es una muestra?'] === true,
+                        aplica_contrato: p['EXTRA_¿Aplica contrato?'] === 'Si' || p['EXTRA_¿Aplica contrato?'] === 'true' || p['EXTRA_¿Aplica contrato?'] === true,
+                        multa_incumplimiento: p['EXTRA_¿Multa por incumplimiento?'] === 'Si' || p['EXTRA_¿Multa por incumplimiento?'] === 'true' || p['EXTRA_¿Multa por incumplimiento?'] === true,
+                        orden_compra: p['EXTRA_Orden de compra/Purchase Order'],
+                        puerto_embarque: p['EXTRA_Puerto embarque/Shipment Port'],
+                        terminos_pago: p['EXTRA_Terminos de pago/Pay Terms'],
+                        puerto_destino: p['EXTRA_Puerto destino/Destination Port'],
+                        via_transporte: p['EXTRA_Via/Type of transport'],
+                        flete: p['EXTRA_Flete/Freight'],
+                        incoterm: p['EXTRA_Incoterm/Incoterm'],
+                        seguro: p['EXTRA_Seguro/Insurance']
+                    };
+
+                    pedidosToPut.push(mapped);
                     mergedCount++;
                 }
                 if (pedidosToPut.length > 0) await db.pedidos.bulkPut(pedidosToPut);
