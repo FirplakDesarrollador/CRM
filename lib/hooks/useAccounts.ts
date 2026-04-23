@@ -37,12 +37,14 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
         const id = crypto.randomUUID();
         const { data: { user } } = await supabase.auth.getUser();
 
-        // Defensive conversion: ensure numeric IDs are numbers, not strings from form
+        const toNum = (val: any) => (val !== undefined && val !== null && val !== "") ? Number(val) : null;
+
         const sanitizedData = {
             ...data,
-            subclasificacion_id: data.subclasificacion_id ? Number(data.subclasificacion_id) : null,
-            departamento_id: data.departamento_id ? Number(data.departamento_id) : null,
-            ciudad_id: data.ciudad_id ? Number(data.ciudad_id) : null
+            subclasificacion_id: toNum(data.subclasificacion_id),
+            departamento_id: toNum(data.departamento_id),
+            ciudad_id: toNum(data.ciudad_id),
+            pais_id: toNum(data.pais_id)
         };
 
         const newAccount = {
@@ -53,7 +55,7 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
             updated_at: new Date().toISOString()
         };
         await db.accounts.add(newAccount as LocalCuenta);
-        await syncEngine.queueMutation('CRM_Cuentas', id, sanitizedData);
+        await syncEngine.queueMutation('CRM_Cuentas', id, newAccount, { isSnapshot: true });
 
         // AUTO-CREATE CONTACT FOR 'PROPIO' CHANNEL
         if (sanitizedData.canal_id === 'PROPIO') {
@@ -71,7 +73,7 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
                 updated_at: new Date().toISOString()
             };
             await db.contacts.add(contactData as any);
-            await syncEngine.queueMutation('CRM_Contactos', contactId, contactData);
+            await syncEngine.queueMutation('CRM_Contactos', contactId, contactData, { isSnapshot: true });
             console.log('[useAccounts] Auto-created contact for PROPIO account:', contactId);
         }
     };
@@ -83,23 +85,28 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
         // Defensive conversion: ensure numeric IDs are numbers, not strings from form
         const { _sync_metadata, ...sanitized } = updates;
         
+        const toNum = (val: any) => (val !== undefined && val !== null && val !== "") ? Number(val) : null;
+        
         // Ensure email and telefono are preserved even if they are null strings
         const sanitizedUpdates: any = {
             ...sanitized,
-            subclasificacion_id: (updates as any).subclasificacion_id ? Number((updates as any).subclasificacion_id) : null,
-            departamento_id: (updates as any).departamento_id ? Number((updates as any).departamento_id) : null,
-            ciudad_id: (updates as any).ciudad_id ? Number((updates as any).ciudad_id) : null,
+            subclasificacion_id: toNum((updates as any).subclasificacion_id),
+            departamento_id: toNum((updates as any).departamento_id),
+            ciudad_id: toNum((updates as any).ciudad_id),
+            pais_id: toNum((updates as any).pais_id),
             telefono: (updates as any).telefono !== undefined ? (updates as any).telefono : sanitized.telefono,
             email: (updates as any).email !== undefined ? (updates as any).email : (sanitized as any).email
         };
 
         console.log('[useAccounts] DEBUG - sanitizedUpdates result:', JSON.stringify(sanitizedUpdates));
         
+        const currentLocal = await db.accounts.get(id);
         const fullUpdates = { ...sanitizedUpdates, updated_at: new Date().toISOString() };
         await db.accounts.update(id, fullUpdates);
         
-        console.log('[useAccounts] DEBUG - Queuing mutation for sync:', sanitizedUpdates);
-        await syncEngine.queueMutation('CRM_Cuentas', id, sanitizedUpdates);
+        const mergedRecord = { ...currentLocal, ...fullUpdates } as LocalCuenta;
+        console.log('[useAccounts] DEBUG - Queuing mutation for sync (Atomic Snapshot):', mergedRecord);
+        await syncEngine.queueMutation('CRM_Cuentas', id, mergedRecord, { isSnapshot: true });
     };
 
     const deleteAccount = async (id: string) => {

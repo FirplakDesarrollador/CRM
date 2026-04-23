@@ -199,7 +199,6 @@ function OpportunitiesContent() {
             
             if (selectedAccountOwnerId) params.set('owner', selectedAccountOwnerId);
             else params.delete('owner');
-
             if (selectedChannel) params.set('channel', selectedChannel);
             else params.delete('channel');
 
@@ -219,6 +218,7 @@ function OpportunitiesContent() {
             else params.delete('endClose');
             
             const queryString = params.toString();
+            if (queryString === searchParams.toString()) return;
             
             // Save to sessionStorage for cross-module persistence
             if (queryString) {

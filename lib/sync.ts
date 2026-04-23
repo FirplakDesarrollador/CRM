@@ -601,7 +601,7 @@ export class SyncEngine {
                             if (localAccount) {
                                 console.log(`[Sync] Re-queueing missing local account: ${missingId}`);
                                 const fieldsToSync: (keyof typeof localAccount)[] =
-                                    ['nombre', 'nit', 'nit_base', 'canal_id', 'telefono', 'email', 'direccion', 'pais_id', 'departamento_id', 'ciudad_id', 'owner_user_id', 'nivel_premium', 'es_premium', 'created_by', 'created_at', 'updated_at'];
+                                    ['nombre', 'nit', 'nit_base', 'canal_id', 'telefono', 'email', 'direccion', 'pais_id', 'departamento_id', 'ciudad_id', 'subclasificacion_id', 'owner_user_id', 'nivel_premium', 'es_premium', 'created_by', 'created_at', 'updated_at', 'comentarios'];
 
                                 const newOutboxItems: any[] = [];
                                 fieldsToSync.forEach(field => {
@@ -653,6 +653,10 @@ export class SyncEngine {
                     .map(p => p.id);
                 if (metadataIdsToRemove.length > 0) {
                     await db.outbox.bulkDelete(metadataIdsToRemove);
+                }
+
+                if (table === 'CRM_Cuentas') {
+                    console.log(`[Sync] Batch for ${table}:`, JSON.stringify(updates, null, 2));
                 }
 
                 const { data, error } = await supabase.rpc('process_field_updates', {
@@ -1012,6 +1016,9 @@ export class SyncEngine {
                         departamento_id: a.departamento_id,
                         ciudad_id: a.ciudad_id,
                         ciudad: a.ciudad,
+                        subclasificacion_id: a.subclasificacion_id,
+                        comentarios: a.comentarios,
+                        ignorar_limites_descuento: a.ignorar_limites_descuento ?? false,
                         owner_user_id: a.owner_user_id,
                         created_by: a.created_by,
                         updated_by: a.updated_by,
@@ -1619,32 +1626,51 @@ export class SyncEngine {
     async queueMutation(
         entityTable: string,
         entityId: string,
-        changes: Record<string, any>
+        changes: Record<string, any>,
+        options: { isSnapshot?: boolean } = {}
     ) {
         try {
             const now = Date.now();
             const items: OutboxItem[] = [];
 
-            for (const [field, value] of Object.entries(changes)) {
-                if (value === undefined) continue; // Skip undefined fields
-                if (field === 'id') continue; // Skip ID (it's the key, not a field to update)
-                if (field === '_sync_metadata') continue; // Internal field managed by RPC/Trigger
-
+            if (options.isSnapshot) {
+                // Modo Snapshot: Enviar todo el objeto como una sola mutación atómica
                 items.push({
                     id: uuidv4(),
                     entity_type: entityTable,
                     entity_id: entityId,
-                    field_name: field,
-                    old_value: null, // Optional tracking
-                    new_value: value,
+                    field_name: '_complete_snapshot_',
+                    old_value: null,
+                    new_value: changes,
                     field_timestamp: now,
                     status: 'PENDING',
                     retry_count: 0
                 });
+            } else {
+                // Modo Normal: Desglosar por campos para LWW granular
+                for (const [field, value] of Object.entries(changes)) {
+                    if (value === undefined) continue;
+                    if (field === 'id') continue;
+                    if (field === '_sync_metadata') continue;
+
+                    items.push({
+                        id: uuidv4(),
+                        entity_type: entityTable,
+                        entity_id: entityId,
+                        field_name: field,
+                        old_value: null,
+                        new_value: value,
+                        field_timestamp: now,
+                        status: 'PENDING',
+                        retry_count: 0
+                    });
+                }
             }
 
-            await db.outbox.bulkAdd(items);
-            this.updatePendingCount();
+            if (items.length > 0) {
+                await db.outbox.bulkAdd(items);
+                this.updatePendingCount();
+            }
 
             // Despachar evento global para Optimistic UI
             if (typeof window !== 'undefined') {
@@ -1653,7 +1679,7 @@ export class SyncEngine {
                 }));
             }
 
-            // Trigger Sync in background (non-blocking for immediate local UI feedback)
+            // Trigger Sync in background
             this.triggerSync().catch(err => {
                 console.warn('[Sync] Background sync triggered from mutation failed:', err);
             });

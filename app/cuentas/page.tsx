@@ -132,6 +132,8 @@ function AccountsContent() {
             if (editingAccount?.id) params.set('id', editingAccount.id); else params.delete('id');
             
             const queryString = params.toString();
+            if (queryString === searchParams.toString()) return;
+
             if (queryString) sessionStorage.setItem('crm_cuentas_state', queryString);
             else if (searchParams.toString() !== '') sessionStorage.removeItem('crm_cuentas_state');
 

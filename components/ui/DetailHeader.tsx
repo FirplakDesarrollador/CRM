@@ -17,11 +17,12 @@ interface DetailHeaderProps {
     title: string;
     subtitle: string;
     status: string;
-    backHref: string;
+    backHref?: string;
+    onBack?: () => void;
     actions?: HeaderAction[];
 }
 
-export function DetailHeader({ title, subtitle, status, backHref, actions }: DetailHeaderProps) {
+export function DetailHeader({ title, subtitle, status, backHref, onBack, actions }: DetailHeaderProps) {
     const router = useRouter();
     const [showMenu, setShowMenu] = useState(false);
     const menuRef = useRef<HTMLDivElement>(null);
@@ -42,7 +43,10 @@ export function DetailHeader({ title, subtitle, status, backHref, actions }: Det
                 <div className="py-4 flex items-center justify-between">
                     <div className="flex items-center gap-4">
                         <button 
-                            onClick={() => router.push(backHref)}
+                            onClick={() => {
+                                if (onBack) onBack();
+                                else if (backHref) router.push(backHref);
+                            }}
                             className="p-2 hover:bg-slate-100 rounded-full text-slate-500 transition-colors"
                         >
                             <ChevronLeft className="w-5 h-5" />

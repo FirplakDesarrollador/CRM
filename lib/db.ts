@@ -117,6 +117,62 @@ export interface LocalQuoteItem {
     updated_at?: string;
 }
 
+export interface LocalPedido {
+    id?: number;
+    uuid_generado: string;
+    cotizacion_id: string;
+    opportunity_id?: string;
+    estado_pedido: 'PLANEADO' | 'ENVIADO_SAP' | null;
+    
+    // Legacy fields
+    salesOrderNumber?: string;
+    reference?: string;
+    stateSalesOrder?: string;
+    amountSalesOrder?: string;
+    company?: string;
+    opportunity?: string;
+
+    // SAP Data (mapped to EXTRA_...)
+    fecha_minima_requerida?: string;
+    fecha_facturacion?: string;
+    tipo_facturacion?: string;
+    notas_sap?: string;
+    formas_pago?: string;
+    facturacion_electronica?: boolean;
+    oc_cot?: string;
+    cierre_facturacion?: string;
+    es_muestra?: boolean;
+    aplica_contrato?: boolean;
+    multa_incumplimiento?: boolean;
+    orden_compra?: string;
+    puerto_embarque?: string;
+    terminos_pago?: string;
+    puerto_destino?: string;
+    via_transporte?: string;
+    flete?: number;
+    incoterm?: string;
+    seguro?: number;
+
+    currency_id?: string;
+    responsible?: string;
+    "EXTRA_Gran Total"?: string;
+
+    created_by?: string;
+    updated_by?: string;
+    updated_at?: string;
+    created_at?: string;
+}
+
+export interface LocalPedidoItem {
+    id: string;
+    pedido_uuid: string;
+    producto_id: string;
+    cantidad: number;
+    precio_unitario: number;
+    descuento?: number;
+    created_at?: string;
+}
+
 // Types for Contacts
 export interface LocalContact {
     comentarios?: string;
@@ -209,10 +265,12 @@ export class CRMFirplakDB extends Dexie {
     activitySubclassifications!: Table<LocalActivitySubclassification, number>;
     lossReasons!: Table<LocalLossReason, number>;
     opportunityCollaborators!: Table<LocalOpportunityCollaborator, string>; // New table
+    pedidos!: Table<LocalPedido, string>;
+    pedidoItems!: Table<LocalPedidoItem, string>;
 
     constructor() {
         super('CRMFirplakDB');
-        this.version(10).stores({
+        this.version(11).stores({
             outbox: 'id, entity_type, status, field_timestamp, field_name',
             fileQueue: 'id, status',
             accounts: 'id, nit, nombre, owner_user_id',
@@ -230,7 +288,9 @@ export class CRMFirplakDB extends Dexie {
             activityClassifications: 'id, tipo_actividad',
             activitySubclassifications: 'id, clasificacion_id',
             lossReasons: 'id',
-            opportunityCollaborators: 'id, oportunidad_id, usuario_id' // New table
+            opportunityCollaborators: 'id, oportunidad_id, usuario_id', // New table
+            pedidos: 'uuid_generado, cotizacion_id, opportunity_id',
+            pedidoItems: 'id, pedido_uuid'
         });
     }
 }
