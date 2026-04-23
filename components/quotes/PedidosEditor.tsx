@@ -168,7 +168,7 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
 
 
 function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, pedidoUuid: string | null, onClose: () => void }) {
-    const { createPedido, updatePedido } = usePedidos(quote.id);
+    const { createPedido, updatePedido, updatePedidoItems } = usePedidos(quote.id);
     const ped = useLiveQuery(async () => {
         if (!pedidoUuid) return null;
         return db.pedidos.get(pedidoUuid);
@@ -267,12 +267,10 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
 
         if (pedidoUuid) {
             await updatePedido(pedidoUuid, pedData);
-            // El updatePedidoHook podría mejorarse para actualizar items, 
-            // por ahora la arquitectura dicta que Create = All, Update = Campos.
-            // Para editar los ítems, sería útil borrar y recrearlos, pero lo simplifico acá por brevity:
+            await updatePedidoItems(pedidoUuid, itemsToSave);
             alert("Datos de pedido actualizados.");
         } else {
-            await createPedido(quote, itemsToSave);
+            await createPedido(quote, itemsToSave, pedData);
             alert("Pedido parcial guardado con éxito.");
         }
         onClose();

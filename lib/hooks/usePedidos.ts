@@ -29,12 +29,14 @@ export function usePedidos(cotizacionId?: string) {
 
     const createPedido = async (
         parentQuote: LocalQuote, 
-        selectedItems: { producto_id: string; cantidad: number; precio_unitario: number; descuento?: number }[]
+        selectedItems: { producto_id: string; cantidad: number; precio_unitario: number; descuento?: number }[],
+        extraData?: Partial<LocalPedido>
     ) => {
         const uuid_generado = uuidv4();
         const opportunityId = parentQuote.opportunity_id;
 
         const newPedido: LocalPedido = {
+            ...extraData,
             uuid_generado,
             cotizacion_id: parentQuote.id,
             opportunity_id: opportunityId,
@@ -160,10 +162,51 @@ export function usePedidos(cotizacionId?: string) {
         await syncEngine.queueMutation('CRM_Pedidos', uuid_generado, { is_deleted: true });
     };
 
+    const updatePedidoItems = async (uuid_generado: string, newItems: { producto_id: string; cantidad: number; precio_unitario: number; descuento?: number }[]) => {
+        const currentItems = await db.pedidoItems.where('pedido_uuid').equals(uuid_generado).toArray();
+        let remainingToSave = [...newItems];
+        
+        for (const currentItem of currentItems) {
+            const updatedItemDef = remainingToSave.find(i => i.producto_id === currentItem.producto_id);
+            if (updatedItemDef) {
+                // Si existe y cambió, lo actualizamos
+                if (currentItem.cantidad !== updatedItemDef.cantidad) {
+                    await db.pedidoItems.update(currentItem.id, { cantidad: updatedItemDef.cantidad });
+                    const updated = await db.pedidoItems.get(currentItem.id);
+                    await syncEngine.queueMutation('CRM_PedidoItems', currentItem.id, updated);
+                }
+                remainingToSave = remainingToSave.filter(i => i.producto_id !== currentItem.producto_id);
+            } else {
+                // Se puso en 0, lo borramos
+                await db.pedidoItems.delete(currentItem.id);
+                await syncEngine.queueMutation('CRM_PedidoItems', currentItem.id, { is_deleted: true });
+            }
+        }
+        
+        // Agregar los nuevos que no existían
+        const itemsToInsert = remainingToSave.map(item => ({
+            id: uuidv4(),
+            pedido_uuid: uuid_generado,
+            producto_id: item.producto_id,
+            cantidad: item.cantidad,
+            precio_unitario: item.precio_unitario,
+            descuento: item.descuento || 0,
+            created_at: new Date().toISOString()
+        }));
+
+        if (itemsToInsert.length > 0) {
+            await db.pedidoItems.bulkAdd(itemsToInsert);
+            for (const pdItem of itemsToInsert) {
+                await syncEngine.queueMutation('CRM_PedidoItems', pdItem.id, pdItem, { isSnapshot: true });
+            }
+        }
+    };
+
     return {
         pedidosCollection,
         createPedido,
         updatePedido,
+        updatePedidoItems,
         deletePedido
     };
 }

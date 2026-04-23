@@ -24,10 +24,21 @@
 **Contexto:** `app/pedidos/page.tsx` falló al compilar por un token residual al cerrar un `div`.
 **Regra de Prevención:** Revisar siempre el diff generado por las herramientas de edición y validar que las etiquetas de cierre `</div>` sean coherentes y no contengan texto basura.
 
-## 5. Lógica de Negocio - Duplicidad de Datos y Cálculos Financieros
-**Problema:** En el módulo de pedidos, se mostraban datos redundantes (Pedido SAP igual a COT) y valores monetarios incorrectos al heredar el total de la cotización madre para pedidos parciales.
-**Contexto:** Los pedidos en estado `PLANEADO` deben calcular su total sumando los items locales (`CRM_PedidoItems`) en lugar de usar el total de la cotización, ya que una cotización puede generar múltiples pedidos parciales.
-**Solución:** Implementar un mapeo dinámico de items por pedido y aplicar sumatoria local con parseo de moneda colombiana (manejo de puntos y comas).
+### Missing Pedidos and Fields Mapping (`EXTRA_`)
+**Issue:** Sales orders were not showing up in the frontend list despite the Supabase payload returning valid data. Moreover, `EXTRA_Gran Total` and other `EXTRA_` fields coming from SAP were not mapped correctly.
+**Resolution Date:** 2026-04-23
+**Root Cause:** The `Dexie` IndexedDB schema (`lib/db.ts`) expected certain fields like `status` and `salesOrderNumber`, while Supabase (`CRM_Pedidos`) returned `estado_pedido`, `sales_order_number`. The pull logic mapped `id` instead of using the local `uuid_generado`. Furthermore, SAP `EXTRA_` fields required specific parsing from the payload map to the frontend.
+**Fix:**
+- Updated `pullChanges` in `lib/sync.ts` for `CRM_Pedidos` to map `id` to `uuid_generado` and standardizing status to `estado_pedido`.
+- Fixed the map logic for SAP `EXTRA_` fields.
+
+### Lost Pedido Item Quantities on Edit
+**Issue:** Modifying the product quantities of a "Pedido" inside a Quote did not persist the changes to the local Dexie DB nor queue them to Supabase via SyncEngine.
+**Resolution Date:** 2026-04-23
+**Root Cause:** In `components/quotes/PedidosEditor.tsx`, the `onSubmit` handler for updating an existing `Pedido` only updated the logistical fields (`pedData`) using `updatePedido`. The array containing the updated quantities (`itemsToSave`) was completely ignored because the `usePedidos.ts` hook lacked an `updatePedidoItems` method to process differential array changes.
+**Fix:** 
+- Added `updatePedidoItems` to `usePedidos.ts` to smartly calculate differential changes (inserts, updates, deletes) against `db.pedidoItems` and correctly queue each mutation to `CRM_PedidoItems`.
+- Connected `updatePedidoItems` into the `onSubmit` function in `PedidosEditor.tsx`.
 **Regra de Prevención:** Nunca asumir que el valor de una entidad hija (Pedido) es igual al de la entidad padre (Cotización) sin validar la granularidad del dato.
 
 ## 6. Sincronización de Búsqueda - Bucle Infinito de Router
@@ -85,3 +96,32 @@ Prevention Rule:
 
 Tags:
 [sync] [visibility] [rls] [sap-mapping] [pedidos]
+
+## [Bug ID: 20260423-02]
+
+Context:
+`lib/sync.ts`, `app/configuracion/page.tsx` y RPC `process_field_updates`. Falla silenciosa y bloqueo en la sincronización de pedidos debido a campos con caracteres especiales y mal manejo de errores en la UI.
+
+What I Did:
+Corregí la generación de SQL dinámico en el RPC y arreglé la UI de configuración para que muestre los ítems pendientes aún cuando haya errores.
+
+Problem:
+1. Al crear un pedido, este no subía al servidor y causaba una violación de Foreign Key (FK) para sus `CRM_PedidoItems`.
+2. La UI de Sincronización ocultaba los ítems en cola (`pendingCount`) cuando se presentaba el mensaje rojo de error, dejando al usuario ciego sobre qué estaba fallando.
+
+Root Cause:
+1. **Dynamic SQL Injection Risk / Syntax Error**: El RPC `process_field_updates` no utilizaba `quote_ident()` para los nombres de las columnas. Dado que los pedidos incluyen campos que mapean a SAP como `EXTRA_Incoterm/Incoterm` (los cuales contienen el caracter `/`), la sentencia `INSERT` generaba un error de sintaxis en PostgreSQL (`syntax error at or near "/"`).
+2. **Cascading FK Failure**: Como el `INSERT` del pedido fallaba (y era rechazado por la base de datos), el SyncEngine procedía a insertar los ítems asociados (`CRM_PedidoItems`). Al no existir el pedido padre, la base de datos rechazaba los ítems por violación de llave foránea.
+3. **UI Logic Error**: El bloque JSX en `app/configuracion/page.tsx` evaluaba `{!error && pendingCount > 0 && (...) }`, haciendo que el componente entero que muestra la cola y el resumen de los ítems desapareciera si `error` era `true`.
+
+Fix Applied:
+1. **Database Migration**: Se aplicó la migración `20260423050213_fix_process_field_updates_quotes.sql` que envuelve todos los identificadores (columnas y tablas) con `quote_ident(%I)` dentro de la función de Supabase.
+2. **UI Correction**: Se eliminó la negación `!error` de la condición de renderizado en `app/configuracion/page.tsx` para permitir que el error coexista con la vista detallada de los ítems atascados en la cola.
+
+Prevention Rule:
+1. **Dynamic SQL Escaping**: Siempre que se construya SQL dinámico en PL/pgSQL, se DEBE usar `quote_ident()` (o el especificador de formato `%I` en `format()`) para cualquier nombre de columna o tabla que provenga de una variable. Esto previene errores de sintaxis y ataques de inyección SQL, especialmente cuando se mapean campos de terceros (SAP) con convenciones inusuales.
+2. **UI Error Handling UX**: Nunca ocultar información de diagnóstico (como la cola de sincronización o elementos pendientes) ante la aparición de un error general. El usuario necesita ver el error y el contexto (qué ítems lo causaron) simultáneamente.
+3. **Sync Engine Execution Order**: Confirmar siempre que las relaciones Padre-Hijo se ejecuten en orden dentro de `lib/sync.ts` (a través de `TABLE_PRIORITY`) para que los fallos del padre sean la causa raíz comprobable, no la falla secundaria del hijo.
+
+Tags:
+[sync] [sql] [rpc] [ui-ux] [foreign-key] [escaping]

@@ -132,11 +132,18 @@ export class SyncEngine {
                 return false;
             })
             .delete();
+            
+        await this.updatePendingCount();
     }
 
     private async updatePendingCount() {
-        // Count everything that isn't successfully synced yet
-        const count = await db.outbox.where('status').anyOf(['PENDING', 'SYNCING', 'FAILED']).count();
+        // Count everything that isn't successfully synced yet, but IGNORE technical metadata items
+        // to prevent "ghost" pending counts in the UI.
+        const count = await db.outbox
+            .where('status').anyOf(['PENDING', 'SYNCING', 'FAILED'])
+            .filter(item => item.field_name !== '_sync_metadata')
+            .count();
+            
         useSyncStore.getState().setPendingCount(count);
     }
 
