@@ -1,6 +1,6 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useQuotes, useQuoteItems } from "@/lib/hooks/useOpportunities";
 import { useProductSearch, PriceListProduct } from "@/lib/hooks/useProducts";
 import { DetailHeader } from "@/components/ui/DetailHeader";
@@ -14,9 +14,11 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { useConfig } from "@/lib/hooks/useConfig";
 import { SendQuoteModal } from "@/components/quotes/SendQuoteModal";
 import { useCommissionCategories } from "@/lib/hooks/useCommissionCategories";
+import { PedidosList } from "@/components/quotes/PedidosEditor";
 
 export default function QuoteEditorPage() {
     const params = useParams();
+    const router = useRouter();
     const quoteId = params.quoteId as string;
     const oppId = params.id as string;
 
@@ -88,7 +90,13 @@ export default function QuoteEditorPage() {
                 title={`Editor: ${quote.numero_cotizacion}`}
                 subtitle="Borrador"
                 status={quote.status}
-                backHref={`/oportunidades/${oppId}`}
+                onBack={() => {
+                    if (activeSection === 'sap') {
+                        setActiveSection('items');
+                    } else {
+                        router.push(`/oportunidades/${oppId}`);
+                    }
+                }}
                 actions={[
                     { label: "Enviar Cotización", icon: Send, onClick: () => setIsSendModalOpen(true) },
                     { label: "Descargar PDF", icon: Download, onClick: handleDownloadPdf }
@@ -132,25 +140,7 @@ export default function QuoteEditorPage() {
                 )}
 
                 {activeSection === 'sap' && (
-                    <SapDataEditor
-                        quote={quote}
-                        onSave={async (updates) => {
-                            // Si se guardan datos SAP, asumimos que se convierte en Pedido
-                            const isComplete = Boolean(updates.fecha_facturacion && updates.tipo_facturacion);
-
-                            await updateQuote(quoteId, {
-                                ...updates,
-                                status: isComplete ? 'WINNER' : quote.status,
-                                es_pedido: isComplete ? true : quote.es_pedido,
-                                is_winner: isComplete ? true : quote.is_winner
-                            });
-
-                            // Si se convierte en pedido, podríamos forzar sincronización extra o notificar
-                            if (isComplete && !quote.es_pedido) {
-                                alert("¡Cotización convertida en Pedido!");
-                            }
-                        }}
-                    />
+                    <PedidosList quote={quote} />
                 )}
 
                 {isSendModalOpen && sendContext && (
@@ -548,79 +538,6 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
     );
 }
 
-// SAP Data Form
-function SapDataEditor({ quote, onSave }: { quote: LocalQuote, onSave: (d: Partial<LocalQuote>) => void }) {
-    const { register, handleSubmit, formState: { isDirty } } = useForm({
-        defaultValues: {
-            fecha_facturacion: quote.fecha_facturacion,
-            tipo_facturacion: quote.tipo_facturacion,
-            orden_compra: quote.orden_compra,
-            incoterm: quote.incoterm,
-            notas_sap: quote.notas_sap,
-            es_muestra: quote.es_muestra
-        }
-    });
-
-
-    const validation = usePremiumValidation(quote);
-
-    return (
-        <form onSubmit={handleSubmit(onSave)} className="space-y-6 bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-            {!validation.isPremium && (
-                <div className="flex items-center gap-3 mb-4 p-3 bg-orange-50 text-orange-800 rounded-lg text-sm">
-                    <AlertTriangle className="w-5 h-5 shrink-0" />
-                    <p>Estos datos son obligatorios para marcar la cotización como ganadora y generar el pedido en SAP.</p>
-                </div>
-            )}
-
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                    <label className="text-sm font-medium flex items-center gap-2">
-                        <Calendar className="w-4 h-4 text-slate-400" /> Fecha Facturación
-                    </label>
-                    <input type="date" {...register("fecha_facturacion")} className="w-full mt-1 p-2 border rounded-lg" />
-                </div>
-
-                <div>
-                    <label className="text-sm font-medium flex items-center gap-2">
-                        <Receipt className="w-4 h-4 text-slate-400" /> Tipo Facturación
-                    </label>
-                    <select {...register("tipo_facturacion")} className="w-full mt-1 p-2 border rounded-lg">
-                        <option value="">Seleccione...</option>
-                        <option value="Standard">Estándar</option>
-                        <option value="Anticipo">Anticipo</option>
-                    </select>
-                </div>
-
-                <div className="md:col-span-2">
-                    <label className="text-sm font-medium">Orden de Compra / Referencia Cliente</label>
-                    <input {...register("orden_compra")} className="w-full mt-1 p-2 border rounded-lg" placeholder="Ej. OC-12345" />
-                </div>
-
-                <div className="md:col-span-2">
-                    <label className="text-sm font-medium">Notas Integración SAP</label>
-                    <textarea {...register("notas_sap")} className="w-full mt-1 p-2 border rounded-lg" rows={3} />
-                </div>
-
-                <div className="md:col-span-2 border-t pt-4 mt-2">
-                    <QuotationSegmentSelector opportunity_id={quote.opportunity_id} initialValue={quote.segmento_id} onSave={(v: number | null) => onSave({ segmento_id: v })} />
-                </div>
-            </div>
-
-            <div className="pt-4 border-t flex justify-end">
-                <button
-                    type="submit"
-                    disabled={validation.isRestricted}
-                    className="bg-blue-600 text-white px-6 py-2 rounded-lg font-medium flex items-center gap-2 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                    <Save className="w-4 h-4" />
-                    Guardar Datos SAP
-                </button>
-            </div>
-        </form >
-    );
-}
 
 function usePremiumValidation(quote: LocalQuote) {
     const { config } = useConfig();

@@ -125,7 +125,7 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
             updated_at: new Date().toISOString()
         };
         await db.opportunities.add(newOpp);
-        await syncEngine.queueMutation('CRM_Oportunidades', id, sanitizeOpportunityForSync(newOpp));
+        await syncEngine.queueMutation('CRM_Oportunidades', id, sanitizeOpportunityForSync(newOpp), { isSnapshot: true });
 
         // Save Collaborators (Defensive)
         if (collaborators && collaborators.length > 0) {
@@ -164,7 +164,7 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
             };
 
             await db.quotes.add(newQuote);
-            await syncEngine.queueMutation('CRM_Cotizaciones', quoteId, newQuote);
+            await syncEngine.queueMutation('CRM_Cotizaciones', quoteId, newQuote, { isSnapshot: true });
 
             // Add items
             // Add items with calculated pricing
@@ -203,7 +203,7 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
             await db.quoteItems.bulkAdd(quoteItems);
             for (const qi of quoteItems) {
                 const { subtotal, ...qiData } = qi;
-                await syncEngine.queueMutation('CRM_CotizacionItems', qi.id, qiData);
+                await syncEngine.queueMutation('CRM_CotizacionItems', qi.id, qiData, { isSnapshot: true });
             }
         }
     };
@@ -405,7 +405,7 @@ export function useQuotes(opportunityId?: string) {
         }
 
         await db.quotes.add(newQuote);
-        await syncEngine.queueMutation('CRM_Cotizaciones', id, newQuote);
+        await syncEngine.queueMutation('CRM_Cotizaciones', id, newQuote, { isSnapshot: true });
 
         // Save items
         if (inheritedItems.length > 0) {
@@ -424,7 +424,7 @@ export function useQuotes(opportunityId?: string) {
             await db.quoteItems.bulkAdd(newItems);
             for (const ni of newItems) {
                 const { subtotal, ...niData } = ni;
-                await syncEngine.queueMutation('CRM_CotizacionItems', ni.id, niData);
+                await syncEngine.queueMutation('CRM_CotizacionItems', ni.id, niData, { isSnapshot: true });
             }
         }
 
@@ -609,7 +609,14 @@ export function useQuoteItems(quoteId?: string) {
         };
         await db.quoteItems.add(newItem);
         const { subtotal, ...itemData } = newItem;
-        await syncEngine.queueMutation('CRM_CotizacionItems', id, itemData);
+        
+        // Defensive check: Ensure required fields are not null for server constraints
+        if (!itemData.cotizacion_id || itemData.cotizacion_id === "null") {
+            console.error("[useQuoteItems] CRITICAL: Attempting to sync item with null cotizacion_id", itemData);
+            return;
+        }
+
+        await syncEngine.queueMutation('CRM_CotizacionItems', id, itemData, { isSnapshot: true });
 
         // Touch parent quote with opportunity_id
         const parentQuote = await db.quotes.get(quoteId);

@@ -39,7 +39,7 @@ export function useContacts(accountId?: string) {
         }
 
         await db.contacts.add(newContact);
-        await syncEngine.queueMutation('CRM_Contactos', id, newContact);
+        await syncEngine.queueMutation('CRM_Contactos', id, newContact, { isSnapshot: true });
         return id;
     };
 
@@ -65,14 +65,13 @@ export function useContacts(accountId?: string) {
         if (currentLocal) {
             const merged = { ...currentLocal, ...fullUpdates };
             await db.contacts.put(merged);
-            await syncEngine.queueMutation('CRM_Contactos', id, fullUpdates);
+            // ATENCIÓN: Usamos isSnapshot: true para asegurar que si el contacto no existe en el servidor
+            // (por ejemplo, si falló la creación inicial), se inserte con todos los campos obligatorios.
+            await syncEngine.queueMutation('CRM_Contactos', id, merged, { isSnapshot: true });
         } else {
-            // If not in Dexie, it probably came from a global server search.
-            // We must ensure the record exists in Dexie for the sync engine to track it.
-            // We assume updates contains enough info or we'll fetch it from the outbox/server logic later.
             const newRecord = { id, ...fullUpdates } as LocalContact;
             await db.contacts.put(newRecord);
-            await syncEngine.queueMutation('CRM_Contactos', id, fullUpdates);
+            await syncEngine.queueMutation('CRM_Contactos', id, newRecord, { isSnapshot: true });
         }
     };
 

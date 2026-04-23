@@ -178,7 +178,8 @@ export default function CreateOpportunityWizard() {
             comentarios: '',
             items: [],
             owner_user_id: ''
-        }
+        },
+        shouldUnregister: false
     });
 
     const searchParams = useSearchParams();

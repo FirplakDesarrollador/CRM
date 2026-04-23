@@ -193,6 +193,7 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
         formState: { errors, isDirty },
     } = useForm<AccountFormData>({
         resolver: zodResolver(accountSchema),
+        shouldUnregister: false,
         defaultValues: {
             nombre: account?.nombre || "",
             nit_base: account?.nit_base || "",

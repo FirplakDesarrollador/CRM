@@ -41,6 +41,7 @@ function ContactsContent() {
     });
     const [isCreating, setIsCreating] = useState(false);
     const [selectedAccountIdForCreate, setSelectedAccountIdForCreate] = useState<string>("");
+    const [accountSearchTerm, setAccountSearchTerm] = useState("");
     const [editingContact, setEditingContact] = useState<any>(undefined);
 
     // Deep linking for edit: Automatically fetch and open contact by ID from URL
@@ -182,33 +183,90 @@ function ContactsContent() {
         router.replace(queryString ? `${window.location.pathname}?${queryString}` : window.location.pathname, { scroll: false });
     };
 
+    // Filtered accounts for selection
+    const filteredAccounts = useMemo(() => {
+        if (!accounts) return [];
+        if (!accountSearchTerm) return accounts;
+        const term = accountSearchTerm.toLowerCase();
+        return accounts.filter((acc: any) => 
+            acc.nombre?.toLowerCase().includes(term) || 
+            acc.nit?.toLowerCase().includes(term)
+        );
+    }, [accounts, accountSearchTerm]);
+
     // --- VIEW: Create Contact Flow (Step 1: Select Account) ---
     if (isCreating && !selectedAccountIdForCreate) {
         return (
-            <div className="p-6">
-                <button
-                    onClick={() => setIsCreating(false)}
-                    className="mb-4 text-sm text-blue-600 hover:underline"
-                >
-                    ← Volver al listado
-                </button>
-                <h1 className="text-2xl font-bold mb-6">Selecciona una Cuenta</h1>
-                <p className="mb-4 text-gray-600">Para crear un contacto, primero selecciona la cuenta:</p>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {accounts?.map((acc: any) => (
-                        <button
-                            key={acc.id}
-                            onClick={() => setSelectedAccountIdForCreate(acc.id)}
-                            className="p-4 border rounded hover:bg-blue-50 text-left bg-white shadow-sm transition-colors"
-                        >
-                            <div className="flex items-center gap-2 mb-1">
-                                <Building size={16} className="text-blue-500" />
-                                <span className="font-bold">{acc.nombre}</span>
+            <div className="p-6 max-w-7xl mx-auto space-y-8">
+                <div className="flex flex-col gap-4">
+                    <button
+                        onClick={() => setIsCreating(false)}
+                        className="flex items-center gap-2 text-sm font-bold text-slate-500 hover:text-[#254153] transition-colors w-fit"
+                    >
+                        <Plus className="rotate-45" size={16} />
+                        Volver al listado
+                    </button>
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
+                        <div className="flex items-center gap-4">
+                            <div className="bg-[#254153] p-3 rounded-2xl text-white shadow-lg shadow-[#254153]/20">
+                                <Building size={32} />
                             </div>
-                            <div className="text-xs text-gray-500 ml-6">{acc.nit}</div>
-                        </button>
-                    ))}
+                            <div>
+                                <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">
+                                    Selecciona una Cuenta
+                                </h1>
+                                <p className="text-slate-500 font-medium">Elige la empresa vinculada al nuevo contacto</p>
+                            </div>
+                        </div>
+                    </div>
                 </div>
+
+                {/* Account Search Bar */}
+                <div className="relative group">
+                    <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400 group-focus-within:text-[#254153] transition-colors" size={20} />
+                    <input
+                        type="text"
+                        placeholder="Buscar cuenta por nombre o NIT..."
+                        value={accountSearchTerm}
+                        onChange={(e) => setAccountSearchTerm(e.target.value)}
+                        className="w-full pl-12 pr-4 py-4 border border-slate-200 rounded-2xl shadow-sm focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] bg-white transition-all outline-none text-slate-700 font-medium placeholder:text-slate-400"
+                    />
+                </div>
+
+                {filteredAccounts.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-20 text-slate-400 bg-slate-50/50 rounded-3xl border-2 border-dashed border-slate-200">
+                        <div className="bg-white p-4 rounded-full shadow-sm mb-4">
+                            <Building size={40} className="text-slate-300" />
+                        </div>
+                        <p className="text-lg font-bold text-slate-600">No se encontraron cuentas</p>
+                        <p className="text-sm">Prueba con otro término de búsqueda</p>
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {filteredAccounts.map((acc: any) => (
+                            <button
+                                key={acc.id}
+                                onClick={() => setSelectedAccountIdForCreate(acc.id)}
+                                className="group p-5 bg-white border border-slate-200 rounded-2xl hover:border-[#254153] hover:shadow-xl hover:shadow-slate-200/50 transition-all text-left relative flex flex-col gap-3"
+                            >
+                                <div className="flex items-center gap-3">
+                                    <div className="bg-slate-50 p-2 rounded-xl group-hover:bg-[#254153]/5 transition-colors">
+                                        <Building size={18} className="text-[#254153]" />
+                                    </div>
+                                    <span className="font-extrabold text-slate-900 group-hover:text-[#254153] transition-colors">{acc.nombre}</span>
+                                </div>
+                                <div className="flex items-center gap-2 text-xs font-bold text-slate-400 ml-10">
+                                    <span className="bg-slate-100 px-2 py-0.5 rounded uppercase tracking-wider">NIT: {acc.nit || 'Sin NIT'}</span>
+                                </div>
+                                <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <div className="bg-[#254153] text-white p-1.5 rounded-lg">
+                                        <Plus size={16} />
+                                    </div>
+                                </div>
+                            </button>
+                        ))}
+                    </div>
+                )}
             </div>
         );
     }
