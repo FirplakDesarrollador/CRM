@@ -125,3 +125,27 @@ Prevention Rule:
 
 Tags:
 [sync] [sql] [rpc] [ui-ux] [foreign-key] [escaping]
+
+## [Bug ID: 20260423-03]
+
+Context:
+`lib/hooks/usePedidos.ts`. Error de TypeScript al intentar pasar un posible valor `undefined` a `syncEngine.queueMutation`.
+
+What I Did:
+Corregí el error de tipo añadiendo un guard clause (if check).
+
+Problem:
+`Argument of type 'LocalPedidoItem | undefined' is not assignable to parameter of type 'Record<string, any>'.`
+
+Root Cause:
+El método `db.pedidoItems.get(id)` de Dexie puede devolver `undefined` si el registro no existe (o si hay una race condition), pero la función de sincronización requiere un objeto literal.
+
+Fix Applied:
+Se añadió un check `if (updated) { ... }` antes de llamar a la sincronización.
+
+Prevention Rule:
+1. **Defensive Database Reads**: Siempre que se lea de Dexie con `.get()`, se debe validar la existencia del objeto antes de procesarlo o pasarlo a funciones que esperan tipos no nulos (como `queueMutation`).
+2. **Type Safety en Hooks**: Revisar los retornos de promesas de base de datos en los hooks de negocio para asegurar que el flujo maneje estados nulos o indefinidos.
+
+Tags:
+[typescript] [dexie] [sync] [type-safety]

@@ -17,7 +17,8 @@
       "Bash(node -e:*)",
       "Bash(node scripts/diagnose-forcemanager.js:*)",
       "WebFetch(domain:apitracker.io)",
-      "Bash(git stash:*)"
+      "Bash(git stash:*)",
+      "Bash(git -C \"c:/Users/isaza/OneDrive/Documentos/CRM FIRPLAK/CRM\" ls-files .agents/workflows/ workflows/ directives/ execution/ docs/ .claude/)"
     ]
   }
 }
