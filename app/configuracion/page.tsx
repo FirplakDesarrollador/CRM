@@ -380,6 +380,52 @@ function ConfigPageContent() {
                                 <p className="text-sm font-bold text-emerald-900">Todo el contenido está sincronizado con la nube.</p>
                             </div>
                         )}
+
+                        {pendingCount > 0 && (
+                            <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 flex items-start gap-3">
+                                <RefreshCw className={cn("w-5 h-5 text-blue-600 shrink-0 mt-0.5", isSyncing && "animate-spin")} />
+                                <div className="space-y-1 w-full">
+                                    <p className="text-sm font-bold text-blue-900">
+                                        Hay {pendingCount} {pendingCount === 1 ? 'cambio pendiente' : 'cambios pendientes'} de sincronización
+                                    </p>
+                                    <p className="text-xs text-blue-700 leading-relaxed">
+                                        {isSyncing ? 'Sincronizando con la nube...' : isPaused ? 'La sincronización está pausada.' : 'Esperando a ser procesado en segundo plano.'}
+                                    </p>
+                                    
+                                    {/* Mostrar resumen rápido de lo pendiente */}
+                                    <div className="mt-3 bg-white/60 rounded-xl p-3 border border-blue-100/50">
+                                        <p className="text-xs font-bold text-blue-800 mb-2">En proceso:</p>
+                                        <ul className="space-y-1">
+                                            {outboxItems
+                                                .filter(i => i.field_name !== '_sync_metadata')
+                                                .slice(0, 3)
+                                                .map(item => (
+                                                    <li key={item.id} className="text-[10px] text-blue-700 flex justify-between items-center bg-white/50 px-2 py-1 rounded">
+                                                        <span>
+                                                            <span className="font-bold">{item.entity_type}</span> 
+                                                            <span className="opacity-70 mx-1">•</span> 
+                                                            {item.field_name}
+                                                        </span>
+                                                        <span className={cn(
+                                                            "uppercase font-bold text-[8px] px-1.5 py-0.5 rounded-full",
+                                                            item.status === 'FAILED' ? "bg-red-100 text-red-600" :
+                                                            item.status === 'SYNCING' ? "bg-blue-200 text-blue-800" :
+                                                            "bg-amber-100 text-amber-600"
+                                                        )}>
+                                                            {item.status}
+                                                        </span>
+                                                    </li>
+                                                ))}
+                                            {outboxItems.filter(i => i.field_name !== '_sync_metadata').length > 3 && (
+                                                <li className="text-[10px] text-blue-600/70 italic px-2 pt-1">
+                                                    + {outboxItems.filter(i => i.field_name !== '_sync_metadata').length - 3} elementos más...
+                                                </li>
+                                            )}
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -571,7 +617,7 @@ function ConfigPageContent() {
             </div>
 
             {/* Outbox Debug Table */}
-            {outboxItems.length > 0 && (
+            {outboxItems.filter(i => i.field_name !== '_sync_metadata').length > 0 && (
                 <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
                     <div className="p-6 border-b border-slate-100 flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
@@ -613,7 +659,9 @@ function ConfigPageContent() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-50">
-                                {outboxItems.map((item) => (
+                                {outboxItems
+                                    .filter(i => i.field_name !== '_sync_metadata')
+                                    .map((item) => (
                                     <tr key={item.id} className="hover:bg-slate-50/50 transition-colors">
                                         <td className="px-6 py-4">
                                             <span className="font-bold text-slate-900">{item.entity_type}</span>
