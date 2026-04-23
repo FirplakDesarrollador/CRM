@@ -53,3 +53,29 @@ router.replace(...);
 **Solución:** Actualizar las interfaces en `lib/db.ts` para que reflejen todos los campos opcionales que se manejan en la UI o en los procesos de cálculo.
 **Regra de Prevención:** Antes de usar un nuevo campo de SAP o de sincronización, validar que esté definido en la interfaz correspondiente en `lib/db.ts`.
 
+---
+
+## [Bug ID: 20260423-01]
+
+Context:
+`lib/sync.ts` y `app/pedidos/page.tsx`. Los pedidos de venta (pedidos) no aparecían en la versión desplegada tras un merge.
+
+What I Did:
+Diagnostiqué la falta de los pedidos y descubrí que no estaban siendo sincronizados por el `SyncEngine`.
+
+Problem:
+Los pedidos creados en otros dispositivos o ramas no se descargaban (pull) al navegador, resultando en una lista vacía. Además, los filtros de visibilidad ocultaban registros si las entidades relacionadas (oportunidades/cotizaciones) no se habían sincronizado aún.
+
+Root Cause:
+Omisión de las entidades `CRM_Pedidos` y `CRM_PedidoItems` en la configuración de sincronización incremental (`pullChanges` y `TABLE_PRIORITY`). Dependencia rígida de metadatos externos para el filtrado en la UI sin estrategias de fallback.
+
+Fix Applied:
+1. Se añadieron `CRM_Pedidos` y `CRM_PedidoItems` al ciclo de vida del `SyncEngine`.
+2. Se flexibilizó el filtro de visibilidad en `app/pedidos/page.tsx` para mostrar pedidos incluso si el `ownerId` no puede determinarse localmente (permitir por defecto en caso de duda).
+
+Prevention Rule:
+1. Al añadir un nuevo módulo o entidad, es OBLIGATORIO registrarla en `TABLE_PRIORITY` y `pullChanges` dentro de `lib/sync.ts` para asegurar persistencia multi-dispositivo.
+2. Los filtros de visibilidad en la UI deben ser resilientes a la "sincronización parcial". Siempre incluir un fallback (`if (!metadata) return true`) para evitar que los datos "desaparezcan" mientras se completa el proceso de descarga.
+
+Tags:
+[sync] [visibility] [data-loss] [dexie] [pedidos]

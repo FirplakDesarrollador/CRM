@@ -10,7 +10,9 @@ const TABLE_PRIORITY: Record<string, number> = {
     'CRM_Oportunidades_Colaboradores': 4,
     'CRM_Cotizaciones': 5,
     'CRM_CotizacionItems': 6,
-    'CRM_Actividades': 7
+    'CRM_Actividades': 7,
+    'CRM_Pedidos': 8,
+    'CRM_PedidoItems': 9
 };
 
 const MAX_RETRIES = 5;
@@ -1534,13 +1536,102 @@ export class SyncEngine {
                         mergedCount++;
                     }
                     if (itemsToPut.length > 0) await db.quoteItems.bulkPut(itemsToPut);
-                    console.log(`[Sync] Merged ${mergedCount} quote items (${skippedCount} with pending changes skipped).`);
-                }
-            } catch (qiErr: any) {
-                console.error('[Sync] Failed to pull quote items:', qiErr.message);
+                console.log(`[Sync] Merged ${mergedCount} quote items (${skippedCount} with pending changes skipped).`);
+            }
+        } catch (qiErr: any) {
+            console.error('[Sync] Failed to pull quote items:', qiErr.message);
+        }
+
+        // Pull Pedidos (CRM_Pedidos)
+        try {
+            let pedidosQuery = supabase
+                .from('CRM_Pedidos')
+                .select('*')
+                .eq('is_deleted', false);
+    
+            if (lastSync) {
+                pedidosQuery = pedidosQuery.gte('updated_at', lastSync);
+            } else {
+                pedidosQuery = pedidosQuery.order('updated_at', { ascending: false }).limit(3000);
             }
 
-            // Pull Activities (CRM_Actividades) - SMART MERGE with incremental sync
+            const { data: pedidos, error: pedidosError } = await pedidosQuery;
+    
+            if (pedidosError) throw pedidosError;
+    
+            if (pedidos && pedidos.length > 0) {
+                const pendingPedidoIds = new Set(
+                    (await db.outbox
+                        .where('entity_type').equals('CRM_Pedidos')
+                        .and(item => item.status === 'PENDING' || item.status === 'SYNCING')
+                        .toArray()
+                    ).map(item => item.entity_id)
+                );
+    
+                let mergedCount = 0;
+                let skippedCount = 0;
+                const pedidosToPut = [];
+    
+                for (const p of pedidos) {
+                    if (pendingPedidoIds.has(p.uuid_generado)) {
+                        skippedCount++;
+                        continue;
+                    }
+                    pedidosToPut.push(p);
+                    mergedCount++;
+                }
+                if (pedidosToPut.length > 0) await db.pedidos.bulkPut(pedidosToPut);
+                console.log(`[Sync] Merged ${mergedCount} pedidos (${skippedCount} skipped).`);
+            }
+        } catch (pErr: any) {
+            console.error('[Sync] Failed to pull pedidos:', pErr.message);
+        }
+
+        // Pull Pedido Items (CRM_PedidoItems)
+        try {
+            let pItemsQuery = supabase
+                .from('CRM_PedidoItems')
+                .select('*');
+    
+            if (lastSync) {
+                pItemsQuery = pItemsQuery.gte('created_at', lastSync);
+            } else {
+                pItemsQuery = pItemsQuery.order('created_at', { ascending: false }).limit(5000);
+            }
+
+            const { data: pItems, error: pItemsError } = await pItemsQuery;
+    
+            if (pItemsError) throw pItemsError;
+    
+            if (pItems && pItems.length > 0) {
+                const pendingPItemIds = new Set(
+                    (await db.outbox
+                        .where('entity_type').equals('CRM_PedidoItems')
+                        .and(item => item.status === 'PENDING' || item.status === 'SYNCING')
+                        .toArray()
+                    ).map(item => item.entity_id)
+                );
+    
+                let mergedCount = 0;
+                let skippedCount = 0;
+                const pItemsToPut = [];
+    
+                for (const pi of pItems) {
+                    if (pendingPItemIds.has(pi.id)) {
+                        skippedCount++;
+                        continue;
+                    }
+                    pItemsToPut.push(pi);
+                    mergedCount++;
+                }
+                if (pItemsToPut.length > 0) await db.pedidoItems.bulkPut(pItemsToPut);
+                console.log(`[Sync] Merged ${mergedCount} pedido items (${skippedCount} skipped).`);
+            }
+        } catch (piErr: any) {
+            console.error('[Sync] Failed to pull pedido items:', piErr.message);
+        }
+
+        // Pull Activities (CRM_Actividades) - SMART MERGE with incremental sync
             // Re-enabled to ensure activities persist across browser sessions
             try {
                 let query = supabase

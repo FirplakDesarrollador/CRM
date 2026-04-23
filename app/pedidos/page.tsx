@@ -76,12 +76,16 @@ function PedidosContent() {
                 const opp = oppsMap.get(opportunityId);
                 const ownerId = opp?.owner_user_id || p.created_by;
 
+                // Si no hay dueño identificado (ej. sync parcial), permitimos ver el pedido
+                // para evitar que desaparezca de la vista del usuario.
+                if (!ownerId) return true;
+
                 if (isVendedor) {
                     return ownerId === user.id;
                 }
                 if (isCoordinador) {
                     if (teamIds.length === 0) return ownerId === user.id;
-                    return teamIds.includes(ownerId || "");
+                    return teamIds.includes(ownerId);
                 }
                 return false;
             });
