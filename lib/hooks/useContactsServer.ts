@@ -67,7 +67,7 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
 
             if (!navigator.onLine) {
                 console.log("[useContactsServer] Device is offline. Falling back to local Dexie database...");
-                let localContacts = await db.contacts.toArray();
+                let localContacts = (await db.contacts.toArray()).filter(c => !c.is_deleted);
                 
                 // Seller restriction for offline
                 if ((isVendedor || userRole === 'COORDINADOR') && currentUserId) {

@@ -12,6 +12,7 @@ import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { cn } from "@/components/ui/utils";
 
+
 const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('es-CO', {
         style: 'currency',
@@ -87,8 +88,8 @@ function AccountsContent() {
 
     const SortIcon = ({ field }: { field: string }) => {
         if (sortField !== field) return <ArrowUpDown className="w-3 h-3 ml-1 opacity-20 group-hover:opacity-100 transition-opacity" />;
-        return sortAsc 
-            ? <ChevronUp className="w-3 h-3 ml-1 text-blue-600" /> 
+        return sortAsc
+            ? <ChevronUp className="w-3 h-3 ml-1 text-blue-600" />
             : <ChevronDown className="w-3 h-3 ml-1 text-blue-600" />;
     };
 
@@ -99,7 +100,7 @@ function AccountsContent() {
         setNivelPremiumFilter(nivelPremium);
         setStartDate(startDate);
         setEndDate(endDate);
-        
+
         setCurrentChannel(channelId);
         setCurrentNivel(nivelPremium);
     }, [setChannelFilter, setSubclassificationFilter, setNivelPremiumFilter, setStartDate, setEndDate]);
@@ -115,22 +116,22 @@ function AccountsContent() {
         const userQuery = searchParams.get('user') || null;
         if (query) setSearchTerm(query);
         if (userQuery) setAssignedUserId(userQuery);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // Sync to URL & SessionStorage
     useEffect(() => {
         const timer = setTimeout(() => {
             setSearchTerm(inputValue);
-            
+
             const params = new URLSearchParams(Array.from(searchParams.entries()));
             if (inputValue) params.set('search', inputValue); else params.delete('search');
             if (selectedUserId) params.set('user', selectedUserId); else params.delete('user');
             if (currentChannel) params.set('channel', currentChannel); else params.delete('channel');
             if (currentNivel) params.set('nivel', currentNivel); else params.delete('nivel');
-            
+
             if (editingAccount?.id) params.set('id', editingAccount.id); else params.delete('id');
-            
+
             const queryString = params.toString();
             if (queryString === searchParams.toString()) return;
 
@@ -205,7 +206,7 @@ function AccountsContent() {
             </div>
 
             <div className="pb-2 border-b border-slate-200">
-                <AccountFilters 
+                <AccountFilters
                     onFilterChange={handleFilterChange}
                     initialChannelId={currentChannel}
                     initialNivelPremium={currentNivel}
@@ -271,8 +272,8 @@ function AccountsContent() {
                             </thead>
                             <tbody className="divide-y divide-slate-100">
                                 {accounts.map(acc => (
-                                    <tr 
-                                        key={acc.id} 
+                                    <tr
+                                        key={acc.id}
                                         onClick={() => handleEdit(acc)}
                                         className="hover:bg-blue-50/30 transition-colors cursor-pointer group"
                                     >
@@ -324,8 +325,8 @@ function AccountsContent() {
                                                 <div className={cn(
                                                     "inline-flex items-center gap-1 px-2 py-0.5 rounded-full border shadow-sm",
                                                     acc.nivel_premium === 'PREMIUM' ? "bg-amber-50 text-amber-600 border-amber-200" :
-                                                    acc.nivel_premium === 'DESTACADO' ? "bg-slate-50 text-slate-600 border-slate-200" :
-                                                    "bg-orange-50 text-orange-600 border-orange-200"
+                                                        acc.nivel_premium === 'DESTACADO' ? "bg-slate-50 text-slate-600 border-slate-200" :
+                                                            "bg-orange-50 text-orange-600 border-orange-200"
                                                 )}>
                                                     <Medal className={cn("w-3 h-3", acc.nivel_premium === 'PREMIUM' ? "fill-amber-400" : acc.nivel_premium === 'DESTACADO' ? "fill-slate-300" : "fill-orange-400")} />
                                                     <span className="text-[10px] font-bold uppercase">{acc.nivel_premium}</span>

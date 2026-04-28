@@ -18,7 +18,7 @@ import packageJson from "../../package.json";
 /** Dangerous SQL keywords & patterns we never allow in inputs */
 const SQL_INJECTION_PATTERNS = [
     /('|%27)/i,                            // single quote / URL-encoded quote
-    /(--|#|%23)/,                          // SQL comments
+    /(--|%23)/,                          // SQL comments (removed literal # to allow it in passwords)
     /(\/\*|\*\/)/,                        // block comments
     /(;|%3B)/i,                           // semicolons
     /\b(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|EXEC|EXECUTE|UNION|WHERE|FROM|INTO|TABLE|DATABASE|TRUNCATE|DECLARE|CAST|CONVERT|CHAR|NCHAR|VARCHAR|NVARCHAR|WAITFOR|DELAY|SLEEP|BENCHMARK|OUTFILE|LOAD_FILE|XP_CMDSHELL)\b/i,
@@ -73,16 +73,7 @@ const loginSchema = z.object({
     password: z
         .string()
         .min(6, "Mínimo 6 caracteres")
-        .max(128, "Contraseña demasiado larga")
-        // Only printable ASCII — blocks null bytes, quotes, etc.
-        .regex(
-            /^[\x20-\x7E]+$/,
-            "La contraseña contiene caracteres no permitidos"
-        )
-        .refine(
-            (val) => !containsSQLInjection(val),
-            { message: "La contraseña contiene patrones no permitidos" }
-        ),
+        .max(128, "Contraseña demasiado larga"),
 });
 
 const MAX_ATTEMPTS = 3;
@@ -138,14 +129,29 @@ export default function LoginPage() {
         }
     }, [showCaptcha, refreshCaptcha]);
 
-    // Initial Login Form
     const {
         register,
         handleSubmit,
+        setValue,
         formState: { errors },
     } = useForm<z.infer<typeof loginSchema>>({
         resolver: zodResolver(loginSchema),
     });
+
+    const [rememberMe, setRememberMe] = useState(false);
+
+    // Load remembered credentials
+    useEffect(() => {
+        const savedEmail = localStorage.getItem("rememberedEmail");
+        const savedPassword = localStorage.getItem("rememberedPassword");
+        const savedRemember = localStorage.getItem("rememberMe") === "true";
+
+        if (savedRemember) {
+            setRememberMe(true);
+            if (savedEmail) setValue("email", savedEmail);
+            if (savedPassword) setValue("password", savedPassword);
+        }
+    }, [setValue]);
 
     // Recovery Form
     const {
@@ -201,13 +207,12 @@ export default function LoginPage() {
             if (!verifyCaptcha()) return;
         }
 
-        // ─ Runtime SQL injection guard (defense-in-depth beyond Zod) ─
         const cleanEmail = sanitizeInput(data.email);
-        const cleanPassword = sanitizeInput(data.password);
+        const cleanPassword = data.password; // Do not sanitize password (no trim, no removal of chars)
 
-        if (containsSQLInjection(cleanEmail) || containsSQLInjection(cleanPassword)) {
-            setError("Entrada no permitida: se detectó un patrón de seguridad inválido");
-            console.warn("[Security] SQL injection attempt blocked on login");
+        if (containsSQLInjection(cleanEmail)) {
+            setError("Entrada no permitida: se detectó un patrón de seguridad inválido en el email");
+            console.warn("[Security] SQL injection attempt blocked on login (email)");
             return;
         }
 
@@ -247,6 +252,17 @@ export default function LoginPage() {
             setFailedAttempts(0);
             setShowCaptcha(false);
             setCaptchaVerified(false);
+
+            // Handle "Remember Me"
+            if (rememberMe) {
+                localStorage.setItem("rememberedEmail", cleanEmail);
+                localStorage.setItem("rememberedPassword", cleanPassword);
+                localStorage.setItem("rememberMe", "true");
+            } else {
+                localStorage.removeItem("rememberedEmail");
+                localStorage.removeItem("rememberedPassword");
+                localStorage.setItem("rememberMe", "false");
+            }
 
             // Cache user ID for offline mode
             if (authData.user?.id) {
@@ -479,6 +495,19 @@ export default function LoginPage() {
                                     {errors.password && (
                                         <p className="text-red-600 text-xs md:text-sm mt-2 font-medium">{errors.password.message}</p>
                                     )}
+                                </div>
+
+                                <div className="flex items-center space-x-2 pt-1">
+                                    <input
+                                        type="checkbox"
+                                        id="rememberMe"
+                                        checked={rememberMe}
+                                        onChange={(e) => setRememberMe(e.target.checked)}
+                                        className="w-4 h-4 rounded border-slate-300 text-[#254153] focus:ring-[#254153] cursor-pointer"
+                                    />
+                                    <label htmlFor="rememberMe" className="text-sm font-medium text-slate-600 cursor-pointer select-none">
+                                        Recordar mis credenciales
+                                    </label>
                                 </div>
 
                                 {/* ── CAPTCHA SECTION ── */}

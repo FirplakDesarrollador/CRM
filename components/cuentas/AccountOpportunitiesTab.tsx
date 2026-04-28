@@ -1,15 +1,22 @@
 "use client";
 
+import { useOpportunitiesServer } from "@/lib/hooks/useOpportunitiesServer";
+import { useEffect } from "react";
 import { db } from "@/lib/db";
 import { useLiveQuery } from "dexie-react-hooks";
 import Link from "next/link";
 import { Briefcase, ChevronRight } from "lucide-react";
 
 export default function AccountOpportunitiesTab({ accountId }: { accountId: string }) {
-    const opportunities = useLiveQuery(
-        () => db.opportunities.where('account_id').equals(accountId).toArray(),
-        [accountId]
-    );
+    const { 
+        data: opportunities, 
+        loading,
+        setAccountIdFilter 
+    } = useOpportunitiesServer({ pageSize: 50 });
+
+    useEffect(() => {
+        setAccountIdFilter(accountId);
+    }, [accountId, setAccountIdFilter]);
 
     const phases = useLiveQuery(() => db.phases.toArray());
     const phaseMap = new Map(phases?.map(p => [p.id, p.nombre]));

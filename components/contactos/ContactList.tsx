@@ -1,7 +1,8 @@
 "use client";
 
 import { useContacts } from "@/lib/hooks/useContacts";
-import { useState } from "react";
+import { useContactsServer } from "@/lib/hooks/useContactsServer";
+import { useState, useEffect } from "react";
 import { ContactForm } from "./ContactForm";
 import { LocalContact } from "@/lib/db";
 import { Edit2, Trash2, Phone, Mail, User, Search } from "lucide-react";
@@ -12,7 +13,13 @@ interface ContactListProps {
 }
 
 export function ContactList({ accountId }: ContactListProps) {
-    const { contacts, deleteContact } = useContacts(accountId);
+    const { 
+        data: contacts, 
+        loading: isLoadingContacts, 
+        refresh 
+    } = useContactsServer({ accountId, pageSize: 100 });
+    
+    const { deleteContact } = useContacts(accountId);
     const [isEditing, setIsEditing] = useState(false);
     const [editingContact, setEditingContact] = useState<LocalContact | undefined>(undefined);
     const [searchTerm, setSearchTerm] = useState("");
@@ -35,6 +42,7 @@ export function ContactList({ accountId }: ContactListProps) {
     const handleSuccess = () => {
         setIsEditing(false);
         setEditingContact(undefined);
+        refresh(); // Force refresh to see new/updated data
     };
 
     const handleDeleteClick = (contact: LocalContact) => {
@@ -47,6 +55,7 @@ export function ContactList({ accountId }: ContactListProps) {
         setIsDeleting(true);
         try {
             await deleteContact(contactToDelete.id);
+            refresh(); // Refresh server list after local deletion
             setShowDeleteModal(false);
             setContactToDelete(null);
         } catch (error) {
@@ -105,13 +114,17 @@ export function ContactList({ accountId }: ContactListProps) {
                 </div>
             </div>
 
-            {!filteredContacts || filteredContacts.length === 0 ? (
+            {isLoadingContacts && (!contacts || contacts.length === 0) ? (
+                <div className="flex justify-center py-12">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#254153]"></div>
+                </div>
+            ) : (!contacts || contacts.length === 0) ? (
                 <div className="text-center py-8 text-gray-500 italic bg-slate-50 rounded-lg border border-dashed" data-testid="contacts-empty-state">
                     {searchTerm ? "No se encontraron contactos que coincidan con tu búsqueda." : "No hay contactos registrados."}
                 </div>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4" data-testid="contacts-grid">
-                    {filteredContacts.map(contact => (
+                    {filteredContacts?.map(contact => (
                         <div 
                             key={contact.id} 
                             data-testid={`contact-card-${contact.id}`}
