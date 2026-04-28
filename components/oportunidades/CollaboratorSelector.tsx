@@ -15,15 +15,17 @@ export interface CollaboratorEntry {
     rol: string;
     tempId?: string; // For UI keying before saving
     full_name?: string; // Display helper
+    isLocked?: boolean; // New: prevents editing or removal
 }
 
 interface CollaboratorSelectorProps {
     value?: CollaboratorEntry[];
     onChange: (collaborators: CollaboratorEntry[]) => void;
     ownerId?: string; // To exclude owner from list
+    disabled?: boolean; // New: globally disables all interactions
 }
 
-export function CollaboratorSelector({ value = [], onChange, ownerId }: CollaboratorSelectorProps) {
+export function CollaboratorSelector({ value = [], onChange, ownerId, disabled }: CollaboratorSelectorProps) {
     const { users, isLoading } = useUsers();
     const [collaborators, setCollaborators] = useState<CollaboratorEntry[]>(value);
 
@@ -39,6 +41,7 @@ export function CollaboratorSelector({ value = [], onChange, ownerId }: Collabor
     );
 
     const handleAddCollaborator = () => {
+        if (disabled) return;
         const newCollab: CollaboratorEntry = {
             usuario_id: '',
             porcentaje: 0,
@@ -51,12 +54,14 @@ export function CollaboratorSelector({ value = [], onChange, ownerId }: Collabor
     };
 
     const handleRemoveCollaborator = (index: number) => {
+        if (disabled || collaborators[index].isLocked) return;
         const updated = collaborators.filter((_, i) => i !== index);
         setCollaborators(updated);
         onChange(updated);
     };
 
     const handleUpdateCollaborator = (index: number, field: keyof CollaboratorEntry, val: any) => {
+        if (disabled || collaborators[index].isLocked) return;
         const updated = [...collaborators];
         updated[index] = { ...updated[index], [field]: val };
 
@@ -88,7 +93,7 @@ export function CollaboratorSelector({ value = [], onChange, ownerId }: Collabor
             </div>
 
             {collaborators.map((collab, index) => (
-                <Card key={collab.tempId || collab.usuario_id || index} className="p-3">
+                <Card key={collab.tempId || collab.usuario_id || index} className={cn("p-3", (collab.isLocked || disabled) && "bg-slate-50 border-slate-200")}>
                     <CardContent className="p-0 flex items-end gap-3">
                         <div className="flex-1 space-y-1">
                             <Label className="text-xs">Usuario</Label>
@@ -96,6 +101,7 @@ export function CollaboratorSelector({ value = [], onChange, ownerId }: Collabor
                                 className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                                 value={collab.usuario_id}
                                 onChange={(e) => handleUpdateCollaborator(index, 'usuario_id', e.target.value)}
+                                disabled={collab.isLocked || disabled}
                             >
                                 <option value="" disabled>Seleccionar usuario</option>
                                 {/* Include current value even if not in availableUsers (to allow viewing current selection) */}
@@ -122,7 +128,8 @@ export function CollaboratorSelector({ value = [], onChange, ownerId }: Collabor
                                     step="0.01"
                                     value={collab.porcentaje}
                                     onChange={(e) => handleUpdateCollaborator(index, 'porcentaje', parseFloat(e.target.value))}
-                                    className={cn(isOverLimit ? "border-red-500" : "")}
+                                    className={cn(isOverLimit ? "border-red-500" : "", (collab.isLocked || disabled) && "bg-slate-100")}
+                                    disabled={collab.isLocked || disabled}
                                 />
                                 <span className="absolute right-3 top-2 text-xs text-muted-foreground">%</span>
                             </div>
@@ -131,8 +138,9 @@ export function CollaboratorSelector({ value = [], onChange, ownerId }: Collabor
                         <Button
                             variant="ghost"
                             size="icon"
-                            className="text-destructive hover:text-destructive/90 mb-0.5"
+                            className={cn("text-destructive hover:text-destructive/90 mb-0.5", (collab.isLocked || disabled) && "opacity-0 pointer-events-none")}
                             onClick={() => handleRemoveCollaborator(index)}
+                            disabled={collab.isLocked || disabled}
                         >
                             <Trash2 className="h-4 w-4" />
                         </Button>
@@ -140,23 +148,25 @@ export function CollaboratorSelector({ value = [], onChange, ownerId }: Collabor
                 </Card>
             ))}
 
-            {isOverLimit && (
+            {isOverLimit && !disabled && (
                 <p className="text-sm text-destructive font-medium">
                     El total asignado a colaboradores supera el 100%. Por favor ajuste los porcentajes.
                 </p>
             )}
 
-            <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleAddCollaborator}
-                className="w-full border-dashed"
-                disabled={totalPercentage >= 100}
-            >
-                <UserPlus className="h-4 w-4 mr-2" />
-                Agregar Colaborador
-            </Button>
+            {!disabled && (
+                <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleAddCollaborator}
+                    className="w-full border-dashed"
+                    disabled={totalPercentage >= 100}
+                >
+                    <UserPlus className="h-4 w-4 mr-2" />
+                    Agregar Colaborador
+                </Button>
+            )}
         </div>
     );
 }

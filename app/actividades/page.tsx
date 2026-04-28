@@ -195,8 +195,16 @@ function ActivitiesContent() {
                 sessionStorage.removeItem('crm_actividades_state');
             }
 
-            const query = queryString ? `?${queryString}` : window.location.pathname;
-            router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
+            // Normalize and compare to prevent infinite router.replace loops
+            const currentParams = new URLSearchParams(searchParams.toString());
+            currentParams.sort();
+            const newParams = new URLSearchParams(queryString);
+            newParams.sort();
+
+            if (currentParams.toString() !== newParams.toString()) {
+                const query = queryString ? `?${queryString}` : window.location.pathname;
+                router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
+            }
         }, 500);
         return () => clearTimeout(timer);
     }, [view, searchQuery, filterType, filterClassification, filterSubclassification, filterUser, filterStatus, filterChannel, searchParams, router]);

@@ -15,6 +15,28 @@ const TABLE_PRIORITY: Record<string, number> = {
     'CRM_PedidoItems': 9
 };
 
+const SAP_MAPPING: Record<string, string> = {
+    'tipo_facturacion': 'EXTRA_Tipo de facturación',
+    'incoterm': 'EXTRA_Incoterm/Incoterm',
+    'notas_sap': 'EXTRA_Notas',
+    'fecha_facturacion': 'EXTRA_Fecha de facturación',
+    'orden_compra': 'EXTRA_Orden de compra/Purchase Order',
+    'fecha_minima_requerida': 'EXTRA_Fecha mínima requerida por comercial/cliente',
+    'formas_pago': 'EXTRA_Formas de pago',
+    'terminos_pago': 'EXTRA_Terminos de pago/Pay Terms',
+    'facturacion_electronica': 'EXTRA_Facturación Electrónica',
+    'es_muestra': 'EXTRA_¿Es una muestra?',
+    'aplica_contrato': 'EXTRA_¿Aplica contrato?',
+    'multa_incumplimiento': 'EXTRA_¿Multa por incumplimiento?',
+    'puerto_embarque': 'EXTRA_Puerto embarque/Shipment Port',
+    'puerto_destino': 'EXTRA_Puerto destino/Destination Port',
+    'via_transporte': 'EXTRA_Via/Type of transport',
+    'flete': 'EXTRA_Flete/Freight',
+    'seguro': 'EXTRA_Seguro/Insurance',
+    'cierre_facturacion': 'EXTRA_Cierre Facturación',
+    'oc_cot': 'EXTRA_OC/COT'
+};
+
 const MAX_RETRIES = 5;
 
 function getBackoffDelay(retryCount: number): number {
@@ -531,25 +553,38 @@ export class SyncEngine {
                         const missingOppIds = oppIdsToCheck.filter(id => !foundOppIds.has(id));
 
                         if (missingOppIds.length > 0) {
-                            console.warn(`[Sync] Self-healing: Found ${missingOppIds.length} missing opportunities referenced by activities:`, missingOppIds);
+                            // Check if these missing opportunities are currently in the outbox pending/syncing
+                            const pendingOpps = await db.outbox
+                                .where('entity_type').equals('CRM_Oportunidades')
+                                .and(i => i.status === 'PENDING' || i.status === 'SYNCING')
+                                .toArray();
+                            const pendingOppIds = new Set(pendingOpps.map(p => p.entity_id));
 
-                            // Nullify opportunity_id in the batch for activities referencing missing opportunities
-                            for (const update of actUpdates) {
-                                if (update.field === 'opportunity_id' && missingOppIds.includes(update.value)) {
-                                    console.log(`[Sync] Nullifying opportunity_id for activity ${update.id} (missing opp: ${update.value})`);
-                                    update.value = null;
-                                }
-                            }
+                            const trulyMissingOppIds = missingOppIds.filter(id => !pendingOppIds.has(id));
 
-                            // Also update local Dexie to avoid re-queuing with bad FK
-                            for (const actId of actEntityIds) {
-                                try {
-                                    const localAct = await db.activities.get(actId);
-                                    if (localAct?.opportunity_id && missingOppIds.includes(localAct.opportunity_id)) {
-                                        await db.activities.update(actId, { opportunity_id: undefined });
-                                        console.log(`[Sync] Updated local activity ${actId}: cleared opportunity_id`);
+                            if (trulyMissingOppIds.length > 0) {
+                                console.warn(`[Sync] Self-healing: Found ${trulyMissingOppIds.length} truly missing opportunities referenced by activities:`, trulyMissingOppIds);
+
+                                // Nullify opportunity_id in the batch for activities referencing missing opportunities
+                                for (const update of actUpdates) {
+                                    if (update.field === 'opportunity_id' && trulyMissingOppIds.includes(update.value)) {
+                                        console.log(`[Sync] Nullifying opportunity_id for activity ${update.id} (truly missing opp: ${update.value})`);
+                                        update.value = null;
                                     }
-                                } catch (e) { /* ignore */ }
+                                }
+
+                                // Also update local Dexie to avoid re-queuing with bad FK
+                                for (const actId of actEntityIds) {
+                                    try {
+                                        const localAct = await db.activities.get(actId);
+                                        if (localAct?.opportunity_id && trulyMissingOppIds.includes(localAct.opportunity_id)) {
+                                            await db.activities.update(actId, { opportunity_id: null });
+                                            console.log(`[Sync] Updated local activity ${actId}: cleared opportunity_id (replaced with null)`);
+                                        }
+                                    } catch (e) { 
+                                        console.warn(`[Sync] Error updating local activity ${actId} during heal:`, e);
+                                    }
+                                }
                             }
                         }
                     }
@@ -653,8 +688,30 @@ export class SyncEngine {
             return priorityA - priorityB;
         });
 
-        for (const [table, updates] of sortedTables) {
+        for (let [table, updates] of sortedTables) {
             try {
+                // 3.5 AUTO-MAPPING: Resolve internal field names to Supabase/SAP column names
+                if (table === 'CRM_Pedidos' || table === 'CRM_Cotizaciones') {
+                    updates = updates.map(u => {
+                        if (SAP_MAPPING[u.field]) {
+                            return { ...u, field: SAP_MAPPING[u.field] };
+                        }
+                        return u;
+                    });
+                }
+
+                // 3.6 AUTO-FILTER: Remove generated columns that cannot be updated
+                if (table === 'CRM_CotizacionItems') {
+                    const originalCount = updates.length;
+                    updates = updates.filter(u => u.field !== 'subtotal');
+                    if (updates.length < originalCount) {
+                        console.log(`[Sync] Filtered out 'subtotal' generated column from CRM_CotizacionItems batch`);
+                    }
+                }
+
+                // If filtering removed all updates for this table, skip it
+                if (updates.length === 0) continue;
+
                 // Clean up _sync_metadata from outbox ONLY (to prevent loops)
                 // BUT keep them in the RPC payload so the server sees the timestamps
                 const metadataIdsToRemove = pending
@@ -952,7 +1009,11 @@ export class SyncEngine {
             const badOutboxItems = await db.outbox.where('entity_id').equals(badContactId).and(i => i.entity_type === 'CRM_Contactos').toArray();
             if (badOutboxItems.length > 0) {
                 console.log(`[Sync-Heal] Cleaning up ${badOutboxItems.length} outbox items for bad contact.`);
-                await db.outbox.bulkDelete(badOutboxItems.map(i => i.id));
+                try {
+                    await db.outbox.bulkDelete(badOutboxItems.map(i => i.id));
+                } catch (dbErr) {
+                    console.error(`[Sync-Heal] Dexie failed to bulkDelete from outbox:`, dbErr);
+                }
             }
 
             // 2. Clear from local Dexie
@@ -963,13 +1024,13 @@ export class SyncEngine {
             console.error(`[Sync-Heal] Error resolving duplicate contact:`, e);
         }
     }
-
     /**
      * PULL: Download server data to local IndexedDB
      * Called on app initialization to ensure all browsers have the same data
      */
     private async pullChanges(_user: any) {
         console.log('[Sync] Pulling data from server...');
+        useSyncStore.getState().setIsLoadingData(true);
         const lastSync = useSyncStore.getState().lastSyncTime;
 
         try {
@@ -1422,6 +1483,47 @@ export class SyncEngine {
                 console.warn('[Sync] No opportunities returned from server (Length is 0 or undefined). Check RLS policies?');
             }
 
+            // CLEANUP: Remove locally cached opportunities that were deleted on server
+            try {
+                let deletedQuery = supabase
+                    .from('CRM_Oportunidades')
+                    .select('id')
+                    .eq('is_deleted', true)
+                    .limit(10000);
+
+                if (lastSync) deletedQuery = deletedQuery.gte('updated_at', lastSync);
+
+                const { data: deletedOpps, error: delError } = await deletedQuery;
+
+                if (!delError && deletedOpps && deletedOpps.length > 0) {
+                    const deletedIds = deletedOpps.map(o => o.id);
+                    await db.opportunities.bulkDelete(deletedIds);
+                    
+                    // Cleanup children locally
+                    await db.activities.where('opportunity_id').anyOf(deletedIds).delete();
+                    
+                    // Cleanup Quotes and their items
+                    const relatedQuotes = await db.quotes.where('opportunity_id').anyOf(deletedIds).toArray();
+                    const quoteIds = relatedQuotes.map(q => q.id);
+                    await db.quotes.where('opportunity_id').anyOf(deletedIds).delete();
+                    if (quoteIds.length > 0) {
+                        await db.quoteItems.where('cotizacion_id').anyOf(quoteIds).delete();
+                    }
+
+                    // Cleanup Pedidos and their items
+                    const relatedPedidos = await db.pedidos.where('opportunity_id').anyOf(deletedIds).toArray();
+                    const pedidoUuids = relatedPedidos.map(p => p.uuid_generado);
+                    await db.pedidos.where('opportunity_id').anyOf(deletedIds).delete();
+                    if (pedidoUuids.length > 0) {
+                        await db.pedidoItems.where('pedido_uuid').anyOf(pedidoUuids).delete();
+                    }
+
+                    console.log(`[Sync] Cleaned up ${deletedIds.length} deleted opportunities and all their related records (quotes, orders, activities) from local cache.`);
+                }
+            } catch (cleanErr) {
+                console.warn('[Sync] Failed to clean up deleted opportunities:', cleanErr);
+            }
+
             // Pull Quotes (CRM_Cotizaciones) - SMART MERGE
             try {
                 let quotesQuery = supabase
@@ -1717,6 +1819,16 @@ export class SyncEngine {
                                     }
                                 }
 
+                                // HEALING: If server version is missing opportunity_id but local version has it,
+                                // the previous sync bug might have nullified it. Restore it!
+                                if (!serverAct.opportunity_id && localAct.opportunity_id) {
+                                    console.warn(`[Sync-Heal] Found orphaned activity ${serverAct.id}. Restoring link to opportunity ${localAct.opportunity_id}...`);
+                                    mergedAct.opportunity_id = localAct.opportunity_id;
+                                    hasChanges = true;
+                                    // Queue a push to fix the server state
+                                    await this.queueMutation('CRM_Actividades', serverAct.id, { opportunity_id: localAct.opportunity_id });
+                                }
+
                                 if (hasChanges) {
                                     activitiesToPut.push(mergedAct);
                                 }
@@ -1740,6 +1852,8 @@ export class SyncEngine {
         } catch (err: any) {
             console.error('[Sync] Pull failed:', err.message);
             // Don't throw - allow push to continue even if pull fails
+        } finally {
+            useSyncStore.getState().setIsLoadingData(false);
         }
     }
 

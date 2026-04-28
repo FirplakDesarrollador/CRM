@@ -1,5 +1,4 @@
 ---
-name: bugs-knowhow-enforcer
 description: Enforces logging and validation of bugs using bugs-knowhow.md to prevent repeated errors and unsafe code.
 ---
 
@@ -30,7 +29,7 @@ bugs-knowhow.md = single source of truth for past bugs
 
 - Check if bugs-knowhow.md exists  
 - If NOT → create it  
-- If YES → read it بالكامل before coding  
+- If YES → read it before coding  
 
 ---
 

@@ -9,27 +9,28 @@ import { cn } from '@/components/ui/utils';
 export function PriceListUploader() {
     const [isUploading, setIsUploading] = useState(false);
     const [progress, setProgress] = useState(0);
-    const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
+    const [status, setStatus] = useState<'idle' | 'validating' | 'confirming' | 'uploading' | 'success' | 'error'>('idle');
     const [message, setMessage] = useState('');
     const [errorDetails, setErrorDetails] = useState<string[]>([]);
-
+    const [validationReport, setValidationReport] = useState<{ row: number; error: string; type: 'critical' | 'warning' }[]>([]);
+    const [pendingData, setPendingData] = useState<any[]>([]);
+    
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
 
         setIsUploading(true);
-        setStatus('idle');
-        setMessage('Leyendo archivo...');
+        setStatus('validating');
+        setMessage('Analizando estructura y datos...');
         setProgress(0);
         setErrorDetails([]);
+        setValidationReport([]);
 
         const reader = new FileReader();
 
         reader.onload = async (evt) => {
             try {
-                // Dynamically import xlsx only when needed
                 const XLSX = await import('xlsx');
-
                 const bstr = evt.target?.result;
                 const workbook = XLSX.read(bstr, { type: 'binary' });
                 const sheetName = workbook.SheetNames[0];
@@ -40,77 +41,71 @@ export function PriceListUploader() {
                     throw new Error("El archivo está vacío o no tiene datos legibles.");
                 }
 
-                // Validation
-                // Must have 'numero_articulo' (mapped from 'Número de artículo' or similar in reality, but implementation said structure matches required repopulation)
-                // The prompt said: "archivo ya tiene la estructura de datos requerida".
-                // So we assume keys match DB columns or we map them?
-                // The previous Excel had "Número de artículo" -> we mapped to "numero_articulo".
-                // Let's try to detect or normalize keys to lowercase/underscore if needed, OR assume user provides correct keys?
-                // Prompt: "ese archivo ya tienen la estructura de datos requerida para repopular"
-                // This implies keys might need to assume 1:1 match with DB columns OR we support the "standard" format we saw before?
-                // Let's support the Standard format we saw (Column A=numero_articulo) AND DB keys.
+                const report: { row: number; error: string; type: 'critical' | 'warning' }[] = [];
+                const finalRows: any[] = [];
 
-                // Let's Normalize Keys function
-                const normalizedData = jsonData.map((row: any) => {
-                    // Try to finding known keys by slight variations if needed, or trust input.
-                    // Let's implement robust mapping based on what we saw in the Excel inspection.
-                    // 'Número de artículo' -> numero_articulo
-                    // 'Descripción' -> descripcion
-                    // 'Precio base general' -> lista_base_cop
-                    // 'Distribución exterior' -> lista_base_exportaciones
-                    // But maybe the user will provide a CSV exported FROM the system or prepared for it?
-                    // Let's assume keys MIGHT be Spanish headers OR db columns.
-                    // Prioritize exact DB column match, fallback to Spanish headers.
-
-                    const getKey = (keys: string[]) => keys.find(k => row[k] !== undefined);
-
-                    return {
-                        numero_articulo: row['numero_articulo'] || row['Número de artículo'] || row['Articulo'] || row['Codigo'],
-                        descripcion: row['descripcion'] || row['Descripción'] || row['Nombre'],
-                        lista_base_cop: parseNumber(row['lista_base_cop'] || row['Precio base general'] || row['COP']),
-                        lista_base_exportaciones: parseNumber(row['lista_base_exportaciones'] || row['Distribución exterior'] || row['USD']),
-                        lista_base_obras: parseNumber(row['lista_base_obras'] || row['Obras nacional']),
-                        distribuidor_pvp_iva: parseNumber(row['distribuidor_pvp_iva'] || row['Distribuidor PVP+IVA']),
-                        pvp_sin_iva: parseNumber(row['pvp_sin_iva'] || row['PVP sin IVA']),
-                        descuentos_volumen: parseJSON(row['descuentos_volumen'] || row['Politica de descuentos'])
-                    };
-                });
-
-                // Validate Row 1
-                if (!normalizedData[0].numero_articulo) {
-                    throw new Error("No se encontró la columna 'numero_articulo' o 'Número de artículo'. Verifique la estructura.");
-                }
-
-                setMessage(`Procesando ${normalizedData.length} registros...`);
-
-                // Batch Upload
-                const BATCH_SIZE = 1000;
-                const total = normalizedData.length;
-                let processed = 0;
-
-                for (let i = 0; i < total; i += BATCH_SIZE) {
-                    const batch = normalizedData.slice(i, i + BATCH_SIZE);
-
-                    // Filter invalid rows (no ID)
-                    const validBatch = batch.filter((r: any) => r.numero_articulo);
-
-                    if (validBatch.length > 0) {
-                        const { error } = await supabase.rpc('admin_upsert_price_list', { prices: validBatch });
-                        if (error) throw error;
+                jsonData.forEach((row: any, index: number) => {
+                    const rowNumber = index + 2; // +2 because Excel starts at 1 and has header
+                    const normalizedRow: Record<string, any> = {};
+                    for (const [key, value] of Object.entries(row)) {
+                        normalizedRow[key.trim()] = value;
                     }
 
-                    processed += batch.length;
-                    setProgress(Math.round((processed / total) * 100));
+                    const articulo = normalizedRow['numero_articulo'] || normalizedRow['Número de artículo'] || normalizedRow['Articulo'] || normalizedRow['Codigo'];
+                    
+                    if (!articulo) {
+                        report.push({ row: rowNumber, error: "Código de artículo ausente", type: 'warning' });
+                        return;
+                    }
+
+                    // Numeric validation for critical prices
+                    const rawPrice = normalizedRow['lista_base_cop'] || normalizedRow['Precio base general'] || normalizedRow['COP'];
+                    const price = parseNumber(rawPrice);
+                    if (rawPrice && isNaN(parseFloat(String(rawPrice).replace(/[$,\s]/g, '').replace(',', '.')))) {
+                        report.push({ row: rowNumber, error: `Precio base con formato no numérico (${rawPrice}), se usará ${price}`, type: 'warning' });
+                    }
+
+                    // JSON validation for discounts
+                    const rawDiscounts = normalizedRow['descuentos_volumen'] || normalizedRow['Politica de descuentos'];
+                    let discounts = null;
+                    if (rawDiscounts) {
+                        try {
+                            discounts = typeof rawDiscounts === 'string' ? JSON.parse(rawDiscounts) : rawDiscounts;
+                        } catch (e) {
+                            report.push({ row: rowNumber, error: "JSON de descuentos inválido", type: 'warning' });
+                        }
+                    }
+
+                    finalRows.push({
+                        numero_articulo: articulo,
+                        descripcion: normalizedRow['descripcion'] || normalizedRow['Descripción'] || normalizedRow['Nombre'],
+                        lista_base_cop: price,
+                        lista_base_exportaciones: parseNumber(normalizedRow['lista_base_exportaciones'] || normalizedRow['Distribución exterior'] || normalizedRow['USD']),
+                        lista_base_obras: parseNumber(normalizedRow['lista_base_obras'] || normalizedRow['Obras nacional']),
+                        distribuidor_pvp_iva: parseNumber(normalizedRow['distribuidor_pvp_iva'] || normalizedRow['Distribuidor PVP+IVA']),
+                        pvp_sin_iva: parseNumber(normalizedRow['pvp_sin_iva'] || normalizedRow['PVP sin IVA']),
+                        descuentos_volumen: discounts
+                    });
+                });
+
+                if (finalRows.length === 0) {
+                    throw new Error("No se encontraron registros válidos para cargar.");
                 }
 
-                setStatus('success');
-                setMessage(`Se han actualizado ${total} productos correctamente.`);
+                setValidationReport(report);
+                setPendingData(finalRows);
+
+                if (report.length > 0) {
+                    setStatus('confirming');
+                    setMessage(`Se encontraron ${report.length} advertencias.`);
+                } else {
+                    await startUpload(finalRows);
+                }
 
             } catch (err: any) {
-                console.error("Upload error:", err);
+                console.error("Validation error:", err);
                 setStatus('error');
-                setMessage("Error al procesar el archivo.");
-                setErrorDetails([err.message || 'Error desconocido']);
+                setMessage(err.message || "Error al analizar el archivo.");
             } finally {
                 setIsUploading(false);
             }
@@ -119,11 +114,55 @@ export function PriceListUploader() {
         reader.readAsBinaryString(file);
     };
 
+    const startUpload = async (data: any[]) => {
+        setIsUploading(true);
+        setStatus('uploading');
+        setProgress(0);
+
+        try {
+            const BATCH_SIZE = 500;
+            const total = data.length;
+            let processed = 0;
+
+            for (let i = 0; i < total; i += BATCH_SIZE) {
+                const batch = data.slice(i, i + BATCH_SIZE);
+                const { error } = await supabase.rpc('admin_upsert_price_list', { prices: batch });
+                if (error) throw error;
+
+                processed += batch.length;
+                setProgress(Math.round((processed / total) * 100));
+                setMessage(`Subiendo... ${processed} de ${total} registros`);
+            }
+
+            setStatus('success');
+            setMessage(`Se han actualizado ${total} productos correctamente.`);
+        } catch (err: any) {
+            console.error("Upload error:", err);
+            setStatus('error');
+            setMessage("Error al subir los datos a la base de datos.");
+            setErrorDetails([err.message || 'Error desconocido']);
+        } finally {
+            setIsUploading(false);
+        }
+    };
+
     const parseNumber = (val: any) => {
         if (typeof val === 'number') return val;
         if (typeof val === 'string') {
-            // Remove $ , spaces
-            const clean = val.replace(/[$,\s]/g, '');
+            // Remove $ and spaces
+            let clean = val.replace(/[$\s]/g, '');
+            // Check if it uses comma as decimal separator
+            const lastComma = clean.lastIndexOf(',');
+            const lastDot = clean.lastIndexOf('.');
+            
+            if (lastComma > lastDot) {
+                // Comma is the decimal separator: remove dots, replace comma with dot
+                clean = clean.replace(/\./g, '').replace(',', '.');
+            } else if (lastDot > lastComma && lastComma !== -1) {
+                 // Dot is decimal, comma is thousands: remove commas
+                 clean = clean.replace(/,/g, '');
+            }
+
             const parsed = parseFloat(clean);
             return isNaN(parsed) ? 0 : parsed;
         }
@@ -165,7 +204,7 @@ export function PriceListUploader() {
             </div>
 
             <div className="bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl p-8 text-center transition-colors hover:bg-slate-100/50">
-                {isUploading ? (
+                {isUploading || status === 'uploading' ? (
                     <div className="space-y-4">
                         <Loader2 className="w-10 h-10 text-blue-600 animate-spin mx-auto" />
                         <p className="text-slate-600 font-medium">{message}</p>
@@ -173,6 +212,41 @@ export function PriceListUploader() {
                             <div className="bg-blue-600 h-2.5 rounded-full transition-all duration-300" style={{ width: `${progress}%` }}></div>
                         </div>
                         <p className="text-xs text-slate-400">{progress}% Completado</p>
+                    </div>
+                ) : status === 'confirming' ? (
+                    <div className="space-y-6">
+                        <AlertCircle className="w-12 h-12 text-amber-500 mx-auto" />
+                        <div>
+                            <p className="text-slate-900 font-bold text-lg">Revisión de Datos</p>
+                            <p className="text-slate-600 text-sm">Se encontraron advertencias en el archivo. Se cargarán <strong>{pendingData.length}</strong> registros válidos.</p>
+                        </div>
+
+                        <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 max-h-48 overflow-y-auto text-left">
+                            <p className="text-xs font-bold text-amber-800 mb-2 uppercase tracking-wider">Detalle de Advertencias:</p>
+                            <ul className="space-y-1.5">
+                                {validationReport.map((item, i) => (
+                                    <li key={i} className="text-[11px] text-amber-700 flex gap-2">
+                                        <span className="font-bold shrink-0">Fila {item.row}:</span>
+                                        <span>{item.error}</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+
+                        <div className="flex items-center justify-center gap-4">
+                            <button
+                                onClick={() => setStatus('idle')}
+                                className="bg-slate-100 text-slate-700 px-6 py-2 rounded-xl text-sm font-bold hover:bg-slate-200 transition-all"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={() => startUpload(pendingData)}
+                                className="bg-blue-600 text-white px-6 py-2 rounded-xl text-sm font-bold shadow-md hover:bg-blue-700 transition-all"
+                            >
+                                Confirmar y Cargar
+                            </button>
+                        </div>
                     </div>
                 ) : status === 'success' ? (
                     <div className="space-y-4">

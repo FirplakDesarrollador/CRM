@@ -3,7 +3,7 @@
 import { useOpportunities, useQuotes, useQuoteItems } from "@/lib/hooks/useOpportunities";
 import { DetailHeader } from "@/components/ui/DetailHeader";
 import { useState, useEffect } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { FileText, Plus, AlertCircle, Check, Trash2, Loader2, Truck, Package, Building, ChevronRight, TrendingUp, User, Users } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
@@ -29,13 +29,15 @@ import { LossReasonModal } from "@/components/oportunidades/LossReasonModal";
 import { CollaboratorsTab } from "@/components/oportunidades/CollaboratorsTab";
 import { AssignedTab } from "@/components/oportunidades/AssignedTab";
 import { DollarSign } from "lucide-react";
+import { useSyncStore } from "@/lib/stores/useSyncStore";
 
 export default function OpportunityDetailPage() {
     const params = useParams();
     const router = useRouter();
     const id = params.id as string;
     const { opportunities, deleteOpportunity } = useOpportunities();
-    const { role: userRole } = useCurrentUser();
+    const { user: currentUser, role: userRole } = useCurrentUser();
+    const setIsLoadingData = useSyncStore(state => state.setIsLoadingData);
 
     const phases = useLiveQuery(() => db.phases.toArray());
     const phaseMap = new Map(phases?.map(p => [p.id, p.nombre]));
@@ -55,6 +57,7 @@ export default function OpportunityDetailPage() {
                 }
                 console.log(`[JIT Sync] Opportunity ${id} not found locally. Fetching from server...`);
                 setIsFetchingServer(true);
+                setIsLoadingData(true);
                 try {
                     // Fetch Opportunity
                     const { data: oppData, error: oppError } = await supabase
@@ -90,6 +93,7 @@ export default function OpportunityDetailPage() {
                     setServerOpportunity('NOT_FOUND');
                 } finally {
                     setIsFetchingServer(false);
+                    setIsLoadingData(false);
                 }
             }
         };
@@ -97,7 +101,17 @@ export default function OpportunityDetailPage() {
         fetchFromServer();
     }, [id, opportunity, opportunities, isFetchingServer, serverOpportunity]);
 
-    const [activeTab, setActiveTab] = useState<'resumen' | 'colaboradores' | 'cotizaciones' | 'productos' | 'actividades' | 'asignado'>('resumen');
+    const searchParams = useSearchParams();
+    const initialTab = searchParams.get('tab') as any;
+    const [activeTab, setActiveTab] = useState<'resumen' | 'colaboradores' | 'cotizaciones' | 'productos' | 'actividades' | 'asignado'>(initialTab || 'resumen');
+
+    // Sincronizar pestaña con parámetro de URL si cambia
+    useEffect(() => {
+        const tab = searchParams.get('tab');
+        if (tab && ['resumen', 'colaboradores', 'cotizaciones', 'productos', 'actividades', 'asignado'].includes(tab)) {
+            setActiveTab(tab as any);
+        }
+    }, [searchParams]);
     
     // Save state for cross-module restoration
     useEffect(() => {
@@ -120,7 +134,7 @@ export default function OpportunityDetailPage() {
         try {
             await deleteOpportunity(id);
             setIsDeleteModalOpen(false); // Close modal before navigation
-            router.push("/oportunidades");
+            router.push("/oportunidades?view=list");
         } catch (error) {
             console.error("Error deleting opportunity:", error);
             setIsDeleting(false);
@@ -128,14 +142,8 @@ export default function OpportunityDetailPage() {
         }
     };
 
-    if (isFetchingServer) {
-        return (
-            <div className="min-h-screen bg-slate-50 flex items-center justify-center flex-col gap-4">
-                <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
-                <p className="text-slate-500 font-medium">Buscando en el servidor...</p>
-            </div>
-        );
-    }
+    // Note: Splash screen removed to allow non-blocking navigation.
+    // Progress is now shown via the global LoadingOverlay.
 
     if (!opportunity) {
         if (serverOpportunity === 'NOT_FOUND') {
@@ -172,7 +180,7 @@ export default function OpportunityDetailPage() {
                 }
                 backHref="/oportunidades?view=list"
                 actions={[
-                    ...(userRole === 'ADMIN' || userRole === 'COORDINADOR' ? [{
+                    ...(userRole === 'ADMIN' || userRole === 'COORDINADOR' || opportunity.owner_user_id === currentUser?.id || opportunity.created_by === currentUser?.id ? [{
                         label: "Eliminar Oportunidad",
                         icon: Trash2,
                         variant: 'danger' as const,
@@ -227,7 +235,7 @@ export default function OpportunityDetailPage() {
                 )}
 
                 {activeTab === 'actividades' && (
-                    <ActivitiesTab opportunityId={id} />
+                    <ActivitiesTab opportunityId={id} accountId={opportunity?.account_id} />
                 )}
 
                 {(userRole === 'ADMIN' || userRole === 'COORDINADOR') && activeTab === 'asignado' && (
@@ -1355,7 +1363,7 @@ function QuotesTab({ opportunityId, currency }: { opportunityId: string, currenc
     );
 }
 
-function ActivitiesTab({ opportunityId }: { opportunityId: string }) {
+function ActivitiesTab({ opportunityId, accountId }: { opportunityId: string, accountId?: string }) {
     const { activities, createActivity, updateActivity, toggleComplete } = useActivities({ opportunity_id: opportunityId });
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedActivity, setSelectedActivity] = useState<LocalActivity | null>(null);
@@ -1510,9 +1518,11 @@ function ActivitiesTab({ opportunityId }: { opportunityId: string }) {
                     }}
                     opportunities={opportunities}
                     initialOpportunityId={opportunityId}
+                    initialAccountId={accountId}
                     initialData={selectedActivity}
                 />
             )}
+
         </div>
     );
 }

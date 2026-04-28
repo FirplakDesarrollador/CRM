@@ -68,38 +68,72 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         [relatedAccount?.id]
     );
 
+    const [resolvedAccountName, setResolvedAccountName] = useState<string>("");
     const opportunityAccountRef = useRef<string | null>(null);
 
-    // Auto-fill account_id when opportunity changes
     useEffect(() => {
         const fillAccount = async () => {
             if (!watchedOpportunityId) return;
 
-            // 1. Try local cache
+            let accountId = null;
+
+            // 1. Try local cache for Opportunity
             const localOpp = await db.opportunities.get(watchedOpportunityId);
             if (localOpp?.account_id) {
-                opportunityAccountRef.current = localOpp.account_id;
-                setValue('account_id', localOpp.account_id, { shouldDirty: true });
-                return;
-            }
-
-            // 2. Fallback to Supabase if not found locally
-            if (navigator.onLine) {
-                const { data, error } = await supabase
+                accountId = localOpp.account_id;
+            } else if (navigator.onLine) {
+                // 2. Fallback to Supabase for Opportunity
+                const { data } = await supabase
                     .from('CRM_Oportunidades')
                     .select('account_id')
                     .eq('id', watchedOpportunityId)
                     .maybeSingle();
+                if (data?.account_id) accountId = data.account_id;
+            }
 
-                if (!error && data?.account_id) {
-                    opportunityAccountRef.current = data.account_id;
-                    setValue('account_id', data.account_id, { shouldDirty: true });
+            if (accountId) {
+                opportunityAccountRef.current = accountId;
+                setValue('account_id', accountId, { shouldDirty: true });
+
+                // Resolve account name independently
+                const localAcc = await db.accounts.get(accountId);
+                if (localAcc) {
+                    setResolvedAccountName(localAcc.nombre);
+                } else if (navigator.onLine) {
+                    const { data } = await supabase
+                        .from('CRM_Cuentas')
+                        .select('nombre')
+                        .eq('id', accountId)
+                        .maybeSingle();
+                    if (data?.nombre) setResolvedAccountName(data.nombre);
                 }
             }
         };
 
         fillAccount();
     }, [watchedOpportunityId, setValue]);
+
+    // Pre-resolve initial account name
+    useEffect(() => {
+        if (initialAccountId) {
+            db.accounts.get(initialAccountId).then(acc => {
+                if (acc) setResolvedAccountName(acc.nombre);
+            });
+        }
+    }, [initialAccountId]);
+
+    // Sync props to form if they change after mount (e.g. late loading from parent)
+    useEffect(() => {
+        if (initialOpportunityId && !getValues('opportunity_id')) {
+            setValue('opportunity_id', initialOpportunityId);
+        }
+    }, [initialOpportunityId, setValue, getValues]);
+
+    useEffect(() => {
+        if (initialAccountId && !getValues('account_id')) {
+            setValue('account_id', initialAccountId);
+        }
+    }, [initialAccountId, setValue, getValues]);
 
     const [msConnected, setMsConnected] = useState<boolean>(false);
     const [isTeamsMeeting, setIsTeamsMeeting] = useState<boolean>(!!initialData?.teams_meeting_url);
@@ -1564,6 +1598,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                         <label className="text-xs font-bold text-slate-500 uppercase">Cuenta Relacionada</label>
                         <AccountCombobox
                             value={watch('account_id')}
+                            initialLabel={resolvedAccountName}
                             onChange={(val) => {
                                 setValue('account_id', val, { shouldDirty: true, shouldValidate: true });
                                 // Logic: Clear opportunity if the new account doesn't match the current opportunity's account

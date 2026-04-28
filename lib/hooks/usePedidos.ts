@@ -173,7 +173,9 @@ export function usePedidos(cotizacionId?: string) {
                 if (currentItem.cantidad !== updatedItemDef.cantidad) {
                     await db.pedidoItems.update(currentItem.id, { cantidad: updatedItemDef.cantidad });
                     const updated = await db.pedidoItems.get(currentItem.id);
-                    await syncEngine.queueMutation('CRM_PedidoItems', currentItem.id, updated);
+                    if (updated) {
+                        await syncEngine.queueMutation('CRM_PedidoItems', currentItem.id, updated);
+                    }
                 }
                 remainingToSave = remainingToSave.filter(i => i.producto_id !== currentItem.producto_id);
             } else {

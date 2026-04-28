@@ -125,3 +125,165 @@ Prevention Rule:
 
 Tags:
 [sync] [sql] [rpc] [ui-ux] [foreign-key] [escaping]
+
+## [Bug ID: 20260423-03]
+
+Context:
+`lib/hooks/usePedidos.ts`. Error de TypeScript al intentar pasar un posible valor `undefined` a `syncEngine.queueMutation`.
+
+What I Did:
+Corregí el error de tipo añadiendo un guard clause (if check).
+
+Problem:
+`Argument of type 'LocalPedidoItem | undefined' is not assignable to parameter of type 'Record<string, any>'.`
+
+Root Cause:
+El método `db.pedidoItems.get(id)` de Dexie puede devolver `undefined` si el registro no existe (o si hay una race condition), pero la función de sincronización requiere un objeto literal.
+
+Fix Applied:
+Se añadió un check `if (updated) { ... }` antes de llamar a la sincronización.
+
+Prevention Rule:
+1. **Defensive Database Reads**: Siempre que se lea de Dexie con `.get()`, se debe validar la existencia del objeto antes de procesarlo o pasarlo a funciones que esperan tipos no nulos (como `queueMutation`).
+2. **Type Safety en Hooks**: Revisar los retornos de promesas de base de datos en los hooks de negocio para asegurar que el flujo maneje estados nulos o indefinidos.
+
+Tags:
+
+---
+
+## [Bug ID: 20260423-04]
+
+Context:
+`components/config/PriceListUploader.tsx`. Fallo en la importación de precios desde Excel.
+
+What I Did:
+Implementé limpieza de cabeceras y un sistema de validación de números sensible a la configuración regional (Colombia).
+
+Problem:
+Los precios se cargaban como 0 o fallaba el mapeo de columnas a pesar de que el archivo Excel parecía correcto.
+
+Root Cause:
+1. **Espacios en Cabeceras**: Los nombres de las columnas en Excel tenían espacios invisibles (ej: `"Número de artículo "`), lo que impedía que `normalizedRow['Número de artículo']` encontrara el valor.
+2. **Formato Numérico Local**: Los archivos en Colombia usan puntos para miles y comas para decimales (o viceversa dependiendo de la exportación). Un `parseFloat` simple no manejaba correctamente strings como `"1.250.000,00"`.
+
+Fix Applied:
+1. Se aplicó `.trim()` a todas las llaves (keys) durante el mapeo de filas de Excel.
+2. Se implementó una función `parseNumber` robusta que detecta dinámicamente si la coma o el punto es el separador decimal comparando su última posición en la cadena.
+
+Prevention Rule:
+1. **Excel Header Sanitization**: Siempre aplicar `.trim()` a las cabeceras de archivos externos (Excel/CSV) antes de intentar mapearlas a objetos de negocio.
+2. **Locale-Aware Number Parsing**: En aplicaciones para el mercado latinoamericano, nunca usar `parseFloat` directo sobre inputs de texto sin antes normalizar los separadores de miles y decimales.
+
+Tags:
+[excel] [parsing] [localization] [sanitization]
+
+## [Bug ID: 20260423-05]
+
+Context:
+Edición de código con `multi_replace_file_content` en `PriceListUploader.tsx`.
+
+What I Did:
+Intenté realizar múltiples ediciones en un solo paso y borré accidentalmente la cabecera de una función.
+
+Problem:
+El código quedó con un error de sintaxis ("Expression expected") porque la declaración de `const handleFileUpload = ...` desapareció del archivo.
+
+Root Cause:
+Error de alineación en el bloque de `TargetContent`. Al reemplazar bloques grandes, es fácil omitir o incluir accidentalmente una línea de cierre o apertura si no se verifica el diff inmediatamente.
+
+Fix Applied:
+Restauración manual de la firma de la función mediante `replace_file_content`.
+
+Prevention Rule:
+1. **Post-Edit Verification**: Tras una edición masiva (`multi_replace`), es MANDATORIO realizar un `view_file` del área afectada para confirmar que las firmas de las funciones y los cierres de llaves sigan intactos.
+2. **Chunk Granularity**: Preferir reemplazos más pequeños y específicos sobre reemplazos de bloques gigantescos que incluyan lógica de control de flujo.
+
+Tags:
+[tool-usage] [syntax-error] [refactoring]
+
+## [Lección General: Limpieza de Esquema]
+
+Context:
+Optimización de tablas en Supabase (`CRM_Pedidos`, `CRM_ListaDePrecios`).
+
+Observation:
+Columnas que parecen "huérfanas" o "legacy" según el código actual (ej: `company`, `opportunity`, `fCreado`) suelen contener datos históricos críticos de migraciones previas o campos necesarios para integraciones de terceros (SAP).
+
+Prevention Rule:
+**Data-First Auditing**: Nunca eliminar una columna basándose solo en su falta de uso en el código fuente. Siempre ejecutar una consulta SQL para verificar si hay datos poblados (`count(*) where col is not null`) y validar si son parte de un flujo de sincronización externo antes de proponer un `DROP COLUMN`.
+
+Tags:
+[database] [migration] [data-integrity] [schema]
+
+---
+
+## [Bug ID: 20260428-01]
+
+Context:
+`AccountCombobox.tsx`, `OpportunityCombobox.tsx`. Visualización de registros seleccionados que no están en la primera página de resultados del servidor.
+
+What I Did:
+Intenté resolver el nombre de la cuenta usando solo la lista devuelta por `useAccountsServer`.
+
+Problem:
+Si el ID de la cuenta/oportunidad seleccionada no estaba entre los primeros 20 resultados (pageSize), el componente mostraba "Seleccione una cuenta..." o quedaba vacío, a pesar de que el valor estaba presente en el formulario.
+
+Root Cause:
+Los hooks de servidor (`useAccountsServer`) están paginados. El componente visual realizaba un `.find()` sobre los datos actuales, ignorando que el registro seleccionado podía estar en páginas posteriores o no haber sido cargado aún.
+
+Fix Applied:
+1. Se añadió la prop `initialLabel` para permitir al padre pasar el nombre si ya lo conoce.
+2. Se implementó una resolución reactiva que prioriza el `initialLabel` y, de forma secundaria, busca en la lista cargada.
+
+Prevention Rule:
+**Combobox Pagination Support**: Cuando se use un Combobox paginado con datos del servidor, NUNCA depender únicamente de la lista local de resultados para mostrar la etiqueta del valor seleccionado. Siempre se debe permitir al componente recibir una etiqueta inicial (`initialLabel`) o realizar un fetch puntual por ID para resolver el nombre del registro seleccionado si no está en la página actual.
+
+Tags:
+[ui] [combobox] [pagination] [server-state]
+
+## [Bug ID: 20260428-02]
+
+Context:
+`AccountCombobox.tsx`. Implementación de fetch asíncrono dentro de un componente de UI genérico.
+
+What I Did:
+Añadí un `useEffect` con un bloque `try/catch` que consultaba Supabase/Dexie por ID cada vez que cambiaba el valor.
+
+Problem:
+El componente se quedaba en un estado de "Cargando..." infinito si el fetch tardaba, o mostraba "Error al cargar" si había problemas de red o RLS, degradando la UX. Además, causaba re-renders innecesarios.
+
+Root Cause:
+Intentar que un componente de UI genérico (como un selector) sea responsable de su propia resolución de datos complejos rompe el principio de responsabilidad única y genera estados de carga difíciles de gestionar. Además, las llamadas a Supabase desde el cliente pueden fallar por políticas de RLS no previstas en tablas relacionadas.
+
+Fix Applied:
+Se eliminó la lógica de fetch interno y se delegó la resolución del nombre al componente padre (Modal), que ya tiene el contexto necesario. El combobox pasó a ser puramente visual/reactivo.
+
+Prevention Rule:
+**Context-Driven Data Resolution**: Evitar que los componentes de selección (Combobox/Select) realicen peticiones de red internas para resolver nombres por ID. La resolución de datos debe ocurrir en el contenedor (Page/Modal) o a través de hooks de estado global, pasando la información resuelta al componente visual mediante props (`initialLabel`). Esto centraliza el manejo de errores y estados de carga.
+
+Tags:
+[ux] [architecture] [async-loading] [ui-components]
+
+## [Bug ID: 20260428-03]
+
+Context:
+`CreateActivityModal.tsx` y `app/oportunidades/[id]/page.tsx`. Sincronización de datos Oportunidad -> Cuenta.
+
+What I Did:
+Pasaba solo el `accountId` al modal y esperaba que este resolviera el resto.
+
+Problem:
+Incluso pasando el ID correcto, el usuario percibía lentitud o veía campos vacíos porque el sistema no aprovechaba que la relación Oportunidad-Cuenta ya estaba disponible en la página de origen.
+
+Root Cause:
+Falta de "puenteo" de datos. Al tener la oportunidad cargada en la página de detalles, ya disponemos de su `account_id` y potencialmente de su nombre. Ignorar esta información y obligar a cada subcomponente a "redescubrirla" genera una experiencia de usuario fragmentada.
+
+Fix Applied:
+Se modificó el flujo para que el modal resuelva de forma agresiva y secuencial: primero busca la oportunidad, luego toma su cuenta y nombre, y lo inyecta todo en el estado local antes de que el usuario interactúe.
+
+Prevention Rule:
+**Relational Data Bridging**: Al navegar entre entidades relacionadas (ej. de Oportunidad a Actividad), pasar siempre el mayor contexto posible (IDs y nombres) a los subcomponentes o modales. Si el sistema ya conoce una relación, debe "regalarla" a los componentes hijos para evitar latencia visual y redundancia de datos.
+
+Tags:
+[ux] [performance] [data-flow] [crm-logic]
+

@@ -94,7 +94,7 @@ export default function QuoteEditorPage() {
                     if (activeSection === 'sap') {
                         setActiveSection('items');
                     } else {
-                        router.push(`/oportunidades/${oppId}`);
+                        router.push(`/oportunidades/${oppId}?tab=cotizaciones`);
                     }
                 }}
                 actions={[
