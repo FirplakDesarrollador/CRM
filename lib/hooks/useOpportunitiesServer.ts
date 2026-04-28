@@ -324,6 +324,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                     created_at,
                     fecha_cierre_estimada,
                     segmento_id,
+                    created_by,
                     ${accountRelation},
                     fase_data:CRM_FasesOportunidad(nombre),
                     estado_data:CRM_EstadosOportunidad(nombre),

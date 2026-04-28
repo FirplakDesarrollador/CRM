@@ -313,6 +313,7 @@ export interface LocalActivity {
     fecha_inicio: string;
     fecha_fin?: string;
     tipo_actividad: 'TAREA' | 'EVENTO';
+    prioridad?: 'Alta' | 'Media' | 'Baja' | null;
     clasificacion_id?: number | null;
     subclasificacion_id?: number | null;
     is_completed: boolean;
