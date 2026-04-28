@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase';
 import { syncEngine } from '@/lib/sync';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { db } from '@/lib/db';
+import { useSyncStore } from '@/lib/stores/useSyncStore';
 
 export type OpportunityServer = {
     id: string;
@@ -140,8 +141,10 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
     const fetchOpportunities = useCallback(async (isLoadMore = false) => {
         if (!currentUserId) return; // Wait for user
         if (!phasesLoadedRef.current) return; // Wait for phases to load
-
+        
+        const setIsLoadingData = useSyncStore.getState().setIsLoadingData;
         setLoading(true);
+        setIsLoadingData(true);
         try {
             // Calculate range using ref
             const currentPage = isLoadMore ? pageRef.current + 1 : 1;
@@ -406,7 +409,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                         estado_data:CRM_EstadosOportunidad(nombre),
                         vendedor:CRM_Usuarios!owner_user_id(full_name),
                         colaboradores:CRM_Oportunidades_Colaboradores!inner(usuario_id)
-                    `, { count: 'exact' });
+                    `);
                     query = query.eq('colaboradores.usuario_id', currentUserId);
                 } else if (userFilter === 'team') {
                     if (userRole === 'COORDINADOR') {
@@ -455,6 +458,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
             console.error("Error fetching opportunities:", err);
         } finally {
             setLoading(false);
+            useSyncStore.getState().setIsLoadingData(false);
         }
     }, [currentUserId, subordinateIds, pageSize, userFilter, searchTerm, accountIdFilter, accountOwnerId, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, phasesReady, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc]);
 

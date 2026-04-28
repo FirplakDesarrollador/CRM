@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase';
 import { syncEngine } from '@/lib/sync';
 import { db } from '@/lib/db';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
+import { useSyncStore } from '@/lib/stores/useSyncStore';
 
 export type AccountServer = {
     id: string;
@@ -75,7 +76,9 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
     }, [userRole, currentUserId]);
 
     const fetchAccounts = useCallback(async (isLoadMore = false) => {
+        const setIsLoadingData = useSyncStore.getState().setIsLoadingData;
         setLoading(true);
+        setIsLoadingData(true);
         try {
             // Calculate range
             const currentPage = isLoadMore ? pageRef.current + 1 : 1;
@@ -154,8 +157,8 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                         valA = a.ciudad || "";
                         valB = b.ciudad || "";
                     } else if (sortField === 'potencial_venta') {
-                        valA = a.potencial_venta || 0;
-                        valB = b.potencial_venta || 0;
+                        valA = (a as any).potencial_venta || 0;
+                        valB = (b as any).potencial_venta || 0;
                     } else if (sortField === 'created_at') {
                         valA = a.created_at ? new Date(a.created_at).getTime() : 0;
                         valB = b.created_at ? new Date(b.created_at).getTime() : 0;
@@ -177,7 +180,7 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                     owner_name: 'Usuario Offline',
                     creator_name: 'Usuario Offline',
                     contact_count: 0,
-                    potencial_venta: allOpps
+                    potencial_venta: (allOpps as any[])
                         .filter(o => o.account_id === item.id)
                         .reduce((sum, o) => sum + (o.amount || o.valor || 0), 0)
                 }));
@@ -317,6 +320,7 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
             console.error("Error fetching accounts:", err);
         } finally {
             setLoading(false);
+            useSyncStore.getState().setIsLoadingData(false);
         }
     }, [currentUserId, pageSize, searchTerm, assignedUserId, isVendedor, userRole, subordinateIds, channelFilter, subclassificationFilter, nivelPremiumFilter, startDate, endDate, sortField, sortAsc]);
 

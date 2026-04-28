@@ -214,3 +214,76 @@ Prevention Rule:
 
 Tags:
 [database] [migration] [data-integrity] [schema]
+
+---
+
+## [Bug ID: 20260428-01]
+
+Context:
+`AccountCombobox.tsx`, `OpportunityCombobox.tsx`. Visualización de registros seleccionados que no están en la primera página de resultados del servidor.
+
+What I Did:
+Intenté resolver el nombre de la cuenta usando solo la lista devuelta por `useAccountsServer`.
+
+Problem:
+Si el ID de la cuenta/oportunidad seleccionada no estaba entre los primeros 20 resultados (pageSize), el componente mostraba "Seleccione una cuenta..." o quedaba vacío, a pesar de que el valor estaba presente en el formulario.
+
+Root Cause:
+Los hooks de servidor (`useAccountsServer`) están paginados. El componente visual realizaba un `.find()` sobre los datos actuales, ignorando que el registro seleccionado podía estar en páginas posteriores o no haber sido cargado aún.
+
+Fix Applied:
+1. Se añadió la prop `initialLabel` para permitir al padre pasar el nombre si ya lo conoce.
+2. Se implementó una resolución reactiva que prioriza el `initialLabel` y, de forma secundaria, busca en la lista cargada.
+
+Prevention Rule:
+**Combobox Pagination Support**: Cuando se use un Combobox paginado con datos del servidor, NUNCA depender únicamente de la lista local de resultados para mostrar la etiqueta del valor seleccionado. Siempre se debe permitir al componente recibir una etiqueta inicial (`initialLabel`) o realizar un fetch puntual por ID para resolver el nombre del registro seleccionado si no está en la página actual.
+
+Tags:
+[ui] [combobox] [pagination] [server-state]
+
+## [Bug ID: 20260428-02]
+
+Context:
+`AccountCombobox.tsx`. Implementación de fetch asíncrono dentro de un componente de UI genérico.
+
+What I Did:
+Añadí un `useEffect` con un bloque `try/catch` que consultaba Supabase/Dexie por ID cada vez que cambiaba el valor.
+
+Problem:
+El componente se quedaba en un estado de "Cargando..." infinito si el fetch tardaba, o mostraba "Error al cargar" si había problemas de red o RLS, degradando la UX. Además, causaba re-renders innecesarios.
+
+Root Cause:
+Intentar que un componente de UI genérico (como un selector) sea responsable de su propia resolución de datos complejos rompe el principio de responsabilidad única y genera estados de carga difíciles de gestionar. Además, las llamadas a Supabase desde el cliente pueden fallar por políticas de RLS no previstas en tablas relacionadas.
+
+Fix Applied:
+Se eliminó la lógica de fetch interno y se delegó la resolución del nombre al componente padre (Modal), que ya tiene el contexto necesario. El combobox pasó a ser puramente visual/reactivo.
+
+Prevention Rule:
+**Context-Driven Data Resolution**: Evitar que los componentes de selección (Combobox/Select) realicen peticiones de red internas para resolver nombres por ID. La resolución de datos debe ocurrir en el contenedor (Page/Modal) o a través de hooks de estado global, pasando la información resuelta al componente visual mediante props (`initialLabel`). Esto centraliza el manejo de errores y estados de carga.
+
+Tags:
+[ux] [architecture] [async-loading] [ui-components]
+
+## [Bug ID: 20260428-03]
+
+Context:
+`CreateActivityModal.tsx` y `app/oportunidades/[id]/page.tsx`. Sincronización de datos Oportunidad -> Cuenta.
+
+What I Did:
+Pasaba solo el `accountId` al modal y esperaba que este resolviera el resto.
+
+Problem:
+Incluso pasando el ID correcto, el usuario percibía lentitud o veía campos vacíos porque el sistema no aprovechaba que la relación Oportunidad-Cuenta ya estaba disponible en la página de origen.
+
+Root Cause:
+Falta de "puenteo" de datos. Al tener la oportunidad cargada en la página de detalles, ya disponemos de su `account_id` y potencialmente de su nombre. Ignorar esta información y obligar a cada subcomponente a "redescubrirla" genera una experiencia de usuario fragmentada.
+
+Fix Applied:
+Se modificó el flujo para que el modal resuelva de forma agresiva y secuencial: primero busca la oportunidad, luego toma su cuenta y nombre, y lo inyecta todo en el estado local antes de que el usuario interactúe.
+
+Prevention Rule:
+**Relational Data Bridging**: Al navegar entre entidades relacionadas (ej. de Oportunidad a Actividad), pasar siempre el mayor contexto posible (IDs y nombres) a los subcomponentes o modales. Si el sistema ya conoce una relación, debe "regalarla" a los componentes hijos para evitar latencia visual y redundancia de datos.
+
+Tags:
+[ux] [performance] [data-flow] [crm-logic]
+

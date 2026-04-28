@@ -29,6 +29,7 @@ import { LossReasonModal } from "@/components/oportunidades/LossReasonModal";
 import { CollaboratorsTab } from "@/components/oportunidades/CollaboratorsTab";
 import { AssignedTab } from "@/components/oportunidades/AssignedTab";
 import { DollarSign } from "lucide-react";
+import { useSyncStore } from "@/lib/stores/useSyncStore";
 
 export default function OpportunityDetailPage() {
     const params = useParams();
@@ -36,6 +37,7 @@ export default function OpportunityDetailPage() {
     const id = params.id as string;
     const { opportunities, deleteOpportunity } = useOpportunities();
     const { user: currentUser, role: userRole } = useCurrentUser();
+    const setIsLoadingData = useSyncStore(state => state.setIsLoadingData);
 
     const phases = useLiveQuery(() => db.phases.toArray());
     const phaseMap = new Map(phases?.map(p => [p.id, p.nombre]));
@@ -55,6 +57,7 @@ export default function OpportunityDetailPage() {
                 }
                 console.log(`[JIT Sync] Opportunity ${id} not found locally. Fetching from server...`);
                 setIsFetchingServer(true);
+                setIsLoadingData(true);
                 try {
                     // Fetch Opportunity
                     const { data: oppData, error: oppError } = await supabase
@@ -90,6 +93,7 @@ export default function OpportunityDetailPage() {
                     setServerOpportunity('NOT_FOUND');
                 } finally {
                     setIsFetchingServer(false);
+                    setIsLoadingData(false);
                 }
             }
         };
@@ -138,14 +142,8 @@ export default function OpportunityDetailPage() {
         }
     };
 
-    if (isFetchingServer) {
-        return (
-            <div className="min-h-screen bg-slate-50 flex items-center justify-center flex-col gap-4">
-                <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
-                <p className="text-slate-500 font-medium">Buscando en el servidor...</p>
-            </div>
-        );
-    }
+    // Note: Splash screen removed to allow non-blocking navigation.
+    // Progress is now shown via the global LoadingOverlay.
 
     if (!opportunity) {
         if (serverOpportunity === 'NOT_FOUND') {
@@ -237,7 +235,7 @@ export default function OpportunityDetailPage() {
                 )}
 
                 {activeTab === 'actividades' && (
-                    <ActivitiesTab opportunityId={id} />
+                    <ActivitiesTab opportunityId={id} accountId={opportunity?.account_id} />
                 )}
 
                 {(userRole === 'ADMIN' || userRole === 'COORDINADOR') && activeTab === 'asignado' && (
@@ -1365,7 +1363,7 @@ function QuotesTab({ opportunityId, currency }: { opportunityId: string, currenc
     );
 }
 
-function ActivitiesTab({ opportunityId }: { opportunityId: string }) {
+function ActivitiesTab({ opportunityId, accountId }: { opportunityId: string, accountId?: string }) {
     const { activities, createActivity, updateActivity, toggleComplete } = useActivities({ opportunity_id: opportunityId });
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedActivity, setSelectedActivity] = useState<LocalActivity | null>(null);
@@ -1520,20 +1518,11 @@ function ActivitiesTab({ opportunityId }: { opportunityId: string }) {
                     }}
                     opportunities={opportunities}
                     initialOpportunityId={opportunityId}
+                    initialAccountId={accountId}
                     initialData={selectedActivity}
                 />
             )}
 
-            <ConfirmationModal
-                isOpen={isDeleteModalOpen}
-                onClose={() => setIsDeleteModalOpen(false)}
-                onConfirm={handleDelete}
-                title="¿Eliminar Oportunidad?"
-                description={`Esta acción eliminará permanentemente "${opportunity.nombre}" junto con todas sus cotizaciones, pedidos y actividades. Esta operación no se puede deshacer.`}
-                confirmText={isDeleting ? "Eliminando..." : "Sí, Eliminar"}
-                cancelText="Cancelar"
-                variant="danger"
-            />
         </div>
     );
 }

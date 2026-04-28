@@ -553,25 +553,38 @@ export class SyncEngine {
                         const missingOppIds = oppIdsToCheck.filter(id => !foundOppIds.has(id));
 
                         if (missingOppIds.length > 0) {
-                            console.warn(`[Sync] Self-healing: Found ${missingOppIds.length} missing opportunities referenced by activities:`, missingOppIds);
+                            // Check if these missing opportunities are currently in the outbox pending/syncing
+                            const pendingOpps = await db.outbox
+                                .where('entity_type').equals('CRM_Oportunidades')
+                                .and(i => i.status === 'PENDING' || i.status === 'SYNCING')
+                                .toArray();
+                            const pendingOppIds = new Set(pendingOpps.map(p => p.entity_id));
 
-                            // Nullify opportunity_id in the batch for activities referencing missing opportunities
-                            for (const update of actUpdates) {
-                                if (update.field === 'opportunity_id' && missingOppIds.includes(update.value)) {
-                                    console.log(`[Sync] Nullifying opportunity_id for activity ${update.id} (missing opp: ${update.value})`);
-                                    update.value = null;
-                                }
-                            }
+                            const trulyMissingOppIds = missingOppIds.filter(id => !pendingOppIds.has(id));
 
-                            // Also update local Dexie to avoid re-queuing with bad FK
-                            for (const actId of actEntityIds) {
-                                try {
-                                    const localAct = await db.activities.get(actId);
-                                    if (localAct?.opportunity_id && missingOppIds.includes(localAct.opportunity_id)) {
-                                        await db.activities.update(actId, { opportunity_id: undefined });
-                                        console.log(`[Sync] Updated local activity ${actId}: cleared opportunity_id`);
+                            if (trulyMissingOppIds.length > 0) {
+                                console.warn(`[Sync] Self-healing: Found ${trulyMissingOppIds.length} truly missing opportunities referenced by activities:`, trulyMissingOppIds);
+
+                                // Nullify opportunity_id in the batch for activities referencing missing opportunities
+                                for (const update of actUpdates) {
+                                    if (update.field === 'opportunity_id' && trulyMissingOppIds.includes(update.value)) {
+                                        console.log(`[Sync] Nullifying opportunity_id for activity ${update.id} (truly missing opp: ${update.value})`);
+                                        update.value = null;
                                     }
-                                } catch (e) { /* ignore */ }
+                                }
+
+                                // Also update local Dexie to avoid re-queuing with bad FK
+                                for (const actId of actEntityIds) {
+                                    try {
+                                        const localAct = await db.activities.get(actId);
+                                        if (localAct?.opportunity_id && trulyMissingOppIds.includes(localAct.opportunity_id)) {
+                                            await db.activities.update(actId, { opportunity_id: null });
+                                            console.log(`[Sync] Updated local activity ${actId}: cleared opportunity_id (replaced with null)`);
+                                        }
+                                    } catch (e) { 
+                                        console.warn(`[Sync] Error updating local activity ${actId} during heal:`, e);
+                                    }
+                                }
                             }
                         }
                     }
@@ -996,7 +1009,11 @@ export class SyncEngine {
             const badOutboxItems = await db.outbox.where('entity_id').equals(badContactId).and(i => i.entity_type === 'CRM_Contactos').toArray();
             if (badOutboxItems.length > 0) {
                 console.log(`[Sync-Heal] Cleaning up ${badOutboxItems.length} outbox items for bad contact.`);
-                await db.outbox.bulkDelete(badOutboxItems.map(i => i.id));
+                try {
+                    await db.outbox.bulkDelete(badOutboxItems.map(i => i.id));
+                } catch (dbErr) {
+                    console.error(`[Sync-Heal] Dexie failed to bulkDelete from outbox:`, dbErr);
+                }
             }
 
             // 2. Clear from local Dexie
@@ -1007,13 +1024,13 @@ export class SyncEngine {
             console.error(`[Sync-Heal] Error resolving duplicate contact:`, e);
         }
     }
-
     /**
      * PULL: Download server data to local IndexedDB
      * Called on app initialization to ensure all browsers have the same data
      */
     private async pullChanges(_user: any) {
         console.log('[Sync] Pulling data from server...');
+        useSyncStore.getState().setIsLoadingData(true);
         const lastSync = useSyncStore.getState().lastSyncTime;
 
         try {
@@ -1802,6 +1819,16 @@ export class SyncEngine {
                                     }
                                 }
 
+                                // HEALING: If server version is missing opportunity_id but local version has it,
+                                // the previous sync bug might have nullified it. Restore it!
+                                if (!serverAct.opportunity_id && localAct.opportunity_id) {
+                                    console.warn(`[Sync-Heal] Found orphaned activity ${serverAct.id}. Restoring link to opportunity ${localAct.opportunity_id}...`);
+                                    mergedAct.opportunity_id = localAct.opportunity_id;
+                                    hasChanges = true;
+                                    // Queue a push to fix the server state
+                                    await this.queueMutation('CRM_Actividades', serverAct.id, { opportunity_id: localAct.opportunity_id });
+                                }
+
                                 if (hasChanges) {
                                     activitiesToPut.push(mergedAct);
                                 }
@@ -1825,6 +1852,8 @@ export class SyncEngine {
         } catch (err: any) {
             console.error('[Sync] Pull failed:', err.message);
             // Don't throw - allow push to continue even if pull fails
+        } finally {
+            useSyncStore.getState().setIsLoadingData(false);
         }
     }
 

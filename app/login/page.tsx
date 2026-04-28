@@ -485,7 +485,7 @@ export default function LoginPage() {
                                 {showCaptcha && (
                                     <div
                                         data-testid="captcha-section"
-                                        className="rounded-2xl border-2 border-amber-300 bg-gradient-to-br from-amber-50 via-orange-50 to-yellow-50 p-5 shadow-md space-y-4 animate-in fade-in slide-in-from-top-2 duration-300"
+                                        className="rounded-2xl border-2 border-amber-300 bg-linear-to-br from-amber-50 via-orange-50 to-yellow-50 p-5 shadow-md space-y-4 animate-in fade-in slide-in-from-top-2 duration-300"
                                     >
                                         {/* Header */}
                                         <div className="flex items-center gap-3">
@@ -502,7 +502,7 @@ export default function LoginPage() {
                                         <div className="bg-white rounded-xl border border-amber-200 p-4 shadow-inner">
                                             <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Resuelve esta operación:</p>
                                             <div className="flex items-center gap-3">
-                                                <div className="flex-1 bg-gradient-to-r from-[#254153] to-[#1a2f3d] text-white text-xl font-bold py-3 px-4 rounded-xl text-center tracking-widest shadow-lg select-none">
+                                                <div className="flex-1 bg-linear-to-r from-[#254153] to-[#1a2f3d] text-white text-xl font-bold py-3 px-4 rounded-xl text-center tracking-widest shadow-lg select-none">
                                                     {captcha.question} = ?
                                                 </div>
                                                 <button

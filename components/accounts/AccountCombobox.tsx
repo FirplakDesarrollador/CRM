@@ -22,12 +22,14 @@ interface AccountComboboxProps {
     value?: string;
     onChange: (value: string) => void;
     disabled?: boolean;
+    initialLabel?: string;
 }
 
 export function AccountCombobox({
     value,
     onChange,
-    disabled = false
+    disabled = false,
+    initialLabel
 }: AccountComboboxProps) {
     const [open, setOpen] = React.useState(false);
     const [search, setSearch] = React.useState("");
@@ -61,9 +63,26 @@ export function AccountCombobox({
         return () => clearTimeout(timeout);
     }, [search, setSearchTerm]);
 
-    const selectedAccount = React.useMemo(() => {
-        return accounts.find(a => a.id === value);
-    }, [value, accounts]);
+    const [selectedAccountName, setSelectedAccountName] = React.useState<string>("");
+
+    // Simple effect to match the current value with the loaded accounts or the initial label
+    React.useEffect(() => {
+        const currentId = String(value || "");
+        if (!currentId || currentId === "undefined" || currentId === "null") {
+            setSelectedAccountName("");
+            return;
+        }
+
+        // Try to find in current list
+        const found = accounts.find(a => String(a.id) === currentId);
+        if (found) {
+            setSelectedAccountName(found.nombre);
+        } else if (initialLabel) {
+            setSelectedAccountName(initialLabel);
+        } else {
+            setSelectedAccountName("");
+        }
+    }, [value, accounts, initialLabel]);
 
     return (
         <Popover open={open} onOpenChange={setOpen}>
@@ -78,7 +97,7 @@ export function AccountCombobox({
                     )}
                 >
                     <span className="truncate">
-                        {value && selectedAccount ? selectedAccount.nombre : "Seleccione una cuenta..."}
+                        {value ? (selectedAccountName || initialLabel || "Cargando...") : "Seleccione una cuenta..."}
                     </span>
                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                 </button>

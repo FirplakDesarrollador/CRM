@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { db } from '@/lib/db';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
+import { useSyncStore } from '@/lib/stores/useSyncStore';
 
 export type ContactServer = {
     id: string;
@@ -55,7 +56,9 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
     }, [userRole, currentUserId]);
 
     const fetchContacts = useCallback(async (isLoadMore = false) => {
+        const setIsLoadingData = useSyncStore.getState().setIsLoadingData;
         setLoading(true);
+        setIsLoadingData(true);
         try {
             // Calculate range
             const currentPage = isLoadMore ? pageRef.current + 1 : 1;
@@ -297,6 +300,7 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
             console.error("Error fetching contacts:", err);
         } finally {
             setLoading(false);
+            useSyncStore.getState().setIsLoadingData(false);
         }
     }, [pageSize, searchTerm, accountId, isVendedor, userRole, currentUserId, subordinateIds]);
 

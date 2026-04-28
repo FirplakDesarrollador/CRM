@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase';
 import { syncEngine } from '@/lib/sync';
 import { db } from '@/lib/db';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
+import { useSyncStore } from '@/lib/stores/useSyncStore';
 
 export type ActivityServer = {
     id: string;
@@ -62,7 +63,9 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
     const fetchActivities = useCallback(async (isLoadMore = false) => {
         if (!currentUserId) return; // Wait for user
 
+        const setIsLoadingData = useSyncStore.getState().setIsLoadingData;
         setLoading(true);
+        setIsLoadingData(true);
         try {
             // Calculate range
             const currentPage = isLoadMore ? page + 1 : 1;
@@ -220,6 +223,7 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
             console.error("Error fetching activities:", err);
         } finally {
             setLoading(false);
+            setIsLoadingData(false);
         }
     }, [currentUserId, pageSize, searchTerm, typeFilter, showCompleted, opportunityId, accountId, page, isAdmin, userRole, subordinateIds]);
 
