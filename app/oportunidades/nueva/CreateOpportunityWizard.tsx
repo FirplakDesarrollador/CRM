@@ -16,6 +16,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { useConfig } from "@/lib/hooks/useConfig";
 import { CollaboratorSelector, CollaboratorEntry } from "@/components/oportunidades/CollaboratorSelector";
+import { useUsers } from "@/lib/hooks/useUsers";
 
 const STEP_LABELS = ["Cuenta", "Datos del Negocio", "Productos", "Equipo"];
 
@@ -51,6 +52,7 @@ export default function CreateOpportunityWizard() {
     const { user } = useCurrentUser();
     const { config } = useConfig();
     const { accounts } = useAccounts({ showAll: true });
+    const { users } = useUsers();
 
     const [step, setStep] = useState(0);
     const [showAccountModal, setShowAccountModal] = useState(false);
@@ -230,7 +232,8 @@ export default function CreateOpportunityWizard() {
                             usuario_id: user.id,
                             porcentaje: creatorPct,
                             rol: 'CREADOR',
-                            full_name: user.full_name || user.email
+                            full_name: user.full_name || user.email,
+                            isLocked: true // Fixed 5% for creator on someone else's account
                         }
                     ]);
                     console.log(`[Wizard-JIT] Cuenta de tercero detectada: ${acc.id}. Asignando propietario ${acc.owner_user_id}`);
@@ -281,7 +284,8 @@ export default function CreateOpportunityWizard() {
                     usuario_id: user.id,
                     porcentaje: creatorPct,
                     rol: 'CREADOR',
-                    full_name: user.full_name || user.email
+                    full_name: user.full_name || user.email,
+                    isLocked: true // Fixed 5% for creator on someone else's account
                 }
             ]);
             console.log(`[Wizard] Cuenta de tercero detectada. Dueño: ${acc.owner_user_id}. Asignando ${creatorPct}% al creador.`);
@@ -859,17 +863,25 @@ export default function CreateOpportunityWizard() {
                 {/* STEP 4: TEAM */}
                 {step === 3 && (
                     <div className="space-y-4">
-                        <h2 className="text-lg font-semibold">Asignación</h2>
-                        <p className="text-sm text-slate-500">
-                            {ownerUserId === user?.id 
-                                ? "Tú eres el propietario de esta cuenta." 
-                                : `El propietario de la cuenta es un tercero (${selectedAccount?.nombre || 'otro asesor'}). Se aplicará la división de comisión configurada.`}
-                        </p>
-                        <CollaboratorSelector
-                            value={collaborators}
-                            onChange={setCollaborators}
-                            ownerId={ownerUserId}
-                        />
+                <h2 className="text-lg font-semibold">Asignación</h2>
+                <p className="text-sm text-slate-600 bg-slate-50 p-4 rounded-lg border border-slate-200">
+                    {ownerUserId === user?.id 
+                        ? "Tú eres el propietario de esta cuenta." 
+                        : (
+                            <span>
+                                El propietario de la cuenta es el asesor <strong>{users.find(u => u.id === ownerUserId)?.full_name || 'otro asesor'}</strong>. 
+                                <br />
+                                <span className="text-xs text-slate-500 mt-1 block">
+                                    Al no ser tu cuenta propia, se te asignará automáticamente una comisión del 5% como creador.
+                                </span>
+                            </span>
+                        )}
+                </p>
+                <CollaboratorSelector
+                    value={collaborators}
+                    onChange={setCollaborators}
+                    ownerId={ownerUserId}
+                />
                     </div>
                 )}
 

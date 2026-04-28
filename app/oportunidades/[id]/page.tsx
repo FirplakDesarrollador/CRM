@@ -3,7 +3,7 @@
 import { useOpportunities, useQuotes, useQuoteItems } from "@/lib/hooks/useOpportunities";
 import { DetailHeader } from "@/components/ui/DetailHeader";
 import { useState, useEffect } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { FileText, Plus, AlertCircle, Check, Trash2, Loader2, Truck, Package, Building, ChevronRight, TrendingUp, User, Users } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
@@ -35,7 +35,7 @@ export default function OpportunityDetailPage() {
     const router = useRouter();
     const id = params.id as string;
     const { opportunities, deleteOpportunity } = useOpportunities();
-    const { role: userRole } = useCurrentUser();
+    const { user: currentUser, role: userRole } = useCurrentUser();
 
     const phases = useLiveQuery(() => db.phases.toArray());
     const phaseMap = new Map(phases?.map(p => [p.id, p.nombre]));
@@ -97,7 +97,17 @@ export default function OpportunityDetailPage() {
         fetchFromServer();
     }, [id, opportunity, opportunities, isFetchingServer, serverOpportunity]);
 
-    const [activeTab, setActiveTab] = useState<'resumen' | 'colaboradores' | 'cotizaciones' | 'productos' | 'actividades' | 'asignado'>('resumen');
+    const searchParams = useSearchParams();
+    const initialTab = searchParams.get('tab') as any;
+    const [activeTab, setActiveTab] = useState<'resumen' | 'colaboradores' | 'cotizaciones' | 'productos' | 'actividades' | 'asignado'>(initialTab || 'resumen');
+
+    // Sincronizar pestaña con parámetro de URL si cambia
+    useEffect(() => {
+        const tab = searchParams.get('tab');
+        if (tab && ['resumen', 'colaboradores', 'cotizaciones', 'productos', 'actividades', 'asignado'].includes(tab)) {
+            setActiveTab(tab as any);
+        }
+    }, [searchParams]);
     
     // Save state for cross-module restoration
     useEffect(() => {
@@ -120,7 +130,7 @@ export default function OpportunityDetailPage() {
         try {
             await deleteOpportunity(id);
             setIsDeleteModalOpen(false); // Close modal before navigation
-            router.push("/oportunidades");
+            router.push("/oportunidades?view=list");
         } catch (error) {
             console.error("Error deleting opportunity:", error);
             setIsDeleting(false);
@@ -172,7 +182,7 @@ export default function OpportunityDetailPage() {
                 }
                 backHref="/oportunidades?view=list"
                 actions={[
-                    ...(userRole === 'ADMIN' || userRole === 'COORDINADOR' ? [{
+                    ...(userRole === 'ADMIN' || userRole === 'COORDINADOR' || opportunity.owner_user_id === currentUser?.id || opportunity.created_by === currentUser?.id ? [{
                         label: "Eliminar Oportunidad",
                         icon: Trash2,
                         variant: 'danger' as const,
@@ -1513,6 +1523,17 @@ function ActivitiesTab({ opportunityId }: { opportunityId: string }) {
                     initialData={selectedActivity}
                 />
             )}
+
+            <ConfirmationModal
+                isOpen={isDeleteModalOpen}
+                onClose={() => setIsDeleteModalOpen(false)}
+                onConfirm={handleDelete}
+                title="¿Eliminar Oportunidad?"
+                description={`Esta acción eliminará permanentemente "${opportunity.nombre}" junto con todas sus cotizaciones, pedidos y actividades. Esta operación no se puede deshacer.`}
+                confirmText={isDeleting ? "Eliminando..." : "Sí, Eliminar"}
+                cancelText="Cancelar"
+                variant="danger"
+            />
         </div>
     );
 }

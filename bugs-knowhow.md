@@ -148,4 +148,69 @@ Prevention Rule:
 2. **Type Safety en Hooks**: Revisar los retornos de promesas de base de datos en los hooks de negocio para asegurar que el flujo maneje estados nulos o indefinidos.
 
 Tags:
-[typescript] [dexie] [sync] [type-safety]
+
+---
+
+## [Bug ID: 20260423-04]
+
+Context:
+`components/config/PriceListUploader.tsx`. Fallo en la importación de precios desde Excel.
+
+What I Did:
+Implementé limpieza de cabeceras y un sistema de validación de números sensible a la configuración regional (Colombia).
+
+Problem:
+Los precios se cargaban como 0 o fallaba el mapeo de columnas a pesar de que el archivo Excel parecía correcto.
+
+Root Cause:
+1. **Espacios en Cabeceras**: Los nombres de las columnas en Excel tenían espacios invisibles (ej: `"Número de artículo "`), lo que impedía que `normalizedRow['Número de artículo']` encontrara el valor.
+2. **Formato Numérico Local**: Los archivos en Colombia usan puntos para miles y comas para decimales (o viceversa dependiendo de la exportación). Un `parseFloat` simple no manejaba correctamente strings como `"1.250.000,00"`.
+
+Fix Applied:
+1. Se aplicó `.trim()` a todas las llaves (keys) durante el mapeo de filas de Excel.
+2. Se implementó una función `parseNumber` robusta que detecta dinámicamente si la coma o el punto es el separador decimal comparando su última posición en la cadena.
+
+Prevention Rule:
+1. **Excel Header Sanitization**: Siempre aplicar `.trim()` a las cabeceras de archivos externos (Excel/CSV) antes de intentar mapearlas a objetos de negocio.
+2. **Locale-Aware Number Parsing**: En aplicaciones para el mercado latinoamericano, nunca usar `parseFloat` directo sobre inputs de texto sin antes normalizar los separadores de miles y decimales.
+
+Tags:
+[excel] [parsing] [localization] [sanitization]
+
+## [Bug ID: 20260423-05]
+
+Context:
+Edición de código con `multi_replace_file_content` en `PriceListUploader.tsx`.
+
+What I Did:
+Intenté realizar múltiples ediciones en un solo paso y borré accidentalmente la cabecera de una función.
+
+Problem:
+El código quedó con un error de sintaxis ("Expression expected") porque la declaración de `const handleFileUpload = ...` desapareció del archivo.
+
+Root Cause:
+Error de alineación en el bloque de `TargetContent`. Al reemplazar bloques grandes, es fácil omitir o incluir accidentalmente una línea de cierre o apertura si no se verifica el diff inmediatamente.
+
+Fix Applied:
+Restauración manual de la firma de la función mediante `replace_file_content`.
+
+Prevention Rule:
+1. **Post-Edit Verification**: Tras una edición masiva (`multi_replace`), es MANDATORIO realizar un `view_file` del área afectada para confirmar que las firmas de las funciones y los cierres de llaves sigan intactos.
+2. **Chunk Granularity**: Preferir reemplazos más pequeños y específicos sobre reemplazos de bloques gigantescos que incluyan lógica de control de flujo.
+
+Tags:
+[tool-usage] [syntax-error] [refactoring]
+
+## [Lección General: Limpieza de Esquema]
+
+Context:
+Optimización de tablas en Supabase (`CRM_Pedidos`, `CRM_ListaDePrecios`).
+
+Observation:
+Columnas que parecen "huérfanas" o "legacy" según el código actual (ej: `company`, `opportunity`, `fCreado`) suelen contener datos históricos críticos de migraciones previas o campos necesarios para integraciones de terceros (SAP).
+
+Prevention Rule:
+**Data-First Auditing**: Nunca eliminar una columna basándose solo en su falta de uso en el código fuente. Siempre ejecutar una consulta SQL para verificar si hay datos poblados (`count(*) where col is not null`) y validar si son parte de un flujo de sincronización externo antes de proponer un `DROP COLUMN`.
+
+Tags:
+[database] [migration] [data-integrity] [schema]

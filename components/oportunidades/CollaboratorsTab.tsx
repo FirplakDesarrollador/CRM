@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Loader2, Save } from 'lucide-react';
 import { syncEngine } from '@/lib/sync';
 import { v4 as uuidv4 } from 'uuid';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 
 export function CollaboratorsTab({ opportunityId }: { opportunityId: string }) {
     const dbCollaborators = useLiveQuery(
@@ -19,9 +20,13 @@ export function CollaboratorsTab({ opportunityId }: { opportunityId: string }) {
         [opportunityId]
     );
 
+    const { user } = useCurrentUser();
     const [entries, setEntries] = useState<CollaboratorEntry[]>([]);
     const [isSaving, setIsSaving] = useState(false);
     const [isDirty, setIsDirty] = useState(false);
+
+    const opportunity = useLiveQuery(() => db.opportunities.get(opportunityId), [opportunityId]);
+    const isOwner = user?.id === opportunity?.owner_user_id;
 
     // Initialize state from DB
     useEffect(() => {
@@ -134,9 +139,13 @@ export function CollaboratorsTab({ opportunityId }: { opportunityId: string }) {
             <div className="flex justify-between items-center mb-6">
                 <div>
                     <h3 className="font-bold text-slate-900 text-lg">Colaboradores y Comisiones</h3>
-                    <p className="text-xs text-slate-500">Gestione quien participa en esta oportunidad</p>
+                    <p className="text-xs text-slate-500">
+                        {isOwner 
+                            ? "Gestione quien participa en esta oportunidad" 
+                            : "Solo el propietario de la oportunidad puede gestionar colaboradores"}
+                    </p>
                 </div>
-                {isDirty && (
+                {isDirty && isOwner && (
                     <Button
                         onClick={handleSave}
                         disabled={isSaving}
@@ -150,10 +159,14 @@ export function CollaboratorsTab({ opportunityId }: { opportunityId: string }) {
 
             <CollaboratorSelector
                 value={entries}
-                onChange={(val) => {
-                    setEntries(val);
-                    setIsDirty(true);
+                onChange={(updated) => {
+                    if (isOwner) {
+                        setEntries(updated);
+                        setIsDirty(true);
+                    }
                 }}
+                ownerId={opportunity?.owner_user_id}
+                disabled={!isOwner}
             />
         </div>
     );

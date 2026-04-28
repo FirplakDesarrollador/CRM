@@ -15,6 +15,28 @@ const TABLE_PRIORITY: Record<string, number> = {
     'CRM_PedidoItems': 9
 };
 
+const SAP_MAPPING: Record<string, string> = {
+    'tipo_facturacion': 'EXTRA_Tipo de facturación',
+    'incoterm': 'EXTRA_Incoterm/Incoterm',
+    'notas_sap': 'EXTRA_Notas',
+    'fecha_facturacion': 'EXTRA_Fecha de facturación',
+    'orden_compra': 'EXTRA_Orden de compra/Purchase Order',
+    'fecha_minima_requerida': 'EXTRA_Fecha mínima requerida por comercial/cliente',
+    'formas_pago': 'EXTRA_Formas de pago',
+    'terminos_pago': 'EXTRA_Terminos de pago/Pay Terms',
+    'facturacion_electronica': 'EXTRA_Facturación Electrónica',
+    'es_muestra': 'EXTRA_¿Es una muestra?',
+    'aplica_contrato': 'EXTRA_¿Aplica contrato?',
+    'multa_incumplimiento': 'EXTRA_¿Multa por incumplimiento?',
+    'puerto_embarque': 'EXTRA_Puerto embarque/Shipment Port',
+    'puerto_destino': 'EXTRA_Puerto destino/Destination Port',
+    'via_transporte': 'EXTRA_Via/Type of transport',
+    'flete': 'EXTRA_Flete/Freight',
+    'seguro': 'EXTRA_Seguro/Insurance',
+    'cierre_facturacion': 'EXTRA_Cierre Facturación',
+    'oc_cot': 'EXTRA_OC/COT'
+};
+
 const MAX_RETRIES = 5;
 
 function getBackoffDelay(retryCount: number): number {
@@ -653,8 +675,30 @@ export class SyncEngine {
             return priorityA - priorityB;
         });
 
-        for (const [table, updates] of sortedTables) {
+        for (let [table, updates] of sortedTables) {
             try {
+                // 3.5 AUTO-MAPPING: Resolve internal field names to Supabase/SAP column names
+                if (table === 'CRM_Pedidos' || table === 'CRM_Cotizaciones') {
+                    updates = updates.map(u => {
+                        if (SAP_MAPPING[u.field]) {
+                            return { ...u, field: SAP_MAPPING[u.field] };
+                        }
+                        return u;
+                    });
+                }
+
+                // 3.6 AUTO-FILTER: Remove generated columns that cannot be updated
+                if (table === 'CRM_CotizacionItems') {
+                    const originalCount = updates.length;
+                    updates = updates.filter(u => u.field !== 'subtotal');
+                    if (updates.length < originalCount) {
+                        console.log(`[Sync] Filtered out 'subtotal' generated column from CRM_CotizacionItems batch`);
+                    }
+                }
+
+                // If filtering removed all updates for this table, skip it
+                if (updates.length === 0) continue;
+
                 // Clean up _sync_metadata from outbox ONLY (to prevent loops)
                 // BUT keep them in the RPC payload so the server sees the timestamps
                 const metadataIdsToRemove = pending
@@ -1420,6 +1464,47 @@ export class SyncEngine {
                 console.log(`[Sync] Merged ${mergedCount} opportunities (${skippedCount} with pending changes skipped).`);
             } else {
                 console.warn('[Sync] No opportunities returned from server (Length is 0 or undefined). Check RLS policies?');
+            }
+
+            // CLEANUP: Remove locally cached opportunities that were deleted on server
+            try {
+                let deletedQuery = supabase
+                    .from('CRM_Oportunidades')
+                    .select('id')
+                    .eq('is_deleted', true)
+                    .limit(10000);
+
+                if (lastSync) deletedQuery = deletedQuery.gte('updated_at', lastSync);
+
+                const { data: deletedOpps, error: delError } = await deletedQuery;
+
+                if (!delError && deletedOpps && deletedOpps.length > 0) {
+                    const deletedIds = deletedOpps.map(o => o.id);
+                    await db.opportunities.bulkDelete(deletedIds);
+                    
+                    // Cleanup children locally
+                    await db.activities.where('opportunity_id').anyOf(deletedIds).delete();
+                    
+                    // Cleanup Quotes and their items
+                    const relatedQuotes = await db.quotes.where('opportunity_id').anyOf(deletedIds).toArray();
+                    const quoteIds = relatedQuotes.map(q => q.id);
+                    await db.quotes.where('opportunity_id').anyOf(deletedIds).delete();
+                    if (quoteIds.length > 0) {
+                        await db.quoteItems.where('cotizacion_id').anyOf(quoteIds).delete();
+                    }
+
+                    // Cleanup Pedidos and their items
+                    const relatedPedidos = await db.pedidos.where('opportunity_id').anyOf(deletedIds).toArray();
+                    const pedidoUuids = relatedPedidos.map(p => p.uuid_generado);
+                    await db.pedidos.where('opportunity_id').anyOf(deletedIds).delete();
+                    if (pedidoUuids.length > 0) {
+                        await db.pedidoItems.where('pedido_uuid').anyOf(pedidoUuids).delete();
+                    }
+
+                    console.log(`[Sync] Cleaned up ${deletedIds.length} deleted opportunities and all their related records (quotes, orders, activities) from local cache.`);
+                }
+            } catch (cleanErr) {
+                console.warn('[Sync] Failed to clean up deleted opportunities:', cleanErr);
             }
 
             // Pull Quotes (CRM_Cotizaciones) - SMART MERGE

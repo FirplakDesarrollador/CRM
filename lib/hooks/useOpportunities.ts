@@ -70,7 +70,7 @@ function sanitizeOpportunityForSync(opp: any) {
 }
 
 export function useOpportunities(filters?: { advisor_id?: string | null }) {
-    const { user, isVendedor } = useCurrentUser();
+    const { user, isVendedor, isAdmin, isCoordinador } = useCurrentUser();
     const userId = user?.id;
 
     const opportunities = useLiveQuery(
@@ -245,13 +245,84 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
         const current = await db.opportunities.get(id);
         if (!current) return;
 
-        await db.opportunities.delete(id);
+        // 1. Permission Check
+        const isOwner = current.owner_user_id === userId || (!current.owner_user_id && current.created_by === userId);
+        console.log('[deleteOpportunity] isAdmin:', isAdmin, 'isCoordinador:', isCoordinador, 'isOwner:', isOwner, 'userId:', userId);
+        if (!isAdmin && !isCoordinador && !isOwner) {
+            throw new Error("No tienes permiso para eliminar esta oportunidad");
+        }
 
-        // Include full row data to satisfy NOT NULL constraints on server if it's an upsert-style sync
+        // 2. Collect all related data BEFORE any transaction
+        const quotes = await db.quotes.where('opportunity_id').equals(id).toArray();
+        const quoteIds = quotes.map(q => q.id);
+        const quoteItemsAll = quoteIds.length > 0
+            ? await db.quoteItems.where('cotizacion_id').anyOf(quoteIds).toArray()
+            : [];
+        const collaborators = await db.opportunityCollaborators.where('oportunidad_id').equals(id).toArray();
+        const activities = await db.activities.where('opportunity_id').equals(id).toArray();
+        const pedidos = await db.pedidos.where('opportunity_id').equals(id).toArray();
+        const pedidoUuids = pedidos.map(p => p.uuid_generado);
+        const pedidoItemsAll = pedidoUuids.length > 0
+            ? await db.pedidoItems.where('pedido_uuid').anyOf(pedidoUuids).toArray()
+            : [];
+
+        console.log('[deleteOpportunity] Found:', {
+            quotes: quotes.length,
+            quoteItems: quoteItemsAll.length,
+            collaborators: collaborators.length,
+            activities: activities.length,
+            pedidos: pedidos.length,
+            pedidoItems: pedidoItemsAll.length
+        });
+
+        // 3. Delete all from Dexie in a single atomic transaction (all tables declared)
+        await db.transaction('rw', [
+            db.opportunities,
+            db.quotes,
+            db.quoteItems,
+            db.opportunityCollaborators,
+            db.activities,
+            db.pedidos,
+            db.pedidoItems
+        ], async () => {
+            await db.opportunities.delete(id);
+            if (quoteIds.length > 0) {
+                await db.quotes.where('opportunity_id').equals(id).delete();
+                await db.quoteItems.where('cotizacion_id').anyOf(quoteIds).delete();
+            }
+            await db.opportunityCollaborators.where('oportunidad_id').equals(id).delete();
+            await db.activities.where('opportunity_id').equals(id).delete();
+            if (pedidoUuids.length > 0) {
+                await db.pedidos.where('opportunity_id').equals(id).delete();
+                await db.pedidoItems.where('pedido_uuid').anyOf(pedidoUuids).delete();
+            }
+        });
+
+        console.log('[deleteOpportunity] Local Dexie delete complete.');
+
+        // 4. Queue Mutations for Server (Soft Delete) — outside transaction
         await syncEngine.queueMutation('CRM_Oportunidades', id, sanitizeOpportunityForSync({
             ...current,
             is_deleted: true
         }));
+
+        for (const quote of quotes) {
+            await syncEngine.queueMutation('CRM_Cotizaciones', quote.id, { ...quote, is_deleted: true });
+        }
+        for (const item of quoteItemsAll) {
+            await syncEngine.queueMutation('CRM_CotizacionItems', item.id, { ...item, is_deleted: true });
+        }
+        for (const activity of activities) {
+            await syncEngine.queueMutation('CRM_Actividades', activity.id, { ...activity, is_deleted: true });
+        }
+        for (const pedido of pedidos) {
+            await syncEngine.queueMutation('CRM_Pedidos', pedido.uuid_generado, { ...pedido, is_deleted: true });
+        }
+        for (const pItem of pedidoItemsAll) {
+            await syncEngine.queueMutation('CRM_PedidoItems', pItem.id, { ...pItem, is_deleted: true });
+        }
+
+        console.log('[deleteOpportunity] All server mutations queued successfully.');
     };
 
     const updateOpportunity = async (id: string, updates: any) => {

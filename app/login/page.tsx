@@ -9,6 +9,7 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { recoverPasswordAction } from "./actions";
 import { FirplakIsotipo } from "@/components/layout/FirplakLogo";
+import packageJson from "../../package.json";
 
 // ─────────────────────────────────────────────────────────────
 //  SQL Injection protection layer
@@ -337,7 +338,7 @@ export default function LoginPage() {
 
                     <div className="relative z-10 text-xs lg:text-sm text-blue-100/50 flex items-center justify-between">
                         <p>© 2026 Firplak</p>
-                        <p className="text-xs">v1.0.9.8</p>
+                        <p className="text-xs">v{packageJson.version}</p>
                     </div>
                 </div>
 
@@ -579,7 +580,7 @@ export default function LoginPage() {
 
                             {/* Mobile Footer */}
                             <div className="md:hidden mt-8 pt-6 border-t border-slate-200 text-center">
-                                <p className="text-xs text-slate-400 font-medium">© 2026 Firplak • v1.0.9.8</p>
+                                <p className="text-xs text-slate-400 font-medium">© 2026 Firplak • v{packageJson.version}</p>
                             </div>
                         </>
                     )}
