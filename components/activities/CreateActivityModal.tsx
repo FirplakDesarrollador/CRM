@@ -42,7 +42,8 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                 : toInputDateTime(new Date(Date.now() + 3600000)),
             opportunity_id: initialData?.opportunity_id || initialOpportunityId || '',
             account_id: initialData?.account_id || initialAccountId || '',
-            is_completed: !!initialData?.is_completed
+            is_completed: !!initialData?.is_completed,
+            prioridad: initialData?.prioridad || 'Media'
         }
     });
 
@@ -489,24 +490,6 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
     console.log("[CreateActivityModal] clasificacion_id:", initialData?.clasificacion_id, "type:", typeof initialData?.clasificacion_id);
     console.log("[CreateActivityModal] Available classifications:", classifications.length);
 
-    const { register, handleSubmit, watch, setValue, reset } = useForm({
-        defaultValues: {
-            asunto: initialData?.asunto || '',
-            descripcion: initialData?.descripcion || '',
-            tipo_actividad: (initialData?.tipo_actividad || 'EVENTO') as 'TAREA' | 'EVENTO',
-            clasificacion_id: initialData?.clasificacion_id ? String(initialData.clasificacion_id) : "",
-            subclasificacion_id: initialData?.subclasificacion_id ? String(initialData.subclasificacion_id) : "",
-            fecha_inicio: initialData?.fecha_inicio
-                ? (initialData.tipo_actividad === 'TAREA' ? toInputDate(initialData.fecha_inicio) : toInputDateTime(initialData.fecha_inicio))
-                : (initialData?.tipo_actividad === 'TAREA' ? toInputDate(new Date()) : toInputDateTime(new Date())),
-            fecha_fin: initialData?.fecha_fin
-                ? toInputDateTime(initialData.fecha_fin)
-                : toInputDateTime(new Date(Date.now() + 3600000)),
-            opportunity_id: initialData?.opportunity_id || initialOpportunityId || '',
-            is_completed: !!initialData?.is_completed,
-            prioridad: initialData?.prioridad || 'Media'
-        }
-    });
 
     // Force form reset when initialData changes OR when classifications finish loading
     // This fixes the timing issue where the select options don't exist yet when form resets
