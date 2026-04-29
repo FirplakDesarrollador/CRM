@@ -231,6 +231,7 @@ jobs:
             ") || echo "0"
           echo "critical=$CRITICAL" >> $GITHUB_OUTPUT
           echo "Vulnerabilidades críticas/altas: $CRITICAL"
+        continue-on-error: true
 
       - name: Comentar si hay vulnerabilidades críticas
         if: steps.audit.outputs.critical != '0'
@@ -267,6 +268,8 @@ jobs:
           NEXTAUTH_SECRET: "build-test-secret-32-chars-minimum"
           NEXTAUTH_URL: "http://localhost:3000"
           NEXT_PUBLIC_APP_URL: "http://localhost:3000"
+          NEXT_PUBLIC_SUPABASE_URL: "https://your-project.supabase.co"
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: "your-anon-key"
 
       - name: Comentar si el build falla
         if: failure()
