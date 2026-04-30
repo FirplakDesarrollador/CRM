@@ -4,7 +4,7 @@ import { useOpportunities, useQuotes, useQuoteItems } from "@/lib/hooks/useOppor
 import { DetailHeader } from "@/components/ui/DetailHeader";
 import { useState, useEffect } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { FileText, Plus, AlertCircle, Check, Trash2, Loader2, Truck, Package, Building, ChevronRight, TrendingUp, User, Users } from "lucide-react";
+import { FileText, Plus, AlertCircle, Check, Trash2, Loader2, Truck, Package, Building, ChevronRight, TrendingUp, User, Users, Copy } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { db } from "@/lib/db";
@@ -639,6 +639,28 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                     </div>
 
                     <div className="space-y-4 flex-1">
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                                ID Oportunidad
+                            </label>
+                            <div className="flex items-center gap-2">
+                                <div className="flex-1 px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg text-slate-500 font-mono text-[11px] truncate">
+                                    {opportunity.id}
+                                </div>
+                                <button
+                                    onClick={() => {
+                                        navigator.clipboard.writeText(opportunity.id);
+                                        // Simple alert or toast if available, but here we don't have a toast system visible
+                                        // We can use a local state for "Copied!" feedback if desired
+                                    }}
+                                    className="p-1.5 hover:bg-slate-100 rounded-md text-slate-400 hover:text-blue-600 transition-colors"
+                                    title="Copiar ID"
+                                >
+                                    <Copy size={14} />
+                                </button>
+                            </div>
+                        </div>
+
                         {/* Probability Donut - Always derived from current phase */}
                         <div
                             className="flex items-center justify-between bg-slate-50 p-4 rounded-xl border border-slate-100 mb-4"
@@ -888,6 +910,12 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                             }
                                         }
                                     }}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && !e.shiftKey) {
+                                            e.preventDefault();
+                                            (e.target as HTMLTextAreaElement).blur();
+                                        }
+                                    }}
                                     rows={3}
                                     className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none placeholder:text-slate-400 resize-none"
                                     placeholder="Agregue comentarios generales aquí..."
@@ -964,6 +992,12 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                                 } finally {
                                                     setIsSavingComentarios(false);
                                                 }
+                                            }
+                                        }}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter' && !e.shiftKey) {
+                                                e.preventDefault();
+                                                (e.target as HTMLTextAreaElement).blur();
                                             }
                                         }}
                                         rows={3}

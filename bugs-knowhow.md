@@ -287,3 +287,104 @@ Prevention Rule:
 Tags:
 [ux] [performance] [data-flow] [crm-logic]
 
+---
+
+## [Bug ID: 20260429-01]
+
+Context:
+`lib/sync.ts`, Motor de Sincronización (SyncEngine). Sucedió durante la sincronización de campos de propiedad (`owner_user_id`, `created_by`, `user_id`) en oportunidades, cuentas y actividades.
+
+What I Did:
+Mantuve un bloque de lógica "proactiva" en `pushChanges` que intentaba asegurar que todos los registros en un lote de sincronización tuvieran un propietario válido.
+
+Problem:
+Cada vez que un usuario editaba un campo cualquiera (ej. el monto de una oportunidad) de un registro que no le pertenecía, el motor de sincronización detectaba que el campo `owner_user_id` no estaba en el lote de cambios actual (porque era una edición parcial) y procedía a inyectarlo usando el ID del usuario que estaba realizando la edición. Esto resultaba en un "secuestro" automático de la propiedad del registro en el servidor.
+
+Root Cause:
+El motor de sincronización asumía erróneamente que si el campo de propietario no estaba presente en el lote de cambios, significaba que era "inválido o faltante" y debía ser "reparado". No distinguía entre una creación de registro (donde el campo es obligatorio) y una actualización parcial (donde el campo no debe ser alterado si no se especificó).
+
+Fix Applied:
+Se eliminó el bloque `else` que inyectaba el campo cuando estaba ausente. Ahora la lógica solo actúa si el campo de propietario **está presente** en el lote de cambios pero contiene un valor inválido (ej. datos de prueba o nulos).
+
+Prevention Rule:
+**Never inject mandatory ownership fields** in a synchronization engine for partial updates. In an offline-first system with a centralized sync engine, assume that if a field is missing from a mutation batch, it is because it was not modified and should remain unchanged on the server. If a field is mandatory for new records, ensure it is provided at the UI/Hook level (using the snapshot pattern), but never force it at the sync engine level unless you can differentiate between an `INSERT` and an `UPDATE`.
+
+Tags:
+[sync] [ownership] [data-hijacking] [engine-logic] [supabase]
+
+
+## [Bug ID: 20260429-02]
+
+Context:
+`CRM_Oportunidades`, `CRM_FasesOportunidad`, y procesos de migración masiva. Se detectaron más de 10,000 oportunidades con fases que no pertenecían al canal de su cuenta asociada (ej. cuenta Nacional con fase de canal Internacional).
+
+What I Did:
+Corregí de forma masiva 10,866 registros mediante un script SQL de re-mapeo inteligente y saneamiento de valores NULL.
+
+Problem:
+Oportunidades con `fase_id` inconsistentes o nulos. Esto provocaba que las oportunidades fueran invisibles en los filtros de la interfaz, reportes de ventas distorsionados y errores en la lógica de negocio que depende de la etapa del embudo.
+
+Root Cause:
+Falta de validación de integridad referencial cruzada (Cross-Table Validation) durante las migraciones. El sistema permitía que una oportunidad apuntara a una fase de un canal distinto al de su cuenta, rompiendo la lógica de segmentación del CRM.
+
+Fix Applied:
+Implementación de un script de remediación con lógica de re-mapeo secuencial:
+1. **Mapeo por Nombre:** Buscar el ID de la fase con el mismo nombre en el canal correcto.
+2. **Mapeo por Orden:** Si el nombre no existe, buscar la fase con el mismo número de orden (jerarquía).
+3. **Mapeo por Defecto:** Si falla lo anterior, asignar la fase inicial (Orden 1) del canal.
+
+Prevention Rule:
+**Strict Channel-Phase Alignment**: En sistemas multicanal, el `fase_id` de una oportunidad es una propiedad dependiente del `canal_id` de la cuenta. NUNCA se debe permitir la inserción o actualización de una fase sin validar que pertenezca al canal de la cuenta. En procesos de migración, siempre implementar el flujo (Nombre -> Orden -> Default) para garantizar que la oportunidad mantenga su estado semántico en el nuevo contexto técnico.
+
+Tags:
+[data-integrity] [migration] [crm-logic] [sql] [phase-mapping]
+
+---
+
+## [Bug ID: 20260429-02]
+
+Context:
+`lib/hooks/useAccountsServer.ts`, `CRM_VistaCuentasConPotencial` (Supabase View). Sucedió al intentar guardar comentarios en el formulario de edición de cuentas. El dato llegaba correctamente a Supabase, pero desaparecía al reabrir el formulario.
+
+What I Did:
+Asumí que el problema era el guardado (onBlur/onKeyDown) e implementé manejadores de eventos. Los datos llegaban correctamente a Supabase, pero el formulario no los mostraba al volver a editar.
+
+Root Cause:
+La vista `CRM_VistaCuentasConPotencial` en Supabase **no incluía la columna `comentarios`** ni `ignorar_limites_descuento`. El hook `useAccountsServer` consulta esta vista para renderizar el listado, y pasa el objeto resultado directamente a `AccountForm` como prop `account`. Al no tener `comentarios`, el form se inicializaba con string vacío y **sobreescribía el comentario existente al guardar**, aunque el dato estuviera correcto en la tabla base.
+
+Fix Applied:
+1. Se actualizó la vista `CRM_VistaCuentasConPotencial` con `DROP + CREATE` para incluir `c.comentarios` y `c.ignorar_limites_descuento`.
+2. Se agregaron los campos `comentarios` e `ignorar_limites_descuento` al tipo TypeScript `AccountServer` en `useAccountsServer.ts`.
+
+Prevention Rule:
+**Vista vs Tabla Base**: Cuando una entidad tiene un formulario de edición complejo que utiliza un hook de listado (paginado/server-side) como fuente del `account` prop, la vista de Supabase DEBE incluir TODOS los campos editables del formulario. Si se agrega un campo nuevo a la tabla base, se debe actualizar también la vista correspondiente. Checklist obligatorio al agregar campos: (1) tabla base ✅, (2) vista de listado ✅, (3) tipo TypeScript del hook ✅, (4) interfaz local Dexie ✅, (5) función `sanitize` de sync ✅.
+
+Tags:
+[data-loss] [supabase-view] [typescript] [crm-logic] [form-data]
+
+---
+
+## [Bug ID: 20260430-01]
+
+Context:
+Navegación entre módulos (Contactos/Oportunidades -> Cuentas) mediante enlaces con parámetros de consulta (`/cuentas?id=...`).
+
+What I Did:
+Implementé un `useEffect` en `app/cuentas/page.tsx` para manejar el "deep linking". El efecto lee el parámetro `id` de la URL y abre automáticamente el formulario de edición de la cuenta correspondiente.
+
+Problem:
+Anteriormente, al hacer clic en "Ver Cuenta" desde otros módulos, el usuario llegaba a la página de Cuentas, pero esta no mostraba ninguna información específica ni abría el formulario de la cuenta seleccionada. El usuario tenía que buscar la cuenta manualmente de nuevo.
+
+Root Cause:
+Inconsistencia en el patrón de diseño de navegación. Mientras que el módulo de Contactos ya tenía lógica para abrir un contacto específico vía URL, el módulo de Cuentas carecía de esta funcionalidad, ignorando el parámetro `id` enviado por los otros módulos.
+
+Fix Applied:
+Se añadió lógica de detección de `id` en `app/cuentas/page.tsx` que:
+1. Verifica si el ID ya existe en la lista cargada (para apertura instantánea).
+2. Si no existe en la lista (ej. está en otra página de resultados), realiza un fetch directo a Supabase (`CRM_Cuentas`) para obtener los datos mínimos necesarios y abrir el formulario.
+
+Prevention Rule:
+**Deep Linking Consistency**: Todos los módulos principales que actúan como "padres" (Cuentas, Contactos, Oportunidades, Pedidos) DEBEN implementar soporte para apertura directa mediante el parámetro `id` en la URL. Esto garantiza que las referencias cruzadas entre módulos funcionen de manera predecible. Al implementar un enlace de navegación dinámica hacia otro módulo, siempre verificar que el módulo de destino tenga el `useEffect` correspondiente para procesar el parámetro de búsqueda.
+
+Tags:
+[navigation] [deep-linking] [ux] [consistency]

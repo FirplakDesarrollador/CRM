@@ -10,6 +10,7 @@ import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 
 export function TopBar() {
     const isSyncing = useSyncStore((state) => state.isSyncing);
+    const isLoadingData = useSyncStore((state) => state.isLoadingData);
     const pendingCount = useSyncStore((state) => state.pendingCount);
     const syncError = useSyncStore((state) => state.error);
     const { user } = useCurrentUser();
@@ -43,10 +44,10 @@ export function TopBar() {
             <div className="flex items-center gap-4">
                 {/* Sync Status Badge */}
                 <div data-testid="topbar-sync-status" className="flex items-center gap-2 text-xs font-medium">
-                    {isSyncing ? (
+                    {isSyncing || isLoadingData ? (
                         <span className="flex items-center text-blue-600 gap-1 bg-blue-50 px-2 py-1 rounded-full">
                             <RefreshCw className="w-3 h-3 animate-spin" />
-                            Sincronizando...
+                            {isSyncing ? "Sincronizando..." : "Cargando..."}
                         </span>
                     ) : syncError ? (
                         <span className="flex items-center text-red-600 gap-1 bg-red-50 px-2 py-1 rounded-full cursor-pointer" title={syncError}>

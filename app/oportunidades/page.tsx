@@ -184,54 +184,59 @@ function OpportunitiesContent() {
         }
     }, [searchParams, router]);
 
-    // Sync to URL
+    // Sync Search Term to hook (debounced)
     useEffect(() => {
         const timer = setTimeout(() => {
             setSearchTerm(inputValue);
-            
-            const params = new URLSearchParams(Array.from(searchParams.entries()));
-            
-            if (inputValue) params.set('search', inputValue);
-            else params.delete('search');
-            
-            if (tab && tab !== 'mine') params.set('tab', tab);
-            else params.delete('tab');
-            
-            if (selectedAccountOwnerId) params.set('owner', selectedAccountOwnerId);
-            else params.delete('owner');
-            if (selectedChannel) params.set('channel', selectedChannel);
-            else params.delete('channel');
-
-            if (statusFilter && statusFilter !== 'open') params.set('status', statusFilter);
-            else params.delete('status');
-            
-            if (startDate) params.set('start', startDate);
-            else params.delete('start');
-            
-            if (endDate) params.set('end', endDate);
-            else params.delete('end');
-            
-            if (startClosingDate) params.set('startClose', startClosingDate);
-            else params.delete('startClose');
-            
-            if (endClosingDate) params.set('endClose', endClosingDate);
-            else params.delete('endClose');
-            
-            const queryString = params.toString();
-            if (queryString === searchParams.toString()) return;
-            
-            // Save to sessionStorage for cross-module persistence
-            if (queryString) {
-                sessionStorage.setItem('crm_oportunidades_state', queryString);
-            } else if (searchParams.toString() !== '') {
-                sessionStorage.removeItem('crm_oportunidades_state');
-            }
-            
-            const query = queryString ? `?${queryString}` : window.location.pathname;
-            router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
-        }, 500);
+        }, 300);
         return () => clearTimeout(timer);
-    }, [inputValue, tab, selectedAccountOwnerId, selectedChannel, statusFilter, startDate, endDate, startClosingDate, endClosingDate, searchParams, setSearchTerm, router]);
+    }, [inputValue, setSearchTerm]);
+
+    // Sync all filters to URL and SessionStorage (immediate for non-search filters)
+    useEffect(() => {
+        const params = new URLSearchParams(Array.from(searchParams.entries()));
+        
+        if (inputValue) params.set('search', inputValue);
+        else params.delete('search');
+        
+        if (tab && tab !== 'mine') params.set('tab', tab);
+        else params.delete('tab');
+        
+        if (selectedAccountOwnerId) params.set('owner', selectedAccountOwnerId);
+        else params.delete('owner');
+
+        if (selectedChannel) params.set('channel', selectedChannel);
+        else params.delete('channel');
+
+        if (statusFilter && statusFilter !== 'open') params.set('status', statusFilter);
+        else params.delete('status');
+        
+        if (startDate) params.set('start', startDate);
+        else params.delete('start');
+        
+        if (endDate) params.set('end', endDate);
+        else params.delete('end');
+        
+        if (startClosingDate) params.set('startClose', startClosingDate);
+        else params.delete('startClose');
+        
+        if (endClosingDate) params.set('endClose', endClosingDate);
+        else params.delete('endClose');
+        
+        const queryString = params.toString();
+        if (queryString === searchParams.toString()) return;
+        
+        // Save to sessionStorage for cross-module persistence
+        if (queryString) {
+            sessionStorage.setItem('crm_oportunidades_state', queryString);
+        } else if (searchParams.toString() !== '') {
+            sessionStorage.removeItem('crm_oportunidades_state');
+        }
+        
+        const query = queryString ? `?${queryString}` : window.location.pathname;
+        router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
+    }, [tab, selectedAccountOwnerId, selectedChannel, statusFilter, startDate, endDate, startClosingDate, endClosingDate, searchParams, router]); // Notice inputValue is NOT in deps here to avoid URL churn during typing
+
 
     const handleFilterChange = useCallback(({ 
         channelId, subclassificationId, segmentId, phaseId, statusFilter: newStatus,

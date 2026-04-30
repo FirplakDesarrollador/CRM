@@ -375,50 +375,99 @@ function ConfigPageContent() {
                         )}
 
                         {!error && !isSyncing && pendingCount === 0 && (
-                            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex items-center gap-3">
-                                <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                                <p className="text-sm font-bold text-emerald-900">Todo el contenido está sincronizado con la nube.</p>
+                            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex items-center justify-between gap-3">
+                                <div className="flex items-center gap-3">
+                                    <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                                    <p className="text-sm font-bold text-emerald-900">Todo el contenido está sincronizado con la nube.</p>
+                                </div>
+                                {outboxItems.some(i => i.status === 'COMPLETED') && (
+                                    <button 
+                                        onClick={async () => {
+                                            await db.outbox.where('status').equals('COMPLETED').delete();
+                                        }}
+                                        className="text-[10px] font-bold text-emerald-700 hover:text-emerald-800 bg-emerald-100 hover:bg-emerald-200 px-2 py-1 rounded transition-colors whitespace-nowrap"
+                                    >
+                                        Limpiar historial
+                                    </button>
+                                )}
                             </div>
                         )}
 
-                        {pendingCount > 0 && (
-                            <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 flex items-start gap-3">
-                                <RefreshCw className={cn("w-5 h-5 text-blue-600 shrink-0 mt-0.5", isSyncing && "animate-spin")} />
+                        {outboxItems.filter(i => i.field_name !== '_sync_metadata').length > 0 && (
+                            <div className={cn(
+                                "rounded-2xl p-4 flex items-start gap-3",
+                                pendingCount > 0 
+                                    ? "bg-blue-50 border border-blue-200" 
+                                    : "bg-slate-50 border border-slate-200"
+                            )}>
+                                <RefreshCw className={cn(
+                                    "w-5 h-5 shrink-0 mt-0.5", 
+                                    isSyncing ? "animate-spin text-blue-600" : "text-slate-400"
+                                )} />
                                 <div className="space-y-1 w-full">
-                                    <p className="text-sm font-bold text-blue-900">
-                                        Hay {pendingCount} {pendingCount === 1 ? 'cambio pendiente' : 'cambios pendientes'} de sincronización
+                                    <p className={cn(
+                                        "text-sm font-bold",
+                                        pendingCount > 0 ? "text-blue-900" : "text-slate-700"
+                                    )}>
+                                        {pendingCount > 0 
+                                            ? `Hay ${pendingCount} ${pendingCount === 1 ? 'cambio pendiente' : 'cambios pendientes'} de sincronización`
+                                            : "Historial reciente de sincronización"
+                                        }
                                     </p>
-                                    <p className="text-xs text-blue-700 leading-relaxed">
-                                        {isSyncing ? 'Sincronizando con la nube...' : isPaused ? 'La sincronización está pausada.' : 'Esperando a ser procesado en segundo plano.'}
+                                    <p className="text-xs text-slate-500 leading-relaxed">
+                                        {isSyncing ? 'Sincronizando con la nube...' : isPaused ? 'La sincronización está pausada.' : pendingCount > 0 ? 'Esperando a ser procesado en segundo plano.' : 'Todos los cambios han sido procesados.'}
                                     </p>
                                     
-                                    {/* Mostrar resumen rápido de lo pendiente */}
-                                    <div className="mt-3 bg-white/60 rounded-xl p-3 border border-blue-100/50">
-                                        <p className="text-xs font-bold text-blue-800 mb-2">En proceso:</p>
+                                    <div className="mt-3 bg-white/60 rounded-xl p-3 border border-slate-100">
+                                        <p className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-tight">Últimos movimientos:</p>
                                         <ul className="space-y-1">
                                             {outboxItems
                                                 .filter(i => i.field_name !== '_sync_metadata')
-                                                .slice(0, 3)
-                                                .map(item => (
-                                                    <li key={item.id} className="text-[10px] text-blue-700 flex justify-between items-center bg-white/50 px-2 py-1 rounded">
-                                                        <span>
-                                                            <span className="font-bold">{item.entity_type}</span> 
-                                                            <span className="opacity-70 mx-1">•</span> 
-                                                            {item.field_name}
-                                                        </span>
-                                                        <span className={cn(
-                                                            "uppercase font-bold text-[8px] px-1.5 py-0.5 rounded-full",
-                                                            item.status === 'FAILED' ? "bg-red-100 text-red-600" :
-                                                            item.status === 'SYNCING' ? "bg-blue-200 text-blue-800" :
-                                                            "bg-amber-100 text-amber-600"
-                                                        )}>
-                                                            {item.status}
-                                                        </span>
-                                                    </li>
-                                                ))}
-                                            {outboxItems.filter(i => i.field_name !== '_sync_metadata').length > 3 && (
-                                                <li className="text-[10px] text-blue-600/70 italic px-2 pt-1">
-                                                    + {outboxItems.filter(i => i.field_name !== '_sync_metadata').length - 3} elementos más...
+                                                .sort((a, b) => b.field_timestamp - a.field_timestamp)
+                                                .slice(0, 10)
+                                                .map(item => {
+                                                    const entityNames: Record<string, string> = {
+                                                        'CRM_Cuentas': 'Cuenta',
+                                                        'CRM_Oportunidades': 'Oportunidad',
+                                                        'CRM_Contactos': 'Contacto',
+                                                        'CRM_Actividades': 'Actividad',
+                                                        'CRM_Pedidos': 'Pedido',
+                                                        'CRM_PedidoItems': 'Item Pedido',
+                                                        'CRM_Cotizaciones': 'Cotización',
+                                                        'CRM_Oportunidades_Colaboradores': 'Colaborador'
+                                                    };
+                                                    
+                                                    const displayValue = typeof item.new_value === 'object' 
+                                                        ? 'Actualizado' 
+                                                        : (item.new_value?.toString() || 'Vacío');
+
+                                                    return (
+                                                        <li key={item.id} className="text-[10px] text-slate-600 flex justify-between items-center bg-white/50 px-2 py-1.5 rounded border border-slate-50">
+                                                            <div className="flex flex-col gap-0.5">
+                                                                <span className="flex items-center gap-1.5">
+                                                                    <span className="font-bold text-slate-700">{entityNames[item.entity_type] || item.entity_type}</span> 
+                                                                    <span className="opacity-40 text-[8px]">•</span> 
+                                                                    <span className="font-medium text-slate-500">{item.field_name}</span>
+                                                                </span>
+                                                                <span className="text-[9px] text-slate-400 italic truncate max-w-[180px]">
+                                                                    Valor: {displayValue}
+                                                                </span>
+                                                            </div>
+                                                            <span className={cn(
+                                                                "uppercase font-bold text-[8px] px-1.5 py-0.5 rounded-full",
+                                                                item.status === 'FAILED' ? "bg-red-100 text-red-600" :
+                                                                item.status === 'SYNCING' ? "bg-blue-200 text-blue-800" :
+                                                                item.status === 'COMPLETED' ? "bg-emerald-100 text-emerald-700" :
+                                                                "bg-amber-100 text-amber-600"
+                                                            )}>
+                                                                {item.status === 'COMPLETED' ? 'INGRESADO' : item.status}
+                                                            </span>
+                                                        </li>
+                                                    );
+                                                })}
+                                            {outboxItems.filter(i => i.field_name !== '_sync_metadata').length > 10 && (
+                                                <li className="text-[10px] text-slate-400 italic px-2 pt-1">
+                                                    + {outboxItems.filter(i => i.field_name !== '_sync_metadata').length - 10} elementos más en la tabla inferior...
                                                 </li>
                                             )}
                                         </ul>
@@ -678,9 +727,10 @@ function ConfigPageContent() {
                                                 "px-2 py-1 rounded-full text-[10px] font-bold uppercase",
                                                 item.status === 'PENDING' ? "bg-amber-100 text-amber-700" :
                                                     item.status === 'SYNCING' ? "bg-blue-100 text-blue-700" :
-                                                        "bg-red-100 text-red-700"
+                                                        item.status === 'COMPLETED' ? "bg-emerald-100 text-emerald-700" :
+                                                            "bg-red-100 text-red-700"
                                             )}>
-                                                {item.status}
+                                                {item.status === 'COMPLETED' ? 'INGRESADO' : item.status}
                                             </span>
                                         </td>
                                         <td className="px-6 py-4 max-w-[200px]">
