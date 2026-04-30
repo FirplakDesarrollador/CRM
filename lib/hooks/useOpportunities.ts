@@ -5,6 +5,7 @@ import { useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { v4 as uuidv4 } from 'uuid';
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { sendOpportunityDeletionEmail } from "@/lib/services/notifications";
 
 // Helper to fetch pricing from server
 async function fetchPricing(productId: string, channelId: string, qty: number) {
@@ -323,6 +324,11 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
         }
 
         console.log('[deleteOpportunity] All server mutations queued successfully.');
+
+        // 5. Send deletion notification (Fire and forget)
+        sendOpportunityDeletionEmail(current).catch(err => {
+            console.error('[deleteOpportunity] Error sending notification:', err);
+        });
     };
 
     const updateOpportunity = async (id: string, updates: any) => {
