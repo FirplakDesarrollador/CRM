@@ -223,9 +223,14 @@ export async function generateQuotePdf(quote: any, items: any[], account: any, o
     doc.setFontSize(7);
     doc.setFont('helvetica', 'normal');
     const paymentText = "Favor consignar en BANCOLOMBIA (Corriente) 008927404-01 Recaudo 34368 ó Banco Bogotá (Corriente) 406-007-252 cod. Recaudo 008617 y dar aviso al fax (4)2817607 o al email cartera@firplak.com con copia a su asesor.";
-    doc.text(doc.splitTextToSize(paymentText, 300), margin, finalY + 15);
+    const splitPayment = doc.splitTextToSize(paymentText, 300);
+    doc.text(splitPayment, margin, finalY + 15);
     
-    finalY += 60;
+    // Asegurarnos de que finalY avance lo suficiente para cubrir los totales o el texto de pago
+    const totalsBottom = finalY + 45;
+    const paymentBottom = finalY + 15 + (splitPayment.length * 8);
+    finalY = Math.max(totalsBottom, paymentBottom) + 20;
+
     doc.setFontSize(9);
     doc.setFont('helvetica', 'bold');
     doc.text('VALIDEZ DE LA OFERTA 15 DÍAS HABILES', margin, finalY);
@@ -256,7 +261,6 @@ export async function generateQuotePdf(quote: any, items: any[], account: any, o
         finalY = (doc as any).lastAutoTable.finalY || finalY;
     }
     
-    finalY = (doc as any).lastAutoTable.finalY || finalY;
     finalY += 15;
 
     doc.setFontSize(9);
@@ -283,8 +287,9 @@ export async function generateQuotePdf(quote: any, items: any[], account: any, o
     doc.setFontSize(7);
     doc.setFont('helvetica', 'normal');
     const legalText = `Con la firma o aceptación de este documento (vía e-mail), usted nos autoriza para tratar sus datos personales de acuerdo con la Ley Colombiana 1581 de 2012 "Protección de Datos Personales" y con nuestra política de tratamiento de datos personales. Conozca esta política y los mecanismos para ejercer sus derechos en http://www.firplak.com/privacy_policies`;
-    doc.text(doc.splitTextToSize(legalText, pageWidth - margin * 2), margin, finalY);
-    finalY += 35;
+    const splitLegal = doc.splitTextToSize(legalText, pageWidth - margin * 2);
+    doc.text(splitLegal, margin, finalY);
+    finalY += (splitLegal.length * 9) + 20;
 
     // Obtener nombre del asesor
     let displayAdvisorName = advisorName || opportunity?.owner_user_id || 'Generado desde CRM';

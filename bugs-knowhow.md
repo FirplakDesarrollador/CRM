@@ -388,3 +388,31 @@ Prevention Rule:
 
 Tags:
 [navigation] [deep-linking] [ux] [consistency]
+
+---
+
+## [Bug ID: 20260430-02]
+
+Context:
+`lib/pdfGenerator.ts`, Generación de PDF de Cotización (jspdf).
+
+What I Did:
+Implementé el flujo de dibujo del PDF usando una variable `finalY` para controlar la posición vertical, pero reseteé esta variable usando `(doc as any).lastAutoTable.finalY` en lugares donde no se había generado una tabla nueva, y usé incrementos fijos (`finalY += 60`) para bloques de texto multilínea.
+
+Problem:
+Los campos inferiores del PDF (Notas, Fecha de entrega, etc.) se traslapaban con los totales o con el texto de pago (Bancolombia), quedando ilegibles o amontonados.
+
+Root Cause:
+1. **Pérdida de Cursor Vertical**: Al reasignar `finalY = lastAutoTable.finalY` fuera de contexto, el cursor de dibujo "saltaba" hacia arriba a la posición de la tabla de productos, ignorando el contenido intermedio (totales, pagos).
+2. **Estimación Estática**: El uso de incrementos fijos no contemplaba que el texto de pago o las notas pudieran ocupar más de 2 o 3 líneas, resultando en colisiones visuales.
+
+Fix Applied:
+1. Se eliminaron las reasignaciones peligrosas de `finalY`.
+2. Se implementó el uso de `splitTextToSize` para calcular la altura real de los bloques de texto dinámico y avanzar `finalY` de forma precisa.
+3. Se añadió un margen de seguridad (`Math.max`) entre los cuadros de totales y el texto de pago.
+
+Prevention Rule:
+**Dynamic Y-Tracking in PDFs**: En generadores de PDF manuales (como jspdf), NUNCA asuma alturas fijas para bloques de texto que provengan de campos de usuario o constantes largas. Use siempre `splitTextToSize` para obtener el array de líneas y multiplique por el tamaño de fuente para avanzar el cursor `finalY`. Evite depender de `lastAutoTable.finalY` a menos que esté inmediatamente después de la creación de una tabla.
+
+Tags:
+[pdf] [jspdf] [layout] [overlap] [dynamic-content]
