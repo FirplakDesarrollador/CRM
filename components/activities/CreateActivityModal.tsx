@@ -510,6 +510,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                     ? toInputDateTime(initialData.fecha_fin)
                     : toInputDateTime(new Date(Date.now() + 3600000)),
                 opportunity_id: initialData.opportunity_id || initialOpportunityId || '',
+                account_id: initialData.account_id || initialAccountId || '',
                 is_completed: !!initialData.is_completed,
                 prioridad: initialData.prioridad || 'Media'
             });
