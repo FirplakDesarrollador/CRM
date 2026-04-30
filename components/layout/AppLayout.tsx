@@ -8,7 +8,7 @@ import { useSyncStore } from "@/lib/stores/useSyncStore";
 import { useEffect, useState, useCallback } from "react";
 import { syncEngine } from "@/lib/sync";
 import { usePathname } from "next/navigation";
-import { LoadingOverlay } from "@/components/ui/LoadingOverlay";
+
 import { supabase } from "@/lib/supabase";
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
@@ -113,7 +113,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
     return (
         <div className="flex h-screen bg-slate-50 overflow-hidden">
-            <LoadingOverlay />
+
             {/* Sidebar (Desktop) */}
             <Sidebar isCollapsed={isCollapsed} toggleSidebar={toggleSidebar} />
 

@@ -12,7 +12,7 @@ export interface OutboxItem {
     new_value: any;
     field_timestamp: number;
     user_id?: string;
-    status: 'PENDING' | 'SYNCING' | 'FAILED';
+    status: 'PENDING' | 'SYNCING' | 'FAILED' | 'COMPLETED';
     retry_count: number;
     error?: string;
 }
@@ -96,6 +96,23 @@ export interface LocalQuote {
     incoterm?: string;
     seguro?: number;
 
+    // PDF / F-V-29 Nuevos Campos
+    cliente_final?: string;
+    email_contacto?: string;
+    contacto_ventas?: string;
+    contacto_logistico?: string;
+    contacto_tesoreria?: string;
+    dir_envio_factura_tipo?: string;
+    servicio_subida_hidromasaje?: boolean;
+    piso_entrega?: number;
+    tiene_escaleras?: boolean;
+    planos_hidromasaje?: string;
+    fecha_entrega?: string;
+    nit_cliente_final?: string;
+    entrega_en_obra?: boolean;
+    bodega_externa?: boolean;
+    bodega_firplak?: boolean;
+
     created_by?: string;
     updated_by?: string;
     updated_at?: string;
@@ -156,6 +173,23 @@ export interface LocalPedido {
     currency_id?: string;
     responsible?: string;
     "EXTRA_Gran Total"?: string;
+
+    // Nuevos campos F-V-29
+    cliente_final?: string;
+    email_contacto?: string;
+    contacto_ventas?: string;
+    contacto_logistico?: string;
+    contacto_tesoreria?: string;
+    dir_envio_factura_tipo?: string;
+    servicio_subida_hidromasaje?: boolean;
+    piso_entrega?: number;
+    tiene_escaleras?: boolean;
+    planos_hidromasaje?: string;
+    fecha_entrega?: string;
+    nit_cliente_final?: string;
+    entrega_en_obra?: boolean;
+    bodega_externa?: boolean;
+    bodega_firplak?: boolean;
 
     created_by?: string;
     updated_by?: string;

@@ -210,6 +210,21 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
             orden_compra: ped?.orden_compra || "",
             incoterm: ped?.incoterm || "",
             notas_sap: ped?.notas_sap || "",
+            cliente_final: ped?.cliente_final || "",
+            email_contacto: ped?.email_contacto || "",
+            contacto_ventas: ped?.contacto_ventas || "",
+            contacto_logistico: ped?.contacto_logistico || "",
+            contacto_tesoreria: ped?.contacto_tesoreria || "",
+            dir_envio_factura_tipo: ped?.dir_envio_factura_tipo || "",
+            servicio_subida_hidromasaje: ped?.servicio_subida_hidromasaje || false,
+            piso_entrega: ped?.piso_entrega || "",
+            tiene_escaleras: ped?.tiene_escaleras || false,
+            planos_hidromasaje: ped?.planos_hidromasaje || "",
+            fecha_entrega: ped?.fecha_entrega || "",
+            nit_cliente_final: ped?.nit_cliente_final || "",
+            entrega_en_obra: ped?.entrega_en_obra || false,
+            bodega_externa: ped?.bodega_externa || false,
+            bodega_firplak: ped?.bodega_firplak || false,
             // Add custom items structure for the form
             selected_quantities: {} as Record<string, number>
         }
@@ -223,6 +238,21 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
             setValue('orden_compra', ped.orden_compra || "");
             setValue('incoterm', ped.incoterm || "");
             setValue('notas_sap', ped.notas_sap || "");
+            setValue('cliente_final', ped.cliente_final || "");
+            setValue('email_contacto', ped.email_contacto || "");
+            setValue('contacto_ventas', ped.contacto_ventas || "");
+            setValue('contacto_logistico', ped.contacto_logistico || "");
+            setValue('contacto_tesoreria', ped.contacto_tesoreria || "");
+            setValue('dir_envio_factura_tipo', ped.dir_envio_factura_tipo || "");
+            setValue('servicio_subida_hidromasaje', ped.servicio_subida_hidromasaje || false);
+            setValue('piso_entrega', ped.piso_entrega || "");
+            setValue('tiene_escaleras', ped.tiene_escaleras || false);
+            setValue('planos_hidromasaje', ped.planos_hidromasaje || "");
+            setValue('fecha_entrega', ped.fecha_entrega || "");
+            setValue('nit_cliente_final', ped.nit_cliente_final || "");
+            setValue('entrega_en_obra', ped.entrega_en_obra || false);
+            setValue('bodega_externa', ped.bodega_externa || false);
+            setValue('bodega_firplak', ped.bodega_firplak || false);
         }
     }, [ped, setValue]);
 
@@ -263,6 +293,21 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
             orden_compra: data.orden_compra,
             incoterm: data.incoterm,
             notas_sap: data.notas_sap,
+            cliente_final: data.cliente_final,
+            email_contacto: data.email_contacto,
+            contacto_ventas: data.contacto_ventas,
+            contacto_logistico: data.contacto_logistico,
+            contacto_tesoreria: data.contacto_tesoreria,
+            dir_envio_factura_tipo: data.dir_envio_factura_tipo,
+            servicio_subida_hidromasaje: data.servicio_subida_hidromasaje,
+            piso_entrega: data.piso_entrega ? Number(data.piso_entrega) : null,
+            tiene_escaleras: data.tiene_escaleras,
+            planos_hidromasaje: data.planos_hidromasaje,
+            fecha_entrega: data.fecha_entrega || null,
+            nit_cliente_final: data.nit_cliente_final,
+            entrega_en_obra: data.entrega_en_obra,
+            bodega_externa: data.bodega_externa,
+            bodega_firplak: data.bodega_firplak,
         };
 
         if (pedidoUuid) {
@@ -273,6 +318,26 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
             await createPedido(quote, itemsToSave, pedData);
             alert("Pedido parcial guardado con éxito.");
         }
+
+        // Sincronizar estos mismos campos en la Cotización principal para el PDF F-V-29
+        await db.quotes.update(quote.id, {
+            cliente_final: pedData.cliente_final,
+            email_contacto: pedData.email_contacto,
+            contacto_ventas: pedData.contacto_ventas,
+            contacto_logistico: pedData.contacto_logistico,
+            contacto_tesoreria: pedData.contacto_tesoreria,
+            dir_envio_factura_tipo: pedData.dir_envio_factura_tipo,
+            servicio_subida_hidromasaje: pedData.servicio_subida_hidromasaje,
+            piso_entrega: pedData.piso_entrega,
+            tiene_escaleras: pedData.tiene_escaleras,
+            planos_hidromasaje: pedData.planos_hidromasaje,
+            fecha_entrega: pedData.fecha_entrega,
+            nit_cliente_final: pedData.nit_cliente_final,
+            entrega_en_obra: pedData.entrega_en_obra,
+            bodega_externa: pedData.bodega_externa,
+            bodega_firplak: pedData.bodega_firplak
+        });
+
         onClose();
     };
 
@@ -341,6 +406,90 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
                     <div className="md:col-span-2">
                         <label className="text-sm font-medium">Notas Integración SAP</label>
                         <textarea {...register("notas_sap")} className="w-full mt-1 p-2 border rounded-lg" rows={3} />
+                    </div>
+                </div>
+
+                <h4 className="font-bold border-b pb-2 pt-4">3. Datos Adicionales (F-V-29 / Contactos)</h4>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label className="text-sm font-medium">Cliente Final (Nombre)</label>
+                        <input {...register("cliente_final")} className="w-full mt-1 p-2 border rounded-lg" placeholder="Nombre del cliente final" />
+                    </div>
+                    <div>
+                        <label className="text-sm font-medium">NIT / CC Cliente Final</label>
+                        <input {...register("nit_cliente_final")} className="w-full mt-1 p-2 border rounded-lg" placeholder="NIT o Cédula" />
+                    </div>
+                    <div>
+                        <label className="text-sm font-medium">Email de Contacto (OC/Cot)</label>
+                        <input {...register("email_contacto")} type="email" className="w-full mt-1 p-2 border rounded-lg" placeholder="correo@ejemplo.com" />
+                    </div>
+                    
+                    <div className="md:col-span-2">
+                        <p className="text-sm font-bold text-slate-700 mt-2">Contactos por Área (Nombre y Celular)</p>
+                    </div>
+                    <div>
+                        <label className="text-sm font-medium">Ventas / Compras</label>
+                        <input {...register("contacto_ventas")} className="w-full mt-1 p-2 border rounded-lg" placeholder="Nombre y celular" />
+                    </div>
+                    <div>
+                        <label className="text-sm font-medium">Logística</label>
+                        <input {...register("contacto_logistico")} className="w-full mt-1 p-2 border rounded-lg" placeholder="Nombre y celular" />
+                    </div>
+                    <div>
+                        <label className="text-sm font-medium">Tesorería</label>
+                        <input {...register("contacto_tesoreria")} className="w-full mt-1 p-2 border rounded-lg" placeholder="Nombre y celular" />
+                    </div>
+
+                    <div className="md:col-span-2">
+                        <p className="text-sm font-bold text-slate-700 mt-2">Entregas y Logística Específica</p>
+                    </div>
+                    <div>
+                        <label className="text-sm font-medium">Dirección Envío Factura</label>
+                        <select {...register("dir_envio_factura_tipo")} className="w-full mt-1 p-2 border rounded-lg">
+                            <option value="">Seleccione...</option>
+                            <option value="OFICINA">Oficina</option>
+                            <option value="TIENDA">Tienda</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="text-sm font-medium flex items-center gap-2 mt-1">
+                            <input type="checkbox" {...register("servicio_subida_hidromasaje")} />
+                            Requiere Servicio Subida Hidromasaje
+                        </label>
+                    </div>
+                    <div>
+                        <label className="text-sm font-medium">Piso de Entrega</label>
+                        <input type="number" {...register("piso_entrega")} className="w-full mt-1 p-2 border rounded-lg" placeholder="Ej. 1" min="1" />
+                    </div>
+                    <div>
+                        <label className="text-sm font-medium flex items-center gap-2 mt-1">
+                            <input type="checkbox" {...register("tiene_escaleras")} />
+                            ¿Tiene escaleras?
+                        </label>
+                    </div>
+                    <div className="md:col-span-2 flex flex-wrap gap-6 bg-slate-50 p-3 rounded-lg border">
+                        <label className="text-sm font-medium flex items-center gap-2">
+                            <input type="checkbox" {...register("entrega_en_obra")} />
+                            ¿Entrega en obra?
+                        </label>
+                        <label className="text-sm font-medium flex items-center gap-2">
+                            <input type="checkbox" {...register("bodega_externa")} />
+                            ¿Bodega externa?
+                        </label>
+                        <label className="text-sm font-medium flex items-center gap-2">
+                            <input type="checkbox" {...register("bodega_firplak")} />
+                            ¿Bodega FIRPLAK?
+                        </label>
+                    </div>
+                    <div className="md:col-span-2">
+                        <label className="text-sm font-medium">Planos de Hidromasaje (Notas/Referencias)</label>
+                        <textarea {...register("planos_hidromasaje")} className="w-full mt-1 p-2 border rounded-lg" rows={2} placeholder="Describa posiciones o referencias..." />
+                    </div>
+                    <div>
+                        <label className="text-sm font-medium flex items-center gap-2 mb-1">
+                            <Calendar className="w-4 h-4 text-slate-400" /> Fecha Mínima de Entrega Solicitada
+                        </label>
+                        <input type="date" {...register("fecha_entrega")} className="w-full p-2 border rounded-lg" />
                     </div>
                 </div>
 

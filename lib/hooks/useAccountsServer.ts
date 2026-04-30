@@ -19,6 +19,9 @@ export type AccountServer = {
     email: string | null;
     direccion: string | null;
     ciudad: string | null;
+    pais_id?: number | null;
+    departamento_id?: number | null;
+    ciudad_id?: number | null;
     created_by: string | null;
     owner_user_id?: string | null;
     creator_name?: string | null;
@@ -28,6 +31,8 @@ export type AccountServer = {
     contact_count?: number;
     potencial_venta?: number;
     _hasPendingSync?: boolean;
+    comentarios?: string | null;
+    ignorar_limites_descuento?: boolean;
 };
 
 type UseAccountsServerProps = {
@@ -181,7 +186,11 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                     creator_name: 'Usuario Offline',
                     contact_count: 0,
                     potencial_venta: (allOpps as any[])
-                        .filter(o => o.account_id === item.id)
+                        .filter(o => 
+                            o.account_id === item.id && 
+                            !o.is_deleted && 
+                            ![11, 14, 2, 3, 4].includes(o.estado_id)
+                        )
                         .reduce((sum, o) => sum + (o.amount || o.valor || 0), 0)
                 }));
 
