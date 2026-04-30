@@ -119,6 +119,40 @@ function AccountsContent() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
+    // Deep linking: Automatically fetch and open account by ID from URL
+    useEffect(() => {
+        const id = searchParams.get('id');
+        if (!id || editingAccount?.id === id) return;
+
+        const findAndOpen = async () => {
+            // 1. Check if already in current list
+            const existing = accounts?.find((a: any) => a.id === id);
+            if (existing) {
+                setEditingAccount(existing);
+                setShowCreate(false);
+                return;
+            }
+
+            // 2. Fallback to Supabase (for JIT access when not in list)
+            try {
+                const { data: account, error } = await supabase
+                    .from('CRM_Cuentas')
+                    .select('*')
+                    .eq('id', id)
+                    .single();
+
+                if (account && !error) {
+                    setEditingAccount(account);
+                    setShowCreate(false);
+                }
+            } catch (err) {
+                console.warn("[AccountsPage] Error fetching account for deep link:", err);
+            }
+        };
+
+        findAndOpen();
+    }, [searchParams, accounts, editingAccount?.id]);
+
     // Sync to URL & SessionStorage
     useEffect(() => {
         const timer = setTimeout(() => {

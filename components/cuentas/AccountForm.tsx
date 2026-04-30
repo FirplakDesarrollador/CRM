@@ -763,6 +763,12 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                             rows={3}
                             className="w-full border p-2 rounded bg-white focus:ring-2 focus:ring-blue-500 outline-none resize-none"
                             placeholder="Agregue información adicional aquí..."
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' && !e.shiftKey) {
+                                    e.preventDefault();
+                                    e.currentTarget.form?.requestSubmit();
+                                }
+                            }}
                         />
                     </div>
 

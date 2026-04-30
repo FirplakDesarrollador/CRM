@@ -31,21 +31,32 @@ export async function generateQuotePdf(quote: any, items: any[], account: any, o
         doc.text(text, textX, yPos + 18, { align: align as any, maxWidth: w - 6 });
     };
 
-    // HEADER
+    // HEADER CON LOGO
+    const logoBase64 = 'PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiIHN0YW5kYWxvbmU9Im5vIj8+CjwhRE9DVFlQRSBzdmcgUFVCTElDICItLy9XM0MvL0RURCBTVkcgMS4xLy9FTiIgImh0dHA6Ly93d3cudzMub3JnL0dyYXBoaWNzL1NWRy8xLjEvRFREL3N2ZzExLmR0ZCI+Cjxzdmcgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgdmlld0JveD0iMCAwIDE3MzIgMjYyIiB2ZXJzaW9uPSIxLjEiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgeG1sbnM6eGxpbms9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkveGxpbmsiIHhtbDpzcGFjZT0icHJlc2VydmUiIHhtbG5zOnNlcmlmPSJodHRwOi8vd3d3LnNlcmlmLmNvbS8iIHN0eWxlPSJmaWxsLXJ1bGU6ZXZlbm9kZDtjbGlwLXJ1bGU6ZXZlbm9kZDtzdHJva2UtbGluZWpvaW46cm91bmQ7c3Ryb2tlLW1pdGVybGltaXQ6MjsiPgogICAgPGcgdHJhbnNmb3JtPSJtYXRyaXgoMSwwLDAsMSwtMzczLjc0NTgzMywtMTUyOC4wODMzMzMpIj4KICAgICAgICA8ZyB0cmFuc2Zvcm09Im1hdHJpeCg0LjE2NjY2NywwLDAsNC4xNjY2NjcsMCwwKSI+CiAgICAgICAgICAgIDxnIHRyYW5zZm9ybT0ibWF0cml4KDEsMCwwLDEsODkuNjk5LDQyOS40NjQ4KSI+CiAgICAgICAgICAgICAgICA8cGF0aCBkPSJNMCwtNjIuNzI0TDQ1Ljc2NywtNjIuNzI0TDQ1Ljc2NywtNTQuMTU0TDExLjY3LC01NC4xNTRMMTEuNjcsLTMyLjI3M0w0NC42NzIsLTMyLjI3M0w0NC42NzIsLTIzLjcwNEwxMS42NywtMjMuNzA0TDExLjY3LDBMMCwwTDAsLTYyLjcyNFoiIHN0eWxlPSJmaWxsOnJnYig1MCw2Nyw4NCk7ZmlsbC1ydWxlOm5vbnplcm87Ii8+CiAgICAgICAgICAgIDwvZz4KICAgICAgICA8L2c+CiAgICAgICAgPGcgdHJhbnNmb3JtPSJtYXRyaXgoNC4xNjY2NjcsMCwwLDQuMTY2NjY3LDAsMCkiPgogICAgICAgICAgICA8ZyB0cmFuc2Zvcm09Im1hdHJpeCgxLDAsMCwxLDAsLTQ1LjY4NCkiPgogICAgICAgICAgICAgICAgPHJlY3QgeD0iMTQ5LjU5NyIgeT0iNDEyLjQyNSIgd2lkdGg9IjExLjc2MSIgaGVpZ2h0PSI2Mi43MjQiIHN0eWxlPSJmaWxsOnJnYig1MCw2Nyw4NCk7Ii8+CiAgICAgICAgICAgIDwvZz4KICAgICAgICA8L2c+CiAgICAgICAgPGcgdHJhbnNmb3JtPSJtYXRyaXgoNC4xNjY2NjcsMCwwLDQuMTY2NjY3LDAsMCkiPgogICAgICAgIC2ZyB0cmFuc2Zvcm09Im1hdHJpeCgxLDAsMCwxLDIwNS43NTg3LDM5OS45MjU2KSI+CiAgICAgICAgICAgICAgICA8cGF0aCBkPSJNMCwtMy42NDZDNy44NDEsLTMuNjQ2IDEyLjQ5LC03LjQ3NSAxMi40OSwtMTQuMzEzQzEyLjQ5LC0yMS4wNTkgOC4xMTQsLTI0LjUyNCAtMC4yNzQsLTI0LjUyNEwtMTguNTk5LC0yNC41MjRMLTE4LjU5OSwtMy42NDZMMCwtMy42NDZaTS0zMC4yNjksLTMzLjE4NUwtMC4yNzQsLTMzLjE4NUMxNS42ODEsLTMzLjE4NSAyNC4yNSwtMjYuODAzIDI0LjI1LC0xNC44NkMyNC4yNSwtNS44MzQgMTguNDE1LDEuMDAzIDkuMzksMi43MzZMMjYuNzExLDI5LjUzOUwxMy43NjYsMjkuNTM5TC0xLjI3Nyw1LjAxNUwtMTguNTk5LDUuMDE1TC0xOC41OTksMjkuNTM5TC0zMC4yNjksMjkuNTM5TC0zMC4yNjksLTMzLjE4NVoiIHN0eWxlPSJmaWxsOnJnYig1MCw2Nyw4NCk7ZmlsbC1ydWxlOm5vbnplcm87Ii8+CiAgICAgICAgICAgIDwvZz4KICAgICAgICA8L2c+CiAgICAgICAgPGcgdHJhbnNmb3JtPSJtYXRyaXgoNC4xNjY2NjcsMCwwLDQuMTY2NjY3LDAsMCkiPgogICAgICAgICAgICA8ZyB0cmFuc2Zvcm09Im1hdHJpeCgxLDAsMCwxLDI3My42Nzk2LDM5OC4xMDI5KSI+CiAgICAgICAgICAgICAgICA8cGF0aCBkPSJNMCwwQzguMTE0LDAgMTIuNTgxLC00LjEwMiAxMi41ODEsLTExLjY3QzEyLjVODEsLTE4Ljk2MyA4LjExNCwtMjIuNzAxIC0wLjQ1NywtMjIuNzAxTC0xNS4zMTYsLTIyLjcwMUwtMTUuMzE2LDBMMCwwWk0tMjcuMDc3LC0zMS4zNjMkTC0wLjQ1NywtMzEuMzYyQzE1LjQ5OSwtMzEuMzYyIDI0LjI1LC0yNC41MjQgMjQuMjUsLTExLjg1MkMyNC4yNSwwLjQ1NiAxNS40OTksOC42NjEgIDAsOC42NjFMLTE1LjMxNiw4LjY2MUwtMTUuMzE2LDMxLjM2MkwtMjcuMDc3LDMxLjM2MkwtMjcuMDc3LC0zMS4zNjJaIiBzdHlsZT0iZmlsbDpyZ2IoNTAsNjcsODQpO2ZpbGwtcnVsZTpub256ZXJvOyIvPgogICAgICAgICAgICA8L2c+CiAgICAgICAgPC9nPgogICAgICAgIDxnIHRyYW5zZm9ybT0ibWF0cml4KDQuMTY2NjY3LDAsMCw0LjE2NjY2NywwLDApIj4KICAgICAgICAgICAgPGcgdHJhbnNmb3JtPSJtYXRyaXgoMSwwLDAsMSwzMTIuMDYwNiw0MjkuNDY0OCkiPgogICAgICAgICAgICAgICAgPHBhdGggZD0iTTAsLTYyLjcyNEwxMS43NjEsLTYyLjcyNEwxMS43NjEsLTguNjYxTDQ2LjMxMywtOC42NjFMNDYuMzEzLDBMMCwwTDAsLTYyLjcyNFoiIHN0eWxlPSJmaWxsOnJnYig1MCw2Nyw4NCk7ZmlsbC1ydWxlOm5vbnplcm87Ii8+CiAgICAgICAgICAgIDwvZz4KICAgICAgICA8L2c+CiAgICAgICAgPGcgdHJhbnNmb3JtPSJtYXRyaXgoNC4xNjY2NjcsMCwwLDQuMTY2NjY3LDAsMCkiPgogICAgICAgICAgICA8ZyB0cmFuc2Zvcm09Im1hdHJpeCgxLDAsMCwxLDQ0Ny40MDg4LDQyOS40NjQ4KSI+CiAgICAgICAgICAgICAgICA8cGF0aCBkPSJNMCwtNjIuNzI0TDExLjc2MSwtNjIuNzI0TDExLjc2MSwtMzQuNzM1TDQxLjI5OSwtNjIuNzI0TDU1LjI0OSwtNjIuNzI0TDI4LjcxOCwtMzYuMzc2TDU3Ljg5MiwwTDQ0LjMwOCwwTDIwLjYwNSwtMjguNjI2TDExLjc2MSwtMjAuMzNMMTEuNzYxLDBMMCwwTDAsLTYyLjcyNFoiIHN0eWxlPSJmaWxsOnJnYig1MCw2Nyw4NCk7ZmlsbC1ydWxlOm5vbnplcm87Ii8+CiAgICAgICAgICAgIDwvZz4KICAgICAgICA8L2c+CiAgICAgICAgPGcgdHJhbnNmb3JtPSJtYXRyaXgoNC4xNjY2NjcsMCwwLDQuMTY2NjY3LDAsMCkiPgogICAgICAgICAgICA8ZyB0cmFuc2Zvcm09Im1hdHJpeCgxLDAsMCwxLDQzMy4yNzgsMzY2Ljc0KSI+CiAgICAgICAgICAgICAgICA8cGF0aCBkPSJNMCw2Mi43MjVMLTIzLjIwOSwwTC0zNy41NjQsMEwtNjAuNzczLDYyLjcyNUwtNDguOTE3LDYyLjcyNUwtMzAuMzg3LDEyLjY0NUwtMTEuODU2LDYyLjcyNUwwLDYyLjcyNVoiIHN0eWxlPSJmaWxsOnJnYig1MCw2Nyw4NCk7ZmlsbC1ydWxlOm5vbnplcm87Ii8+CiAgICAgICAgICAgIDwvZz4KICAgICAgICA8L2c+CiAgICAgICAgPGcgdHJhbnNmb3JtPSJtYXRyaXgoNC4xNjY2NjcsMCwwLDQuMTY2NjY3LDAsMCkiPgogICAgICAgICAgICA8ZyB0cmFuc2Zvcm09Im1hdHJpeCgxLDAsMCwxLDQwOS42OTYxLDQxMS4wNzUpIj4KICAgIC2cHRyYW5zZm9ybT0ibWF0cml4KDEsMCwwLDEsNDA5LjY5NjEsNDExLjA3NSkiPgogICAgICAgICAgICAgICAgPHBhdGggZD0iTTAsMTguMzlMLTYuODA1LDBMLTEzLjYwOSwxOC4zOUwwLDE4LjM5WiIgc3R5bGU9ImZpbGw6cmdiKDUwLDY3LDg0KTtmaWxsLXJ1bGU6bm9uemVybzsiLz4KICAgICAgICAgICAgPC9nPgogICAgICAgIDwvZz4KICAgIDwvZz4KPC9zdmc+Cg==';
+    
+    try {
+        doc.addImage('data:image/svg+xml;base64,' + logoBase64, 'SVG', margin, y - 10, 100, 25);
+    } catch (e) {
+        console.warn('No se pudo cargar el logo SVG:', e);
+        doc.setFontSize(14);
+        doc.setFont('helvetica', 'bold');
+        doc.text('FIRPLAK', margin, y + 10);
+    }
+
     doc.setFontSize(10);
     doc.setFont('helvetica', 'bold');
     doc.text('F-V-29', pageWidth - 70, y);
     y += 15;
     
     doc.setFontSize(12);
-    doc.text('FORMATO DE COTIZACIÓN Y/O PEDIDO BAÑOS, COCINAS Y ROPAS', margin, y);
+    doc.text('FORMATO DE COTIZACIÓN Y/O PEDIDO BAÑOS, COCINAS Y ROPAS', margin + 110, y - 5);
     doc.setFontSize(10);
     doc.text('V. 4', pageWidth - 70, y);
     y += 15;
     
     doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
-    doc.text('NIT 890.927.404-0', margin, y);
+    doc.text('NIT 890.927.404-0', margin + 110, y - 10);
     doc.text(`Año: ${new Date().getFullYear()}`, pageWidth - 70, y);
     y += 10;
     
@@ -66,7 +77,10 @@ export async function generateQuotePdf(quote: any, items: any[], account: any, o
     
     // ROW 2: NIT
     doc.text(`NIT/C.C. ${account?.nit_base || account?.nit || ''}`, col1, y);
-    doc.text(`CLIENTE FINAL`, col3, y);
+    doc.text(`CLIENTE FINAL: ${quote.cliente_final || ''}`, col3, y);
+    if (quote.nit_cliente_final) {
+        doc.text(`NIT C.F.: ${quote.nit_cliente_final}`, col3 + 180, y);
+    }
     y += 15;
     
     // ROW 3: DIREC. PRODUCTO
@@ -88,22 +102,22 @@ export async function generateQuotePdf(quote: any, items: any[], account: any, o
     y += 15;
 
     doc.setFont('helvetica', 'normal');
-    doc.text(`VENTAS/COMPRAS: ${account?.nombre || ''}`, col1, y);
+    doc.text(`VENTAS/COMPRAS: ${quote.contacto_ventas || account?.nombre || ''}`, col1, y);
     doc.text(`TEL \/ CEL: ${account?.telefono || ''}`, col3, y);
     y += 15;
     
-    doc.text(`LOGISTICO: `, col1, y);
+    doc.text(`LOGISTICO: ${quote.contacto_logistico || ''}`, col1, y);
     doc.text(`TEL \/ CEL: `, col3, y);
     y += 15;
     
-    doc.text(`TESORERIA: `, col1, y);
+    doc.text(`TESORERIA: ${quote.contacto_tesoreria || ''}`, col1, y);
     doc.text(`TEL \/ CEL: `, col3, y);
     y += 15;
     
     doc.text(`FACTURA ELECTR.: ${account?.email || ''}`, col1, y);
     y += 15;
     
-    doc.text(`EMAIL CONTACTO OC/COT: ${account?.email || ''}`, col1, y);
+    doc.text(`EMAIL CONTACTO OC/COT: ${quote.email_contacto || account?.email || ''}`, col1, y);
     y += 20;
 
     // INVOICE SECTION
@@ -119,13 +133,17 @@ export async function generateQuotePdf(quote: any, items: any[], account: any, o
     doc.text(`ES UNA MUESTRA? ${quote.es_muestra ? 'SI' : 'NO'}`, col1, y);
     y += 15;
     
-    doc.text(`DIRECCION PARA ENVIO DE FACTURA (marque con una X): OFICINA ( X )  TIENDA (   )`, col1, y);
+    doc.text(`DIRECCION PARA ENVIO DE FACTURA (marque con una X): OFICINA ( ${quote.dir_envio_factura_tipo === 'OFICINA' ? 'X' : ' '} )  TIENDA ( ${quote.dir_envio_factura_tipo === 'TIENDA' ? 'X' : ' '} )`, col1, y);
     y += 15;
 
-    doc.text(`SERVICIO DE SUBIDA DE HIDROMASAJE (marque con una X): SI ( ) NO ( X )`, col1, y);
+    doc.text(`SERVICIO DE SUBIDA DE HIDROMASAJE (marque con una X): SI ( ${quote.servicio_subida_hidromasaje ? 'X' : ' '} ) NO ( ${!quote.servicio_subida_hidromasaje ? 'X' : ' '} )`, col1, y);
     y += 15;
 
-    doc.text(`PISO (   ) MEDIO (marque con una X) ASCENSOR ( ) ESCALERAS ( )`, col1, y);
+    const tieneAscensor = !quote.tiene_escaleras && quote.piso_entrega > 1;
+    doc.text(`PISO ( ${quote.piso_entrega || '  '} ) MEDIO (marque con una X) ASCENSOR ( ${tieneAscensor ? 'X' : ' '} ) ESCALERAS ( ${quote.tiene_escaleras ? 'X' : ' '} )`, col1, y);
+    y += 15;
+
+    doc.text(`ENTREGA EN OBRA ( ${quote.entrega_en_obra ? 'X' : ' '} )  BODEGA EXTERNA ( ${quote.bodega_externa ? 'X' : ' '} )  BODEGA FIRPLAK ( ${quote.bodega_firplak ? 'X' : ' '} )`, col1, y);
     y += 15;
 
     doc.text(`VERIFICACIÓN PREVIA POR PARTE DE PERSONAL FIRPLAK (marque con una X) SI ( ) NO ( X )`, col1, y);
@@ -205,9 +223,14 @@ export async function generateQuotePdf(quote: any, items: any[], account: any, o
     doc.setFontSize(7);
     doc.setFont('helvetica', 'normal');
     const paymentText = "Favor consignar en BANCOLOMBIA (Corriente) 008927404-01 Recaudo 34368 ó Banco Bogotá (Corriente) 406-007-252 cod. Recaudo 008617 y dar aviso al fax (4)2817607 o al email cartera@firplak.com con copia a su asesor.";
-    doc.text(doc.splitTextToSize(paymentText, 300), margin, finalY + 15);
+    const splitPayment = doc.splitTextToSize(paymentText, 300);
+    doc.text(splitPayment, margin, finalY + 15);
     
-    finalY += 60;
+    // Asegurarnos de que finalY avance lo suficiente para cubrir los totales o el texto de pago
+    const totalsBottom = finalY + 45;
+    const paymentBottom = finalY + 15 + (splitPayment.length * 8);
+    finalY = Math.max(totalsBottom, paymentBottom) + 20;
+
     doc.setFontSize(9);
     doc.setFont('helvetica', 'bold');
     doc.text('VALIDEZ DE LA OFERTA 15 DÍAS HABILES', margin, finalY);
@@ -220,22 +243,29 @@ export async function generateQuotePdf(quote: any, items: any[], account: any, o
     finalY += 15;
     
     doc.setFontSize(8);
-    autoTable(doc, {
-        startY: finalY,
-        head: [['REFERENCIA SAP', 'CANT.', 'DESCRIPCION', 'POSICIÓN DE FALDÓN']],
-        body: [['', '', '', '']],
-        theme: 'plain',
-        headStyles: { fillColor: [240, 240, 240], textColor: 0, fontStyle: 'bold', lineWidth: 0.5, lineColor: 0 },
-        bodyStyles: { lineWidth: 0.5, lineColor: 200, minCellHeight: 20 },
-        styles: { fontSize: 8, cellPadding: 3 },
-    });
+    if (quote.planos_hidromasaje) {
+        doc.setFont('helvetica', 'normal');
+        const splitPlanos = doc.splitTextToSize(quote.planos_hidromasaje, pageWidth - margin * 2);
+        doc.text(splitPlanos, margin, finalY);
+        finalY += (splitPlanos.length * 10) + 5;
+    } else {
+        autoTable(doc, {
+            startY: finalY,
+            head: [['REFERENCIA SAP', 'CANT.', 'DESCRIPCION', 'POSICIÓN DE FALDÓN']],
+            body: [['', '', '', '']],
+            theme: 'plain',
+            headStyles: { fillColor: [240, 240, 240], textColor: 0, fontStyle: 'bold', lineWidth: 0.5, lineColor: 0 },
+            bodyStyles: { lineWidth: 0.5, lineColor: 200, minCellHeight: 20 },
+            styles: { fontSize: 8, cellPadding: 3 },
+        });
+        finalY = (doc as any).lastAutoTable.finalY || finalY;
+    }
     
-    finalY = (doc as any).lastAutoTable.finalY || finalY;
     finalY += 15;
 
     doc.setFontSize(9);
     doc.setFont('helvetica', 'normal');
-    doc.text(`Fecha de entrega:`, margin, finalY);
+    doc.text(`Fecha de entrega: ${quote.fecha_entrega ? format(new Date(quote.fecha_entrega), "dd/MM/yyyy") : ''}`, margin, finalY);
     finalY += 15;
     doc.text(`Fecha minima requerida por comercial/cliente: ${quote.fecha_minima_requerida || ''}`, margin, finalY);
     finalY += 15;
@@ -257,8 +287,9 @@ export async function generateQuotePdf(quote: any, items: any[], account: any, o
     doc.setFontSize(7);
     doc.setFont('helvetica', 'normal');
     const legalText = `Con la firma o aceptación de este documento (vía e-mail), usted nos autoriza para tratar sus datos personales de acuerdo con la Ley Colombiana 1581 de 2012 "Protección de Datos Personales" y con nuestra política de tratamiento de datos personales. Conozca esta política y los mecanismos para ejercer sus derechos en http://www.firplak.com/privacy_policies`;
-    doc.text(doc.splitTextToSize(legalText, pageWidth - margin * 2), margin, finalY);
-    finalY += 35;
+    const splitLegal = doc.splitTextToSize(legalText, pageWidth - margin * 2);
+    doc.text(splitLegal, margin, finalY);
+    finalY += (splitLegal.length * 9) + 20;
 
     // Obtener nombre del asesor
     let displayAdvisorName = advisorName || opportunity?.owner_user_id || 'Generado desde CRM';

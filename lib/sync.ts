@@ -50,6 +50,8 @@ export class SyncEngine {
         // Listen for online status
         if (typeof window !== 'undefined') {
             window.addEventListener('online', () => this.triggerSync());
+            // Clear completed items from previous session
+            db.outbox.where('status').equals('COMPLETED').delete().catch(e => console.error('[Sync] Failed to clear history:', e));
         }
     }
 
@@ -220,17 +222,8 @@ export class SyncEngine {
                     const currentVal = ownerEntry?.value;
                     const isValid = typeof currentVal === 'string' && UUID_REGEX.test(currentVal);
 
-                    if (!isValid) {
-                        if (ownerEntry) {
-                            ownerEntry.value = user.id;
-                        } else {
-                            batches[table].push({
-                                id: id,
-                                field: ownerField,
-                                value: user.id,
-                                ts: now
-                            });
-                        }
+                    if (ownerEntry && !isValid) {
+                        ownerEntry.value = user.id;
                     }
                 }
             }
@@ -712,13 +705,13 @@ export class SyncEngine {
                 // If filtering removed all updates for this table, skip it
                 if (updates.length === 0) continue;
 
-                // Clean up _sync_metadata from outbox ONLY (to prevent loops)
+                // Mark _sync_metadata as COMPLETED from outbox (to prevent loops)
                 // BUT keep them in the RPC payload so the server sees the timestamps
-                const metadataIdsToRemove = pending
+                const metadataIdsToComplete = pending
                     .filter(p => p.entity_type === table && p.field_name === '_sync_metadata')
                     .map(p => p.id);
-                if (metadataIdsToRemove.length > 0) {
-                    await db.outbox.bulkDelete(metadataIdsToRemove);
+                if (metadataIdsToComplete.length > 0) {
+                    await db.outbox.where('id').anyOf(metadataIdsToComplete).modify({ status: 'COMPLETED' });
                 }
 
                 if (table === 'CRM_Cuentas') {
@@ -743,17 +736,17 @@ export class SyncEngine {
                 for (const result of results) {
                     if (result.success) {
                         if (result.field === '_all') {
-                            // Successful INSERT (or consolidated update): remove ALL pending items for this ID
-                            const idsToDelete = pending
+                            // Successful INSERT (or consolidated update): mark ALL pending items for this ID as COMPLETED
+                            const idsToComplete = pending
                                 .filter(p => p.entity_id === result.id && p.entity_type === table)
                                 .map(p => p.id);
-                            await db.outbox.bulkDelete(idsToDelete);
+                            await db.outbox.where('id').anyOf(idsToComplete).modify({ status: 'COMPLETED' });
                         } else {
-                            // Successful single field update: remove ALL items for this field from outbox in this batch
-                            const idsToDelete = pending
+                            // Successful single field update: mark ALL items for this field from outbox in this batch as COMPLETED
+                            const idsToComplete = pending
                                 .filter(p => p.entity_id === result.id && p.field_name === result.field && p.entity_type === table)
                                 .map(p => p.id);
-                            await db.outbox.bulkDelete(idsToDelete);
+                            await db.outbox.where('id').anyOf(idsToComplete).modify({ status: 'COMPLETED' });
                         }
                     } else {
                         // Failure: Mark ALL relevant items as FAILED
@@ -895,12 +888,12 @@ export class SyncEngine {
 
                     if (!error) {
                         const rowIds = rows.map(r => r.id);
-                        const idsToDelete = pending
+                        const idsToComplete = pending
                             .filter(p => p.entity_type === 'CRM_Oportunidades_Colaboradores' && rowIds.includes(p.entity_id))
                             .map(p => p.id);
 
-                        if (idsToDelete.length > 0) {
-                            await db.outbox.bulkDelete(idsToDelete);
+                        if (idsToComplete.length > 0) {
+                            await db.outbox.where('id').anyOf(idsToComplete).modify({ status: 'COMPLETED' });
                         }
                         console.log(`[Sync] Bypassed RPC for Collaborators. Synced ${rows.length} rows.`);
                     } else {

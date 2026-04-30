@@ -5,7 +5,6 @@ import { useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { v4 as uuidv4 } from 'uuid';
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
-import { sendOpportunityDeletionEmail } from "@/lib/services/notifications";
 
 // Helper to fetch pricing from server
 async function fetchPricing(productId: string, channelId: string, qty: number) {
@@ -305,30 +304,25 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
         await syncEngine.queueMutation('CRM_Oportunidades', id, sanitizeOpportunityForSync({
             ...current,
             is_deleted: true
-        }));
+        }), { isSnapshot: true });
 
         for (const quote of quotes) {
-            await syncEngine.queueMutation('CRM_Cotizaciones', quote.id, { ...quote, is_deleted: true });
+            await syncEngine.queueMutation('CRM_Cotizaciones', quote.id, { ...quote, is_deleted: true }, { isSnapshot: true });
         }
         for (const item of quoteItemsAll) {
-            await syncEngine.queueMutation('CRM_CotizacionItems', item.id, { ...item, is_deleted: true });
+            await syncEngine.queueMutation('CRM_CotizacionItems', item.id, { ...item, is_deleted: true }, { isSnapshot: true });
         }
         for (const activity of activities) {
-            await syncEngine.queueMutation('CRM_Actividades', activity.id, { ...activity, is_deleted: true });
+            await syncEngine.queueMutation('CRM_Actividades', activity.id, { ...activity, is_deleted: true }, { isSnapshot: true });
         }
         for (const pedido of pedidos) {
-            await syncEngine.queueMutation('CRM_Pedidos', pedido.uuid_generado, { ...pedido, is_deleted: true });
+            await syncEngine.queueMutation('CRM_Pedidos', pedido.uuid_generado, { ...pedido, is_deleted: true }, { isSnapshot: true });
         }
         for (const pItem of pedidoItemsAll) {
-            await syncEngine.queueMutation('CRM_PedidoItems', pItem.id, { ...pItem, is_deleted: true });
+            await syncEngine.queueMutation('CRM_PedidoItems', pItem.id, { ...pItem, is_deleted: true }, { isSnapshot: true });
         }
 
         console.log('[deleteOpportunity] All server mutations queued successfully.');
-
-        // 5. Send deletion notification (Fire and forget)
-        sendOpportunityDeletionEmail(current).catch(err => {
-            console.error('[deleteOpportunity] Error sending notification:', err);
-        });
     };
 
     const updateOpportunity = async (id: string, updates: any) => {
@@ -361,17 +355,9 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
 
         await db.opportunities.update(id, updated);
 
-        // Prepare partial payload with mandatory NOT NULL fields for UPSERT safety
-        const syncPayload: any = sanitizeOpportunityForSync(sanitizedUpdates);
-        if (updates.fecha_cierre_estimada !== undefined) syncPayload.fecha_cierre_estimada = updated.fecha_cierre_estimada;
-
-        syncPayload.nombre = updated.nombre;
-        syncPayload.account_id = updated.account_id;
-        syncPayload.fase_id = updated.fase_id;
-        syncPayload.moneda_id = updated.moneda_id;
-        syncPayload.owner_user_id = updated.owner_user_id;
-
-        await syncEngine.queueMutation('CRM_Oportunidades', id, syncPayload);
+        // Send full snapshot to optimize sync payload
+        const syncPayload: any = sanitizeOpportunityForSync(updated);
+        await syncEngine.queueMutation('CRM_Oportunidades', id, syncPayload, { isSnapshot: true });
 
         // PROPAGATION: If segmento_id changed, update all associated quotes
         if (updates.segmento_id !== undefined) {
@@ -380,7 +366,7 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
                 if (q.segmento_id !== updates.segmento_id) {
                     const updatedQuote = { ...q, segmento_id: updates.segmento_id, updated_at: new Date().toISOString() };
                     await db.quotes.update(q.id, updatedQuote);
-                    await syncEngine.queueMutation('CRM_Cotizaciones', q.id, updatedQuote);
+                    await syncEngine.queueMutation('CRM_Cotizaciones', q.id, updatedQuote, { isSnapshot: true });
                 }
             }
         }
@@ -397,15 +383,9 @@ async function performOpportunityUpdate(id: string, updates: any) {
     const updated = { ...current, ...updates, updated_at: new Date().toISOString() };
     await db.opportunities.update(id, updated);
 
-    // Prepare partial payload with mandatory NOT NULL fields
-    const syncPayload: any = sanitizeOpportunityForSync(updates);
-    syncPayload.nombre = updated.nombre;
-    syncPayload.account_id = updated.account_id;
-    syncPayload.fase_id = updated.fase_id;
-    syncPayload.moneda_id = updated.moneda_id;
-    syncPayload.owner_user_id = updated.owner_user_id;
-
-    await syncEngine.queueMutation('CRM_Oportunidades', id, syncPayload);
+    // Send full snapshot to optimize sync payload
+    const syncPayload: any = sanitizeOpportunityForSync(updated);
+    await syncEngine.queueMutation('CRM_Oportunidades', id, syncPayload, { isSnapshot: true });
 }
 
 
@@ -516,15 +496,10 @@ export function useQuotes(opportunityId?: string) {
             return;
         }
 
-        const fullUpdates = { ...updates, updated_at: new Date().toISOString() };
-        await db.quotes.update(id, fullUpdates);
+        const updatedQuote = { ...currentQuote, ...updates, updated_at: new Date().toISOString() };
+        await db.quotes.update(id, updatedQuote);
 
-        // Include opportunity_id in the sync payload to avoid constraint violations
-        const syncPayload = {
-            ...fullUpdates,
-            opportunity_id: currentQuote.opportunity_id,
-        };
-        await syncEngine.queueMutation('CRM_Cotizaciones', id, syncPayload);
+        await syncEngine.queueMutation('CRM_Cotizaciones', id, updatedQuote, { isSnapshot: true });
 
         // PROPAGATION: If segmento_id changed, update the parent opportunity
         if (updates.segmento_id !== undefined && currentQuote.opportunity_id) {
@@ -532,7 +507,7 @@ export function useQuotes(opportunityId?: string) {
             if (opp && opp.segmento_id !== updates.segmento_id) {
                 const updatedOpp = { ...opp, segmento_id: updates.segmento_id, updated_at: new Date().toISOString() };
                 await db.opportunities.update(opp.id, updatedOpp);
-                await syncEngine.queueMutation('CRM_Oportunidades', opp.id, updatedOpp);
+                await syncEngine.queueMutation('CRM_Oportunidades', opp.id, sanitizeOpportunityForSync(updatedOpp), { isSnapshot: true });
             }
         }
     };
@@ -590,7 +565,7 @@ export function useQuotes(opportunityId?: string) {
             await syncEngine.queueMutation('CRM_CotizacionItems', item.id, {
                 ...itemData,
                 is_deleted: true
-            });
+            }, { isSnapshot: true });
         }
 
         // 2. Delete Quote
@@ -598,7 +573,7 @@ export function useQuotes(opportunityId?: string) {
         await syncEngine.queueMutation('CRM_Cotizaciones', id, {
             ...quote,
             is_deleted: true
-        });
+        }, { isSnapshot: true });
     };
 
     return { quotes, createQuote, updateQuote, updateQuoteTotal, markAsWinner, deleteQuote };
@@ -698,12 +673,9 @@ export function useQuoteItems(quoteId?: string) {
         // Touch parent quote with opportunity_id
         const parentQuote = await db.quotes.get(quoteId);
         if (parentQuote) {
-            const quoteUpdate = { updated_at: new Date().toISOString() };
+            const quoteUpdate = { ...parentQuote, updated_at: new Date().toISOString() };
             await db.quotes.update(quoteId, quoteUpdate);
-            await syncEngine.queueMutation('CRM_Cotizaciones', quoteId, {
-                ...quoteUpdate,
-                opportunity_id: parentQuote.opportunity_id
-            });
+            await syncEngine.queueMutation('CRM_Cotizaciones', quoteId, quoteUpdate, { isSnapshot: true });
         }
     };
 
@@ -758,17 +730,14 @@ export function useQuoteItems(quoteId?: string) {
 
         await db.quoteItems.update(itemId, updated);
         const { subtotal, ...updateData } = updated;
-        await syncEngine.queueMutation('CRM_CotizacionItems', itemId, updateData);
+        await syncEngine.queueMutation('CRM_CotizacionItems', itemId, updateData, { isSnapshot: true });
 
         // Touch parent quote with opportunity_id
         const parentQuote = await db.quotes.get(current.cotizacion_id);
         if (parentQuote) {
-            const quoteUpdate = { updated_at: new Date().toISOString() };
+            const quoteUpdate = { ...parentQuote, updated_at: new Date().toISOString() };
             await db.quotes.update(current.cotizacion_id, quoteUpdate);
-            await syncEngine.queueMutation('CRM_Cotizaciones', current.cotizacion_id, {
-                ...quoteUpdate,
-                opportunity_id: parentQuote.opportunity_id
-            });
+            await syncEngine.queueMutation('CRM_Cotizaciones', current.cotizacion_id, quoteUpdate, { isSnapshot: true });
         }
     };
 
@@ -783,18 +752,15 @@ export function useQuoteItems(quoteId?: string) {
         await syncEngine.queueMutation('CRM_CotizacionItems', itemId, {
             ...itemData,
             is_deleted: true
-        });
+        }, { isSnapshot: true });
 
         // Touch parent quote with opportunity_id
         if (current) {
             const parentQuote = await db.quotes.get(current.cotizacion_id);
             if (parentQuote) {
-                const quoteUpdate = { updated_at: new Date().toISOString() };
+                const quoteUpdate = { ...parentQuote, updated_at: new Date().toISOString() };
                 await db.quotes.update(current.cotizacion_id, quoteUpdate);
-                await syncEngine.queueMutation('CRM_Cotizaciones', current.cotizacion_id, {
-                    ...quoteUpdate,
-                    opportunity_id: parentQuote.opportunity_id
-                });
+                await syncEngine.queueMutation('CRM_Cotizaciones', current.cotizacion_id, quoteUpdate, { isSnapshot: true });
             }
         }
     };

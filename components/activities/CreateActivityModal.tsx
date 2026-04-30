@@ -491,6 +491,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
     console.log("[CreateActivityModal] Available classifications:", classifications.length);
 
 
+
     // Force form reset when initialData changes OR when classifications finish loading
     // This fixes the timing issue where the select options don't exist yet when form resets
     useEffect(() => {
@@ -1349,7 +1350,30 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                     {/* MICROSOFT INTEGRATION (Teams/Guests for EVENTO, Collaborators/Checklist for TAREA) */}
                     {msConnected && (
                         <div className="space-y-4 animate-in fade-in slide-in-from-top-4 duration-300">
-
+                            {tipo === 'EVENTO' && (
+                                <div className="p-px bg-linear-to-r from-blue-500 to-indigo-500 rounded-2xl shadow-sm">
+                                    <div className="bg-white rounded-[15px] p-4 flex items-center justify-between">
+                                        <div className="flex items-center gap-3">
+                                            <div className="bg-blue-50 p-2 rounded-xl text-blue-600">
+                                                <Video className="w-5 h-5" />
+                                            </div>
+                                            <div className="space-y-0.5">
+                                                <label className="text-sm font-bold text-slate-900">Reunión de Teams</label>
+                                                <p className="text-[10px] text-slate-500 font-medium">Crea un enlace automático para esta reunión</p>
+                                            </div>
+                                        </div>
+                                        <label className="relative inline-flex items-center cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={isTeamsMeeting}
+                                                onChange={(e) => setIsTeamsMeeting(e.target.checked)}
+                                                className="sr-only peer"
+                                            />
+                                            <div className="w-11 h-6 bg-slate-100 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600 transition-all"></div>
+                                        </label>
+                                    </div>
+                                </div>
+                            )}
 
                             {/* COLLABORATORS / ATTENDEES (Unified search) */}
                             <div className="space-y-2">
