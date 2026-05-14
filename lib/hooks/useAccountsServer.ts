@@ -240,7 +240,9 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                     .filter(Boolean) || [];
 
                 if (isVendedor) {
-                    let orFilter = `owner_user_id.eq.${currentUserId},and(owner_user_id.is.null,created_by.eq.${currentUserId})`;
+                    const ids = [currentUserId, ...(user?.coordinadores || [])].filter(Boolean);
+                    const idsString = ids.join(',');
+                    let orFilter = `owner_user_id.in.(${idsString}),and(owner_user_id.is.null,created_by.in.(${idsString}))`;
                     if (collabAccountIds.length > 0) {
                         const uniqueIds = [...new Set(collabAccountIds)];
                         orFilter += `,id.in.(${uniqueIds.join(',')})`;

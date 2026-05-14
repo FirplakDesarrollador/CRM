@@ -10,6 +10,7 @@ export interface CurrentUser {
     role: UserRole;
     is_active: boolean;
     allowed_modules?: string[] | null;
+    coordinadores?: string[] | null;
 }
 
 interface UserState {
@@ -69,7 +70,7 @@ export const useUserStore = create<UserState>((set, get) => ({
             // Fetch user details from CRM_Usuarios table
             const { data: crmUser, error: crmError } = await supabase
                 .from('CRM_Usuarios')
-                .select('id, email, full_name, role, is_active')
+                .select('id, email, full_name, role, is_active, coordinadores, allowed_modules')
                 .eq('id', authUser.id)
                 .single();
 
@@ -83,7 +84,8 @@ export const useUserStore = create<UserState>((set, get) => ({
                         full_name: crmUser.full_name,
                         role: crmUser.role as UserRole,
                         is_active: crmUser.is_active,
-                        allowed_modules: null,
+                        allowed_modules: crmUser.allowed_modules,
+                        coordinadores: crmUser.coordinadores,
                     },
                     initialized: true
                 });

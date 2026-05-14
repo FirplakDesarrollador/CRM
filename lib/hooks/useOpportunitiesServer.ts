@@ -389,7 +389,9 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                 query = query.eq('owner_user_id', accountOwnerId);
             } else {
                 if (userFilter === 'mine') {
-                    query = query.or(`owner_user_id.eq.${currentUserId},and(owner_user_id.is.null,created_by.eq.${currentUserId})`);
+                    const ids = [currentUserId, ...(user?.coordinadores || [])].filter(Boolean);
+                    const idsString = ids.join(',');
+                    query = query.or(`owner_user_id.in.(${idsString}),and(owner_user_id.is.null,created_by.in.(${idsString}))`);
                 } else if (userFilter === 'collab') {
                     // Filter by matching in CRM_Oportunidades_Colaboradores
                     // We use inner join to filter results
@@ -417,7 +419,8 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                         const ids = [currentUserId, ...subordinateIds].filter(Boolean);
                         query = query.in('owner_user_id', ids);
                     } else if (userRole !== 'ADMIN') {
-                        query = query.eq('owner_user_id', currentUserId);
+                        const ids = [currentUserId, ...(user?.coordinadores || [])].filter(Boolean);
+                        query = query.in('owner_user_id', ids);
                     }
                 }
             }
