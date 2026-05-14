@@ -298,6 +298,9 @@ function AccountsContent() {
                                     <th onClick={() => handleSort('nivel_premium')} className="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-center cursor-pointer group hover:bg-slate-100/50 transition-colors">
                                         <div className="flex items-center justify-center">Nivel <SortIcon field="nivel_premium" /></div>
                                     </th>
+                                    <th onClick={() => handleSort('created_at')} className="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-center cursor-pointer group hover:bg-slate-100/50 transition-colors">
+                                        <div className="flex items-center justify-center">Creación <SortIcon field="created_at" /></div>
+                                    </th>
                                     <th onClick={() => handleSort('updated_at')} className="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-center cursor-pointer group hover:bg-slate-100/50 transition-colors">
                                         <div className="flex items-center justify-center">Actualizado <SortIcon field="updated_at" /></div>
                                     </th>
@@ -368,6 +371,11 @@ function AccountsContent() {
                                             ) : (
                                                 <span className="text-[10px] text-slate-300">-</span>
                                             )}
+                                        </td>
+                                        <td className="px-4 py-3 text-center">
+                                            <span className="text-xs text-slate-500">
+                                                {acc.created_at ? new Date(acc.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) : "-"}
+                                            </span>
                                         </td>
                                         <td className="px-4 py-3 text-center">
                                             <span className="text-xs text-slate-500">
