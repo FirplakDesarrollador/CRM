@@ -286,6 +286,17 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
         onItemsChange();
     };
 
+    const handleAddManualItem = async () => {
+        await addItem(quote.id, {
+            producto_id: null,
+            descripcion_linea: 'BAGNO - PRODUCTO MANUAL',
+            cantidad: 1,
+            precio_unitario: 0,
+            subtotal: 0
+        });
+        onItemsChange();
+    };
+
     const handleRemove = async (itemId: string) => {
         await removeItem(itemId);
         onItemsChange();
@@ -367,6 +378,15 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                         />
+                        <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
+                            <button 
+                                onClick={handleAddManualItem}
+                                className="text-[10px] bg-slate-200 hover:bg-slate-300 text-slate-700 px-2 py-1 rounded-md font-bold uppercase transition-colors"
+                                title="Agregar ítem que no está en la lista"
+                            >
+                                + Ítem Manual
+                            </button>
+                        </div>
 
                         {(searchTerm || selectedPrefix) && (
                             <div className="absolute z-20 w-full mt-2 bg-white border border-slate-200 rounded-xl shadow-2xl max-h-80 overflow-y-auto overflow-x-hidden">
@@ -433,10 +453,36 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
                         items.map((item) => (
                             <div key={item.id} className="flex flex-col md:flex-row md:items-center gap-4 p-4 bg-white border border-slate-200 rounded-xl hover:shadow-md transition-all group">
                                 <div className="flex-1 min-w-0">
-                                    <h4 className="font-semibold text-slate-800 line-clamp-2 leading-tight">{item.descripcion_linea}</h4>
-                                    <p className="text-xs text-slate-500 mt-1">
-                                        Precio unitario: ${new Intl.NumberFormat().format(item.precio_unitario)}
-                                    </p>
+                                    {item.producto_id === null ? (
+                                        <input 
+                                            type="text"
+                                            className="font-semibold text-slate-800 w-full bg-slate-50 border-b border-slate-200 focus:outline-none focus:border-blue-500 rounded px-1 mb-1"
+                                            defaultValue={item.descripcion_linea}
+                                            onBlur={(e) => updateItem(item.id, { descripcion_linea: e.target.value })}
+                                        />
+                                    ) : (
+                                        <h4 className="font-semibold text-slate-800 line-clamp-2 leading-tight">{item.descripcion_linea}</h4>
+                                    )}
+                                    
+                                    <div className="flex items-center gap-1 mt-1">
+                                        <span className="text-xs text-slate-500">Precio Unitario: $</span>
+                                        <input 
+                                            type="number"
+                                            className={cn(
+                                                "text-xs font-medium bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 focus:outline-none w-28 px-1 transition-all",
+                                                item.producto_id === null ? "bg-slate-50 border-slate-200" : ""
+                                            )}
+                                            defaultValue={item.precio_unitario}
+                                            key={`${item.id}-price-${item.precio_unitario}`}
+                                            onBlur={(e) => {
+                                                const val = parseFloat(e.target.value) || 0;
+                                                if (val !== item.precio_unitario) {
+                                                    updateItem(item.id, { precio_unitario: val });
+                                                    onItemsChange();
+                                                }
+                                            }}
+                                        />
+                                    </div>
                                 </div>
                                 <div className="flex items-center justify-between md:justify-end gap-6">
                                     <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg">

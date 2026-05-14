@@ -121,7 +121,7 @@ export interface LocalQuote {
 export interface LocalQuoteItem {
     id: string;
     cotizacion_id: string;
-    producto_id: string;
+    producto_id: string | null;
     cantidad: number;
     precio_unitario: number;
     subtotal: number;

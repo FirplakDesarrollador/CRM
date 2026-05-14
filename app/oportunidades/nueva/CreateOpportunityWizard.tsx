@@ -8,6 +8,7 @@ import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronRight, Check } from "lucide-react";
+import { cn } from "@/components/ui/utils";
 import { AccountForm } from "@/components/cuentas/AccountForm";
 import { useProductSearch, PriceListProduct } from "@/lib/hooks/useProducts";
 import { Trash2, PlusCircle, Search, Loader2 } from "lucide-react";
@@ -58,6 +59,7 @@ export default function CreateOpportunityWizard() {
     const [showAccountModal, setShowAccountModal] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
     const [accountSearchTerm, setAccountSearchTerm] = useState("");
+    const [isSubmitting, setIsSubmitting] = useState(false);
     const [showAccountDropdown, setShowAccountDropdown] = useState(false);
     const [selectedAccount, setSelectedAccount] = useState<any>(null);
     const [segments, setSegments] = useState<any[]>([]);
@@ -425,6 +427,7 @@ export default function CreateOpportunityWizard() {
     }, [items, setValue]);
 
     const onSubmit = async (data: any) => {
+        setIsSubmitting(true);
         try {
             // Defensive conversion for numeric IDs
             const sanitizedData = {
@@ -448,6 +451,7 @@ export default function CreateOpportunityWizard() {
             router.push("/oportunidades");
         } catch (err) {
             console.error(err);
+            setIsSubmitting(false);
         }
     };
 
@@ -907,9 +911,17 @@ export default function CreateOpportunityWizard() {
                     ) : (
                         <button
                             type="submit"
-                            className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg text-sm font-medium flex items-center gap-2 shadow-lg shadow-green-200"
+                            disabled={isSubmitting}
+                            className={cn(
+                                "bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-2 shadow-lg shadow-green-200 transition-all",
+                                isSubmitting && "bg-slate-400 opacity-70 cursor-not-allowed"
+                            )}
                         >
-                            Crear Oportunidad <Check className="w-4 h-4" />
+                            {isSubmitting ? (
+                                <><Loader2 className="w-4 h-4 animate-spin" /> Procesando...</>
+                            ) : (
+                                <>{'Crear Oportunidad'} <Check className="w-4 h-4" /></>
+                            )}
                         </button>
                     )}
                 </div>

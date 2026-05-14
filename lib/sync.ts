@@ -1119,6 +1119,40 @@ export class SyncEngine {
             }
 
             await this.yield();
+            
+            // SPECIAL PULL: Accounts where user is a collaborator
+            // This ensures shared accounts are synced even if not in the top 3000
+            try {
+                const { data: collabRels } = await supabase
+                    .from('CRM_Oportunidades_Colaboradores')
+                    .select('oportunidad_id')
+                    .eq('usuario_id', _user.id);
+                
+                if (collabRels && collabRels.length > 0) {
+                    const oppIds = collabRels.map(r => r.oportunidad_id);
+                    const { data: collabOpps } = await supabase
+                        .from('CRM_Oportunidades')
+                        .select('account_id')
+                        .in('id', oppIds);
+                    
+                    if (collabOpps && collabOpps.length > 0) {
+                        const accIds = [...new Set(collabOpps.map(o => o.account_id).filter(Boolean))];
+                        const { data: collabAccs } = await supabase
+                            .from('CRM_Cuentas')
+                            .select('*')
+                            .in('id', accIds as string[]);
+                        
+                        if (collabAccs && collabAccs.length > 0) {
+                            await db.accounts.bulkPut(collabAccs);
+                            console.log(`[Sync] Pulled ${collabAccs.length} accounts via collaboration links.`);
+                        }
+                    }
+                }
+            } catch (collabErr) {
+                console.warn('[Sync] Failed to pull collaborator accounts:', collabErr);
+            }
+
+            await this.yield();
 
             // Pull Phases (CRM_FasesOportunidad)
             try {
@@ -1417,6 +1451,27 @@ export class SyncEngine {
                 }
 
                 console.log(`[Sync] Merged ${mergedCount} contacts (${skippedCount} skipped, ${healedCount} healed).`);
+            }
+
+            // Pull Opportunity Collaborators
+            try {
+                let collabQuery = supabase
+                    .from('CRM_Oportunidades_Colaboradores')
+                    .select('*');
+                
+                if (lastSync) {
+                    collabQuery = collabQuery.gte('updated_at', lastSync);
+                } else {
+                    collabQuery = collabQuery.eq('usuario_id', _user.id);
+                }
+
+                const { data: collabs, error: collabsError } = await collabQuery;
+                if (!collabsError && collabs) {
+                    await db.opportunityCollaborators.bulkPut(collabs);
+                    console.log(`[Sync] Pulled ${collabs.length} opportunity collaborators.`);
+                }
+            } catch (cErr) {
+                console.error('[Sync] Failed to pull collaborators:', cErr);
             }
 
             // Pull Opportunities (CRM_Oportunidades) - SMART MERGE
