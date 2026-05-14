@@ -275,6 +275,7 @@ export interface LocalOportunidad {
     created_by?: string;
     updated_by?: string;
     comentarios?: string;
+    direccion_entrega?: string;
 }
 
 export class CRMFirplakDB extends Dexie {

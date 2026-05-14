@@ -289,6 +289,8 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     const [isSavingComentarios, setIsSavingComentarios] = useState(false);
     const [localComentarios, setLocalComentarios] = useState(opportunity.comentarios || "");
     const [isSavingComentariosMain, setIsSavingComentariosMain] = useState(false);
+    const [localDireccion, setLocalDireccion] = useState(opportunity.direccion_entrega || "");
+    const [isSavingDireccion, setIsSavingDireccion] = useState(false);
 
     // Modal state (kept for backward compat but no longer used for blocking)
     const [isLossReasonModalOpen, setIsLossReasonModalOpen] = useState(false);
@@ -334,7 +336,8 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
         setLocalRazonPerdida(opportunity.razon_perdida || "");
         setLocalComentariosPerdida(opportunity.comentarios_perdida || "");
         setLocalComentarios(opportunity.comentarios || "");
-    }, [opportunity.segmento_id, opportunity.fecha_cierre_estimada, opportunity.origen_oportunidad, opportunity.url_origen, opportunity.fuente_conversion, opportunity.razon_perdida, opportunity.comentarios_perdida, opportunity.comentarios]);
+        setLocalDireccion(opportunity.direccion_entrega || "");
+    }, [opportunity.segmento_id, opportunity.fecha_cierre_estimada, opportunity.origen_oportunidad, opportunity.url_origen, opportunity.fuente_conversion, opportunity.razon_perdida, opportunity.comentarios_perdida, opportunity.comentarios, opportunity.direccion_entrega]);
 
     useEffect(() => {
         const fetchSegments = async () => {
@@ -815,6 +818,36 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                                 opportunity.estado_id === 4 ? 'Cancelada' : 'Abierta'
                                 )}
                             </div>
+                        </div>
+
+                        {/* Dirección de entrega Section */}
+                        <div className="pt-4 border-t border-slate-100">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Dirección de Entrega</label>
+                            <div className="relative group">
+                                <input
+                                    type="text"
+                                    value={localDireccion}
+                                    onChange={(e) => setLocalDireccion(e.target.value)}
+                                    onBlur={async () => {
+                                        if (localDireccion !== (opportunity.direccion_entrega || "")) {
+                                            setIsSavingDireccion(true);
+                                            try {
+                                                await updateOpportunity(opportunity.id, { direccion_entrega: localDireccion });
+                                            } finally {
+                                                setIsSavingDireccion(false);
+                                            }
+                                        }
+                                    }}
+                                    className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none placeholder:text-slate-400"
+                                    placeholder="Dirección de despacho..."
+                                />
+                                {isSavingDireccion && (
+                                    <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                        <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                    </div>
+                                )}
+                            </div>
+                            <p className="text-[9px] text-slate-400 italic mt-1">Requerido por logística para el procesamiento del pedido.</p>
                         </div>
 
                         {/* Orígenes Section */}
