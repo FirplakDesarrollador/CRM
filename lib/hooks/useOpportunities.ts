@@ -691,11 +691,8 @@ export function useQuoteItems(quoteId?: string) {
 
         const updated = { ...current, ...updates };
 
-        // If quantity changed, re-calculate pricing? 
-        // Plan says: "no recalcular automáticamente líneas existentes si luego cambian descuentos/listas"
-        // But usually if I change QTY, volume discount SHOULD update.
-        // Let's implement Recalc on Quantity change for best UX
-        if (updates.cantidad !== undefined && updates.cantidad !== current.cantidad) {
+        // If quantity changed, re-calculate pricing ONLY for linked products
+        if (updates.cantidad !== undefined && updates.cantidad !== current.cantidad && current.producto_id) {
             let pricing = null;
             try {
                 const parentQuote = await db.quotes.get(current.cotizacion_id);
