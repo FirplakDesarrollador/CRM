@@ -317,7 +317,7 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
             alert(`El descuento máximo permitido para esta cantidad es ${item.max_discount_pct}%`);
         }
 
-        const finalPrice = item.precio_unitario * (1 - validPct / 100);
+        const finalPrice = parseFloat((item.precio_unitario * (1 - validPct / 100)).toFixed(10));
 
         await updateItem(itemId, {
             discount_pct: validPct,

@@ -38,6 +38,7 @@ const schema = z.object({
     fuente_conversion: z.string().optional().nullable(),
     probability: z.coerce.number().min(0).max(100).default(0).optional().nullable(),
     comentarios: z.string().optional().nullable(),
+    direccion_entrega: z.string().optional().nullable(),
     items: z.array(z.object({
         product_id: z.string(),
         cantidad: z.number().min(1),
@@ -180,6 +181,7 @@ export default function CreateOpportunityWizard() {
             fuente_conversion: '',
             probability: 0,
             comentarios: '',
+            direccion_entrega: '',
             items: [],
             owner_user_id: ''
         },
@@ -254,6 +256,9 @@ export default function CreateOpportunityWizard() {
                 if (acc.ciudad_id) {
                     setValue("ciudad_id", Number(acc.ciudad_id));
                 }
+                if (acc.direccion) {
+                    setValue("direccion_entrega", acc.direccion);
+                }
                 setStep(1); // Advance to "Datos del Negocio"
             }
         };
@@ -305,6 +310,9 @@ export default function CreateOpportunityWizard() {
         }
         if (acc.ciudad_id) {
             setValue("ciudad_id", Number(acc.ciudad_id));
+        }
+        if (acc.direccion) {
+            setValue("direccion_entrega", acc.direccion);
         }
     };
 
@@ -700,6 +708,18 @@ export default function CreateOpportunityWizard() {
                                     }
                                 </select>
                             </div>
+                        </div>
+
+                        <div>
+                            <label className="text-sm font-medium">Dirección de entrega</label>
+                            <input 
+                                {...register("direccion_entrega")} 
+                                className="w-full p-2 border rounded-lg" 
+                                placeholder="Ej. Calle 10 # 20 - 30, Bodega 4" 
+                            />
+                            <p className="text-[10px] text-slate-500 italic mt-0.5">
+                                Este dato es obligatorio para el despacho de pedidos.
+                            </p>
                         </div>
 
                         <div className="grid grid-cols-2 gap-4">

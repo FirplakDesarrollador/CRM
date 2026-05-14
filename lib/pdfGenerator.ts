@@ -151,11 +151,17 @@ export async function generateQuotePdf(quote: any, items: any[], account: any, o
 
     // TABLE
     const tableData = items.map((item, index) => {
-        // En FIRPLAK, el Subtotal en la BD a veces ya tiene IVA, o es base. 
-        // Vamos a usar base unit price y subtotal base.
         const qty = item.cantidad || 1;
         const discountPct = item.discount_pct || 0;
-        const unitPrice = item.precio_unitario || 0;
+        const isExport = quote.currency_id === 'USD';
+        
+        // En FIRPLAK, el precio en la BD incluye IVA. 
+        // El usuario requiere mostrar precios SIN IVA en las columnas de la tabla.
+        const unitPriceWithIva = item.precio_unitario || 0;
+        const unitPriceBase = isExport ? unitPriceWithIva : unitPriceWithIva / 1.19;
+        
+        const lineTotalWithIva = item.subtotal || (unitPriceWithIva * qty * (1 - discountPct / 100));
+        const lineTotalBase = isExport ? lineTotalWithIva : lineTotalWithIva / 1.19;
         
         const formatter = new Intl.NumberFormat(quote.currency_id === 'USD' ? 'en-US' : 'es-CO');
         
@@ -163,9 +169,9 @@ export async function generateQuotePdf(quote: any, items: any[], account: any, o
             item.numero_articulo || item.producto_id || 'N/A', 
             qty.toString(), 
             item.descripcion_linea || 'Artículo', 
-            formatter.format(unitPrice), 
+            formatter.format(unitPriceBase), 
             discountPct > 0 ? `${discountPct}%` : '0%', 
-            formatter.format(item.subtotal || (unitPrice * qty * (1 - discountPct / 100)))
+            formatter.format(lineTotalBase)
         ];
     });
 
