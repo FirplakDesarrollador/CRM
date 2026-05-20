@@ -90,7 +90,7 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
                     } else if (userRole === 'COORDINADOR') {
                         const idsToMatch = [currentUserId, ...subordinateIds];
                         localActivities = localActivities.filter(a => idsToMatch.includes(a.created_by || 'dummy') || (a.user_id && idsToMatch.includes(a.user_id)));
-                    } else {
+                    } else if (userRole === 'VENDEDOR') {
                         localActivities = localActivities.filter(a => a.created_by === currentUserId || a.updated_by === currentUserId || a.user_id === currentUserId);
                     }
                 }
@@ -175,7 +175,7 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
                     const idsToMatch = [currentUserId, ...subordinateIds].filter(Boolean);
                     const idsString = idsToMatch.join(',');
                     query = query.or(`user_id.in.(${idsString}),created_by.in.(${idsString})`);
-                } else {
+                } else if (userRole === 'VENDEDOR') {
                     query = query.or(`user_id.eq.${currentUserId},created_by.eq.${currentUserId}`);
                 }
             }

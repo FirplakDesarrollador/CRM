@@ -1163,7 +1163,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                 )}
                             </div>
                         )}
-                        <button onClick={onClose} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors text-2xl leading-none">&times;</button>
+                        <button type="button" onClick={onClose} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors text-2xl leading-none">&times;</button>
                     </div>
                 </div>
 
