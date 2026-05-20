@@ -172,7 +172,11 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                 // Filtering
                 if (searchTerm) {
                     const lowerSearch = searchTerm.toLowerCase();
-                    localOpps = localOpps.filter(o => o.nombre.toLowerCase().includes(lowerSearch));
+                    localOpps = localOpps.filter(o => {
+                        const oppNameMatches = o.nombre?.toLowerCase().includes(lowerSearch);
+                        const accountNameMatches = accMap.get(o.account_id)?.nombre?.toLowerCase().includes(lowerSearch);
+                        return oppNameMatches || accountNameMatches;
+                    });
                 }
 
                 if (channelFilter) {
@@ -306,6 +310,20 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                 return;
             }
 
+            // Resolve search term against accounts and users to allow cross-table filtering
+            let searchAccountIds: string[] = [];
+            let searchUserIds: string[] = [];
+            
+            if (searchTerm) {
+                const [accountsRes, usersRes] = await Promise.all([
+                    supabase.from('CRM_Cuentas').select('id').ilike('nombre', `%${searchTerm}%`).limit(100),
+                    supabase.from('CRM_Usuarios').select('id').ilike('full_name', `%${searchTerm}%`).limit(100)
+                ]);
+
+                if (accountsRes.data) searchAccountIds = accountsRes.data.map(a => a.id);
+                if (usersRes.data) searchUserIds = usersRes.data.map(u => u.id);
+            }
+
             // Dynamically build select to support filtering on account
             const useInnerJoin = channelFilter || subclassificationFilter;
             const accountRelation = useInnerJoin ? 'account:CRM_Cuentas!inner(nombre, canal_id, subclasificacion_id)' : 'account:CRM_Cuentas(nombre, canal_id, subclasificacion_id)';
@@ -334,7 +352,14 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
 
             // Apply Filters
             if (searchTerm) {
-                query = query.ilike('nombre', `%${searchTerm}%`);
+                let orConditions = [`nombre.ilike.%${searchTerm}%`];
+                if (searchAccountIds.length > 0) {
+                    orConditions.push(`account_id.in.(${searchAccountIds.join(',')})`);
+                }
+                if (searchUserIds.length > 0) {
+                    orConditions.push(`owner_user_id.in.(${searchUserIds.join(',')})`);
+                }
+                query = query.or(orConditions.join(','));
             }
 
             // Hierarchical Filters
