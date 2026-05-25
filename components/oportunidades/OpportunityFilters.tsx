@@ -43,6 +43,9 @@ interface OpportunityFiltersProps {
         endClosingDate: string | null;
     }) => void;
     initialChannelId?: string | null;
+    initialSubclassId?: number | null;
+    initialSegmentId?: number | null;
+    initialPhaseId?: number | null;
     initialStatusFilter?: StatusFilter;
     initialDates?: {
         startDate: string | null;
@@ -52,7 +55,15 @@ interface OpportunityFiltersProps {
     };
 }
 
-export function OpportunityFilters({ onFilterChange, initialChannelId, initialStatusFilter, initialDates }: OpportunityFiltersProps) {
+export function OpportunityFilters({
+    onFilterChange,
+    initialChannelId,
+    initialSubclassId,
+    initialSegmentId,
+    initialPhaseId,
+    initialStatusFilter,
+    initialDates
+}: OpportunityFiltersProps) {
     const [channels, setChannels] = useState<Channel[]>([]);
     const [subclasses, setSubclasses] = useState<Subclasificacion[]>([]);
     const [segments, setSegments] = useState<Segment[]>([]);
@@ -60,9 +71,9 @@ export function OpportunityFilters({ onFilterChange, initialChannelId, initialSt
 
     // Selection state
     const [selectedChannel, setSelectedChannel] = useState<string | null>(initialChannelId || null);
-    const [selectedSubclass, setSelectedSubclass] = useState<number | null>(null);
-    const [selectedSegment, setSelectedSegment] = useState<number | null>(null);
-    const [selectedPhase, setSelectedPhase] = useState<number | null>(null);
+    const [selectedSubclass, setSelectedSubclass] = useState<number | null>(initialSubclassId || null);
+    const [selectedSegment, setSelectedSegment] = useState<number | null>(initialSegmentId || null);
+    const [selectedPhase, setSelectedPhase] = useState<number | null>(initialPhaseId || null);
     const [statusFilter, setStatusFilter] = useState<StatusFilter>(initialStatusFilter || 'open');
 
     const [startDate, setStartDate] = useState<string | null>(initialDates?.startDate || null);
@@ -104,12 +115,12 @@ export function OpportunityFilters({ onFilterChange, initialChannelId, initialSt
 
                 // If initial filters were set (e.g., from URL on back navigation),
                 // notify the parent so the hook fetches with correct filters
-                if (initialChannelId || (initialStatusFilter && initialStatusFilter !== 'open') || initialDates) {
+                if (initialChannelId || initialSubclassId || initialSegmentId || initialPhaseId || (initialStatusFilter && initialStatusFilter !== 'open') || initialDates) {
                     onFilterChange({
                         channelId: initialChannelId || null,
-                        subclassificationId: null,
-                        segmentId: null,
-                        phaseId: null,
+                        subclassificationId: initialSubclassId || null,
+                        segmentId: initialSegmentId || null,
+                        phaseId: initialPhaseId || null,
                         statusFilter: initialStatusFilter || 'open',
                         startDate: initialDates?.startDate || null,
                         endDate: initialDates?.endDate || null,
