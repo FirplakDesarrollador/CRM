@@ -40,7 +40,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
 
     // Filters
     const [searchTerm, setSearchTerm] = useState<string>("");
-    const [userFilter, setUserFilter] = useState<'mine' | 'team' | 'collab' | 'all'>('all');
+    const [userFilter, setUserFilter] = useState<'mine' | 'team' | 'collab' | 'all' | 'unrestricted'>('all');
     const [accountOwnerId, setAccountOwnerId] = useState<string | null>(null);
 
     // New Hierarchical Filters
@@ -230,7 +230,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
 
                 if (accountOwnerId) {
                     localOpps = localOpps.filter(o => o.owner_user_id === accountOwnerId);
-                } else {
+                } else if (userFilter !== 'unrestricted') {
                     if (userFilter === 'mine') {
                         localOpps = localOpps.filter(o => 
                             o.owner_user_id === currentUserId || 
@@ -241,13 +241,15 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                         const collabOppIds = new Set(collabOpps.map(c => c.oportunidad_id));
                         localOpps = localOpps.filter(o => collabOppIds.has(o.id));
                     } else if (userFilter === 'all') {
-                        const collabOpps = await db.opportunityCollaborators.where('usuario_id').equals(currentUserId).toArray();
-                        const collabOppIds = new Set(collabOpps.map(c => c.oportunidad_id));
-                        localOpps = localOpps.filter(o =>
-                            o.owner_user_id === currentUserId ||
-                            (!o.owner_user_id && o.created_by === currentUserId) ||
-                            collabOppIds.has(o.id)
-                        );
+                        if (userRole !== 'ADMIN') {
+                            const collabOpps = await db.opportunityCollaborators.where('usuario_id').equals(currentUserId).toArray();
+                            const collabOppIds = new Set(collabOpps.map(c => c.oportunidad_id));
+                            localOpps = localOpps.filter(o =>
+                                o.owner_user_id === currentUserId ||
+                                (!o.owner_user_id && o.created_by === currentUserId) ||
+                                collabOppIds.has(o.id)
+                            );
+                        }
                     } else if (userFilter === 'team' && userRole !== 'ADMIN') {
                         if (userRole === 'COORDINADOR') {
                             localOpps = localOpps.filter(o => o.owner_user_id === currentUserId || (o.owner_user_id && subordinateIds.includes(o.owner_user_id)));
@@ -429,7 +431,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
 
             if (accountOwnerId) {
                 query = query.eq('owner_user_id', accountOwnerId);
-            } else {
+            } else if (userFilter !== 'unrestricted') {
                 if (userFilter === 'mine') {
                     const ids = [currentUserId, ...(user?.coordinadores || [])].filter(Boolean);
                     const idsString = ids.join(',');
@@ -457,21 +459,23 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                     `);
                     query = query.eq('colaboradores.usuario_id', currentUserId);
                 } else if (userFilter === 'all') {
-                    const ids = [currentUserId, ...(user?.coordinadores || [])].filter(Boolean);
-                    const idsString = ids.join(',');
-                    const { data: collabRows } = await supabase
-                        .from('CRM_Oportunidades_Colaboradores')
-                        .select('oportunidad_id')
-                        .eq('usuario_id', currentUserId);
-                    const collabOppIds = Array.from(new Set((collabRows || []).map(row => row.oportunidad_id).filter(Boolean)));
-                    const ownershipConditions = [
-                        `owner_user_id.in.(${idsString})`,
-                        `and(owner_user_id.is.null,created_by.in.(${idsString}))`
-                    ];
-                    if (collabOppIds.length > 0) {
-                        ownershipConditions.push(`id.in.(${collabOppIds.join(',')})`);
+                    if (userRole !== 'ADMIN') {
+                        const ids = [currentUserId, ...(user?.coordinadores || [])].filter(Boolean);
+                        const idsString = ids.join(',');
+                        const { data: collabRows } = await supabase
+                            .from('CRM_Oportunidades_Colaboradores')
+                            .select('oportunidad_id')
+                            .eq('usuario_id', currentUserId);
+                        const collabOppIds = Array.from(new Set((collabRows || []).map(row => row.oportunidad_id).filter(Boolean)));
+                        const ownershipConditions = [
+                            `owner_user_id.in.(${idsString})`,
+                            `and(owner_user_id.is.null,created_by.in.(${idsString}))`
+                        ];
+                        if (collabOppIds.length > 0) {
+                            ownershipConditions.push(`id.in.(${collabOppIds.join(',')})`);
+                        }
+                        query = query.or(ownershipConditions.join(','));
                     }
-                    query = query.or(ownershipConditions.join(','));
                 } else if (userFilter === 'team') {
                     if (userRole === 'COORDINADOR') {
                         const ids = [currentUserId, ...subordinateIds].filter(Boolean);
