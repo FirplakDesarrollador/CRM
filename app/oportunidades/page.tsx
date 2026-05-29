@@ -75,14 +75,10 @@ function OpportunitiesContent() {
             ? <ChevronUp className="w-3 h-3 ml-1 text-blue-600" /> 
             : <ChevronDown className="w-3 h-3 ml-1 text-blue-600" />;
     };
-    const [tab, setTab] = useState<'mine' | 'collab' | 'team'>(() => {
+    const [tab, setTab] = useState<'mine' | 'collab' | 'all' | 'team'>(() => {
         const fromUrl = searchParams.get('tab');
         if (fromUrl) return (fromUrl as any);
-        if (typeof window !== 'undefined') {
-            const saved = sessionStorage.getItem('crm_oportunidades_state');
-            if (saved) return (new URLSearchParams(saved).get('tab') as any) || 'mine';
-        }
-        return 'mine';
+        return 'all';
     });
     const [selectedChannel, setSelectedChannel] = useState<string | null>(() => {
         const fromUrl = searchParams.get('channel');
@@ -90,6 +86,36 @@ function OpportunitiesContent() {
         if (typeof window !== 'undefined') {
             const saved = sessionStorage.getItem('crm_oportunidades_state');
             if (saved) return new URLSearchParams(saved).get('channel') || null;
+        }
+        return null;
+    });
+    const [selectedSubclass, setSelectedSubclass] = useState<number | null>(() => {
+        const fromUrl = searchParams.get('subclass');
+        if (fromUrl) return Number(fromUrl);
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_oportunidades_state');
+            const value = saved ? new URLSearchParams(saved).get('subclass') : null;
+            return value ? Number(value) : null;
+        }
+        return null;
+    });
+    const [selectedSegment, setSelectedSegment] = useState<number | null>(() => {
+        const fromUrl = searchParams.get('segment');
+        if (fromUrl) return Number(fromUrl);
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_oportunidades_state');
+            const value = saved ? new URLSearchParams(saved).get('segment') : null;
+            return value ? Number(value) : null;
+        }
+        return null;
+    });
+    const [selectedPhase, setSelectedPhase] = useState<number | null>(() => {
+        const fromUrl = searchParams.get('phase');
+        if (fromUrl) return Number(fromUrl);
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_oportunidades_state');
+            const value = saved ? new URLSearchParams(saved).get('phase') : null;
+            return value ? Number(value) : null;
         }
         return null;
     });
@@ -146,13 +172,21 @@ function OpportunitiesContent() {
     // On mount: apply initial filter values from URL to the server hook
     // This is critical for the "back button" scenario where URL has params but hook starts fresh
     useEffect(() => {
-        const initialTab = (searchParams.get('tab') as any) || 'mine';
+        const initialTab = (searchParams.get('tab') as any) || 'all';
         const initialSearch = searchParams.get('search') || '';
         const initialOwner = searchParams.get('owner') || null;
+        const initialChannel = searchParams.get('channel') || selectedChannel;
+        const initialSubclass = searchParams.get('subclass') || (selectedSubclass ? String(selectedSubclass) : null);
+        const initialSegment = searchParams.get('segment') || (selectedSegment ? String(selectedSegment) : null);
+        const initialPhase = searchParams.get('phase') || (selectedPhase ? String(selectedPhase) : null);
 
-        // Apply tab, search, owner to hook (channel/status/dates are handled by OpportunityFilters on init)
+        // Apply tab, search, owner and restored hierarchical filters to hook
         if (initialSearch) setSearchTerm(initialSearch);
         if (initialOwner) setAccountOwnerId(initialOwner);
+        if (initialChannel) setChannelFilter(initialChannel);
+        if (initialSubclass) setSubclassificationFilter(Number(initialSubclass));
+        if (initialSegment) setSegmentFilter(Number(initialSegment));
+        if (initialPhase) setPhaseFilter(Number(initialPhase));
         setUserFilter(initialTab);
         
         // Initial dates for the hook
@@ -178,7 +212,9 @@ function OpportunitiesContent() {
                 if (savedId) {
                     router.replace(`/oportunidades/${savedId}`, { scroll: false });
                 } else {
-                    router.replace(`/oportunidades?${savedState}`, { scroll: false });
+                    savedParams.delete('tab');
+                    const restoredState = savedParams.toString();
+                    router.replace(restoredState ? `/oportunidades?${restoredState}` : '/oportunidades', { scroll: false });
                 }
             }
         }
@@ -199,7 +235,7 @@ function OpportunitiesContent() {
         if (inputValue) params.set('search', inputValue);
         else params.delete('search');
         
-        if (tab && tab !== 'mine') params.set('tab', tab);
+        if (tab && tab !== 'all') params.set('tab', tab);
         else params.delete('tab');
         
         if (selectedAccountOwnerId) params.set('owner', selectedAccountOwnerId);
@@ -207,6 +243,15 @@ function OpportunitiesContent() {
 
         if (selectedChannel) params.set('channel', selectedChannel);
         else params.delete('channel');
+
+        if (selectedSubclass) params.set('subclass', String(selectedSubclass));
+        else params.delete('subclass');
+
+        if (selectedSegment) params.set('segment', String(selectedSegment));
+        else params.delete('segment');
+
+        if (selectedPhase) params.set('phase', String(selectedPhase));
+        else params.delete('phase');
 
         if (statusFilter && statusFilter !== 'open') params.set('status', statusFilter);
         else params.delete('status');
@@ -235,7 +280,7 @@ function OpportunitiesContent() {
         
         const query = queryString ? `?${queryString}` : window.location.pathname;
         router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
-    }, [tab, selectedAccountOwnerId, selectedChannel, statusFilter, startDate, endDate, startClosingDate, endClosingDate, searchParams, router]); // Notice inputValue is NOT in deps here to avoid URL churn during typing
+    }, [tab, selectedAccountOwnerId, selectedChannel, selectedSubclass, selectedSegment, selectedPhase, statusFilter, startDate, endDate, startClosingDate, endClosingDate, searchParams, router]); // Notice inputValue is NOT in deps here to avoid URL churn during typing
 
 
     const handleFilterChange = useCallback(({ 
@@ -243,6 +288,9 @@ function OpportunitiesContent() {
         startDate: sD, endDate: eD, startClosingDate: sCD, endClosingDate: eCD
     }: any) => {
         setSelectedChannel(channelId);
+        setSelectedSubclass(subclassificationId);
+        setSelectedSegment(segmentId);
+        setSelectedPhase(phaseId);
         setStatusFilterState(newStatus);
         setStartDateState(sD);
         setEndDateState(eD);
@@ -261,7 +309,7 @@ function OpportunitiesContent() {
     }, [setChannelFilter, setSubclassificationFilter, setSegmentFilter, setPhaseFilter, setStatusFilter, setStartDate, setEndDate, setStartClosingDate, setEndClosingDate]);
 
     // PERF FIX: Stable callback references
-    const handleTabChange = useCallback((newTab: 'mine' | 'collab' | 'team') => {
+    const handleTabChange = useCallback((newTab: 'mine' | 'collab' | 'all' | 'team') => {
         setTab(newTab);
         setUserFilter(newTab);
     }, [setUserFilter]);
@@ -293,6 +341,16 @@ function OpportunitiesContent() {
             <div className="flex flex-col gap-4 border-b border-slate-200 pb-2">
                 <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                     <div className="flex space-x-4 overflow-x-auto w-full md:w-auto pb-2 md:pb-0">
+                        <button
+                            data-testid="opportunities-tab-all"
+                            onClick={() => handleTabChange('all')}
+                            className={cn(
+                                "pb-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
+                                tab === 'all' ? "border-blue-600 text-blue-600" : "border-transparent text-slate-500 hover:text-slate-800"
+                            )}
+                        >
+                            Todas
+                        </button>
                         <button
                             data-testid="opportunities-tab-mine"
                             onClick={() => handleTabChange('mine')}
@@ -353,6 +411,9 @@ function OpportunitiesContent() {
                     <OpportunityFilters
                         onFilterChange={handleFilterChange}
                         initialChannelId={selectedChannel}
+                        initialSubclassId={selectedSubclass}
+                        initialSegmentId={selectedSegment}
+                        initialPhaseId={selectedPhase}
                         initialStatusFilter={statusFilter}
                         initialDates={{
                             startDate,
