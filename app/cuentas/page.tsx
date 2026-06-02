@@ -11,6 +11,7 @@ import { AccountFilters } from "@/components/cuentas/AccountFilters";
 import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { cn } from "@/components/ui/utils";
+import { AccountDeleteModal } from "@/components/cuentas/AccountDeleteModal";
 
 
 const formatCurrency = (value: number) => {
@@ -48,6 +49,7 @@ function AccountsContent() {
 
     const [showCreate, setShowCreate] = useState(false);
     const [editingAccount, setEditingAccount] = useState<any>(null);
+    const [accountToDelete, setAccountToDelete] = useState<any>(null);
     const [inputValue, setInputValue] = useState(() => {
         const fromUrl = searchParams.get('search');
         if (fromUrl) return fromUrl;
@@ -190,14 +192,18 @@ function AccountsContent() {
         setEditingAccount(null);
     };
 
-    const handleDelete = async (e: React.MouseEvent, acc: any) => {
+    const handleDelete = (e: React.MouseEvent, acc: any) => {
         e.stopPropagation();
-        if (!window.confirm(`¿Estás seguro de eliminar la cuenta "${acc.nombre}"?`)) return;
+        setAccountToDelete(acc);
+    };
+
+    const confirmDelete = async (accountId: string) => {
         try {
-            await deleteAccount(acc.id);
+            await deleteAccount(accountId);
             refresh();
         } catch (err) {
             console.error(err);
+            throw err;
         }
     };
 
@@ -262,6 +268,14 @@ function AccountsContent() {
                         onCancel={() => { setShowCreate(false); setEditingAccount(null); }}
                     />
                 </div>
+            )}
+
+            {accountToDelete && (
+                <AccountDeleteModal
+                    account={accountToDelete}
+                    onClose={() => setAccountToDelete(null)}
+                    onConfirm={confirmDelete}
+                />
             )}
 
             {loading && accounts.length === 0 ? (
@@ -387,7 +401,7 @@ function AccountsContent() {
                                                 <button onClick={(e) => { e.stopPropagation(); handleEdit(acc); }} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
                                                     <Pencil className="w-4 h-4" />
                                                 </button>
-                                                {isAdmin && (
+                                                {hasCoordinatorAccess && (
                                                     <button onClick={(e) => handleDelete(e, acc)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
                                                         <Trash2 className="w-4 h-4" />
                                                     </button>
