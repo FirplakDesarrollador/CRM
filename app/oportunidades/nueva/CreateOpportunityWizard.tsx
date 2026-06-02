@@ -36,6 +36,7 @@ const schema = z.object({
     origen_oportunidad: z.string().optional().nullable(),
     url_origen: z.string().optional().nullable(),
     fuente_conversion: z.string().optional().nullable(),
+    categoria_oportunidad: z.string().optional().nullable(),
     probability: z.coerce.number().min(0).max(100).default(0).optional().nullable(),
     comentarios: z.string().optional().nullable(),
     direccion_entrega: z.string().optional().nullable(),
@@ -745,7 +746,7 @@ export default function CreateOpportunityWizard() {
                         </div>
 
                         {/* Fifth Row - Orígenes */}
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4 border-t border-slate-100">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 pt-4 border-t border-slate-100">
                             <div className="space-y-2">
                                 <label htmlFor="origen_oportunidad" className="text-sm font-medium">Origen de la Oportunidad</label>
                                 <input
@@ -777,6 +778,17 @@ export default function CreateOpportunityWizard() {
                                     className="w-full p-2 border rounded-lg hover:border-blue-300 focus:border-blue-500 transition-colors"
                                 />
                                 {errors.fuente_conversion && <p className="text-sm text-red-500 mt-1">{errors.fuente_conversion.message as string}</p>}
+                            </div>
+
+                            <div className="space-y-2">
+                                <label htmlFor="categoria_oportunidad" className="text-sm font-medium">Categoría de Interés</label>
+                                <input
+                                    id="categoria_oportunidad"
+                                    placeholder="Ej: Cocinas, Baños..."
+                                    {...register("categoria_oportunidad")}
+                                    className="w-full p-2 border rounded-lg hover:border-blue-300 focus:border-blue-500 transition-colors"
+                                />
+                                {errors.categoria_oportunidad && <p className="text-sm text-red-500 mt-1">{errors.categoria_oportunidad.message as string}</p>}
                             </div>
                         </div>
                     </div>
