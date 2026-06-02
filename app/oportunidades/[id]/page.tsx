@@ -276,11 +276,13 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     const [localOrigen, setLocalOrigen] = useState(opportunity.origen_oportunidad || "");
     const [localUrlOrigen, setLocalUrlOrigen] = useState(opportunity.url_origen || "");
     const [localFuente, setLocalFuente] = useState(opportunity.fuente_conversion || "");
+    const [localCategoriaOportunidad, setLocalCategoriaOportunidad] = useState(opportunity.categoria_oportunidad || "");
     const [isSaving, setIsSaving] = useState(false);
     const [isSavingDate, setIsSavingDate] = useState(false);
     const [isSavingOrigen, setIsSavingOrigen] = useState(false);
     const [isSavingUrl, setIsSavingUrl] = useState(false);
     const [isSavingFuente, setIsSavingFuente] = useState(false);
+    const [isSavingCategoria, setIsSavingCategoria] = useState(false);
 
     // Loss reason inline fields
     const [localRazonPerdida, setLocalRazonPerdida] = useState(opportunity.razon_perdida || "");
@@ -337,7 +339,8 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
         setLocalComentariosPerdida(opportunity.comentarios_perdida || "");
         setLocalComentarios(opportunity.comentarios || "");
         setLocalDireccion(opportunity.direccion_entrega || "");
-    }, [opportunity.segmento_id, opportunity.fecha_cierre_estimada, opportunity.origen_oportunidad, opportunity.url_origen, opportunity.fuente_conversion, opportunity.razon_perdida, opportunity.comentarios_perdida, opportunity.comentarios, opportunity.direccion_entrega]);
+        setLocalCategoriaOportunidad(opportunity.categoria_oportunidad || "");
+    }, [opportunity.segmento_id, opportunity.fecha_cierre_estimada, opportunity.origen_oportunidad, opportunity.url_origen, opportunity.fuente_conversion, opportunity.razon_perdida, opportunity.comentarios_perdida, opportunity.comentarios, opportunity.direccion_entrega, opportunity.categoria_oportunidad]);
 
     useEffect(() => {
         const fetchSegments = async () => {
@@ -918,6 +921,33 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                         placeholder="Ej: Google Ads, Referido..."
                                     />
                                     {isSavingFuente && (
+                                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                            <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                                    Categoría de Interés (Categoría Oportunidad)
+                                </label>
+                                <div className="relative group">
+                                    <input
+                                        type="text"
+                                        value={localCategoriaOportunidad}
+                                        onChange={(e) => setLocalCategoriaOportunidad(e.target.value)}
+                                        onBlur={async () => {
+                                            if (localCategoriaOportunidad !== opportunity.categoria_oportunidad) {
+                                                setIsSavingCategoria(true);
+                                                await updateOpportunity(opportunity.id, { categoria_oportunidad: localCategoriaOportunidad });
+                                                setIsSavingCategoria(false);
+                                            }
+                                        }}
+                                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none placeholder:text-slate-400"
+                                        placeholder="Ej: Cocinas, Baños..."
+                                    />
+                                    {isSavingCategoria && (
                                         <div className="absolute right-3 top-1/2 -translate-y-1/2">
                                             <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
                                         </div>
