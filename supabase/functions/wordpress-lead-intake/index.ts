@@ -73,6 +73,7 @@ Deno.serve(async (req: Request) => {
   // ────────────────────────────────────────────────────────────────────────────
   let cuentaId = "";
   let existingCuenta: any = null;
+  let nombreDeLaCuenta = "";
 
   // NUEVA LÓGICA: Buscar por teléfono del contacto
   const telefonoContacto = (body.contacto?.telefono ?? "").trim();
@@ -82,7 +83,7 @@ Deno.serve(async (req: Request) => {
     // Buscar si existe una cuenta con el nit_base igual al telefono del contacto
     // o con el teléfono igual al teléfono del contacto
     const { data } = await supabase.from("CRM_Cuentas")
-      .select("id")
+      .select("id, nombre")
       .or(`nit_base.eq.${telefonoContacto},telefono.eq.${telefonoContacto}`)
       .eq("is_deleted", false)
       .limit(1)
@@ -93,6 +94,7 @@ Deno.serve(async (req: Request) => {
 
   if (existingCuenta) {
     cuentaId = existingCuenta.id;
+    nombreDeLaCuenta = existingCuenta.nombre;
     // IMPORTANTE: Ya no cambiamos el dueño de la cuenta existente, 
     // evitamos el problema de estar saltando la propiedad a cada asesor nuevo.
   } else {
@@ -102,6 +104,7 @@ Deno.serve(async (req: Request) => {
     if (!nombreContacto || nombreContacto === "-") {
       nombreContacto = "Consumidor Final";
     }
+    nombreDeLaCuenta = nombreContacto;
 
     const emailContacto = (body.contacto?.email ?? "").trim();
     
@@ -131,14 +134,20 @@ Deno.serve(async (req: Request) => {
   // ────────────────────────────────────────────────────────────────────────────
   // PASO 4: OPORTUNIDAD
   // ────────────────────────────────────────────────────────────────────────────
+  let oportunidadNombre = body.oportunidad?.nombre?.trim();
+  if (!oportunidadNombre || oportunidadNombre === "Por definir" || oportunidadNombre === "-") {
+    oportunidadNombre = nombreDeLaCuenta;
+  }
+
   const { data: op, error: errOp } = await supabase.from("CRM_Oportunidades").insert({
     account_id: cuentaId,
     owner_user_id: ownerFinal, // <--- Asignado a la oportunidad
-    nombre: body.oportunidad?.nombre?.trim(),
+    nombre: oportunidadNombre,
     categoria_oportunidad: body.oportunidad?.categoria_oportunidad,
     estado_id: ESTADO_ID,
     origen_oportunidad: body.oportunidad?.origen_oportunidad,
     url_origen: body.oportunidad?.url_origen,
+    fuente_conversion: body.oportunidad?.fuente_conversion,
     comentarios: [
       body.oportunidad?.comentarios,
       !ownerResuelto && nombreAsesor ? `Asignado a: ${nombreAsesor} (No encontrado)` : null

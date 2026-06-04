@@ -60,6 +60,9 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
     const [sortField, setSortField] = useState<string>('updated_at');
     const [sortAsc, setSortAsc] = useState<boolean>(false);
 
+    // Web Filter
+    const [webFilter, setWebFilter] = useState<boolean>(false);
+
     // User Context
     const { user, role: userRole, isVendedor } = useCurrentUser();
     const currentUserId = user?.id;
@@ -226,6 +229,22 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                 .select('*', { count: 'exact' })
                 .eq('is_deleted', false);
 
+            if (webFilter) {
+                // Fetch account_ids from opportunities that came from web
+                const { data: webOpps } = await supabase
+                    .from('CRM_Oportunidades')
+                    .select('account_id')
+                    .or('url_origen.not.is.null,origen_oportunidad.ilike.%web%,origen_oportunidad.ilike.%pagina%')
+                    .eq('is_deleted', false);
+                
+                const webAccountIds = [...new Set(webOpps?.map(o => o.account_id).filter(Boolean))];
+                if (webAccountIds.length > 0) {
+                    query = query.in('id', webAccountIds);
+                } else {
+                    query = query.eq('id', '00000000-0000-0000-0000-000000000000'); // Force empty
+                }
+            }
+
             // Role filtering
             if ((isVendedor || userRole === 'COORDINADOR') && currentUserId) {
                 // Fetch accounts where user is collaborator
@@ -367,7 +386,7 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
             setLoading(false);
             useSyncStore.getState().setIsLoadingData(false);
         }
-    }, [currentUserId, pageSize, searchTerm, assignedUserId, isVendedor, userRole, subordinateIds, channelFilter, subclassificationFilter, nivelPremiumFilter, startDate, endDate, sortField, sortAsc]);
+    }, [currentUserId, pageSize, searchTerm, assignedUserId, isVendedor, userRole, subordinateIds, channelFilter, subclassificationFilter, nivelPremiumFilter, startDate, endDate, sortField, sortAsc, webFilter]);
 
     // Initial Fetch & Filter Fetch
     useEffect(() => {
@@ -416,6 +435,8 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
         setEndDate,
         setSortField,
         setSortAsc,
+        setWebFilter,
+        webFilter,
         sortField,
         sortAsc,
         refresh: () => fetchAccounts(false)

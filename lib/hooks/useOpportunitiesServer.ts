@@ -40,7 +40,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
 
     // Filters
     const [searchTerm, setSearchTerm] = useState<string>("");
-    const [userFilter, setUserFilter] = useState<'mine' | 'team' | 'collab' | 'all' | 'unrestricted'>('all');
+    const [userFilter, setUserFilter] = useState<'mine' | 'team' | 'collab' | 'all' | 'unrestricted' | 'web'>('all');
     const [accountOwnerId, setAccountOwnerId] = useState<string | null>(null);
 
     // New Hierarchical Filters
@@ -256,6 +256,8 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                         } else {
                             localOpps = localOpps.filter(o => o.owner_user_id === currentUserId);
                         }
+                    } else if (userFilter === 'web') {
+                        localOpps = localOpps.filter(o => o.origen_oportunidad && o.origen_oportunidad.toLowerCase().includes('web'));
                     }
                 }
 
@@ -484,6 +486,8 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                         const ids = [currentUserId, ...(user?.coordinadores || [])].filter(Boolean);
                         query = query.in('owner_user_id', ids);
                     }
+                } else if (userFilter === 'web') {
+                    query = query.or('url_origen.not.is.null,origen_oportunidad.ilike.%web%,origen_oportunidad.ilike.%pagina%');
                 }
             }
 

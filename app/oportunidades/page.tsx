@@ -19,6 +19,7 @@ function OpportunitiesContent() {
     // Server Side Hook
     const {
         data: opportunities,
+        count,
         loading,
         hasMore,
         loadMore,
@@ -75,7 +76,7 @@ function OpportunitiesContent() {
             ? <ChevronUp className="w-3 h-3 ml-1 text-blue-600" /> 
             : <ChevronDown className="w-3 h-3 ml-1 text-blue-600" />;
     };
-    const [tab, setTab] = useState<'mine' | 'collab' | 'all' | 'team'>(() => {
+    const [tab, setTab] = useState<'mine' | 'collab' | 'all' | 'team' | 'web'>(() => {
         const fromUrl = searchParams.get('tab');
         if (fromUrl) return (fromUrl as any);
         return 'all';
@@ -309,7 +310,7 @@ function OpportunitiesContent() {
     }, [setChannelFilter, setSubclassificationFilter, setSegmentFilter, setPhaseFilter, setStatusFilter, setStartDate, setEndDate, setStartClosingDate, setEndClosingDate]);
 
     // PERF FIX: Stable callback references
-    const handleTabChange = useCallback((newTab: 'mine' | 'collab' | 'all' | 'team') => {
+    const handleTabChange = useCallback((newTab: 'mine' | 'collab' | 'all' | 'team' | 'web') => {
         setTab(newTab);
         setUserFilter(newTab);
     }, [setUserFilter]);
@@ -324,7 +325,14 @@ function OpportunitiesContent() {
             {/* Header */}
             <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
                 <div className="flex items-center gap-3">
-                    <h1 className="text-2xl font-bold text-slate-900">Oportunidades</h1>
+                    <h1 className="text-2xl font-bold text-slate-900">
+                        Oportunidades
+                        {count !== undefined && count !== null && !loading && (
+                            <span className="ml-2 text-sm font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full align-middle">
+                                {count}
+                            </span>
+                        )}
+                    </h1>
 
                 </div>
                 <Link
@@ -383,6 +391,16 @@ function OpportunitiesContent() {
                                 Todas (Equipo)
                             </button>
                         )}
+                        <button
+                            data-testid="opportunities-tab-web"
+                            onClick={() => handleTabChange('web')}
+                            className={cn(
+                                "pb-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
+                                tab === 'web' ? "border-blue-600 text-blue-600" : "border-transparent text-slate-500 hover:text-slate-800"
+                            )}
+                        >
+                            Oportunidades desde página {tab === 'web' && !loading && `(${count})`}
+                        </button>
                     </div>
 
                     {/* Search and User Picker */}
