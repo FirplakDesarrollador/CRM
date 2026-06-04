@@ -3,6 +3,11 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 
 // ─── CONFIGURACIÓN Y CONSTANTES ──────────────────────────────────────────────
 const FALLBACK_OWNER_ID = "f361d4e5-d937-4668-913a-a4359658d6f4"; // Canal Propio
+const ROTATING_OWNERS = [
+  "31472414-6416-4c11-baa7-11448c44074b", // Juan Fernando Ospina
+  "9bca54d7-45d6-4e79-8dba-be6983a78556", // Claudia Granada
+  "e42aa99a-f359-4cae-b7c7-4a48267bbdb6"  // Brian Rua
+];
 const CANAL_ID          = "PROPIO";
 const ESTADO_ID         = 8; // Contacto Inicial
 
@@ -65,6 +70,25 @@ Deno.serve(async (req: Request) => {
     if (user) {
       ownerFinal = user.id;
       ownerResuelto = true;
+    }
+  }
+
+  // ─── ASIGNACIÓN AUTOMÁTICA (ROUND-ROBIN) ───────────────────────────────────
+  if (!ownerResuelto) {
+    const { data: lastOp } = await supabase
+      .from("CRM_Oportunidades")
+      .select("owner_user_id")
+      .in("owner_user_id", ROTATING_OWNERS)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (lastOp && lastOp.owner_user_id) {
+      const lastIndex = ROTATING_OWNERS.indexOf(lastOp.owner_user_id);
+      const nextIndex = (lastIndex + 1) % ROTATING_OWNERS.length;
+      ownerFinal = ROTATING_OWNERS[nextIndex];
+    } else {
+      ownerFinal = ROTATING_OWNERS[0];
     }
   }
 
