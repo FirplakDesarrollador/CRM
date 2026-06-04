@@ -51,45 +51,24 @@ Deno.serve(async (req: Request) => {
   );
 
   // ────────────────────────────────────────────────────────────────────────────
-  // PASO 1: RESOLVER EL ASESOR (OWNER)
+  // PASO 1: RESOLVER EL ASESOR (OWNER) - SIEMPRE ROUND ROBIN
   // ────────────────────────────────────────────────────────────────────────────
-  let ownerFinal = FALLBACK_OWNER_ID;
-  let ownerResuelto = false;
+  let ownerFinal = ROTATING_OWNERS[0];
   const nombreAsesor = (body.oportunidad?.asignado_a ?? "").trim();
 
-  if (nombreAsesor) {
-    const { data: user } = await supabase
-      .from("CRM_Usuarios")
-      .select("id")
-      .ilike("full_name", `%${nombreAsesor}%`)
-      .eq("is_active", true)
-      .eq("is_deleted", false)
-      .limit(1)
-      .maybeSingle();
-
-    if (user) {
-      ownerFinal = user.id;
-      ownerResuelto = true;
-    }
-  }
-
   // ─── ASIGNACIÓN AUTOMÁTICA (ROUND-ROBIN) ───────────────────────────────────
-  if (!ownerResuelto) {
-    const { data: lastOp } = await supabase
-      .from("CRM_Oportunidades")
-      .select("owner_user_id")
-      .in("owner_user_id", ROTATING_OWNERS)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+  const { data: lastOp } = await supabase
+    .from("CRM_Oportunidades")
+    .select("owner_user_id")
+    .in("owner_user_id", ROTATING_OWNERS)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
-    if (lastOp && lastOp.owner_user_id) {
-      const lastIndex = ROTATING_OWNERS.indexOf(lastOp.owner_user_id);
-      const nextIndex = (lastIndex + 1) % ROTATING_OWNERS.length;
-      ownerFinal = ROTATING_OWNERS[nextIndex];
-    } else {
-      ownerFinal = ROTATING_OWNERS[0];
-    }
+  if (lastOp && lastOp.owner_user_id) {
+    const lastIndex = ROTATING_OWNERS.indexOf(lastOp.owner_user_id);
+    const nextIndex = (lastIndex + 1) % ROTATING_OWNERS.length;
+    ownerFinal = ROTATING_OWNERS[nextIndex];
   }
 
   // ────────────────────────────────────────────────────────────────────────────
@@ -174,7 +153,7 @@ Deno.serve(async (req: Request) => {
     fuente_conversion: body.oportunidad?.fuente_conversion,
     comentarios: [
       body.oportunidad?.comentarios,
-      !ownerResuelto && nombreAsesor ? `Asignado a: ${nombreAsesor} (No encontrado)` : null
+      nombreAsesor ? `Asesor solicitado desde web: ${nombreAsesor}` : null
     ].filter(Boolean).join("\n")
   }).select("id, owner_user_id").single();
 
