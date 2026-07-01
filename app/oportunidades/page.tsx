@@ -10,6 +10,11 @@ import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { UserPickerFilter } from "@/components/cuentas/UserPickerFilter";
 import { OpportunityFilters } from "@/components/oportunidades/OpportunityFilters";
 import { formatColombiaDate, isDateOverdue } from "@/lib/date-utils";
+import dynamic from 'next/dynamic';
+import 'handsontable/styles/handsontable.min.css';
+import 'handsontable/styles/ht-theme-main.min.css';
+
+const HotTable = dynamic(() => import('@/components/HotTableWrapper'), { ssr: false });
 
 function OpportunitiesContent() {
     const { role: userRole } = useCurrentUser();
@@ -40,7 +45,7 @@ function OpportunitiesContent() {
         setSortAsc,
         sortField,
         sortAsc
-    } = useOpportunitiesServer({ pageSize: 20 });
+    } = useOpportunitiesServer({ pageSize: 10000 });
 
     const [inputValue, setInputValue] = useState(() => {
         const fromUrl = searchParams.get('search');
@@ -209,14 +214,11 @@ function OpportunitiesContent() {
             const savedState = sessionStorage.getItem('crm_oportunidades_state');
             if (savedState) {
                 const savedParams = new URLSearchParams(savedState);
-                const savedId = savedParams.get('id');
-                if (savedId) {
-                    router.replace(`/oportunidades/${savedId}`, { scroll: false });
-                } else {
-                    savedParams.delete('tab');
-                    const restoredState = savedParams.toString();
-                    router.replace(restoredState ? `/oportunidades?${restoredState}` : '/oportunidades', { scroll: false });
-                }
+                // Evitamos redireccionar al detalle por defecto para siempre mostrar la lista inicial
+                savedParams.delete('id');
+                savedParams.delete('tab');
+                const restoredState = savedParams.toString();
+                router.replace(restoredState ? `/oportunidades?${restoredState}` : '/oportunidades', { scroll: false });
             }
         }
     }, [searchParams, router]);
@@ -319,6 +321,29 @@ function OpportunitiesContent() {
         setSelectedAccountOwnerId(userId);
         setAccountOwnerId(userId);
     }, [setAccountOwnerId]);
+
+    const hotData = opportunities.map(opp => ({
+        id: opp.id,
+        cuenta: opp.account?.nombre || "Sin cuenta",
+        nombre: opp.nombre || "Sin nombre",
+        fase: opp.fase_data?.nombre || 'Pros.',
+        estado: opp.estado_data?.nombre || 'Abierta',
+        creada: opp.created_at ? new Date(opp.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' }) : "-",
+        valor: opp.amount || 0,
+        cierre: opp.fecha_cierre_estimada ? new Date(opp.fecha_cierre_estimada).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) : "-",
+        vendedor: opp.vendedor?.full_name || "Sin asignar"
+    }));
+
+    const hotColumns = [
+        { data: 'cuenta', title: 'Cuenta', readOnly: true },
+        { data: 'nombre', title: 'Nombre', readOnly: true },
+        { data: 'fase', title: 'Fase', readOnly: true },
+        { data: 'estado', title: 'Estado', readOnly: true },
+        { data: 'creada', title: 'Creada', readOnly: true },
+        { data: 'valor', title: 'Valor', type: 'numeric', numericFormat: { pattern: '$ 0,0', culture: 'es-CO' }, readOnly: true },
+        { data: 'cierre', title: 'Cierre', readOnly: true },
+        { data: 'vendedor', title: 'Vendedor', readOnly: true }
+    ];
 
     return (
         <div data-testid="opportunities-page" className="space-y-4">
@@ -458,125 +483,34 @@ function OpportunitiesContent() {
                 </div>
             ) : (
                 <div data-testid="opportunities-list" className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse">
-                            <thead className="bg-slate-50 border-b border-slate-200">
-                                <tr>
-                                    <th 
-                                        onClick={() => handleSort('account_nombre')}
-                                        className="px-3 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider cursor-pointer group hover:bg-slate-100/50 transition-colors"
-                                    >
-                                        <div className="flex items-center">Cuenta <SortIcon field="account_nombre" /></div>
-                                    </th>
-                                    <th 
-                                        onClick={() => handleSort('nombre')}
-                                        className="px-3 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider cursor-pointer group hover:bg-slate-100/50 transition-colors"
-                                    >
-                                        <div className="flex items-center">Nombre <SortIcon field="nombre" /></div>
-                                    </th>
-                                    <th 
-                                        onClick={() => handleSort('created_at')}
-                                        className="px-3 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-center cursor-pointer group hover:bg-slate-100/50 transition-colors"
-                                    >
-                                        <div className="flex items-center justify-center">Creada <SortIcon field="created_at" /></div>
-                                    </th>
-                                    <th 
-                                        onClick={() => handleSort('amount')}
-                                        className="px-3 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-right cursor-pointer group hover:bg-slate-100/50 transition-colors"
-                                    >
-                                        <div className="flex items-center justify-end">Valor <SortIcon field="amount" /></div>
-                                    </th>
-                                    <th 
-                                        onClick={() => handleSort('fecha_cierre_estimada')}
-                                        className="px-3 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-center cursor-pointer group hover:bg-slate-100/50 transition-colors"
-                                    >
-                                        <div className="flex items-center justify-center">Cierre <SortIcon field="fecha_cierre_estimada" /></div>
-                                    </th>
-                                    <th 
-                                        onClick={() => handleSort('vendedor_nombre')}
-                                        className="px-3 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider cursor-pointer group hover:bg-slate-100/50 transition-colors"
-                                    >
-                                        <div className="flex items-center">Vendedor <SortIcon field="vendedor_nombre" /></div>
-                                    </th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                                {opportunities.map(opp => {
-                                    const isOverdue = isDateOverdue(opp.fecha_cierre_estimada);
-                                    return (
-                                        <tr 
-                                            key={opp.id} 
-                                            onClick={() => {
-                                                const params = new URLSearchParams(Array.from(searchParams.entries()));
-                                                params.set('id', opp.id);
-                                                sessionStorage.setItem('crm_oportunidades_state', params.toString());
-                                                router.push(`/oportunidades/${opp.id}`);
-                                            }}
-                                            className={cn(
-                                                "group cursor-pointer transition-colors",
-                                                isOverdue ? "bg-red-50/50 hover:bg-red-50" : "hover:bg-slate-50"
-                                            )}
-                                            data-testid={`opportunities-row-${opp.id}`}
-                                        >
-                                            <td className="px-3 py-2.5">
-                                                <span className="text-xs font-medium text-blue-600 truncate block max-w-[130px]" title={opp.account?.nombre || ""}>
-                                                    {opp.account?.nombre || "Sin cuenta"}
-                                                </span>
-                                            </td>
-                                            <td className="px-3 py-2.5">
-                                                <div className="flex flex-col gap-0.5">
-                                                    <span className={cn(
-                                                        "text-xs font-bold truncate block max-w-[160px]",
-                                                        isOverdue ? "text-red-900" : "text-slate-900"
-                                                    )} title={opp.nombre || ""}>
-                                                        {opp.nombre || "Sin nombre"}
-                                                    </span>
-                                                    <div className="flex items-center gap-1.5">
-                                                        <span className="text-[9px] px-1 py-0.5 rounded-full bg-slate-100 text-slate-500 font-bold uppercase whitespace-nowrap">
-                                                            {opp.fase_data?.nombre || 'Pros.'}
-                                                        </span>
-                                                        <span className={cn(
-                                                            "text-[9px] px-1 py-0.5 rounded-full font-bold uppercase whitespace-nowrap",
-                                                            (opp.estado_data?.nombre?.toLowerCase().includes('ganada') || opp.estado_data?.nombre?.toLowerCase().includes('ganado')) ? "bg-emerald-100 text-emerald-700" :
-                                                            (opp.estado_data?.nombre?.toLowerCase().includes('perdida') || opp.estado_data?.nombre?.toLowerCase().includes('perdido') || opp.estado_data?.nombre?.toLowerCase().includes('cancelada')) ? "bg-red-100 text-red-700" :
-                                                            "bg-blue-100 text-blue-700"
-                                                        )}>
-                                                            {opp.estado_data?.nombre || 'Abierta'}
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                            </td>
-                                            <td className="px-3 py-2.5 text-center">
-                                                <span className="text-xs text-slate-500 whitespace-nowrap">
-                                                    {opp.created_at ? new Date(opp.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' }) : "-"}
-                                                </span>
-                                            </td>
-                                            <td className="px-3 py-2.5 text-right">
-                                                <span className="text-xs font-semibold text-slate-700 whitespace-nowrap">
-                                                    {new Intl.NumberFormat('es-CO', { style: 'currency', currency: opp.currency_id === '2' ? 'USD' : 'COP', maximumFractionDigits: 0 }).format(opp.amount || 0)}
-                                                </span>
-                                            </td>
-                                            <td className="px-3 py-2.5 text-center">
-                                                <div className={cn(
-                                                    "inline-flex items-center gap-1 px-2 py-0.5 rounded flex-col",
-                                                    isOverdue ? "bg-red-50 text-red-600" : "text-slate-500"
-                                                )}>
-                                                    <span className="text-[11px] font-medium leading-none">
-                                                        {opp.fecha_cierre_estimada ? new Date(opp.fecha_cierre_estimada).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) : "-"}
-                                                    </span>
-                                                    {isOverdue && <span className="text-[8px] font-bold uppercase leading-none">Vencido</span>}
-                                                </div>
-                                            </td>
-                                            <td className="px-3 py-2.5">
-                                                <span className="text-xs text-slate-600 truncate block max-w-[110px]" title={opp.vendedor?.full_name || ""}>
-                                                    {opp.vendedor?.full_name || "Sin asignar"}
-                                                </span>
-                                            </td>
-                                        </tr>
-                                    )
-                                })}
-                            </tbody>
-                        </table>
+                    <div className="w-full relative z-0" style={{ minHeight: '400px' }}>
+                        <HotTable
+                            data={hotData}
+                            columns={hotColumns}
+                            rowHeaders={true}
+                            colHeaders={true}
+                            filters={true}
+                            dropdownMenu={true}
+                            width="100%"
+                            height="calc(100vh - 280px)"
+                            autoColumnSize={false}
+                            autoRowSize={false}
+                            renderAllRows={false}
+                            licenseKey="non-commercial-and-evaluation"
+                            afterOnCellMouseDown={(event, coords, td) => {
+                                if (coords.row >= 0) {
+                                    const opp = hotData[coords.row];
+                                    if (opp && opp.id) {
+                                        const params = new URLSearchParams(Array.from(searchParams.entries()));
+                                        params.set('id', opp.id);
+                                        sessionStorage.setItem('crm_oportunidades_state', params.toString());
+                                        router.push(`/oportunidades/${opp.id}`);
+                                    }
+                                }
+                            }}
+                            stretchH="all"
+                            className="text-sm font-sans"
+                        />
                     </div>
 
                     {hasMore && (
