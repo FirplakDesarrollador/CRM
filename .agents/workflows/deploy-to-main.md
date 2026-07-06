@@ -1,3 +1,7 @@
+---
+description: Commit y push en rama alejo. Validar compilación en GitHub y build de preview en Vercel. Fusionar (merge) alejo con main mediante Pull Request. Confirmar el despliegue final de producción en Vercel.
+---
+
 # Workflow: Despliegue a Main desde Rama `alejo`
 
 Este workflow describe los pasos necesarios para desplegar cambios de forma segura desde la rama de trabajo `alejo` hacia la rama principal `main`, asegurando la verificación de compilación en GitHub y Vercel.
