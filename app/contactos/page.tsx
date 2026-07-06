@@ -11,6 +11,7 @@ import { Edit2, Trash2, Phone, Mail, User, Building, Search, Plus, CloudUpload, 
 import { useContacts } from "@/lib/hooks/useContacts";
 import { useContactsServer } from "@/lib/hooks/useContactsServer";
 import { useAccounts } from "@/lib/hooks/useAccounts";
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { supabase } from "@/lib/supabase";
 import dynamic from 'next/dynamic';
 
@@ -26,8 +27,9 @@ function ContactsContent() {
         loadMore,
         setSearchTerm,
         refresh
-    } = useContactsServer({ pageSize: 10000 });
+    } = useContactsServer({ pageSize: 50 });
 
+    const { isAdmin } = useCurrentUser();
     const { accounts } = useAccounts();
     const { deleteContact } = useContacts();
 
@@ -328,6 +330,29 @@ function ContactsContent() {
         { data: 'telefono', title: 'Teléfono', type: 'text', readOnly: true }
     ];
 
+    if (isAdmin) {
+        hotColumns.unshift({
+            data: 'acciones',
+            title: 'Acciones',
+            renderer: function (instance: any, td: HTMLTableCellElement, row: number, col: number, prop: string, value: any, cellProperties: any) {
+                td.innerHTML = `
+                    <div style="text-align: center; white-space: nowrap;">
+                        <button class="edit-action-btn" title="Editar" style="cursor:pointer; color:#2563eb; background:none; border:none; padding:0 4px; margin:0; display:inline-block; vertical-align:middle;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>
+                        </button>
+                        <button class="delete-action-btn" title="Eliminar" style="cursor:pointer; color:#dc2626; background:none; border:none; padding:0 4px; margin:0; display:inline-block; vertical-align:middle;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+                        </button>
+                    </div>
+                `;
+                td.className = "htCenter htMiddle";
+                return td;
+            },
+            readOnly: true,
+            width: 80
+        } as any);
+    }
+
     // --- VIEW: Global List ---
     return (
         <div data-testid="contacts-page" className="p-6 max-w-7xl mx-auto space-y-5">
@@ -399,11 +424,24 @@ function ContactsContent() {
                                 height="calc(100vh - 280px)"
                                 autoColumnSize={false}
                                 autoRowSize={false}
+                                rowHeights={38}
                                 renderAllRows={false}
                                 licenseKey="non-commercial-and-evaluation"
                                 afterOnCellMouseDown={(event, coords, td) => {
                                     if (coords.row >= 0) {
                                         const contact = hotData[coords.row]._original;
+                                        const target = event.target as HTMLElement;
+                                        
+                                        if (target.closest('.delete-action-btn')) {
+                                            setContactToDelete(contact);
+                                            return;
+                                        }
+                                        
+                                        if (target.closest('.edit-action-btn')) {
+                                            handleEdit(contact);
+                                            return;
+                                        }
+                                        
                                         handleEdit(contact);
                                     }
                                 }}

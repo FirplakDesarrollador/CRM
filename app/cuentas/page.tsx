@@ -50,7 +50,7 @@ function AccountsContent() {
         sortField,
         sortAsc,
         refresh
-    } = useAccountsServer({ pageSize: 10000 });
+    } = useAccountsServer({ pageSize: 50 });
 
     const [showCreate, setShowCreate] = useState(false);
     const [editingAccount, setEditingAccount] = useState<any>(null);
@@ -245,6 +245,29 @@ function AccountsContent() {
         { data: 'actualizado', title: 'Actualizado', type: 'text', readOnly: true }
     ];
 
+    if (isAdmin) {
+        hotColumns.unshift({
+            data: 'acciones',
+            title: 'Acciones',
+            renderer: function (instance: any, td: HTMLTableCellElement, row: number, col: number, prop: string, value: any, cellProperties: any) {
+                td.innerHTML = `
+                    <div style="text-align: center; white-space: nowrap;">
+                        <button class="edit-action-btn" title="Editar" style="cursor:pointer; color:#2563eb; background:none; border:none; padding:0 4px; margin:0; display:inline-block; vertical-align:middle;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>
+                        </button>
+                        <button class="delete-action-btn" title="Eliminar" style="cursor:pointer; color:#dc2626; background:none; border:none; padding:0 4px; margin:0; display:inline-block; vertical-align:middle;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+                        </button>
+                    </div>
+                `;
+                td.className = "htCenter htMiddle";
+                return td;
+            },
+            readOnly: true,
+            width: 80
+        } as any);
+    }
+
     return (
         <div data-testid="accounts-page" className="space-y-4">
             <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
@@ -359,8 +382,78 @@ function AccountsContent() {
                     <p className="text-slate-500 mb-4">Prueba ajustando los filtros o crea una nueva.</p>
                 </div>
             ) : (
-                <div data-testid="accounts-list" className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-                    <div className="w-full relative z-0" style={{ minHeight: '400px' }}>
+                <div data-testid="accounts-list" className="flex flex-col relative min-h-[450px] transition-all duration-300">
+                    {/* VISTA MÓVIL: Tarjetas */}
+                    <div className="grid grid-cols-1 gap-3 md:hidden">
+                        {accounts.map((acc) => (
+                            <div key={acc.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col hover:border-blue-300 active:scale-[0.99] transition-all relative">
+                                <div className="p-4 border-b border-slate-100 flex justify-between items-start gap-3">
+                                    <div className="flex-1 min-w-0">
+                                        <div className="font-bold text-slate-900 text-sm mb-0.5 truncate">
+                                            {acc.nombre || "Sin nombre"}
+                                        </div>
+                                        <div className="text-slate-500 text-xs flex items-center gap-1 truncate">
+                                            <MapPin className="w-3 h-3" />
+                                            {acc.ciudad || "Sin ciudad"}
+                                        </div>
+                                    </div>
+                                    <div className="shrink-0 flex items-start">
+                                        <span className={cn("px-2.5 py-1 rounded-full text-[11px] font-bold border whitespace-nowrap", 
+                                            acc.nivel_premium === 'PREMIUM' ? 'bg-amber-100 text-amber-700 border-amber-200' : 'bg-slate-100 text-slate-700 border-slate-200'
+                                        )}>
+                                            {acc.nivel_premium || "Regular"}
+                                        </span>
+                                    </div>
+                                </div>
+                                
+                                <div className="p-4 bg-slate-50/50 grid grid-cols-2 gap-y-3 gap-x-2 text-xs">
+                                    <div>
+                                        <span className="block text-slate-400 mb-1">Potencial</span>
+                                        <span className="font-bold text-slate-800">{formatCurrency(acc.potencial_venta || 0)}</span>
+                                    </div>
+                                    <div>
+                                        <span className="block text-slate-400 mb-1">Canal / Tipo</span>
+                                        <span className="font-medium text-slate-700">{acc.canal_id || "-"} / {acc.subclasificacion_id || "-"}</span>
+                                    </div>
+                                    <div className="col-span-2">
+                                        <span className="block text-slate-400 mb-1">Vendedor</span>
+                                        <div className="flex items-center gap-1.5 font-medium text-slate-700 truncate">
+                                            <div className="w-5 h-5 shrink-0 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-[9px] font-bold">
+                                                <User className="w-3 h-3" />
+                                            </div>
+                                            <span className="truncate">{acc.owner_name || "Sin asignar"}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                {isAdmin && (
+                                    <div className="flex divide-x divide-slate-100 border-t border-slate-100 bg-white">
+                                        <button 
+                                            onClick={() => handleEdit(acc)}
+                                            className="flex-1 py-2.5 flex items-center justify-center gap-1.5 text-blue-600 hover:bg-blue-50 font-medium text-xs transition-colors"
+                                        >
+                                            <Pencil className="w-3.5 h-3.5" />
+                                            Editar
+                                        </button>
+                                        <button 
+                                            onClick={() => {
+                                                if (window.confirm(`¿Estás seguro de que deseas eliminar la cuenta "${acc.nombre}"?`)) {
+                                                    confirmDelete(acc.id);
+                                                }
+                                            }}
+                                            className="flex-1 py-2.5 flex items-center justify-center gap-1.5 text-rose-600 hover:bg-rose-50 font-medium text-xs transition-colors"
+                                        >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                            Eliminar
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* VISTA DESKTOP: Tabla */}
+                    <div className="hidden md:block w-full relative z-0 bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm" style={{ minHeight: '400px' }}>
                         <HotTable
                             data={hotData}
                             columns={hotColumns}
@@ -372,11 +465,24 @@ function AccountsContent() {
                             height="calc(100vh - 280px)"
                             autoColumnSize={false}
                             autoRowSize={false}
+                            rowHeights={38}
                             renderAllRows={false}
                             licenseKey="non-commercial-and-evaluation"
                             afterOnCellMouseDown={(event, coords, td) => {
                                 if (coords.row >= 0) {
                                     const acc = hotData[coords.row]._original;
+                                    const target = event.target as HTMLElement;
+                                    
+                                    if (target.closest('.delete-action-btn')) {
+                                        setAccountToDelete(acc);
+                                        return;
+                                    }
+                                    
+                                    if (target.closest('.edit-action-btn')) {
+                                        handleEdit(acc);
+                                        return;
+                                    }
+                                    
                                     handleEdit(acc);
                                 }
                             }}
