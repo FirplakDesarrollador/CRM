@@ -11,7 +11,10 @@ import { AccountFilters } from "@/components/cuentas/AccountFilters";
 import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { cn } from "@/components/ui/utils";
+import { AccountDeleteModal } from "@/components/cuentas/AccountDeleteModal";
+import dynamic from 'next/dynamic';
 
+const HotTable = dynamic(() => import('@/components/HotTableWrapper'), { ssr: false });
 
 const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('es-CO', {
@@ -29,6 +32,7 @@ function AccountsContent() {
 
     const {
         data: accounts,
+        count,
         loading,
         hasMore,
         loadMore,
@@ -41,13 +45,16 @@ function AccountsContent() {
         setEndDate,
         setSortField,
         setSortAsc,
+        setWebFilter,
+        webFilter,
         sortField,
         sortAsc,
         refresh
-    } = useAccountsServer({ pageSize: 20 });
+    } = useAccountsServer({ pageSize: 10000 });
 
     const [showCreate, setShowCreate] = useState(false);
     const [editingAccount, setEditingAccount] = useState<any>(null);
+    const [accountToDelete, setAccountToDelete] = useState<any>(null);
     const [inputValue, setInputValue] = useState(() => {
         const fromUrl = searchParams.get('search');
         if (fromUrl) return fromUrl;
@@ -190,21 +197,67 @@ function AccountsContent() {
         setEditingAccount(null);
     };
 
-    const handleDelete = async (e: React.MouseEvent, acc: any) => {
+    const handleDelete = (e: React.MouseEvent, acc: any) => {
         e.stopPropagation();
-        if (!window.confirm(`¿Estás seguro de eliminar la cuenta "${acc.nombre}"?`)) return;
+        setAccountToDelete(acc);
+    };
+
+    const confirmDelete = async (accountId: string) => {
         try {
-            await deleteAccount(acc.id);
+            await deleteAccount(accountId);
             refresh();
         } catch (err) {
             console.error(err);
+            throw err;
         }
     };
+
+    // Preparar datos para Handsontable
+    const hotData = accounts.map(acc => ({
+        id: acc.id,
+        nombre: acc.nombre,
+        ciudad: acc.ciudad || "Sin ciudad",
+        canal_id: acc.canal_id || "-",
+        tipo: acc.subclasificacion_id || "",
+        potencial_venta: acc.potencial_venta || 0,
+        vendedor: acc.owner_name || "Sin asignar",
+        nivel: acc.nivel_premium || "-",
+        creacion: acc.created_at ? new Date(acc.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) : "-",
+        actualizado: acc.updated_at ? new Date(acc.updated_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) : "-",
+        _original: acc
+    }));
+
+    const hotColumns = [
+        { data: 'nombre', title: 'Cuenta', type: 'text', readOnly: true },
+        { data: 'ciudad', title: 'Ubicación', type: 'text', readOnly: true },
+        { data: 'canal_id', title: 'Canal', type: 'text', readOnly: true },
+        { data: 'tipo', title: 'Tipo', type: 'text', readOnly: true },
+        { 
+            data: 'potencial_venta', 
+            title: 'Potencial Venta', 
+            type: 'numeric',
+            numericFormat: { pattern: '$ 0,0', culture: 'es-CO' },
+            readOnly: true
+        },
+        { data: 'vendedor', title: 'Vendedor', type: 'text', readOnly: true },
+        { data: 'nivel', title: 'Nivel', type: 'text', readOnly: true },
+        { data: 'creacion', title: 'Creación', type: 'text', readOnly: true },
+        { data: 'actualizado', title: 'Actualizado', type: 'text', readOnly: true }
+    ];
 
     return (
         <div data-testid="accounts-page" className="space-y-4">
             <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
-                <h1 className="text-2xl font-bold text-slate-900">Cuentas</h1>
+                <div className="flex items-center gap-3">
+                    <h1 className="text-2xl font-bold text-slate-900">
+                        Cuentas
+                        {count !== undefined && count !== null && !loading && (
+                            <span className="ml-2 text-sm font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full align-middle">
+                                {count}
+                            </span>
+                        )}
+                    </h1>
+                </div>
 
                 <div className="flex flex-wrap md:flex-nowrap gap-2 w-full md:w-auto items-center">
                     {hasCoordinatorAccess && (
@@ -239,6 +292,27 @@ function AccountsContent() {
                 </div>
             </div>
 
+            <div className="flex gap-4 border-b border-slate-200 mt-2 mb-4">
+                <button
+                    onClick={() => setWebFilter(false)}
+                    className={cn(
+                        "pb-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
+                        !webFilter ? "border-blue-600 text-blue-600" : "border-transparent text-slate-500 hover:text-slate-800"
+                    )}
+                >
+                    Todas
+                </button>
+                <button
+                    onClick={() => setWebFilter(true)}
+                    className={cn(
+                        "pb-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
+                        webFilter ? "border-blue-600 text-blue-600" : "border-transparent text-slate-500 hover:text-slate-800"
+                    )}
+                >
+                    Cuentas desde página {webFilter && !loading && `(${count})`}
+                </button>
+            </div>
+
             <div className="pb-2 border-b border-slate-200">
                 <AccountFilters
                     onFilterChange={handleFilterChange}
@@ -264,6 +338,14 @@ function AccountsContent() {
                 </div>
             )}
 
+            {accountToDelete && (
+                <AccountDeleteModal
+                    account={accountToDelete}
+                    onClose={() => setAccountToDelete(null)}
+                    onConfirm={confirmDelete}
+                />
+            )}
+
             {loading && accounts.length === 0 ? (
                 <div className="space-y-3">
                     {[1, 2, 3, 4, 5].map(i => (
@@ -278,126 +360,29 @@ function AccountsContent() {
                 </div>
             ) : (
                 <div data-testid="accounts-list" className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-left border-collapse">
-                            <thead className="bg-slate-50 border-b border-slate-200">
-                                <tr>
-                                    <th onClick={() => handleSort('nombre')} className="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider cursor-pointer group hover:bg-slate-100/50 transition-colors">
-                                        <div className="flex items-center">Cuenta <SortIcon field="nombre" /></div>
-                                    </th>
-                                    <th onClick={() => handleSort('ciudad')} className="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider cursor-pointer group hover:bg-slate-100/50 transition-colors">
-                                        <div className="flex items-center">Ubicación <SortIcon field="ciudad" /></div>
-                                    </th>
-                                    <th onClick={() => handleSort('canal_id')} className="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider cursor-pointer group hover:bg-slate-100/50 transition-colors">
-                                        <div className="flex items-center">Canal / Tipo <SortIcon field="canal_id" /></div>
-                                    </th>
-                                    <th onClick={() => handleSort('potencial_venta')} className="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-right cursor-pointer group hover:bg-slate-100/50 transition-colors">
-                                        <div className="flex items-center justify-end">Potencial Venta <SortIcon field="potencial_venta" /></div>
-                                    </th>
-                                    <th className="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Vendedor</th>
-                                    <th onClick={() => handleSort('nivel_premium')} className="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-center cursor-pointer group hover:bg-slate-100/50 transition-colors">
-                                        <div className="flex items-center justify-center">Nivel <SortIcon field="nivel_premium" /></div>
-                                    </th>
-                                    <th onClick={() => handleSort('created_at')} className="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-center cursor-pointer group hover:bg-slate-100/50 transition-colors">
-                                        <div className="flex items-center justify-center">Creación <SortIcon field="created_at" /></div>
-                                    </th>
-                                    <th onClick={() => handleSort('updated_at')} className="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-center cursor-pointer group hover:bg-slate-100/50 transition-colors">
-                                        <div className="flex items-center justify-center">Actualizado <SortIcon field="updated_at" /></div>
-                                    </th>
-                                    <th className="px-4 py-3 text-[11px] font-bold text-slate-500 uppercase tracking-wider text-right"></th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                                {accounts.map(acc => (
-                                    <tr
-                                        key={acc.id}
-                                        onClick={() => handleEdit(acc)}
-                                        className="hover:bg-blue-50/30 transition-colors cursor-pointer group"
-                                    >
-                                        <td className="px-4 py-3">
-                                            <span className="text-sm font-bold text-slate-900 group-hover:text-blue-700 transition-colors truncate block max-w-[200px]" title={acc.nombre}>
-                                                {acc.nombre}
-                                            </span>
-                                        </td>
-                                        <td className="px-4 py-3">
-                                            <div className="flex items-center gap-1.5 whitespace-nowrap">
-                                                <MapPin className="w-3 h-3 text-slate-400" />
-                                                <span className="text-xs text-slate-600">{acc.ciudad || "Sin ciudad"}</span>
-                                            </div>
-                                        </td>
-                                        <td className="px-4 py-3">
-                                            <div className="flex flex-col gap-0.5">
-                                                <div className="flex items-center gap-1.5">
-                                                    <Briefcase className="w-3 h-3 text-slate-400" />
-                                                    <span className="text-xs font-medium text-slate-700">{acc.canal_id || "-"}</span>
-                                                </div>
-                                                <span className="text-[10px] text-slate-400 font-medium uppercase tracking-tight">
-                                                    {acc.subclasificacion_id ? `Tipo: ${acc.subclasificacion_id}` : ""}
-                                                </span>
-                                            </div>
-                                        </td>
-                                        <td className="px-4 py-3 text-right">
-                                            <div className="flex flex-col items-end">
-                                                <span className={cn(
-                                                    "text-sm font-bold",
-                                                    (acc.potencial_venta || 0) > 0 ? "text-emerald-600" : "text-slate-400"
-                                                )}>
-                                                    {formatCurrency(acc.potencial_venta || 0)}
-                                                </span>
-                                                <span className="text-[10px] text-slate-400 font-medium tracking-tight">
-                                                    Consolidado
-                                                </span>
-                                            </div>
-                                        </td>
-                                        <td className="px-4 py-3">
-                                            <div className="flex items-center gap-1.5">
-                                                <User className="w-3 h-3 text-slate-400" />
-                                                <span className="text-xs text-slate-600 truncate max-w-[100px]" title={acc.owner_name || ""}>
-                                                    {acc.owner_name || "Sin asignar"}
-                                                </span>
-                                            </div>
-                                        </td>
-                                        <td className="px-4 py-3 text-center">
-                                            {acc.nivel_premium ? (
-                                                <div className={cn(
-                                                    "inline-flex items-center gap-1 px-2 py-0.5 rounded-full border shadow-sm",
-                                                    acc.nivel_premium === 'PREMIUM' ? "bg-amber-50 text-amber-600 border-amber-200" :
-                                                        acc.nivel_premium === 'DESTACADO' ? "bg-slate-50 text-slate-600 border-slate-200" :
-                                                            "bg-orange-50 text-orange-600 border-orange-200"
-                                                )}>
-                                                    <Medal className={cn("w-3 h-3", acc.nivel_premium === 'PREMIUM' ? "fill-amber-400" : acc.nivel_premium === 'DESTACADO' ? "fill-slate-300" : "fill-orange-400")} />
-                                                    <span className="text-[10px] font-bold uppercase">{acc.nivel_premium}</span>
-                                                </div>
-                                            ) : (
-                                                <span className="text-[10px] text-slate-300">-</span>
-                                            )}
-                                        </td>
-                                        <td className="px-4 py-3 text-center">
-                                            <span className="text-xs text-slate-500">
-                                                {acc.created_at ? new Date(acc.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) : "-"}
-                                            </span>
-                                        </td>
-                                        <td className="px-4 py-3 text-center">
-                                            <span className="text-xs text-slate-500">
-                                                {acc.updated_at ? new Date(acc.updated_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) : "-"}
-                                            </span>
-                                        </td>
-                                        <td className="px-4 py-3 text-right">
-                                            <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <button onClick={(e) => { e.stopPropagation(); handleEdit(acc); }} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
-                                                    <Pencil className="w-4 h-4" />
-                                                </button>
-                                                {isAdmin && (
-                                                    <button onClick={(e) => handleDelete(e, acc)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
-                                                        <Trash2 className="w-4 h-4" />
-                                                    </button>
-                                                )}
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                    <div className="w-full relative z-0" style={{ minHeight: '400px' }}>
+                        <HotTable
+                            data={hotData}
+                            columns={hotColumns}
+                            rowHeaders={true}
+                            colHeaders={true}
+                            filters={true}
+                            dropdownMenu={true}
+                            width="100%"
+                            height="calc(100vh - 280px)"
+                            autoColumnSize={false}
+                            autoRowSize={false}
+                            renderAllRows={false}
+                            licenseKey="non-commercial-and-evaluation"
+                            afterOnCellMouseDown={(event, coords, td) => {
+                                if (coords.row >= 0) {
+                                    const acc = hotData[coords.row]._original;
+                                    handleEdit(acc);
+                                }
+                            }}
+                            stretchH="all"
+                            className="text-sm font-sans"
+                        />
                     </div>
 
                     {hasMore && (

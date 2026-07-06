@@ -207,6 +207,8 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
                 await syncEngine.queueMutation('CRM_CotizacionItems', qi.id, qiData, { isSnapshot: true });
             }
         }
+
+        return id;
     };
 
     const generateMockData = async () => {

@@ -12,6 +12,9 @@ import { useContacts } from "@/lib/hooks/useContacts";
 import { useContactsServer } from "@/lib/hooks/useContactsServer";
 import { useAccounts } from "@/lib/hooks/useAccounts";
 import { supabase } from "@/lib/supabase";
+import dynamic from 'next/dynamic';
+
+const HotTable = dynamic(() => import('@/components/HotTableWrapper'), { ssr: false });
 
 function ContactsContent() {
     const searchParams = useSearchParams();
@@ -23,7 +26,7 @@ function ContactsContent() {
         loadMore,
         setSearchTerm,
         refresh
-    } = useContactsServer({ pageSize: 12 });
+    } = useContactsServer({ pageSize: 10000 });
 
     const { accounts } = useAccounts();
     const { deleteContact } = useContacts();
@@ -301,6 +304,30 @@ function ContactsContent() {
         );
     }
 
+    // Preparar datos para Handsontable
+    const hotData = contacts.map(contact => {
+        const accountName = contact.account_name || accountMap.get(contact.account_id) || "-";
+        return {
+            id: contact.id,
+            nombre: contact.nombre,
+            cargo: contact.cargo || "Sin cargo registrado",
+            principal: contact.es_principal ? "Principal" : "-",
+            cuenta: accountName,
+            email: contact.email || "-",
+            telefono: contact.telefono || "-",
+            _original: contact
+        };
+    });
+
+    const hotColumns = [
+        { data: 'nombre', title: 'Contacto', type: 'text', readOnly: true },
+        { data: 'cargo', title: 'Cargo', type: 'text', readOnly: true },
+        { data: 'principal', title: 'Principal', type: 'text', readOnly: true },
+        { data: 'cuenta', title: 'Cuenta', type: 'text', readOnly: true },
+        { data: 'email', title: 'Email', type: 'text', readOnly: true },
+        { data: 'telefono', title: 'Teléfono', type: 'text', readOnly: true }
+    ];
+
     // --- VIEW: Global List ---
     return (
         <div data-testid="contacts-page" className="p-6 max-w-7xl mx-auto space-y-5">
@@ -360,98 +387,30 @@ function ContactsContent() {
             ) : (
                 <>
                     <div data-testid="contacts-list" className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                        <div className="hidden md:grid grid-cols-[minmax(220px,1.2fr)_minmax(180px,1fr)_minmax(220px,1.1fr)_minmax(140px,.7fr)_120px] items-center gap-4 border-b border-slate-200 bg-slate-50 px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                            <div>Contacto</div>
-                            <div>Cuenta</div>
-                            <div>Email</div>
-                            <div>Telefono</div>
-                            <div className="text-right">Acciones</div>
+                        <div className="w-full relative z-0" style={{ minHeight: '400px' }}>
+                            <HotTable
+                                data={hotData}
+                                columns={hotColumns}
+                                rowHeaders={true}
+                                colHeaders={true}
+                                filters={true}
+                                dropdownMenu={true}
+                                width="100%"
+                                height="calc(100vh - 280px)"
+                                autoColumnSize={false}
+                                autoRowSize={false}
+                                renderAllRows={false}
+                                licenseKey="non-commercial-and-evaluation"
+                                afterOnCellMouseDown={(event, coords, td) => {
+                                    if (coords.row >= 0) {
+                                        const contact = hotData[coords.row]._original;
+                                        handleEdit(contact);
+                                    }
+                                }}
+                                stretchH="all"
+                                className="text-sm font-sans"
+                            />
                         </div>
-                        {contacts.map(contact => {
-                            const accountName = contact.account_name || accountMap.get(contact.account_id);
-                            return (
-                                <div 
-                                    key={contact.id} 
-                                    data-testid={`contacts-row-${contact.id}`} 
-                                    onClick={() => handleEdit(contact)}
-                                    className="group grid grid-cols-1 gap-3 border-b border-slate-100 px-4 py-4 transition-colors hover:bg-blue-50/30 cursor-pointer last:border-b-0 md:grid-cols-[minmax(220px,1.2fr)_minmax(180px,1fr)_minmax(220px,1.1fr)_minmax(140px,.7fr)_120px] md:items-center md:gap-4"
-                                >
-                                    <div className="min-w-0">
-                                        <div className="flex items-center gap-2">
-                                            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500 group-hover:bg-white">
-                                                <User size={16} />
-                                            </div>
-                                            <div className="min-w-0">
-                                                <div className="flex min-w-0 items-center gap-2">
-                                                    <span className="truncate text-sm font-bold text-slate-900">
-                                                        {contact.nombre}
-                                                    </span>
-                                                    {contact.es_principal && (
-                                                        <span className="shrink-0 rounded-full border border-emerald-100 bg-emerald-50 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-emerald-700">
-                                                            Principal
-                                                        </span>
-                                                    )}
-                                                    {contact._hasPendingSync && (
-                                                        <span className="shrink-0 rounded-full bg-amber-100 p-1 text-amber-600 animate-pulse" title="Sincronizando cambios...">
-                                                            <CloudUpload className="w-3 h-3" />
-                                                        </span>
-                                                    )}
-                                                </div>
-                                                <p className="truncate text-xs font-semibold uppercase tracking-tight text-slate-500">
-                                                    {contact.cargo || "Sin cargo registrado"}
-                                                </p>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <Link
-                                        href={`/cuentas?id=${contact.account_id}`}
-                                        onClick={(e) => e.stopPropagation()}
-                                        className="flex min-w-0 items-center gap-2 rounded-lg border border-blue-100 bg-blue-50 px-2.5 py-2 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-100"
-                                    >
-                                        <Building size={14} className="shrink-0" />
-                                        <span className="truncate">{accountName || 'Cuenta Desconocida'}</span>
-                                    </Link>
-
-                                    <a
-                                        href={contact.email ? `mailto:${contact.email}` : undefined}
-                                        onClick={(e) => e.stopPropagation()}
-                                        className="flex min-w-0 items-center gap-2 text-sm font-medium text-slate-600 hover:text-[#254153]"
-                                    >
-                                        <Mail size={15} className="shrink-0 text-slate-400" />
-                                        <span className="truncate">{contact.email || "-"}</span>
-                                    </a>
-
-                                    <a
-                                        href={contact.telefono ? `tel:${contact.telefono}` : undefined}
-                                        onClick={(e) => e.stopPropagation()}
-                                        className="flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-[#254153]"
-                                    >
-                                        <Phone size={15} className="shrink-0 text-slate-400" />
-                                        <span>{contact.telefono || "-"}</span>
-                                    </a>
-
-                                    <div className="flex items-center justify-end gap-2">
-                                        <button
-                                            data-testid={`contacts-edit-${contact.id}`}
-                                            onClick={(e) => { e.stopPropagation(); handleEdit(contact); }}
-                                            className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-blue-50 hover:text-blue-600"
-                                            title="Editar"
-                                        >
-                                            <Edit2 size={16} />
-                                        </button>
-                                        <button
-                                            data-testid={`contacts-delete-${contact.id}`}
-                                            onClick={(e) => { e.stopPropagation(); setContactToDelete(contact); }}
-                                            className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600"
-                                            title="Eliminar"
-                                        >
-                                            <Trash2 size={16} />
-                                        </button>
-                                    </div>
-                                </div>
-                            );
-                        })}
                     </div>
 
                     {hasMore && (
