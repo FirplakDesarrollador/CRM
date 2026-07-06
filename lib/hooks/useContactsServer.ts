@@ -93,7 +93,8 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
                     const lowerSearch = searchTerm.toLowerCase();
                     localContacts = localContacts.filter(c => 
                         c.nombre.toLowerCase().includes(lowerSearch) ||
-                        (c.email && c.email.toLowerCase().includes(lowerSearch))
+                        (c.email && c.email.toLowerCase().includes(lowerSearch)) ||
+                        (c.telefono && c.telefono.toLowerCase().includes(lowerSearch))
                     );
                 }
 
@@ -177,7 +178,7 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
             }
 
             if (searchTerm) {
-                query = query.or(`nombre.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%`);
+                query = query.or(`nombre.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%,telefono.ilike.%${searchTerm}%`);
             }
 
             // Order

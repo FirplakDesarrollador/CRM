@@ -40,7 +40,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
 
     // Filters
     const [searchTerm, setSearchTerm] = useState<string>("");
-    const [userFilter, setUserFilter] = useState<'mine' | 'team' | 'collab' | 'all'>('mine');
+    const [userFilter, setUserFilter] = useState<'mine' | 'team' | 'collab' | 'all' | 'unrestricted' | 'web'>('all');
     const [accountOwnerId, setAccountOwnerId] = useState<string | null>(null);
 
     // New Hierarchical Filters
@@ -172,7 +172,11 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                 // Filtering
                 if (searchTerm) {
                     const lowerSearch = searchTerm.toLowerCase();
-                    localOpps = localOpps.filter(o => o.nombre.toLowerCase().includes(lowerSearch));
+                    localOpps = localOpps.filter(o => {
+                        const oppNameMatches = o.nombre?.toLowerCase().includes(lowerSearch);
+                        const accountNameMatches = accMap.get(o.account_id)?.nombre?.toLowerCase().includes(lowerSearch);
+                        return oppNameMatches || accountNameMatches;
+                    });
                 }
 
                 if (channelFilter) {
@@ -226,7 +230,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
 
                 if (accountOwnerId) {
                     localOpps = localOpps.filter(o => o.owner_user_id === accountOwnerId);
-                } else {
+                } else if (userFilter !== 'unrestricted') {
                     if (userFilter === 'mine') {
                         localOpps = localOpps.filter(o => 
                             o.owner_user_id === currentUserId || 
@@ -236,12 +240,24 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                         const collabOpps = await db.opportunityCollaborators.where('usuario_id').equals(currentUserId).toArray();
                         const collabOppIds = new Set(collabOpps.map(c => c.oportunidad_id));
                         localOpps = localOpps.filter(o => collabOppIds.has(o.id));
+                    } else if (userFilter === 'all') {
+                        if (userRole !== 'ADMIN') {
+                            const collabOpps = await db.opportunityCollaborators.where('usuario_id').equals(currentUserId).toArray();
+                            const collabOppIds = new Set(collabOpps.map(c => c.oportunidad_id));
+                            localOpps = localOpps.filter(o =>
+                                o.owner_user_id === currentUserId ||
+                                (!o.owner_user_id && o.created_by === currentUserId) ||
+                                collabOppIds.has(o.id)
+                            );
+                        }
                     } else if (userFilter === 'team' && userRole !== 'ADMIN') {
                         if (userRole === 'COORDINADOR') {
                             localOpps = localOpps.filter(o => o.owner_user_id === currentUserId || (o.owner_user_id && subordinateIds.includes(o.owner_user_id)));
                         } else {
                             localOpps = localOpps.filter(o => o.owner_user_id === currentUserId);
                         }
+                    } else if (userFilter === 'web') {
+                        localOpps = localOpps.filter(o => o.origen_oportunidad && o.origen_oportunidad.toLowerCase().includes('web'));
                     }
                 }
 
@@ -306,6 +322,20 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                 return;
             }
 
+            // Resolve search term against accounts and users to allow cross-table filtering
+            let searchAccountIds: string[] = [];
+            let searchUserIds: string[] = [];
+            
+            if (searchTerm) {
+                const [accountsRes, usersRes] = await Promise.all([
+                    supabase.from('CRM_Cuentas').select('id').ilike('nombre', `%${searchTerm}%`).limit(100),
+                    supabase.from('CRM_Usuarios').select('id').ilike('full_name', `%${searchTerm}%`).limit(100)
+                ]);
+
+                if (accountsRes.data) searchAccountIds = accountsRes.data.map(a => a.id);
+                if (usersRes.data) searchUserIds = usersRes.data.map(u => u.id);
+            }
+
             // Dynamically build select to support filtering on account
             const useInnerJoin = channelFilter || subclassificationFilter;
             const accountRelation = useInnerJoin ? 'account:CRM_Cuentas!inner(nombre, canal_id, subclasificacion_id)' : 'account:CRM_Cuentas(nombre, canal_id, subclasificacion_id)';
@@ -334,7 +364,14 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
 
             // Apply Filters
             if (searchTerm) {
-                query = query.ilike('nombre', `%${searchTerm}%`);
+                let orConditions = [`nombre.ilike.%${searchTerm}%`];
+                if (searchAccountIds.length > 0) {
+                    orConditions.push(`account_id.in.(${searchAccountIds.join(',')})`);
+                }
+                if (searchUserIds.length > 0) {
+                    orConditions.push(`owner_user_id.in.(${searchUserIds.join(',')})`);
+                }
+                query = query.or(orConditions.join(','));
             }
 
             // Hierarchical Filters
@@ -354,16 +391,25 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                 query = query.eq('fase_id', phaseFilter);
             }
 
-            // Status Filter (won/lost/open) - use refs for phase IDs
-            if (statusFilter === 'won' && wonPhaseIdsRef.current.length > 0) {
-                query = query.in('fase_id', wonPhaseIdsRef.current);
-            } else if (statusFilter === 'lost' && lostPhaseIdsRef.current.length > 0) {
-                query = query.in('fase_id', lostPhaseIdsRef.current);
-            } else if (statusFilter === 'open' && closedPhaseIdsRef.current.length > 0) {
-                // Exclude all known closed phases
-                query = query.not('fase_id', 'in', `(${closedPhaseIdsRef.current.join(',')})`);
-                // Also exclude explicit closed states (11: Cerrado Ganado, 14: Cerrado Perdido, 2: Ganada, 3: Perdida, 4: Cancelada)
-                query = query.not('estado_id', 'in', '(2,3,4,11,14)');
+            // Status Filter (won/lost/open) - combine phase names with legacy estado_id values.
+            // Keep NULL estado_id as open; Postgres NOT IN would otherwise drop those rows.
+            if (statusFilter === 'won') {
+                const phaseCondition = wonPhaseIdsRef.current.length > 0
+                    ? `fase_id.in.(${wonPhaseIdsRef.current.join(',')})`
+                    : null;
+                const conditions = [phaseCondition, 'estado_id.in.(2,11)'].filter(Boolean);
+                query = query.or(conditions.join(','));
+            } else if (statusFilter === 'lost') {
+                const phaseCondition = lostPhaseIdsRef.current.length > 0
+                    ? `fase_id.in.(${lostPhaseIdsRef.current.join(',')})`
+                    : null;
+                const conditions = [phaseCondition, 'estado_id.in.(3,4,14)'].filter(Boolean);
+                query = query.or(conditions.join(','));
+            } else if (statusFilter === 'open') {
+                if (closedPhaseIdsRef.current.length > 0) {
+                    query = query.not('fase_id', 'in', `(${closedPhaseIdsRef.current.join(',')})`);
+                }
+                query = query.or('estado_id.is.null,estado_id.not.in.(2,3,4,11,14)');
             }
 
             if (accountIdFilter) {
@@ -387,9 +433,11 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
 
             if (accountOwnerId) {
                 query = query.eq('owner_user_id', accountOwnerId);
-            } else {
+            } else if (userFilter !== 'unrestricted') {
                 if (userFilter === 'mine') {
-                    query = query.or(`owner_user_id.eq.${currentUserId},and(owner_user_id.is.null,created_by.eq.${currentUserId})`);
+                    const ids = [currentUserId, ...(user?.coordinadores || [])].filter(Boolean);
+                    const idsString = ids.join(',');
+                    query = query.or(`owner_user_id.in.(${idsString}),and(owner_user_id.is.null,created_by.in.(${idsString}))`);
                 } else if (userFilter === 'collab') {
                     // Filter by matching in CRM_Oportunidades_Colaboradores
                     // We use inner join to filter results
@@ -412,13 +460,34 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                         colaboradores:CRM_Oportunidades_Colaboradores!inner(usuario_id)
                     `);
                     query = query.eq('colaboradores.usuario_id', currentUserId);
+                } else if (userFilter === 'all') {
+                    if (userRole !== 'ADMIN') {
+                        const ids = [currentUserId, ...(user?.coordinadores || [])].filter(Boolean);
+                        const idsString = ids.join(',');
+                        const { data: collabRows } = await supabase
+                            .from('CRM_Oportunidades_Colaboradores')
+                            .select('oportunidad_id')
+                            .eq('usuario_id', currentUserId);
+                        const collabOppIds = Array.from(new Set((collabRows || []).map(row => row.oportunidad_id).filter(Boolean)));
+                        const ownershipConditions = [
+                            `owner_user_id.in.(${idsString})`,
+                            `and(owner_user_id.is.null,created_by.in.(${idsString}))`
+                        ];
+                        if (collabOppIds.length > 0) {
+                            ownershipConditions.push(`id.in.(${collabOppIds.join(',')})`);
+                        }
+                        query = query.or(ownershipConditions.join(','));
+                    }
                 } else if (userFilter === 'team') {
                     if (userRole === 'COORDINADOR') {
                         const ids = [currentUserId, ...subordinateIds].filter(Boolean);
                         query = query.in('owner_user_id', ids);
                     } else if (userRole !== 'ADMIN') {
-                        query = query.eq('owner_user_id', currentUserId);
+                        const ids = [currentUserId, ...(user?.coordinadores || [])].filter(Boolean);
+                        query = query.in('owner_user_id', ids);
                     }
+                } else if (userFilter === 'web') {
+                    query = query.or('url_origen.not.is.null,origen_oportunidad.ilike.%web%,origen_oportunidad.ilike.%pagina%');
                 }
             }
 

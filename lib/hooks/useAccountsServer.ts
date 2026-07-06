@@ -60,6 +60,9 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
     const [sortField, setSortField] = useState<string>('updated_at');
     const [sortAsc, setSortAsc] = useState<boolean>(false);
 
+    // Web Filter
+    const [webFilter, setWebFilter] = useState<boolean>(false);
+
     // User Context
     const { user, role: userRole, isVendedor } = useCurrentUser();
     const currentUserId = user?.id;
@@ -96,17 +99,28 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                 const allOpps = await db.opportunities.toArray();
 
                 // Role filtering
+                const localCollabs = await db.opportunityCollaborators
+                    .where('usuario_id')
+                    .equals(currentUserId || '')
+                    .toArray();
+                
+                const collabOppIds = localCollabs.filter(c => !c.is_deleted).map(c => c.oportunidad_id);
+                const collabOpps = await db.opportunities.where('id').anyOf(collabOppIds).toArray();
+                const collabAccIds = collabOpps.filter(o => !o.is_deleted).map(o => o.account_id);
+
                 if (isVendedor && currentUserId) {
                     localAccounts = localAccounts.filter((a: any) => 
                         a.owner_user_id === currentUserId || 
-                        (!a.owner_user_id && a.created_by === currentUserId)
+                        (!a.owner_user_id && a.created_by === currentUserId) ||
+                        collabAccIds.includes(a.id)
                     );
                 } else if (userRole === 'COORDINADOR' && currentUserId) {
                     localAccounts = localAccounts.filter((a: any) => 
                         a.owner_user_id === currentUserId || 
                         (!a.owner_user_id && a.created_by === currentUserId) ||
                         (a.owner_user_id && subordinateIds.includes(a.owner_user_id)) ||
-                        (!a.owner_user_id && a.created_by && subordinateIds.includes(a.created_by))
+                        (!a.owner_user_id && a.created_by && subordinateIds.includes(a.created_by)) ||
+                        collabAccIds.includes(a.id)
                     );
                 }
 
@@ -215,13 +229,54 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                 .select('*', { count: 'exact' })
                 .eq('is_deleted', false);
 
+            if (webFilter) {
+                // Fetch account_ids from opportunities that came from web
+                const { data: webOpps } = await supabase
+                    .from('CRM_Oportunidades')
+                    .select('account_id')
+                    .or('url_origen.not.is.null,origen_oportunidad.ilike.%web%,origen_oportunidad.ilike.%pagina%')
+                    .eq('is_deleted', false);
+                
+                const webAccountIds = [...new Set(webOpps?.map(o => o.account_id).filter(Boolean))];
+                if (webAccountIds.length > 0) {
+                    query = query.in('id', webAccountIds);
+                } else {
+                    query = query.eq('id', '00000000-0000-0000-0000-000000000000'); // Force empty
+                }
+            }
+
             // Role filtering
-            if (isVendedor && currentUserId) {
-                query = query.or(`owner_user_id.eq.${currentUserId},and(owner_user_id.is.null,created_by.eq.${currentUserId})`);
-            } else if (userRole === 'COORDINADOR' && currentUserId) {
-                const ids = [currentUserId, ...subordinateIds].filter(Boolean);
-                const idsString = ids.join(',');
-                query = query.or(`owner_user_id.in.(${idsString}),and(owner_user_id.is.null,created_by.in.(${idsString}))`);
+            if ((isVendedor || userRole === 'COORDINADOR') && currentUserId) {
+                // Fetch accounts where user is collaborator
+                const { data: collabData } = await supabase
+                    .from('CRM_Oportunidades_Colaboradores')
+                    .select('CRM_Oportunidades!inner(account_id)')
+                    .eq('usuario_id', currentUserId)
+                    .eq('is_deleted', false);
+                
+                const collabAccountIds = collabData
+                    ?.map(c => (c as any).CRM_Oportunidades?.account_id)
+                    .filter(Boolean) || [];
+
+                if (isVendedor) {
+                    const ids = [currentUserId, ...(user?.coordinadores || [])].filter(Boolean);
+                    const idsString = ids.join(',');
+                    let orFilter = `owner_user_id.in.(${idsString}),and(owner_user_id.is.null,created_by.in.(${idsString}))`;
+                    if (collabAccountIds.length > 0) {
+                        const uniqueIds = [...new Set(collabAccountIds)];
+                        orFilter += `,id.in.(${uniqueIds.join(',')})`;
+                    }
+                    query = query.or(orFilter);
+                } else if (userRole === 'COORDINADOR') {
+                    const ids = [currentUserId, ...subordinateIds].filter(Boolean);
+                    const idsString = ids.join(',');
+                    let orFilter = `owner_user_id.in.(${idsString}),and(owner_user_id.is.null,created_by.in.(${idsString}))`;
+                    if (collabAccountIds.length > 0) {
+                        const uniqueIds = [...new Set(collabAccountIds)];
+                        orFilter += `,id.in.(${uniqueIds.join(',')})`;
+                    }
+                    query = query.or(orFilter);
+                }
             }
 
             if (searchTerm) {
@@ -331,7 +386,7 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
             setLoading(false);
             useSyncStore.getState().setIsLoadingData(false);
         }
-    }, [currentUserId, pageSize, searchTerm, assignedUserId, isVendedor, userRole, subordinateIds, channelFilter, subclassificationFilter, nivelPremiumFilter, startDate, endDate, sortField, sortAsc]);
+    }, [currentUserId, pageSize, searchTerm, assignedUserId, isVendedor, userRole, subordinateIds, channelFilter, subclassificationFilter, nivelPremiumFilter, startDate, endDate, sortField, sortAsc, webFilter]);
 
     // Initial Fetch & Filter Fetch
     useEffect(() => {
@@ -380,6 +435,8 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
         setEndDate,
         setSortField,
         setSortAsc,
+        setWebFilter,
+        webFilter,
         sortField,
         sortAsc,
         refresh: () => fetchAccounts(false)

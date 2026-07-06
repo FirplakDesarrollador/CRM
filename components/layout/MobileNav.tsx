@@ -16,7 +16,8 @@ import {
     DollarSign,
     BarChart3,
     FileSpreadsheet,
-    UserCircle
+    UserCircle,
+    Store
 } from "lucide-react";
 
 const MOBILE_NAV = [
@@ -28,6 +29,7 @@ const MOBILE_NAV = [
     { label: "Pedidos", href: "/pedidos", icon: Truck },
     { label: "Comisiones", href: "/comisiones", icon: DollarSign },
     { label: "Indicadores", href: "/indicadores", icon: BarChart3 },
+    { label: "Tiendas", href: "/tiendas", icon: Store },
     { label: "Informes", href: "/informes", icon: FileSpreadsheet, requiredRole: "ADMIN" },
     { label: "Usuarios", href: "/usuarios", icon: UserCircle },
     { label: "Configuración", href: "/configuracion", icon: Settings },

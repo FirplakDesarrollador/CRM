@@ -185,7 +185,7 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
                 const maxDiscount = pricing ? pricing.discount_pct : 0;
 
                 const discount = 0; // Default to 0 manual discount
-                const finalPrice = unitPrice * (1 - discount / 100);
+                const finalPrice = parseFloat((unitPrice * (1 - discount / 100)).toFixed(10));
 
                 return {
                     id: uuidv4(),
@@ -196,7 +196,7 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
                     discount_pct: discount,
                     max_discount_pct: maxDiscount,
                     final_unit_price: finalPrice,
-                    subtotal: item.cantidad * finalPrice,
+                    subtotal: parseFloat((item.cantidad * finalPrice).toFixed(10)),
                     descripcion_linea: item.nombre
                 };
             }));
@@ -207,6 +207,8 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
                 await syncEngine.queueMutation('CRM_CotizacionItems', qi.id, qiData, { isSnapshot: true });
             }
         }
+
+        return id;
     };
 
     const generateMockData = async () => {
@@ -653,7 +655,7 @@ export function useQuoteItems(quoteId?: string) {
         } catch (e) { console.error("Pricing calc error", e); }
 
         const discount = 0;
-        const finalPrice = unitPrice * (1 - discount / 100);
+        const finalPrice = parseFloat((unitPrice * (1 - discount / 100)).toFixed(10));
 
         const newItem: LocalQuoteItem = {
             ...item,
@@ -663,7 +665,7 @@ export function useQuoteItems(quoteId?: string) {
             discount_pct: discount,
             max_discount_pct: maxDiscount,
             final_unit_price: finalPrice,
-            subtotal: item.cantidad * finalPrice
+            subtotal: parseFloat((item.cantidad * finalPrice).toFixed(10))
         };
         await db.quoteItems.add(newItem);
         const { subtotal, ...itemData } = newItem;
@@ -691,11 +693,8 @@ export function useQuoteItems(quoteId?: string) {
 
         const updated = { ...current, ...updates };
 
-        // If quantity changed, re-calculate pricing? 
-        // Plan says: "no recalcular automáticamente líneas existentes si luego cambian descuentos/listas"
-        // But usually if I change QTY, volume discount SHOULD update.
-        // Let's implement Recalc on Quantity change for best UX
-        if (updates.cantidad !== undefined && updates.cantidad !== current.cantidad) {
+        // If quantity changed, re-calculate pricing ONLY for linked products
+        if (updates.cantidad !== undefined && updates.cantidad !== current.cantidad && current.producto_id) {
             let pricing = null;
             try {
                 const parentQuote = await db.quotes.get(current.cotizacion_id);
@@ -731,8 +730,9 @@ export function useQuoteItems(quoteId?: string) {
         const currentDiscount = updated.discount_pct !== undefined ? updated.discount_pct : (current.discount_pct || 0);
 
         // ALWAYS recalculate final unit price to ensure consistency
-        updated.final_unit_price = currentPrice * (1 - currentDiscount / 100);
-        updated.subtotal = updated.cantidad * updated.final_unit_price;
+        // Use toFixed(10) to eliminate IEEE 754 floating point noise (e.g., 7589.400000000001)
+        updated.final_unit_price = parseFloat((currentPrice * (1 - currentDiscount / 100)).toFixed(10));
+        updated.subtotal = parseFloat((updated.cantidad * updated.final_unit_price).toFixed(10));
 
         await db.quoteItems.update(itemId, updated);
         const { subtotal, ...updateData } = updated;

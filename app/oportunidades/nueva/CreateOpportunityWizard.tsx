@@ -8,6 +8,7 @@ import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronRight, Check } from "lucide-react";
+import { cn } from "@/components/ui/utils";
 import { AccountForm } from "@/components/cuentas/AccountForm";
 import { useProductSearch, PriceListProduct } from "@/lib/hooks/useProducts";
 import { Trash2, PlusCircle, Search, Loader2 } from "lucide-react";
@@ -35,8 +36,10 @@ const schema = z.object({
     origen_oportunidad: z.string().optional().nullable(),
     url_origen: z.string().optional().nullable(),
     fuente_conversion: z.string().optional().nullable(),
+    categoria_oportunidad: z.string().optional().nullable(),
     probability: z.coerce.number().min(0).max(100).default(0).optional().nullable(),
     comentarios: z.string().optional().nullable(),
+    direccion_entrega: z.string().optional().nullable(),
     items: z.array(z.object({
         product_id: z.string(),
         cantidad: z.number().min(1),
@@ -58,6 +61,7 @@ export default function CreateOpportunityWizard() {
     const [showAccountModal, setShowAccountModal] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
     const [accountSearchTerm, setAccountSearchTerm] = useState("");
+    const [isSubmitting, setIsSubmitting] = useState(false);
     const [showAccountDropdown, setShowAccountDropdown] = useState(false);
     const [selectedAccount, setSelectedAccount] = useState<any>(null);
     const [segments, setSegments] = useState<any[]>([]);
@@ -178,6 +182,7 @@ export default function CreateOpportunityWizard() {
             fuente_conversion: '',
             probability: 0,
             comentarios: '',
+            direccion_entrega: '',
             items: [],
             owner_user_id: ''
         },
@@ -252,6 +257,9 @@ export default function CreateOpportunityWizard() {
                 if (acc.ciudad_id) {
                     setValue("ciudad_id", Number(acc.ciudad_id));
                 }
+                if (acc.direccion) {
+                    setValue("direccion_entrega", acc.direccion);
+                }
                 setStep(1); // Advance to "Datos del Negocio"
             }
         };
@@ -303,6 +311,9 @@ export default function CreateOpportunityWizard() {
         }
         if (acc.ciudad_id) {
             setValue("ciudad_id", Number(acc.ciudad_id));
+        }
+        if (acc.direccion) {
+            setValue("direccion_entrega", acc.direccion);
         }
     };
 
@@ -425,6 +436,7 @@ export default function CreateOpportunityWizard() {
     }, [items, setValue]);
 
     const onSubmit = async (data: any) => {
+        setIsSubmitting(true);
         try {
             // Defensive conversion for numeric IDs
             const sanitizedData = {
@@ -448,6 +460,7 @@ export default function CreateOpportunityWizard() {
             router.push("/oportunidades");
         } catch (err) {
             console.error(err);
+            setIsSubmitting(false);
         }
     };
 
@@ -698,6 +711,18 @@ export default function CreateOpportunityWizard() {
                             </div>
                         </div>
 
+                        <div>
+                            <label className="text-sm font-medium">Dirección de entrega</label>
+                            <input 
+                                {...register("direccion_entrega")} 
+                                className="w-full p-2 border rounded-lg" 
+                                placeholder="Ej. Calle 10 # 20 - 30, Bodega 4" 
+                            />
+                            <p className="text-[10px] text-slate-500 italic mt-0.5">
+                                Este dato es obligatorio para el despacho de pedidos.
+                            </p>
+                        </div>
+
                         <div className="grid grid-cols-2 gap-4">
                             <div>
                                 <label className="text-sm font-medium">Valor Estimado</label>
@@ -721,7 +746,7 @@ export default function CreateOpportunityWizard() {
                         </div>
 
                         {/* Fifth Row - Orígenes */}
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4 border-t border-slate-100">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 pt-4 border-t border-slate-100">
                             <div className="space-y-2">
                                 <label htmlFor="origen_oportunidad" className="text-sm font-medium">Origen de la Oportunidad</label>
                                 <input
@@ -753,6 +778,17 @@ export default function CreateOpportunityWizard() {
                                     className="w-full p-2 border rounded-lg hover:border-blue-300 focus:border-blue-500 transition-colors"
                                 />
                                 {errors.fuente_conversion && <p className="text-sm text-red-500 mt-1">{errors.fuente_conversion.message as string}</p>}
+                            </div>
+
+                            <div className="space-y-2">
+                                <label htmlFor="categoria_oportunidad" className="text-sm font-medium">Categoría de Interés</label>
+                                <input
+                                    id="categoria_oportunidad"
+                                    placeholder="Ej: Cocinas, Baños..."
+                                    {...register("categoria_oportunidad")}
+                                    className="w-full p-2 border rounded-lg hover:border-blue-300 focus:border-blue-500 transition-colors"
+                                />
+                                {errors.categoria_oportunidad && <p className="text-sm text-red-500 mt-1">{errors.categoria_oportunidad.message as string}</p>}
                             </div>
                         </div>
                     </div>
@@ -907,9 +943,17 @@ export default function CreateOpportunityWizard() {
                     ) : (
                         <button
                             type="submit"
-                            className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg text-sm font-medium flex items-center gap-2 shadow-lg shadow-green-200"
+                            disabled={isSubmitting}
+                            className={cn(
+                                "bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-2 shadow-lg shadow-green-200 transition-all",
+                                isSubmitting && "bg-slate-400 opacity-70 cursor-not-allowed"
+                            )}
                         >
-                            Crear Oportunidad <Check className="w-4 h-4" />
+                            {isSubmitting ? (
+                                <><Loader2 className="w-4 h-4 animate-spin" /> Procesando...</>
+                            ) : (
+                                <>{'Crear Oportunidad'} <Check className="w-4 h-4" /></>
+                            )}
                         </button>
                     )}
                 </div>

@@ -23,7 +23,7 @@ export default function AccountOpportunitiesTab({ accountId }: { accountId: stri
 
     useEffect(() => {
         setAccountIdFilter(accountId);
-        setUserFilter('all'); // Asegurar que vemos todas las oportunidades de la cuenta, no solo las propias
+        setUserFilter('unrestricted'); // Asegurar que vemos todas las oportunidades de la cuenta, sin restricciones de usuario
     }, [accountId, setAccountIdFilter, setUserFilter]);
 
     useEffect(() => {

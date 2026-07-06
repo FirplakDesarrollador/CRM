@@ -1,10 +1,9 @@
 "use client"; 
 
 
-import { useLiveQuery } from "dexie-react-hooks";
-import { db, LocalContact } from "@/lib/db";
+import { db } from "@/lib/db";
 import { useSearchParams, useRouter } from "next/navigation";
-import { useState, useMemo, useEffect, Suspense, useCallback } from "react";
+import { useState, useMemo, useEffect, Suspense } from "react";
 import { ContactForm } from "@/components/contactos/ContactForm";
 import Link from "next/link";
 import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
@@ -12,7 +11,11 @@ import { Edit2, Trash2, Phone, Mail, User, Building, Search, Plus, CloudUpload, 
 import { useContacts } from "@/lib/hooks/useContacts";
 import { useContactsServer } from "@/lib/hooks/useContactsServer";
 import { useAccounts } from "@/lib/hooks/useAccounts";
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { supabase } from "@/lib/supabase";
+import dynamic from 'next/dynamic';
+
+const HotTable = dynamic(() => import('@/components/HotTableWrapper'), { ssr: false });
 
 function ContactsContent() {
     const searchParams = useSearchParams();
@@ -24,8 +27,9 @@ function ContactsContent() {
         loadMore,
         setSearchTerm,
         refresh
-    } = useContactsServer({ pageSize: 12 });
+    } = useContactsServer({ pageSize: 50 });
 
+    const { isAdmin } = useCurrentUser();
     const { accounts } = useAccounts();
     const { deleteContact } = useContacts();
 
@@ -302,56 +306,97 @@ function ContactsContent() {
         );
     }
 
+    // Preparar datos para Handsontable
+    const hotData = contacts.map(contact => {
+        const accountName = contact.account_name || accountMap.get(contact.account_id) || "-";
+        return {
+            id: contact.id,
+            nombre: contact.nombre,
+            cargo: contact.cargo || "Sin cargo registrado",
+            principal: contact.es_principal ? "Principal" : "-",
+            cuenta: accountName,
+            email: contact.email || "-",
+            telefono: contact.telefono || "-",
+            _original: contact
+        };
+    });
+
+    const hotColumns = [
+        { data: 'nombre', title: 'Contacto', type: 'text', readOnly: true },
+        { data: 'cargo', title: 'Cargo', type: 'text', readOnly: true },
+        { data: 'principal', title: 'Principal', type: 'text', readOnly: true },
+        { data: 'cuenta', title: 'Cuenta', type: 'text', readOnly: true },
+        { data: 'email', title: 'Email', type: 'text', readOnly: true },
+        { data: 'telefono', title: 'Teléfono', type: 'text', readOnly: true }
+    ];
+
+    if (isAdmin) {
+        hotColumns.unshift({
+            data: 'acciones',
+            title: 'Acciones',
+            renderer: function (instance: any, td: HTMLTableCellElement, row: number, col: number, prop: string, value: any, cellProperties: any) {
+                td.innerHTML = `
+                    <div style="text-align: center; white-space: nowrap;">
+                        <button class="edit-action-btn" title="Editar" style="cursor:pointer; color:#2563eb; background:none; border:none; padding:0 4px; margin:0; display:inline-block; vertical-align:middle;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>
+                        </button>
+                        <button class="delete-action-btn" title="Eliminar" style="cursor:pointer; color:#dc2626; background:none; border:none; padding:0 4px; margin:0; display:inline-block; vertical-align:middle;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+                        </button>
+                    </div>
+                `;
+                td.className = "htCenter htMiddle";
+                return td;
+            },
+            readOnly: true,
+            width: 80
+        } as any);
+    }
+
     // --- VIEW: Global List ---
     return (
-        <div data-testid="contacts-page" className="p-6 max-w-7xl mx-auto space-y-8">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-                <div className="flex items-center gap-4">
-                    <div className="bg-[#254153] p-3 rounded-2xl text-white shadow-lg shadow-[#254153]/20">
-                        <User size={32} />
+        <div data-testid="contacts-page" className="p-6 max-w-7xl mx-auto space-y-5">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div className="flex items-center gap-3">
+                    <div className="bg-[#254153] p-2.5 rounded-xl text-white shadow-md shadow-[#254153]/15">
+                        <User size={26} />
                     </div>
                     <div>
-                        <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">
+                        <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
                             Contactos
                         </h1>
-                        <p className="text-slate-500 font-medium">Gestiona tu red de contactos y clientes</p>
+                        <p className="text-sm text-slate-500 font-medium">
+                            {loading ? "Cargando contactos..." : `${contacts.length} contactos en tu red`}
+                        </p>
                     </div>
                 </div>
                 <button
                     data-testid="contacts-create-button"
                     onClick={() => setIsCreating(true)}
-                    className="w-full md:w-auto px-6 py-3 bg-[#254153] text-white rounded-xl hover:bg-[#1a2f3d] flex items-center justify-center gap-2 shadow-xl shadow-[#254153]/10 transition-all hover:scale-[1.02] active:scale-[0.98] font-bold"
+                    className="w-full md:w-auto px-4 py-2.5 bg-[#254153] text-white rounded-lg hover:bg-[#1a2f3d] flex items-center justify-center gap-2 shadow-sm transition-all font-bold"
                 >
-                    <Plus size={20} />
+                    <Plus size={18} />
                     Nuevo Contacto
                 </button>
             </div>
 
-            {/* Total Count */}
-            {!loading && contacts && contacts.length > 0 && (
-                <p className="text-sm text-slate-500 font-medium">
-                    Mostrando {contacts.length} contactos
-                </p>
-            )}
-
-            {/* Search Bar */}
-            <div className="relative group">
-                <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400 group-focus-within:text-[#254153] transition-colors" size={20} />
+            <div className="relative group rounded-xl border border-slate-200 bg-white shadow-sm">
+                <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400 group-focus-within:text-[#254153] transition-colors" size={18} />
                 <input
                     type="text"
                     data-testid="contacts-search"
                     placeholder="Buscar por nombre, cuenta o email..."
                     value={inputValue}
                     onChange={(e) => setInputValue(e.target.value)}
-                    className="w-full pl-12 pr-4 py-4 border border-slate-200 rounded-2xl shadow-sm focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] bg-white transition-all outline-none text-slate-700 font-medium placeholder:text-slate-400"
+                    className="w-full pl-11 pr-4 py-3 rounded-xl bg-transparent transition-all outline-none text-slate-700 font-medium placeholder:text-slate-400 focus:ring-2 focus:ring-[#254153]/10"
                 />
             </div>
 
             {/* List */}
             {(loading && contacts.length === 0) ? (
-                <div data-testid="contacts-loading" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div data-testid="contacts-loading" className="space-y-2">
                     {[1, 2, 3, 4, 5, 6].map((i) => (
-                        <div key={i} className="h-48 bg-slate-100 rounded-2xl animate-pulse border border-slate-200" />
+                        <div key={i} className="h-20 bg-slate-100 rounded-xl animate-pulse border border-slate-200" />
                     ))}
                 </div>
             ) : (!contacts || contacts.length === 0) ? (
@@ -366,99 +411,44 @@ function ContactsContent() {
                 </div>
             ) : (
                 <>
-                    <div data-testid="contacts-list" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        {contacts.map(contact => {
-                            const accountName = contact.account_name || accountMap.get(contact.account_id);
-                            return (
-                                <div 
-                                    key={contact.id} 
-                                    data-testid={`contacts-row-${contact.id}`} 
-                                    onClick={() => handleEdit(contact)}
-                                    className="group bg-white border border-slate-200 rounded-2xl p-5 shadow-sm hover:shadow-xl hover:shadow-slate-200/50 transition-all duration-300 relative flex flex-col h-full cursor-pointer"
-                                >
-                                    {/* Actions Overlay */}
-                                    <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10">
-                                        <button
-                                            data-testid={`contacts-edit-${contact.id}`}
-                                            onClick={(e) => { e.stopPropagation(); handleEdit(contact); }}
-                                            className="p-2 text-blue-600 bg-blue-50 hover:bg-blue-600 hover:text-white rounded-xl transition-all shadow-sm"
-                                            title="Editar"
-                                        >
-                                            <Edit2 size={16} />
-                                        </button>
-                                        <button
-                                            data-testid={`contacts-delete-${contact.id}`}
-                                            onClick={(e) => { e.stopPropagation(); setContactToDelete(contact); }}
-                                            className="p-2 text-red-600 bg-red-50 hover:bg-red-600 hover:text-white rounded-xl transition-all shadow-sm"
-                                            title="Eliminar"
-                                        >
-                                            <Trash2 size={16} />
-                                        </button>
-                                    </div>
-
-                                    <div className="flex flex-col gap-4 flex-1">
-                                        {/* Account Link */}
-                                        <Link
-                                            href={`/cuentas?id=${contact.account_id}`}
-                                            onClick={(e) => e.stopPropagation()}
-                                            className="flex items-center gap-1.5 text-sm text-blue-600 bg-blue-50 px-2.5 py-1.5 rounded-xl w-fit hover:bg-blue-100 transition-all cursor-pointer group/acc border border-blue-100 shadow-sm"
-                                        >
-                                            <Building size={14} className="group-hover/acc:scale-110 transition-transform" />
-                                            <span className="font-bold truncate max-w-[200px]">{accountName || 'Cuenta Desconocida'}</span>
-                                        </Link>
-
-                                        <div className="space-y-1 pr-16 relative">
-                                            <div className="flex items-center gap-2 flex-wrap">
-                                                <span className="font-extrabold text-xl text-slate-900 leading-tight">
-                                                    {contact.nombre}
-                                                </span>
-                                                {contact.es_principal && (
-                                                    <span className="bg-emerald-50 text-emerald-700 text-[10px] px-2.5 py-1 rounded-full font-black uppercase tracking-wider border border-emerald-100">
-                                                        Principal
-                                                    </span>
-                                                )}
-                                                {contact._hasPendingSync && (
-                                                    <div className="absolute -top-1 -right-1 bg-amber-100 text-amber-600 rounded-full p-0.5 animate-pulse" title="Sincronizando cambios...">
-                                                        <CloudUpload className="w-3 h-3" />
-                                                    </div>
-                                                )}
-                                            </div>
-                                            <div className="flex items-center gap-1.5 text-slate-500 font-bold text-xs uppercase tracking-tight">
-                                                <span className="truncate">{contact.cargo || "Sin cargo registrado"}</span>
-                                            </div>
-                                        </div>
-
-                                        {/* Contact Details */}
-                                        <div className="space-y-3 mt-auto pt-4 border-t border-slate-50">
-                                            {contact.email && (
-                                                <a
-                                                    href={`mailto:${contact.email}`}
-                                                    onClick={(e) => e.stopPropagation()}
-                                                    className="flex items-center gap-3 text-slate-600 hover:text-[#254153] transition-colors group/link"
-                                                >
-                                                    <div className="bg-slate-100 p-2 rounded-lg group-hover/link:bg-blue-50 transition-colors">
-                                                        <Mail size={14} className="text-slate-400 group-hover/link:text-blue-500" />
-                                                    </div>
-                                                    <span className="text-sm font-medium truncate">{contact.email}</span>
-                                                </a>
-                                            )}
-                                            {contact.telefono && (
-                                                <a
-                                                    href={`tel:${contact.telefono}`}
-                                                    onClick={(e) => e.stopPropagation()}
-                                                    className="flex items-center gap-3 text-slate-600 hover:text-[#254153] transition-colors group/link"
-                                                >
-                                                    <div className="bg-slate-100 p-2 rounded-lg group-hover/link:bg-emerald-50 transition-colors">
-                                                        <Phone size={14} className="text-slate-400 group-hover/link:text-emerald-500" />
-                                                    </div>
-                                                    <span className="text-sm font-medium">{contact.telefono}</span>
-                                                </a>
-                                            )}
-                                        </div>
-                                    </div>
-                                </div>
-                            );
-                        })}
+                    <div data-testid="contacts-list" className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                        <div className="w-full relative z-0" style={{ minHeight: '400px' }}>
+                            <HotTable
+                                data={hotData}
+                                columns={hotColumns}
+                                rowHeaders={true}
+                                colHeaders={true}
+                                filters={true}
+                                dropdownMenu={true}
+                                width="100%"
+                                height="calc(100vh - 280px)"
+                                autoColumnSize={false}
+                                autoRowSize={false}
+                                rowHeights={38}
+                                renderAllRows={false}
+                                licenseKey="non-commercial-and-evaluation"
+                                afterOnCellMouseDown={(event, coords, td) => {
+                                    if (coords.row >= 0) {
+                                        const contact = hotData[coords.row]._original;
+                                        const target = event.target as HTMLElement;
+                                        
+                                        if (target.closest('.delete-action-btn')) {
+                                            setContactToDelete(contact);
+                                            return;
+                                        }
+                                        
+                                        if (target.closest('.edit-action-btn')) {
+                                            handleEdit(contact);
+                                            return;
+                                        }
+                                        
+                                        handleEdit(contact);
+                                    }
+                                }}
+                                stretchH="all"
+                                className="text-sm font-sans"
+                            />
+                        </div>
                     </div>
 
                     {hasMore && (

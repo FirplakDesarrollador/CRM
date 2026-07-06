@@ -76,6 +76,8 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
             await syncEngine.queueMutation('CRM_Contactos', contactId, contactData, { isSnapshot: true });
             console.log('[useAccounts] Auto-created contact for PROPIO account:', contactId);
         }
+
+        return id;
     };
 
 
