@@ -41,7 +41,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
     // Filters
     const [searchTerm, setSearchTerm] = useState<string>("");
     const [userFilter, setUserFilter] = useState<'mine' | 'team' | 'collab' | 'all' | 'unrestricted' | 'web'>('all');
-    const [accountOwnerId, setAccountOwnerId] = useState<string | null>(null);
+    const [accountOwnerIds, setAccountOwnerIds] = useState<string[]>([]);
 
     // New Hierarchical Filters
     const [channelFilter, setChannelFilter] = useState<string | null>(null);
@@ -228,8 +228,8 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                     localOpps = localOpps.filter(o => o.fecha_cierre_estimada && new Date(o.fecha_cierre_estimada) <= end);
                 }
 
-                if (accountOwnerId) {
-                    localOpps = localOpps.filter(o => o.owner_user_id === accountOwnerId);
+                if (accountOwnerIds && accountOwnerIds.length > 0) {
+                    localOpps = localOpps.filter(o => o.owner_user_id && accountOwnerIds.includes(o.owner_user_id));
                 } else if (userFilter !== 'unrestricted') {
                     if (userFilter === 'mine') {
                         localOpps = localOpps.filter(o => 
@@ -431,8 +431,8 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                 query = query.lte('fecha_cierre_estimada', `${endClosingDate}T23:59:59`);
             }
 
-            if (accountOwnerId) {
-                query = query.eq('owner_user_id', accountOwnerId);
+            if (accountOwnerIds && accountOwnerIds.length > 0) {
+                query = query.in('owner_user_id', accountOwnerIds);
             } else if (userFilter !== 'unrestricted') {
                 if (userFilter === 'mine') {
                     const ids = [currentUserId, ...(user?.coordinadores || [])].filter(Boolean);
@@ -530,7 +530,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
             setLoading(false);
             useSyncStore.getState().setIsLoadingData(false);
         }
-    }, [currentUserId, subordinateIds, pageSize, userFilter, searchTerm, accountIdFilter, accountOwnerId, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, phasesReady, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc]);
+    }, [currentUserId, subordinateIds, pageSize, userFilter, searchTerm, accountIdFilter, accountOwnerIds, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, phasesReady, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc]);
 
     // Initial Fetch & Filter Fetch - no longer depends on phase IDs (read from refs)
     useEffect(() => {
@@ -574,7 +574,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
         loadMore,
         setSearchTerm,
         setUserFilter,
-        setAccountOwnerId,
+        setAccountOwnerIds,
 
         // New Filter Setters
         setChannelFilter,

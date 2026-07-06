@@ -4,7 +4,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { useRouter } from "next/navigation";
-import { Lock, Mail, Loader2, ShieldAlert, RefreshCw } from "lucide-react";
+import { Lock, Mail, Loader2, ShieldAlert, RefreshCw, Eye, EyeOff } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { recoverPasswordAction } from "./actions";
@@ -139,6 +139,7 @@ export default function LoginPage() {
     });
 
     const [rememberMe, setRememberMe] = useState(false);
+    const [showPassword, setShowPassword] = useState(false);
 
     // Load remembered credentials
     useEffect(() => {
@@ -487,27 +488,53 @@ export default function LoginPage() {
                                         <Lock className="absolute left-4 md:left-5 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 group-focus-within:text-[#254153] transition-colors" />
                                         <input
                                             {...register("password")}
-                                            type="password"
-                                            className="w-full pl-12 md:pl-14 pr-4 md:pr-5 py-3 md:py-4 border-2 border-slate-200 rounded-xl md:rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#254153]/20 focus:border-[#254153] transition-all text-slate-900 bg-white shadow-sm hover:border-slate-300 text-sm md:text-base"
+                                            type={showPassword ? "text" : "password"}
+                                            className="w-full pl-12 md:pl-14 pr-12 md:pr-14 py-3 md:py-4 border-2 border-slate-200 rounded-xl md:rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#254153]/20 focus:border-[#254153] transition-all text-slate-900 bg-white shadow-sm hover:border-slate-300 text-sm md:text-base"
                                             placeholder="••••••••"
                                         />
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowPassword(!showPassword)}
+                                            className="absolute right-4 md:right-5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-[#254153] focus:outline-none transition-colors"
+                                            title={showPassword ? "Ocultar contraseña" : "Mostrar contraseña"}
+                                        >
+                                            {showPassword ? (
+                                                <EyeOff className="h-5 w-5" />
+                                            ) : (
+                                                <Eye className="h-5 w-5" />
+                                            )}
+                                        </button>
                                     </div>
                                     {errors.password && (
                                         <p className="text-red-600 text-xs md:text-sm mt-2 font-medium">{errors.password.message}</p>
                                     )}
                                 </div>
 
-                                <div className="flex items-center space-x-2 pt-1">
-                                    <input
-                                        type="checkbox"
-                                        id="rememberMe"
-                                        checked={rememberMe}
-                                        onChange={(e) => setRememberMe(e.target.checked)}
-                                        className="w-4 h-4 rounded border-slate-300 text-[#254153] focus:ring-[#254153] cursor-pointer"
-                                    />
-                                    <label htmlFor="rememberMe" className="text-sm font-medium text-slate-600 cursor-pointer select-none">
-                                        Recordar mis credenciales
-                                    </label>
+                                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-1">
+                                    <div className="flex items-center space-x-2">
+                                        <input
+                                            type="checkbox"
+                                            id="rememberMe"
+                                            checked={rememberMe}
+                                            onChange={(e) => setRememberMe(e.target.checked)}
+                                            className="w-4 h-4 rounded border-slate-300 text-[#254153] focus:ring-[#254153] cursor-pointer"
+                                        />
+                                        <label htmlFor="rememberMe" className="text-sm font-medium text-slate-600 cursor-pointer select-none">
+                                            Recordar mis credenciales
+                                        </label>
+                                    </div>
+                                    <div className="flex items-center space-x-2">
+                                        <input
+                                            type="checkbox"
+                                            id="showPasswordCheckbox"
+                                            checked={showPassword}
+                                            onChange={(e) => setShowPassword(e.target.checked)}
+                                            className="w-4 h-4 rounded border-slate-300 text-[#254153] focus:ring-[#254153] cursor-pointer"
+                                        />
+                                        <label htmlFor="showPasswordCheckbox" className="text-sm font-medium text-slate-600 cursor-pointer select-none">
+                                            Mostrar contraseña
+                                        </label>
+                                    </div>
                                 </div>
 
                                 {/* ── CAPTCHA SECTION ── */}
