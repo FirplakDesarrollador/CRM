@@ -31,7 +31,7 @@ function OpportunitiesContent() {
         loadMore,
         setSearchTerm,
         setUserFilter,
-        setAccountOwnerId,
+        setAccountOwnerIds,
         refresh,
         setChannelFilter,
         setSubclassificationFilter,
@@ -57,14 +57,17 @@ function OpportunitiesContent() {
         }
         return "";
     });
-    const [selectedAccountOwnerId, setSelectedAccountOwnerId] = useState<string | null>(() => {
+    const [selectedAccountOwnerIds, setSelectedAccountOwnerIds] = useState<string[]>(() => {
         const fromUrl = searchParams.get('owner');
-        if (fromUrl) return fromUrl;
+        if (fromUrl) return fromUrl.split(',').filter(Boolean);
         if (typeof window !== 'undefined') {
             const saved = sessionStorage.getItem('crm_oportunidades_state');
-            if (saved) return new URLSearchParams(saved).get('owner') || null;
+            if (saved) {
+                const ownerParam = new URLSearchParams(saved).get('owner');
+                return ownerParam ? ownerParam.split(',').filter(Boolean) : [];
+            }
         }
-        return null;
+        return [];
     });
 
     const handleSort = (field: string) => {
@@ -189,7 +192,7 @@ function OpportunitiesContent() {
 
         // Apply tab, search, owner and restored hierarchical filters to hook
         if (initialSearch) setSearchTerm(initialSearch);
-        if (initialOwner) setAccountOwnerId(initialOwner);
+        if (initialOwner) setAccountOwnerIds(initialOwner.split(',').filter(Boolean));
         if (initialChannel) setChannelFilter(initialChannel);
         if (initialSubclass) setSubclassificationFilter(Number(initialSubclass));
         if (initialSegment) setSegmentFilter(Number(initialSegment));
@@ -242,7 +245,7 @@ function OpportunitiesContent() {
         if (tab && tab !== 'all') params.set('tab', tab);
         else params.delete('tab');
         
-        if (selectedAccountOwnerId) params.set('owner', selectedAccountOwnerId);
+        if (selectedAccountOwnerIds.length > 0) params.set('owner', selectedAccountOwnerIds.join(','));
         else params.delete('owner');
 
         if (selectedChannel) params.set('channel', selectedChannel);
@@ -284,7 +287,7 @@ function OpportunitiesContent() {
         
         const query = queryString ? `?${queryString}` : window.location.pathname;
         router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
-    }, [tab, selectedAccountOwnerId, selectedChannel, selectedSubclass, selectedSegment, selectedPhase, statusFilter, startDate, endDate, startClosingDate, endClosingDate, searchParams, router]); // Notice inputValue is NOT in deps here to avoid URL churn during typing
+    }, [tab, selectedAccountOwnerIds, selectedChannel, selectedSubclass, selectedSegment, selectedPhase, statusFilter, startDate, endDate, startClosingDate, endClosingDate, searchParams, router]); // Notice inputValue is NOT in deps here to avoid URL churn during typing
 
 
     const handleFilterChange = useCallback(({ 
@@ -351,10 +354,10 @@ function OpportunitiesContent() {
         setUserFilter(newTab);
     }, [setUserFilter]);
 
-    const handleUserSelect = useCallback((userId: string | null) => {
-        setSelectedAccountOwnerId(userId);
-        setAccountOwnerId(userId);
-    }, [setAccountOwnerId]);
+    const handleUsersSelect = useCallback((userIds: string[]) => {
+        setSelectedAccountOwnerIds(userIds);
+        setAccountOwnerIds(userIds);
+    }, [setAccountOwnerIds]);
 
     const hotData = opportunities.map(opp => ({
         id: opp.id,
@@ -479,8 +482,9 @@ function OpportunitiesContent() {
                 <div className="flex gap-2 items-center w-full xl:w-auto">
                     <div className="hidden sm:block">
                         <UserPickerFilter
-                            selectedUserId={selectedAccountOwnerId}
-                            onUserSelect={handleUserSelect}
+                            multiple={true}
+                            selectedUserIds={selectedAccountOwnerIds}
+                            onUsersSelect={handleUsersSelect}
                         />
                     </div>
                     <div className="relative flex-1">
