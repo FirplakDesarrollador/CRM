@@ -100,7 +100,14 @@ function ContactsContent() {
         if (typeof window !== 'undefined' && searchParams.toString() === '') {
             const savedState = sessionStorage.getItem('crm_contactos_state');
             if (savedState) {
-                router.replace(`/contactos?${savedState}`, { scroll: false });
+                const savedParams = new URLSearchParams(savedState);
+                savedParams.delete('id'); // Nunca restaurar el ID (para no abrir el modal directamente sin querer al navegar)
+                const restoredState = savedParams.toString();
+                if (restoredState !== '') {
+                    router.replace(`/contactos?${restoredState}`, { scroll: false });
+                } else {
+                    sessionStorage.removeItem('crm_contactos_state');
+                }
             }
         }
     }, [searchParams, router]);
@@ -141,6 +148,14 @@ function ContactsContent() {
             else params.delete('search');
             
             const queryString = params.toString();
+            
+            // Evitar bucles infinitos
+            const paramsForCompare = new URLSearchParams(queryString);
+            paramsForCompare.sort();
+            const currentParamsForCompare = new URLSearchParams(searchParams.toString());
+            currentParamsForCompare.sort();
+            
+            if (paramsForCompare.toString() === currentParamsForCompare.toString()) return;
             
             // Save to sessionStorage for cross-module persistence
             if (queryString) {
