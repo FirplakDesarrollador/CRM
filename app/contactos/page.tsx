@@ -22,6 +22,7 @@ function ContactsContent() {
     const router = useRouter();
     const {
         data: contacts,
+        count,
         loading,
         hasMore,
         loadMore,
@@ -365,8 +366,8 @@ function ContactsContent() {
                         <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
                             Contactos
                         </h1>
-                        <p className="text-sm text-slate-500 font-medium">
-                            {loading ? "Cargando contactos..." : `${contacts.length} contactos en tu red`}
+                        <p className="text-sm text-slate-500 font-medium hidden sm:block">
+                            Directorio y gestión de contactos
                         </p>
                     </div>
                 </div>
@@ -393,6 +394,13 @@ function ContactsContent() {
             </div>
 
             {/* List */}
+            {(!loading || contacts.length > 0) && (
+                <div className="flex items-center justify-end mb-3 px-1 z-10">
+                    <span className="text-sm font-medium text-slate-500 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm flex items-center gap-2">
+                        Total de registros: <strong className="text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md">{count !== undefined && count !== null ? count : contacts.length}</strong>
+                    </span>
+                </div>
+            )}
             {(loading && contacts.length === 0) ? (
                 <div data-testid="contacts-loading" className="space-y-2">
                     {[1, 2, 3, 4, 5, 6].map((i) => (

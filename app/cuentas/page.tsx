@@ -274,11 +274,6 @@ function AccountsContent() {
                 <div className="flex items-center gap-3">
                     <h1 className="text-2xl font-bold text-slate-900">
                         Cuentas
-                        {count !== undefined && count !== null && !loading && (
-                            <span className="ml-2 text-sm font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full align-middle">
-                                {count}
-                            </span>
-                        )}
                     </h1>
                 </div>
 
@@ -383,6 +378,13 @@ function AccountsContent() {
                 </div>
             ) : (
                 <div data-testid="accounts-list" className="flex flex-col relative min-h-[450px] transition-all duration-300">
+                    {(!loading || accounts.length > 0) && (
+                        <div className="flex items-center justify-end mb-3 px-1 z-10">
+                            <span className="text-sm font-medium text-slate-500 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm flex items-center gap-2">
+                                Total de registros: <strong className="text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md">{count !== undefined && count !== null ? count : accounts.length}</strong>
+                            </span>
+                        </div>
+                    )}
                     {/* VISTA MÓVIL: Tarjetas */}
                     <div className="grid grid-cols-1 gap-3 md:hidden">
                         {accounts.map((acc) => (
