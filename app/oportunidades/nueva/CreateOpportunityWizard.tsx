@@ -412,7 +412,8 @@ export default function CreateOpportunityWizard() {
                 product_id: product.id,
                 nombre: product.descripcion,
                 cantidad: 1,
-                precio: price
+                precio: price,
+                descuento_porcentaje: 0
             }]);
         }
         setSearchTerm("");
@@ -423,15 +424,24 @@ export default function CreateOpportunityWizard() {
         setValue("items", items.map((i: any) => i.product_id === productId ? { ...i, cantidad: validQty } : i));
     };
 
+    const updateDiscount = (productId: string, discount: number) => {
+        const validDiscount = isNaN(discount) ? 0 : Math.max(0, Math.min(100, discount));
+        setValue("items", items.map((i: any) => i.product_id === productId ? { ...i, descuento_porcentaje: validDiscount } : i));
+    };
+
     const removeProduct = (productId: string) => {
         setValue("items", items.filter((i: any) => i.product_id !== productId));
     };
 
     // Calculate total from items
     useEffect(() => {
-        const total = (items || []).reduce((acc: number, curr: any) => 
-            acc + ((Number(curr.precio) || 0) * (Number(curr.cantidad) || 0)), 0
-        );
+        const total = (items || []).reduce((acc: number, curr: any) => {
+            const basePrice = Number(curr.precio) || 0;
+            const qty = Number(curr.cantidad) || 0;
+            const discountPercent = Number(curr.descuento_porcentaje) || 0;
+            const discountedPrice = basePrice * (1 - (discountPercent / 100));
+            return acc + (discountedPrice * qty);
+        }, 0);
         setValue("amount", total);
     }, [items, setValue]);
 
@@ -744,53 +754,6 @@ export default function CreateOpportunityWizard() {
                                 placeholder="Notas adicionales sobre esta oportunidad..."
                             />
                         </div>
-
-                        {/* Fifth Row - Orígenes */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 pt-4 border-t border-slate-100">
-                            <div className="space-y-2">
-                                <label htmlFor="origen_oportunidad" className="text-sm font-medium">Origen de la Oportunidad</label>
-                                <input
-                                    id="origen_oportunidad"
-                                    placeholder="Ej: Llamada, Evento..."
-                                    {...register("origen_oportunidad")}
-                                    className="w-full p-2 border rounded-lg hover:border-blue-300 focus:border-blue-500 transition-colors"
-                                />
-                                {errors.origen_oportunidad && <p className="text-sm text-red-500 mt-1">{errors.origen_oportunidad.message as string}</p>}
-                            </div>
-
-                            <div className="space-y-2">
-                                <label htmlFor="url_origen" className="text-sm font-medium">URL Origen</label>
-                                <input
-                                    id="url_origen"
-                                    placeholder="https://..."
-                                    {...register("url_origen")}
-                                    className="w-full p-2 border rounded-lg hover:border-blue-300 focus:border-blue-500 transition-colors"
-                                />
-                                {errors.url_origen && <p className="text-sm text-red-500 mt-1">{errors.url_origen.message as string}</p>}
-                            </div>
-
-                            <div className="space-y-2">
-                                <label htmlFor="fuente_conversion" className="text-sm font-medium">Fuente de Conversión</label>
-                                <input
-                                    id="fuente_conversion"
-                                    placeholder="Ej: Google Ads, Referido..."
-                                    {...register("fuente_conversion")}
-                                    className="w-full p-2 border rounded-lg hover:border-blue-300 focus:border-blue-500 transition-colors"
-                                />
-                                {errors.fuente_conversion && <p className="text-sm text-red-500 mt-1">{errors.fuente_conversion.message as string}</p>}
-                            </div>
-
-                            <div className="space-y-2">
-                                <label htmlFor="categoria_oportunidad" className="text-sm font-medium">Categoría de Interés</label>
-                                <input
-                                    id="categoria_oportunidad"
-                                    placeholder="Ej: Cocinas, Baños..."
-                                    {...register("categoria_oportunidad")}
-                                    className="w-full p-2 border rounded-lg hover:border-blue-300 focus:border-blue-500 transition-colors"
-                                />
-                                {errors.categoria_oportunidad && <p className="text-sm text-red-500 mt-1">{errors.categoria_oportunidad.message as string}</p>}
-                            </div>
-                        </div>
                     </div>
                 )}
 
@@ -872,20 +835,36 @@ export default function CreateOpportunityWizard() {
                                             <div className="font-medium text-sm text-slate-800">{item.nombre}</div>
                                             <div className="text-xs text-slate-500">{currencyId} {new Intl.NumberFormat().format(item.precio || 0)} c/u</div>
                                         </div>
-                                        <div className="flex items-center gap-2">
-                                            <input
-                                                type="number"
-                                                className="w-16 p-1 border rounded text-center text-sm"
-                                                value={isNaN(item.cantidad) ? "" : item.cantidad}
-                                                onChange={(e) => updateQuantity(item.product_id, parseInt(e.target.value))}
-                                            />
-                                            <button
-                                                type="button"
-                                                onClick={() => removeProduct(item.product_id)}
-                                                className="p-1 text-red-500 hover:bg-red-50 rounded"
-                                            >
-                                                <Trash2 className="w-4 h-4" />
-                                            </button>
+                                        <div className="flex items-center gap-2 mt-2 sm:mt-0">
+                                            <div className="flex flex-col items-center">
+                                                <span className="text-[10px] text-slate-500 uppercase font-semibold mb-1">Cant.</span>
+                                                <input
+                                                    type="number"
+                                                    className="w-16 p-1 border rounded text-center text-sm"
+                                                    value={isNaN(item.cantidad) ? "" : item.cantidad}
+                                                    onChange={(e) => updateQuantity(item.product_id, parseInt(e.target.value))}
+                                                />
+                                            </div>
+                                            <div className="flex flex-col items-center">
+                                                <span className="text-[10px] text-slate-500 uppercase font-semibold mb-1">Desc %</span>
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    max="100"
+                                                    className="w-16 p-1 border rounded text-center text-sm"
+                                                    value={isNaN(item.descuento_porcentaje) ? "" : item.descuento_porcentaje}
+                                                    onChange={(e) => updateDiscount(item.product_id, parseFloat(e.target.value))}
+                                                />
+                                            </div>
+                                            <div className="flex flex-col items-center justify-end h-full mt-4">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => removeProduct(item.product_id)}
+                                                    className="p-1.5 text-red-500 hover:bg-red-50 rounded"
+                                                >
+                                                    <Trash2 className="w-5 h-5" />
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                 ))

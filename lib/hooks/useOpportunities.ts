@@ -184,7 +184,7 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
                 const unitPrice = item.precio || (pricing ? pricing.base_price : 0);
                 const maxDiscount = pricing ? pricing.discount_pct : 0;
 
-                const discount = 0; // Default to 0 manual discount
+                const discount = Number(item.descuento_porcentaje) || 0;
                 const finalPrice = parseFloat((unitPrice * (1 - discount / 100)).toFixed(10));
 
                 return {
