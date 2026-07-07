@@ -129,7 +129,7 @@ function ActivitiesContent() {
         }
         return "";
     });
-    const [filterStatus, setFilterStatus] = useState<"all" | "completed" | "pending">(() => {
+    const [filterStatus, setFilterStatus] = useState<"all" | "completed" | "pending" | "overdue">(() => {
         const fromUrl = searchParams.get('status');
         if (fromUrl) return (fromUrl as any);
         if (typeof window !== 'undefined') {
@@ -350,6 +350,14 @@ function ActivitiesContent() {
             // 4. NEW: Estado
             if (filterStatus === "completed" && !act.is_completed) return false;
             if (filterStatus === "pending" && act.is_completed) return false;
+            if (filterStatus === "overdue") {
+                if (act.is_completed) return false;
+                const actDate = new Date(act.fecha_inicio);
+                actDate.setHours(0, 0, 0, 0);
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                if (actDate >= today) return false;
+            }
 
             // 7. NEW: Canal
             if (filterChannel) {
@@ -516,6 +524,15 @@ function ActivitiesContent() {
                                     )}
                                 >
                                     Pendientes
+                                </button>
+                                <button
+                                    onClick={() => setFilterStatus("overdue")}
+                                    className={cn(
+                                        "px-3 py-1.5 rounded-lg text-[10px] uppercase font-black transition-all",
+                                        filterStatus === "overdue" ? "bg-white text-red-600 shadow-sm" : "text-slate-400 hover:text-slate-600"
+                                    )}
+                                >
+                                    Vencidas
                                 </button>
                                 <button
                                     onClick={() => setFilterStatus("completed")}

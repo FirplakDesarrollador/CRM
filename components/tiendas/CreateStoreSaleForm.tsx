@@ -12,6 +12,7 @@ import { useProductSearch, PriceListProduct } from "@/lib/hooks/useProducts";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/db";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { useUsers } from "@/lib/hooks/useUsers";
 
 // Eschema de validación combinado
 const storeSaleSchema = z.object({
@@ -30,6 +31,8 @@ const storeSaleSchema = z.object({
     amount: z.coerce.number().min(0, "Debe ser mayor a 0"),
     comentarios: z.string().min(1, "Comentario requerido"),
     origen_oportunidad: z.enum(["visita", "wp"], { required_error: "Origen requerido" }),
+    categoria_oportunidad: z.string().optional(),
+    asesor_id: z.string().optional(),
     items: z.array(z.object({
         product_id: z.string(),
         cantidad: z.number().min(1),
@@ -47,17 +50,16 @@ const storeSaleSchema = z.object({
 
 type StoreSaleFormData = z.infer<typeof storeSaleSchema>;
 
-interface CreateStoreSaleModalProps {
-    isOpen: boolean;
-    onClose: () => void;
+interface CreateStoreSaleFormProps {
     onSuccess?: () => void;
 }
 
-export function CreateStoreSaleModal({ isOpen, onClose, onSuccess }: CreateStoreSaleModalProps) {
+export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
     const { createAccount } = useAccounts();
     const { createOpportunity } = useOpportunities();
     const { createActivity } = useActivities();
     const { user } = useCurrentUser();
+    const { users } = useUsers();
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
     
@@ -103,11 +105,10 @@ export function CreateStoreSaleModal({ isOpen, onClose, onSuccess }: CreateStore
         }
     });
 
-    // Cargar datos por defecto al abrir
+    // Cargar datos por defecto
     useEffect(() => {
-        if (isOpen) {
-            reset();
-            setValue("pais_id", "1");
+        reset();
+        setValue("pais_id", "1");
             setValue("origen_oportunidad", "visita");
             if (phasesList && phasesList.length > 0) {
                 setValue("fase_id", String(phasesList[0].id));
@@ -123,8 +124,7 @@ export function CreateStoreSaleModal({ isOpen, onClose, onSuccess }: CreateStore
 
             setValue("fecha_inicio", startISO);
             setValue("fecha_fin", endISO);
-        }
-    }, [isOpen, reset, setValue]);
+    }, [reset, setValue]);
 
     const items: any[] = watch("items") || [];
 
@@ -165,11 +165,20 @@ export function CreateStoreSaleModal({ isOpen, onClose, onSuccess }: CreateStore
         setValue("amount", total);
     }, [items, setValue]);
 
-    if (!isOpen) return null;
-
     const onSubmit = async (data: StoreSaleFormData) => {
         setIsSubmitting(true);
         try {
+            // VALIDACIÓN DE DUPLICADOS LOCALES
+            const duplicates = await db.accounts.filter(a => 
+                a.nit_base === data.nit_base || (!!a.telefono && a.telefono === data.telefono)
+            ).toArray();
+
+            if (duplicates.length > 0) {
+                alert("Ya existe un cliente con esta cédula/NIT o teléfono en la base de datos. Por favor, usa el flujo normal de Oportunidades para agregar ventas a clientes existentes.");
+                setIsSubmitting(false);
+                return;
+            }
+
             // 1. Crear Cuenta
             const accountData = {
                 nombre: data.nombre_cuenta,
@@ -192,48 +201,45 @@ export function CreateStoreSaleModal({ isOpen, onClose, onSuccess }: CreateStore
                 throw new Error("No se pudo obtener el ID de la cuenta creada.");
             }
 
-            // 2. Determinar fase inicial
-            const initialPhase = data.fase_id ? Number(data.fase_id) : (phasesList.length > 0 ? phasesList[0].id : 1);
+            // 2. Crear Oportunidad
+            const combinedComentarios = data.categoria_oportunidad ? 
+                `Categoría: ${data.categoria_oportunidad}\n\n${data.comentarios}` : data.comentarios;
 
-            // 3. Crear Oportunidad
-            const oppData = {
+            const opportunityData = {
                 account_id: accountId,
-                nombre: `Venta ${data.nombre_cuenta}`,
-                currency_id: 'COP', // Siempre COP
+                nombre: `Venta - ${data.nombre_cuenta}`,
                 amount: data.amount,
-                estado_id: 1, // Abierta
-                fase_id: initialPhase,
-                pais_id: data.pais_id ? Number(data.pais_id) : null,
-                departamento_id: data.departamento_id ? Number(data.departamento_id) : null,
-                ciudad_id: data.ciudad_id ? Number(data.ciudad_id) : null,
-                ciudad: accountData.ciudad,
+                fase_id: Number(data.fase_id),
+                estado_id: 1, // OPEN
+                currency_id: "COP",
                 origen_oportunidad: data.origen_oportunidad,
-                comentarios: data.comentarios,
-                owner_user_id: user?.id,
-                items: data.items
+                comentarios: combinedComentarios,
+                items: data.items,
+                owner_user_id: data.asesor_id || user?.id,
             };
-
-            const opportunityId = await createOpportunity(oppData);
+            const opportunityId = await createOpportunity(opportunityData);
 
             if (!opportunityId) {
                 console.warn("No se obtuvo ID de oportunidad. La actividad podría no quedar bien vinculada.");
             }
 
-            // 4. Crear Actividad
-            await createActivity({
+            // 3. Crear Actividad
+            const activityData = {
+                opportunity_id: opportunityId,
                 account_id: accountId,
-                opportunity_id: opportunityId || undefined, // Fallback safe
-                asunto: `Actividad de Venta - ${data.nombre_cuenta}`,
-                descripcion: data.actividad_descripcion || "",
-                prioridad: data.prioridad,
-                tipo_actividad: "REUNION", // Por defecto
+                classification_id: Number(data.clasificacion_id),
+                tipo_actividad: "REUNION",
+                descripcion: data.actividad_descripcion || "Seguimiento de venta en tienda",
                 fecha_inicio: data.fecha_inicio,
                 fecha_fin: data.fecha_fin,
-                clasificacion_id: data.clasificacion_id ? Number(data.clasificacion_id) : undefined,
-            });
+                prioridad: data.prioridad,
+                user_id: data.asesor_id || user?.id,
+            };
+            await createActivity(activityData);
 
             if (onSuccess) onSuccess();
-            onClose();
+            reset();
+            setSearchTerm("");
         } catch (error) {
             console.error("Error creando venta de tienda:", error);
             alert("Ocurrió un error al intentar crear el registro.");
@@ -243,19 +249,14 @@ export function CreateStoreSaleModal({ isOpen, onClose, onSuccess }: CreateStore
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
-            <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl flex flex-col max-h-[90vh]">
-                <div className="flex justify-between items-center px-6 py-4 border-b border-slate-100">
-                    <div>
-                        <h2 className="text-xl font-bold text-slate-800">Registrar Venta / Cliente</h2>
-                        <p className="text-sm text-slate-500">Crea un cliente y su oportunidad al mismo tiempo.</p>
-                    </div>
-                    <button onClick={onClose} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors">
-                        <X className="w-5 h-5" />
-                    </button>
+        <div className="w-full flex flex-col">
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 w-full flex flex-col overflow-hidden">
+                <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+                    <h2 className="text-xl font-bold text-slate-800">Registrar Venta / Cliente</h2>
+                    <p className="text-sm text-slate-500">Crea un cliente y su oportunidad al mismo tiempo.</p>
                 </div>
 
-                <div className="overflow-y-auto p-6 flex-1">
+                <div className="p-6 flex-1">
                     <form id="store-sale-form" onSubmit={handleSubmit(onSubmit)} className="space-y-8">
                         
                         {/* SECCIÓN CUENTA */}
@@ -398,6 +399,33 @@ export function CreateStoreSaleModal({ isOpen, onClose, onSuccess }: CreateStore
                                         <option value="wp">WhatsApp (WP)</option>
                                     </select>
                                     {errors.origen_oportunidad && <p className="text-red-500 text-xs mt-1">{errors.origen_oportunidad.message}</p>}
+                                </div>
+
+                                <div>
+                                    <label className="text-sm font-medium text-slate-700">Categoría (Opcional)</label>
+                                    <select 
+                                        {...register("categoria_oportunidad")} 
+                                        className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-green-500 outline-none"
+                                    >
+                                        <option value="">Seleccione...</option>
+                                        <option value="Baños">Baños</option>
+                                        <option value="Zona de Labores">Zona de Labores</option>
+                                        <option value="Cocinas">Cocinas</option>
+                                        <option value="Hidromasajes">Hidromasajes</option>
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label className="text-sm font-medium text-slate-700">Asesor Encargado (Opcional)</label>
+                                    <select 
+                                        {...register("asesor_id")} 
+                                        className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-green-500 outline-none"
+                                    >
+                                        <option value="">(Asignarme a mí)</option>
+                                        {users?.filter(u => u.is_active).map(u => (
+                                            <option key={u.id} value={u.id}>{u.nombre || u.email}</option>
+                                        ))}
+                                    </select>
                                 </div>
                             </div>
 
@@ -565,14 +593,14 @@ export function CreateStoreSaleModal({ isOpen, onClose, onSuccess }: CreateStore
                     </form>
                 </div>
                 
-                <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-3 rounded-b-2xl">
+                <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
                     <button 
                         type="button" 
-                        onClick={onClose} 
+                        onClick={() => { reset(); setSearchTerm(""); }} 
                         className="px-4 py-2 text-slate-600 font-medium hover:bg-slate-200 rounded-lg transition-colors"
                         disabled={isSubmitting}
                     >
-                        Cancelar
+                        Limpiar Formulario
                     </button>
                     <button 
                         type="submit" 
