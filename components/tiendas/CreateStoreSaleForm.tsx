@@ -173,32 +173,37 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                 a.nit_base === data.nit_base || (!!a.telefono && a.telefono === data.telefono)
             ).toArray();
 
+            let accountId = "";
+
             if (duplicates.length > 0) {
-                alert("Ya existe un cliente con esta cédula/NIT o teléfono en la base de datos. Por favor, usa el flujo normal de Oportunidades para agregar ventas a clientes existentes.");
-                setIsSubmitting(false);
-                return;
+                // Usar el cliente existente
+                accountId = duplicates[0].id;
+                console.log("Cliente ya existe, usando ID existente:", accountId);
+            } else {
+                // 1. Crear Cuenta si no existe
+                const accountData = {
+                    nombre: data.nombre_cuenta,
+                    nit_base: data.nit_base,
+                    canal_id: 'PROPIO', // Siempre PROPIO según requerimientos
+                    telefono: data.telefono,
+                    email: data.email || null,
+                    direccion: data.direccion || null,
+                    pais_id: data.pais_id ? Number(data.pais_id) : null,
+                    departamento_id: data.departamento_id ? Number(data.departamento_id) : null,
+                    ciudad_id: data.ciudad_id ? Number(data.ciudad_id) : null,
+                    // Conservamos compatibilidad string con DB
+                    ciudad: data.ciudad_id ? citiesList.find(c => String(c.id) === data.ciudad_id)?.nombre : null,
+                    es_premium: false
+                };
+
+                const newId = await createAccount(accountData);
+                if (newId) {
+                    accountId = newId;
+                }
             }
 
-            // 1. Crear Cuenta
-            const accountData = {
-                nombre: data.nombre_cuenta,
-                nit_base: data.nit_base,
-                canal_id: 'PROPIO', // Siempre PROPIO según requerimientos
-                telefono: data.telefono,
-                email: data.email || null,
-                direccion: data.direccion || null,
-                pais_id: data.pais_id ? Number(data.pais_id) : null,
-                departamento_id: data.departamento_id ? Number(data.departamento_id) : null,
-                ciudad_id: data.ciudad_id ? Number(data.ciudad_id) : null,
-                // Conservamos compatibilidad string con DB
-                ciudad: data.ciudad_id ? citiesList.find(c => String(c.id) === data.ciudad_id)?.nombre : null,
-                es_premium: false
-            };
-
-            const accountId = await createAccount(accountData);
-
             if (!accountId) {
-                throw new Error("No se pudo obtener el ID de la cuenta creada.");
+                throw new Error("No se pudo obtener el ID de la cuenta.");
             }
 
             // 2. Crear Oportunidad

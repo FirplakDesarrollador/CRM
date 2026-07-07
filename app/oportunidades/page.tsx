@@ -222,7 +222,12 @@ function OpportunitiesContent() {
                 savedParams.delete('id');
                 savedParams.delete('tab');
                 const restoredState = savedParams.toString();
-                router.replace(restoredState ? `/oportunidades?${restoredState}` : '/oportunidades', { scroll: false });
+                if (restoredState !== '') {
+                    router.replace(`/oportunidades?${restoredState}`, { scroll: false });
+                } else {
+                    // Ya está vacío, limpiamos la sesión para no entrar en bucle infinito
+                    sessionStorage.removeItem('crm_oportunidades_state');
+                }
             }
         }
     }, [searchParams, router]);
@@ -276,7 +281,14 @@ function OpportunitiesContent() {
         else params.delete('endClose');
         
         const queryString = params.toString();
-        if (queryString === searchParams.toString()) return;
+        
+        // Evitamos bucles infinitos por orden de parámetros comparándolos ordenados
+        const paramsForCompare = new URLSearchParams(params.toString());
+        paramsForCompare.sort();
+        const currentParamsForCompare = new URLSearchParams(searchParams.toString());
+        currentParamsForCompare.sort();
+        
+        if (paramsForCompare.toString() === currentParamsForCompare.toString()) return;
         
         // Save to sessionStorage for cross-module persistence
         if (queryString) {
