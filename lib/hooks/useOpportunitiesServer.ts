@@ -507,15 +507,49 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
 
             if (error) throw error;
 
+            const pendingChanges = await db.outbox
+                .where('entity_type').equals('CRM_Oportunidades')
+                .and(item => item.status === 'PENDING' || item.status === 'SYNCING')
+                .toArray();
+
+            const resultIds = result ? (result as any[]).map(r => r.id) : [];
+            const missingPendingIds = new Set<string>();
+
+            for (const change of pendingChanges) {
+                if (!resultIds.includes(change.entity_id)) {
+                    missingPendingIds.add(change.entity_id);
+                }
+            }
+
+            let pendingLocalOpps: any[] = [];
+            if (missingPendingIds.size > 0) {
+                const localOpps = await db.opportunities.where('id').anyOf(Array.from(missingPendingIds)).toArray();
+                pendingLocalOpps = localOpps.filter((o: any) => {
+                    if (searchTerm) {
+                        const lowerSearch = searchTerm.toLowerCase();
+                        if (!o.nombre?.toLowerCase().includes(lowerSearch)) {
+                            return false;
+                        }
+                    }
+                    if (accountIdFilter && o.account_id !== accountIdFilter) return false;
+                    return true;
+                }).map((o: any) => ({
+                    ...o,
+                    _hasPendingSync: true,
+                }));
+            }
+
+            const combinedResults = [...pendingLocalOpps, ...(result as any[])];
+
             if (isLoadMore) {
                 setData(prev => {
                     const existingIds = new Set(prev.map(i => i.id));
-                    const newItems = (result as any[]).filter(i => !existingIds.has(i.id));
+                    const newItems = combinedResults.filter(i => !existingIds.has(i.id));
                     return [...prev, ...newItems];
                 });
                 pageRef.current = currentPage;
             } else {
-                setData(result as any);
+                setData(combinedResults as any);
                 pageRef.current = 1;
             }
 

@@ -10,5 +10,11 @@ import 'handsontable/styles/ht-theme-main.min.css';
 registerAllModules();
 
 export default function HotTableWrapper(props: any) {
-    return <HotTable {...props} />;
+    // Si se pasa dropdownMenu como true, lo cambiamos para que solo muestre el filtro por valor
+    const customProps = { ...props };
+    if (customProps.dropdownMenu === true) {
+        customProps.dropdownMenu = ['filter_by_value', 'filter_action_bar'];
+    }
+    
+    return <HotTable {...customProps} />;
 }

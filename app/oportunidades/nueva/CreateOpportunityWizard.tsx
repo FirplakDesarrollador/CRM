@@ -44,7 +44,8 @@ const schema = z.object({
         product_id: z.string(),
         cantidad: z.number().min(1),
         precio: z.number(),
-        nombre: z.string()
+        nombre: z.string(),
+        descuento_porcentaje: z.union([z.number(), z.string()]).optional().nullable()
     })).default([]),
     owner_user_id: z.string().optional()
 });
@@ -58,6 +59,7 @@ export default function CreateOpportunityWizard() {
     const { users } = useUsers();
 
     const [step, setStep] = useState(0);
+    const [hasDraft, setHasDraft] = useState(false);
     const [showAccountModal, setShowAccountModal] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
     const [accountSearchTerm, setAccountSearchTerm] = useState("");
@@ -163,7 +165,8 @@ export default function CreateOpportunityWizard() {
         formState: { errors },
         setValue,
         watch,
-        trigger
+        trigger,
+        reset
     } = useForm({
         resolver: zodResolver(schema),
         defaultValues: {
@@ -190,6 +193,43 @@ export default function CreateOpportunityWizard() {
     });
 
     const searchParams = useSearchParams();
+
+    // Cargar borrador al montar
+    useEffect(() => {
+        const accountIdParam = searchParams.get('account_id');
+        const draft = localStorage.getItem("draft_opportunity");
+        
+        if (draft && !accountIdParam) {
+            try {
+                const parsed = JSON.parse(draft);
+                // Restaurar estado del form
+                reset(parsed);
+                setHasDraft(true);
+                
+                // Restaurar la cuenta seleccionada en la UI
+                if (parsed.account_id) {
+                    db.accounts.get(parsed.account_id).then(acc => {
+                        if (acc) {
+                            setSelectedAccount(acc);
+                            setAccountSearchTerm(acc.nombre);
+                        }
+                    });
+                }
+            } catch (e) {
+                console.error("Error al cargar borrador", e);
+            }
+        }
+    }, [reset, searchParams]);
+
+    // Guardar borrador cuando cambien los datos
+    useEffect(() => {
+        const subscription = watch((value) => {
+            if (Object.keys(value).length > 0) {
+                localStorage.setItem("draft_opportunity", JSON.stringify(value));
+            }
+        });
+        return () => subscription.unsubscribe();
+    }, [watch]);
 
     // Auto-select account from URL param and jump to step 1
     useEffect(() => {
@@ -424,8 +464,9 @@ export default function CreateOpportunityWizard() {
         setValue("items", items.map((i: any) => i.product_id === productId ? { ...i, cantidad: validQty } : i));
     };
 
-    const updateDiscount = (productId: string, discount: number) => {
-        const validDiscount = isNaN(discount) ? 0 : Math.max(0, Math.min(100, discount));
+    const updateDiscount = (productId: string, discountStr: string) => {
+        const val = parseFloat(discountStr);
+        const validDiscount = isNaN(val) ? "" : Math.max(0, Math.min(100, val));
         setValue("items", items.map((i: any) => i.product_id === productId ? { ...i, descuento_porcentaje: validDiscount } : i));
     };
 
@@ -467,6 +508,7 @@ export default function CreateOpportunityWizard() {
 
             console.log('[Wizard] Submitting sanitized opportunity data:', sanitizedData);
             await createOpportunity(sanitizedData);
+            localStorage.removeItem("draft_opportunity");
             router.push("/oportunidades");
         } catch (err) {
             console.error(err);
@@ -496,6 +538,27 @@ export default function CreateOpportunityWizard() {
     return (
         <div className="max-w-3xl mx-auto space-y-6">
             <h1 className="text-2xl font-bold text-slate-800">Nueva Oportunidad</h1>
+
+            {hasDraft && (
+                <div className="bg-blue-50 border border-blue-200 text-blue-800 px-4 py-3 rounded-lg flex items-center justify-between shadow-sm">
+                    <span className="text-sm font-medium">Hemos recuperado tu borrador de una sesión anterior.</span>
+                    <button 
+                        onClick={() => {
+                            if (window.confirm("¿Seguro que quieres borrar este borrador y empezar de cero?")) {
+                                localStorage.removeItem("draft_opportunity");
+                                reset();
+                                setHasDraft(false);
+                                setStep(0);
+                                setSelectedAccount(null);
+                                setAccountSearchTerm("");
+                            }
+                        }}
+                        className="text-sm bg-white border border-blue-200 px-3 py-1 rounded hover:bg-blue-100 transition-colors font-semibold"
+                    >
+                        Empezar de cero
+                    </button>
+                </div>
+            )}
 
             {/* Steps Indicator */}
             <div className="flex items-center space-x-4 mb-8 overflow-x-auto pb-2">
@@ -833,7 +896,12 @@ export default function CreateOpportunityWizard() {
                                     <div key={item.product_id} className="flex items-center gap-4 p-3 bg-white border border-slate-200 rounded-xl shadow-sm">
                                         <div className="flex-1">
                                             <div className="font-medium text-sm text-slate-800">{item.nombre}</div>
-                                            <div className="text-xs text-slate-500">{currencyId} {new Intl.NumberFormat().format(item.precio || 0)} c/u</div>
+                                            <div className="text-xs text-slate-500">{currencyId} {new Intl.NumberFormat().format(item.precio || 0)} c/u base</div>
+                                            {(Number(item.descuento_porcentaje) || 0) > 0 && (
+                                                <div className="text-xs text-emerald-600 font-medium mt-0.5">
+                                                    Precio con desc: {currencyId} {new Intl.NumberFormat().format((item.precio || 0) * (1 - (Number(item.descuento_porcentaje) || 0) / 100))} c/u
+                                                </div>
+                                            )}
                                         </div>
                                         <div className="flex items-center gap-2 mt-2 sm:mt-0">
                                             <div className="flex flex-col items-center">
@@ -852,8 +920,8 @@ export default function CreateOpportunityWizard() {
                                                     min="0"
                                                     max="100"
                                                     className="w-16 p-1 border rounded text-center text-sm"
-                                                    value={isNaN(item.descuento_porcentaje) ? "" : item.descuento_porcentaje}
-                                                    onChange={(e) => updateDiscount(item.product_id, parseFloat(e.target.value))}
+                                                    value={item.descuento_porcentaje === "" ? "" : (item.descuento_porcentaje ?? 0)}
+                                                    onChange={(e) => updateDiscount(item.product_id, e.target.value)}
                                                 />
                                             </div>
                                             <div className="flex flex-col items-center justify-end h-full mt-4">
