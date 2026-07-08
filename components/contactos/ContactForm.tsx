@@ -3,6 +3,7 @@ import { db, LocalContact } from "@/lib/db";
 import { useForm } from "react-hook-form";
 import { useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
+import { useFormDraft } from "@/lib/hooks/useFormDraft";
 import { ContactImportButton } from "./ContactImportButton";
 import { ParsedContact } from "@/lib/vcard";
 import { AccountSelector } from "./AccountSelector";
@@ -28,12 +29,19 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel }:
         comentarios: existingContact?.comentarios || "",
     };
 
-    const { register, handleSubmit, reset, setValue, watch, formState: { errors, isSubmitting } } = useForm<LocalContact>({
+    const form = useForm<LocalContact>({
         defaultValues: defaultValues as any
     });
 
+    const { register, handleSubmit, reset, setValue, watch, formState: { errors, isSubmitting } } = form;
+
+    const { clearDraft } = useFormDraft(form, 'crm_draft_contact', !existingContact);
+
     useEffect(() => {
-        reset(defaultValues as any);
+        // En modo creación, useFormDraft ya maneja el estado inicial. No sobreescribir aquí.
+        if (existingContact) {
+            reset(defaultValues as any);
+        }
     }, [existingContact?.id, accountId, reset]);
 
     const selectedAccountId = watch("account_id");
@@ -150,6 +158,7 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel }:
                 await updateContact(existingContact.id, data);
             } else {
                 await createContact(data);
+                clearDraft(); // Limpiar borrador si es creación exitosa
             }
             onSuccess();
         } catch (error) {

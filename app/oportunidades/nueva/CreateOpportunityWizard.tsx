@@ -18,6 +18,7 @@ import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { useConfig } from "@/lib/hooks/useConfig";
 import { CollaboratorSelector, CollaboratorEntry } from "@/components/oportunidades/CollaboratorSelector";
 import { useUsers } from "@/lib/hooks/useUsers";
+import { useFormDraft } from "@/lib/hooks/useFormDraft";
 
 const STEP_LABELS = ["Cuenta", "Datos del Negocio", "Productos", "Equipo"];
 
@@ -59,7 +60,6 @@ export default function CreateOpportunityWizard() {
     const { users } = useUsers();
 
     const [step, setStep] = useState(0);
-    const [hasDraft, setHasDraft] = useState(false);
     const [showAccountModal, setShowAccountModal] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
     const [accountSearchTerm, setAccountSearchTerm] = useState("");
@@ -159,15 +159,7 @@ export default function CreateOpportunityWizard() {
         ensurePhasesLoaded();
     }, []);
 
-    const {
-        register,
-        handleSubmit,
-        formState: { errors },
-        setValue,
-        watch,
-        trigger,
-        reset
-    } = useForm({
+    const form = useForm({
         resolver: zodResolver(schema),
         defaultValues: {
             account_id: '',
@@ -192,44 +184,35 @@ export default function CreateOpportunityWizard() {
         shouldUnregister: false
     });
 
+    const {
+        register,
+        handleSubmit,
+        formState: { errors },
+        setValue,
+        watch,
+        trigger,
+        reset
+    } = form;
+
+    const { hasDraft, clearDraft } = useFormDraft(form, 'crm_draft_opportunity', true);
+
     const searchParams = useSearchParams();
 
-    // Cargar borrador al montar
+    // Restaurar el account seleccionado en la UI si el borrador lo cargó
     useEffect(() => {
         const accountIdParam = searchParams.get('account_id');
-        const draft = localStorage.getItem("draft_opportunity");
-        
-        if (draft && !accountIdParam) {
-            try {
-                const parsed = JSON.parse(draft);
-                // Restaurar estado del form
-                reset(parsed);
-                setHasDraft(true);
-                
-                // Restaurar la cuenta seleccionada en la UI
-                if (parsed.account_id) {
-                    db.accounts.get(parsed.account_id).then(acc => {
-                        if (acc) {
-                            setSelectedAccount(acc);
-                            setAccountSearchTerm(acc.nombre);
-                        }
-                    });
-                }
-            } catch (e) {
-                console.error("Error al cargar borrador", e);
+        if (hasDraft && !accountIdParam) {
+            const accId = form.getValues('account_id');
+            if (accId) {
+                db.accounts.get(accId).then(acc => {
+                    if (acc) {
+                        setSelectedAccount(acc);
+                        setAccountSearchTerm(acc.nombre);
+                    }
+                });
             }
         }
-    }, [reset, searchParams]);
-
-    // Guardar borrador cuando cambien los datos
-    useEffect(() => {
-        const subscription = watch((value) => {
-            if (Object.keys(value).length > 0) {
-                localStorage.setItem("draft_opportunity", JSON.stringify(value));
-            }
-        });
-        return () => subscription.unsubscribe();
-    }, [watch]);
+    }, [hasDraft, searchParams, form]);
 
     // Auto-select account from URL param and jump to step 1
     useEffect(() => {
@@ -508,7 +491,7 @@ export default function CreateOpportunityWizard() {
 
             console.log('[Wizard] Submitting sanitized opportunity data:', sanitizedData);
             await createOpportunity(sanitizedData);
-            localStorage.removeItem("draft_opportunity");
+            clearDraft();
             router.push("/oportunidades");
         } catch (err) {
             console.error(err);
@@ -545,9 +528,8 @@ export default function CreateOpportunityWizard() {
                     <button 
                         onClick={() => {
                             if (window.confirm("¿Seguro que quieres borrar este borrador y empezar de cero?")) {
-                                localStorage.removeItem("draft_opportunity");
+                                clearDraft();
                                 reset();
-                                setHasDraft(false);
                                 setStep(0);
                                 setSelectedAccount(null);
                                 setAccountSearchTerm("");
