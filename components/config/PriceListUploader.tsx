@@ -84,7 +84,9 @@ export function PriceListUploader() {
                         lista_base_obras: parseNumber(normalizedRow['lista_base_obras'] || normalizedRow['Obras nacional']),
                         distribuidor_pvp_iva: parseNumber(normalizedRow['distribuidor_pvp_iva'] || normalizedRow['Distribuidor PVP+IVA']),
                         pvp_sin_iva: parseNumber(normalizedRow['pvp_sin_iva'] || normalizedRow['PVP sin IVA']),
-                        descuentos_volumen: discounts
+                        descuentos_volumen: discounts,
+                        planta: normalizedRow['planta'] || normalizedRow['Planta'] || null,
+                        familia: normalizedRow['familia'] || normalizedRow['Familia'] || null
                     });
                 });
 
@@ -314,6 +316,8 @@ export function PriceListUploader() {
                 <p className="text-xs text-blue-700 leading-relaxed">
                     El archivo debe contener obligatoriamente la columna <strong>numero_articulo</strong> (o 'Número de artículo').
                     Las columnas de precios opcionales son: <em>lista_base_cop, lista_base_exportaciones, lista_base_obras, distribuidor_pvp_iva, pvp_sin_iva</em>.
+                    <br />
+                    Las columnas de S&OP opcionales son: <strong>planta</strong> y <strong>familia</strong>.
                     <br />
                     Para la política de descuentos, usa la columna <strong>descuentos_volumen</strong> con formato JSON válido (ej. <code>{`{"DIST_NAC": [{"min_qty": 10, "discount_pct": 5}]}`}</code>).
                 </p>

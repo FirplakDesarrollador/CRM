@@ -4,7 +4,7 @@ import React, { useState, useMemo } from 'react';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useUsers } from '@/lib/hooks/useUsers';
 import { supabase } from '@/lib/supabase';
-import { downloadExcel, downloadCSV, ExportColumn } from '@/lib/utils/informes';
+import { downloadExcel, downloadCSV, downloadSopExcel, ExportColumn, SopRow } from '@/lib/utils/informes';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { FileSpreadsheet, Loader2, Download, TableProperties, Users, Briefcase, Building2, Calendar as CalendarIcon, Filter } from 'lucide-react';
 import { cn } from '@/components/ui/utils';
@@ -16,12 +16,14 @@ const ENTIDADES = [
   { id: 'contactos', label: 'Contactos', icon: Users, table: 'CRM_Contactos' },
   { id: 'cotizaciones', label: 'Cotizaciones', icon: TableProperties, table: 'CRM_Cotizaciones' },
   { id: 'actividades', label: 'Actividades', icon: CalendarIcon, table: 'CRM_Actividades' },
+  { id: 'sop', label: 'Proyección S&OP', icon: FileSpreadsheet, table: 'CRM_Oportunidades' },
 ] as const;
 
 type EntidadType = typeof ENTIDADES[number]['id'];
 
 // const CANALES = ['Retail', 'Constructoras', 'Grandes Superficies', 'Institucional', 'Exportaciones', 'E-commerce', 'Showroom'];
 const ESTADOS_OPPORTUNIDADES = ['Abierta', 'Ganada', 'Perdida', 'Suspendida'];
+const MESES_ES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
 export default function InformesPage() {
     const { role, isLoading: isLoadingUser } = useCurrentUser();
@@ -34,6 +36,9 @@ export default function InformesPage() {
     const [selectedUser, setSelectedUser] = useState('');
     const [selectedCanal, setSelectedCanal] = useState('');
     const [selectedEstado, setSelectedEstado] = useState('');
+    const [selectedPlanta, setSelectedPlanta] = useState('');
+    const [selectedSopAnio, setSelectedSopAnio] = useState('');
+    const [selectedSopMes, setSelectedSopMes] = useState('');
     const [isExporting, setIsExporting] = useState(false);
 
     // Cargar canales para el filtro
@@ -126,6 +131,293 @@ export default function InformesPage() {
             let selectStr = '*';
             let columns: ExportColumn<any>[] = [];
             let flattenFn = (item: any) => item;
+
+            if (selectedEntidad === 'sop') {
+                // 1. Cargar productos de CRM_ListaDePrecios para mapear planta y familia
+                const { data: dbProducts, error: prodErr } = await supabase
+                    .from('CRM_ListaDePrecios')
+                    .select('id, numero_articulo, descripcion, planta, familia');
+                if (prodErr) throw prodErr;
+
+                const prodMap = new Map<string, { sku: string, descripcion: string, planta: string, familia: string }>();
+                dbProducts?.forEach(p => prodMap.set(p.id, {
+                    sku: p.numero_articulo || '-',
+                    descripcion: p.descripcion || '-',
+                    planta: p.planta || '-',
+                    familia: p.familia || '-'
+                }));
+
+                // 2. Consultar todas las Oportunidades activas
+                let oppQuery = supabase
+                    .from('CRM_Oportunidades')
+                    .select(`
+                        id,
+                        nombre,
+                        amount,
+                        probabilidad,
+                        fecha_cierre_estimada,
+                        created_at,
+                        owner_user_id,
+                        account_id,
+                        estado_id,
+                        fase_id,
+                        cuenta:CRM_Cuentas(nombre, canal_id, subclasificacion_id),
+                        fase:CRM_FasesOportunidad(nombre, canal_id),
+                        estado_info:CRM_EstadosOportunidad(nombre)
+                    `)
+                    .eq('is_deleted', false);
+
+                // Si hay filtro de asesor
+                if (selectedUser) oppQuery = oppQuery.eq('owner_user_id', selectedUser);
+
+                const { data: opps, error: oppsError } = await oppQuery;
+                if (oppsError) throw oppsError;
+
+                if (!opps || opps.length === 0) {
+                    alert("No se encontraron oportunidades con los filtros seleccionados.");
+                    setIsExporting(false);
+                    return;
+                }
+
+                // 3. Consultar Pedidos
+                const oppIds = opps.map(o => o.id);
+                const { data: peds, error: pedsError } = await supabase
+                    .from('CRM_Pedidos')
+                    .select(`
+                        id,
+                        uuid_generado,
+                        opportunity_id,
+                        cotizacion_id,
+                        fecha_facturacion,
+                        fecha_entrega,
+                        estado_pedido,
+                        is_deleted,
+                        items:CRM_PedidoItems(
+                            id,
+                            producto_id,
+                            cantidad,
+                            precio_unitario
+                        )
+                    `)
+                    .in('opportunity_id', oppIds)
+                    .eq('is_deleted', false);
+                if (pedsError) throw pedsError;
+
+                // Identificar qué oportunidades tienen pedidos
+                const oppsWithPedidos = new Set(peds?.map(p => p.opportunity_id) || []);
+                const oppsWithoutPedidosIds = oppIds.filter(id => !oppsWithPedidos.has(id));
+
+                // 4. Consultar Cotizaciones para oportunidades sin pedidos
+                let quotesData: any[] = [];
+                if (oppsWithoutPedidosIds.length > 0) {
+                    const { data: qts, error: qtsError } = await supabase
+                        .from('CRM_Cotizaciones')
+                        .select(`
+                            id,
+                            opportunity_id,
+                            status,
+                            is_winner,
+                            items:CRM_CotizacionItems(
+                                id,
+                                producto_id,
+                                cantidad,
+                                precio_unitario
+                            )
+                        `)
+                        .in('opportunity_id', oppsWithoutPedidosIds);
+                    if (qtsError) throw qtsError;
+                    quotesData = qts || [];
+                }
+
+                // 5. Procesar filas del reporte
+                const sopRows: SopRow[] = [];
+
+                // Helper para parsear fecha local
+                const getYearAndMonth = (dateStr: string | null | undefined) => {
+                    if (!dateStr) return { year: new Date().getFullYear(), monthName: 'Sin fecha', day: 1 };
+                    const parts = dateStr.split('-');
+                    if (parts.length >= 3) {
+                        const year = parseInt(parts[0]);
+                        const monthIdx = parseInt(parts[1]) - 1;
+                        const day = parseInt(parts[2]);
+                        return {
+                            year,
+                            monthName: MESES_ES[monthIdx] || 'Sin fecha',
+                            day
+                        };
+                    }
+                    const date = new Date(dateStr);
+                    return {
+                        year: date.getFullYear(),
+                        monthName: MESES_ES[date.getMonth()] || 'Sin fecha',
+                        day: date.getDate()
+                    };
+                };
+
+                // A. Procesar Pedidos
+                peds?.forEach(ped => {
+                    const opp = opps.find(o => o.id === ped.opportunity_id);
+                    if (!opp) return;
+
+                    const canalId = opp.cuenta?.canal_id;
+                    const subcanalId = opp.cuenta?.subclasificacion_id;
+
+                    // Filtro por canal en UI
+                    if (selectedCanal && canalId !== selectedCanal) return;
+
+                    const dtComercial = getYearAndMonth(ped.fecha_facturacion || ped.fecha_entrega);
+                    const dtPlanta = getYearAndMonth(ped.fecha_entrega || ped.fecha_facturacion);
+
+                    const anioFact = dtComercial.year;
+                    const mesComercial = dtComercial.monthName;
+                    const mesPlanta = dtPlanta.monthName;
+                    const quincena = dtComercial.day <= 15 ? 1 : 2;
+
+                    // Aplicar filtros específicos de S&OP de Año y Mes Comercial si se seleccionaron
+                    if (selectedSopAnio && String(anioFact) !== selectedSopAnio) return;
+                    if (selectedSopMes && mesComercial !== selectedSopMes) return;
+
+                    ped.items?.forEach((item: any) => {
+                        const prod = prodMap.get(item.producto_id) || {
+                            sku: '-',
+                            descripcion: 'Producto no especificado',
+                            planta: '-',
+                            familia: '-'
+                        };
+
+                        // Filtro por planta en UI
+                        if (selectedPlanta && prod.planta !== selectedPlanta) return;
+
+                        sopRows.push({
+                            anio_fact: anioFact,
+                            mes_planta: mesPlanta,
+                            mes_comercial: mesComercial,
+                            estado: 'Pedido (' + (ped.estado_pedido || 'Planeado') + ')',
+                            asesor: opp.CRM_Usuarios?.full_name || userMap.get(opp.owner_user_id) || '-',
+                            grupo_cliente: canalMap.get(canalId) || '-',
+                            subgrupo_cliente: subclasificacionMap.get(subcanalId) || '-',
+                            cliente: opp.cuenta?.nombre || '-',
+                            codigo_articulo: prod.sku,
+                            descripcion_articulo: prod.descripcion,
+                            planta: prod.planta,
+                            familia: prod.familia,
+                            valor_unit: Number(item.precio_unitario || 0),
+                            cantidad_total: Number(item.cantidad || 0),
+                            valor_total: Number(item.precio_unitario || 0) * Number(item.cantidad || 0),
+                            probabilidad: 100, // Los pedidos son 100% seguros
+                            quincena: quincena
+                        });
+                    });
+                });
+
+                // B. Procesar Oportunidades sin Pedidos (Proyectado)
+                oppsWithoutPedidosIds.forEach(oppId => {
+                    const opp = opps.find(o => o.id === oppId);
+                    if (!opp) return;
+
+                    const canalId = opp.cuenta?.canal_id;
+                    const subcanalId = opp.cuenta?.subclasificacion_id;
+
+                    // Filtro por canal en UI
+                    if (selectedCanal && canalId !== selectedCanal) return;
+
+                    // Filtro por estado en UI si se seleccionó en la grilla general de estados
+                    if (selectedEstado && opp.estado_info?.nombre !== selectedEstado) return;
+
+                    const quote = quotesData.find(q => q.opportunity_id === oppId && (q.is_winner || q.status === 'WINNER'))
+                               || quotesData.find(q => q.opportunity_id === oppId);
+
+                    if (!quote || !quote.items || quote.items.length === 0) return;
+
+                    const dtComercial = getYearAndMonth(opp.fecha_cierre_estimada);
+                    const dtPlanta = getYearAndMonth(opp.fecha_cierre_estimada);
+
+                    const anioFact = dtComercial.year;
+                    const mesComercial = dtComercial.monthName;
+                    const mesPlanta = dtPlanta.monthName;
+                    const quincena = dtComercial.day <= 15 ? 1 : 2;
+
+                    // Aplicar filtros específicos de S&OP de Año y Mes Comercial si se seleccionaron
+                    if (selectedSopAnio && String(anioFact) !== selectedSopAnio) return;
+                    if (selectedSopMes && mesComercial !== selectedSopMes) return;
+
+                    quote.items.forEach((item: any) => {
+                        const prod = prodMap.get(item.producto_id) || {
+                            sku: '-',
+                            descripcion: 'Producto no especificado',
+                            planta: '-',
+                            familia: '-'
+                        };
+
+                        // Filtro por planta en UI
+                        if (selectedPlanta && prod.planta !== selectedPlanta) return;
+
+                        sopRows.push({
+                            anio_fact: anioFact,
+                            mes_planta: mesPlanta,
+                            mes_comercial: mesComercial,
+                            estado: opp.estado_info?.nombre || 'Proyectado',
+                            asesor: opp.CRM_Usuarios?.full_name || userMap.get(opp.owner_user_id) || '-',
+                            grupo_cliente: canalMap.get(canalId) || '-',
+                            subgrupo_cliente: subclasificacionMap.get(subcanalId) || '-',
+                            cliente: opp.cuenta?.nombre || '-',
+                            codigo_articulo: prod.sku,
+                            descripcion_articulo: prod.descripcion,
+                            planta: prod.planta,
+                            familia: prod.familia,
+                            valor_unit: Number(item.precio_unitario || 0),
+                            cantidad_total: Number(item.cantidad || 0),
+                            valor_total: Number(item.precio_unitario || 0) * Number(item.cantidad || 0),
+                            probabilidad: Number(opp.probabilidad || 0),
+                            quincena: quincena
+                        });
+                    });
+                });
+
+                if (sopRows.length === 0) {
+                    alert("No se encontraron registros de S&OP con los filtros seleccionados.");
+                    setIsExporting(false);
+                    return;
+                }
+
+                // 6. Exportar
+                const currentDateTime = new Date().toISOString().replace(/:/g, '-').split('.')[0];
+                const fileName = `Informe_SOP_${currentDateTime}`;
+
+                if (format === 'excel') {
+                    await downloadSopExcel(sopRows, fileName);
+                } else {
+                    // Exportar CSV simple de datos planos
+                    const columnsSopCsv = [
+                        { header: 'Año fact', key: 'anio_fact' },
+                        { header: 'Mes Planta', key: 'mes_planta' },
+                        { header: 'Mes Comercial', key: 'mes_comercial' },
+                        { header: 'Estado', key: 'estado' },
+                        { header: 'Asesor', key: 'asesor' },
+                        { header: 'Grupo Cliente', key: 'grupo_cliente' },
+                        { header: 'Subgrupo Cliente', key: 'subgrupo_cliente' },
+                        { header: 'Cliente', key: 'cliente' },
+                        { header: 'Código del Artículo', key: 'codigo_articulo' },
+                        { header: 'Descripción del Artículo', key: 'descripcion_articulo' },
+                        { header: 'Planta', key: 'planta' },
+                        { header: 'Familia', key: 'familia' },
+                        { header: 'Valor Unit', key: 'valor_unit' },
+                        { header: 'Cantidad Total', key: 'cantidad_total' },
+                        { header: 'Valor Total', key: 'valor_total' },
+                        { header: '% de Probabilidad', key: 'probabilidad' },
+                        { header: 'Quincena', key: 'quincena' }
+                    ];
+                    downloadCSV(sopRows, columnsSopCsv, fileName);
+                }
+
+                setIsExporting(false);
+                return;
+            }
+
+            // Configuración de columnas y joins por entidad
+            selectStr = '*';
+            columns = [];
+            flattenFn = (item: any) => item;
 
             if (selectedEntidad === 'oportunidades') {
                 selectStr = `
@@ -447,7 +739,7 @@ export default function InformesPage() {
                         </div>
 
                         {/* Filtros específicos por entidad */}
-                        {(selectedEntidad === 'oportunidades' || selectedEntidad === 'cuentas') && (
+                        {(selectedEntidad === 'oportunidades' || selectedEntidad === 'cuentas' || selectedEntidad === 'sop') && (
                             <div className="space-y-3">
                                 <label className="text-sm font-semibold text-slate-700">Canal</label>
                                 <select 
@@ -463,7 +755,7 @@ export default function InformesPage() {
                             </div>
                         )}
 
-                        {selectedEntidad === 'oportunidades' && (
+                        {(selectedEntidad === 'oportunidades' || selectedEntidad === 'sop') && (
                             <div className="space-y-3">
                                 <label className="text-sm font-semibold text-slate-700">Estado</label>
                                 <select 
@@ -477,6 +769,52 @@ export default function InformesPage() {
                                     ))}
                                 </select>
                             </div>
+                        )}
+
+                        {selectedEntidad === 'sop' && (
+                            <>
+                                <div className="space-y-3">
+                                    <label className="text-sm font-semibold text-slate-700">Año Facturación (S&OP)</label>
+                                    <select 
+                                        value={selectedSopAnio} 
+                                        onChange={e => setSelectedSopAnio(e.target.value)}
+                                        className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-sm"
+                                    >
+                                        <option value="">Todos los años</option>
+                                        <option value="2025">2025</option>
+                                        <option value="2026">2026</option>
+                                        <option value="2027">2027</option>
+                                    </select>
+                                </div>
+
+                                <div className="space-y-3">
+                                    <label className="text-sm font-semibold text-slate-700">Mes Comercial (S&OP)</label>
+                                    <select 
+                                        value={selectedSopMes} 
+                                        onChange={e => setSelectedSopMes(e.target.value)}
+                                        className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-sm"
+                                    >
+                                        <option value="">Todos los meses</option>
+                                        {MESES_ES.map(mes => (
+                                            <option key={mes} value={mes}>{mes}</option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <div className="space-y-3">
+                                    <label className="text-sm font-semibold text-slate-700">Planta</label>
+                                    <select 
+                                        value={selectedPlanta} 
+                                        onChange={e => setSelectedPlanta(e.target.value)}
+                                        className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-sm"
+                                    >
+                                        <option value="">Todas las plantas</option>
+                                        <option value="PC">PC</option>
+                                        <option value="ALM">ALM</option>
+                                        <option value="FVH">FVH</option>
+                                    </select>
+                                </div>
+                            </>
                         )}
 
                     </CardContent>
