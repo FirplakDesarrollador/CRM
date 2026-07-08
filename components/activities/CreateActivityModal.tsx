@@ -725,7 +725,14 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
     }, [plannerBuckets, relatedAccount, watchedOpportunityId, watchedAccountId, initialData?.ms_planner_id]);
 
 
+    const isSubmittingRef = useRef(false);
+
     const handleActualSubmit = async (data: any) => {
+        if (isSubmittingRef.current) {
+            console.warn("[CreateActivityModal] Prevented double submit");
+            return;
+        }
+        isSubmittingRef.current = true;
         setIsSubmitting(true);
         setSyncFeedback({}); // Reset feedback
         try {
@@ -1009,6 +1016,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
             console.error("[CreateActivityModal] Uncaught error in submit:", e);
             alert(`Error interno: ${e.message}`);
         } finally {
+            isSubmittingRef.current = false;
             setIsSubmitting(false);
         }
     };

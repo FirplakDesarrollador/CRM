@@ -338,16 +338,40 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                 }
             }
 
-            // Group changes by entity_id for successful queries
             const resultIds = result ? (result as any[]).map(r => r.id) : [];
             const optimisticUpdates: Record<string, Record<string, any>> = {};
+            const missingPendingIds = new Set<string>();
+
             for (const change of pendingChanges) {
                 if (resultIds.includes(change.entity_id)) {
                     if (!optimisticUpdates[change.entity_id]) {
                         optimisticUpdates[change.entity_id] = {};
                     }
                     optimisticUpdates[change.entity_id][change.field_name] = change.new_value;
+                } else {
+                    missingPendingIds.add(change.entity_id);
                 }
+            }
+
+            let pendingLocalAccounts: any[] = [];
+            if (missingPendingIds.size > 0) {
+                const localAccs = await db.accounts.where('id').anyOf(Array.from(missingPendingIds)).toArray();
+                pendingLocalAccounts = localAccs.filter((a: any) => {
+                    if (searchTerm) {
+                        const lowerSearch = searchTerm.toLowerCase();
+                        if (!a.nombre.toLowerCase().includes(lowerSearch) && !(a.nit_base && a.nit_base.toLowerCase().includes(lowerSearch))) {
+                            return false;
+                        }
+                    }
+                    return true;
+                }).map((a: any) => ({
+                    ...a,
+                    _hasPendingSync: true,
+                    owner_name: ownerMap[a.owner_user_id] || ownerMap[a.created_by] || 'Usuario',
+                    creator_name: ownerMap[a.created_by] || 'Usuario',
+                    contact_count: 0,
+                    potencial_venta: 0
+                }));
             }
 
             const flattenedResults = (result as any[]).map(item => {
@@ -363,15 +387,18 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                 };
             });
 
+            // Combine local pending accounts and server results
+            const combinedResults = [...pendingLocalAccounts, ...flattenedResults];
+
             if (isLoadMore) {
                 setData(prev => {
                     const existingIds = new Set(prev.map(i => i.id));
-                    const newItems = flattenedResults.filter(i => !existingIds.has(i.id));
+                    const newItems = combinedResults.filter(i => !existingIds.has(i.id));
                     return [...prev, ...newItems];
                 });
                 pageRef.current = currentPage;
             } else {
-                setData(flattenedResults as any);
+                setData(combinedResults as any);
                 pageRef.current = 1;
             }
 

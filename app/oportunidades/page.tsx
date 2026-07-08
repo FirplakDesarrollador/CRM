@@ -222,7 +222,12 @@ function OpportunitiesContent() {
                 savedParams.delete('id');
                 savedParams.delete('tab');
                 const restoredState = savedParams.toString();
-                router.replace(restoredState ? `/oportunidades?${restoredState}` : '/oportunidades', { scroll: false });
+                if (restoredState !== '') {
+                    router.replace(`/oportunidades?${restoredState}`, { scroll: false });
+                } else {
+                    // Ya está vacío, limpiamos la sesión para no entrar en bucle infinito
+                    sessionStorage.removeItem('crm_oportunidades_state');
+                }
             }
         }
     }, [searchParams, router]);
@@ -276,7 +281,14 @@ function OpportunitiesContent() {
         else params.delete('endClose');
         
         const queryString = params.toString();
-        if (queryString === searchParams.toString()) return;
+        
+        // Evitamos bucles infinitos por orden de parámetros comparándolos ordenados
+        const paramsForCompare = new URLSearchParams(params.toString());
+        paramsForCompare.sort();
+        const currentParamsForCompare = new URLSearchParams(searchParams.toString());
+        currentParamsForCompare.sort();
+        
+        if (paramsForCompare.toString() === currentParamsForCompare.toString()) return;
         
         // Save to sessionStorage for cross-module persistence
         if (queryString) {
@@ -430,11 +442,6 @@ function OpportunitiesContent() {
                         <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
                             Oportunidades
                         </h1>
-                        {count !== undefined && count !== null && !loading && (
-                            <span className="text-sm font-bold text-blue-700 bg-blue-50 px-3 py-1 rounded-full border border-blue-100 shadow-sm">
-                                {count}
-                            </span>
-                        )}
                     </div>
                     <p className="text-slate-500 text-sm hidden sm:block">Gestiona y haz seguimiento a todas las oportunidades comerciales.</p>
                 </div>
@@ -538,6 +545,13 @@ function OpportunitiesContent() {
 
             {/* Listado (Tarjetas en Móvil, Tabla en Desktop) */}
             <div className="flex flex-col relative min-h-[450px] transition-all duration-300">
+                {(!loading || opportunities.length > 0) && (
+                    <div className="flex items-center justify-end mb-3 px-1 z-10">
+                        <span className="text-sm font-medium text-slate-500 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm flex items-center gap-2">
+                            Total de registros: <strong className="text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md">{count !== undefined && count !== null ? count : opportunities.length}</strong>
+                        </span>
+                    </div>
+                )}
                 {loading && opportunities.length === 0 ? (
                     <div className="space-y-4 bg-white border border-slate-200 rounded-2xl shadow-sm p-4 sm:p-6">
                         {[1, 2, 3, 4].map((i) => (

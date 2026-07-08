@@ -18,6 +18,7 @@ import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { useConfig } from "@/lib/hooks/useConfig";
 import { CollaboratorSelector, CollaboratorEntry } from "@/components/oportunidades/CollaboratorSelector";
 import { useUsers } from "@/lib/hooks/useUsers";
+import { useFormDraft } from "@/lib/hooks/useFormDraft";
 
 const STEP_LABELS = ["Cuenta", "Datos del Negocio", "Productos", "Equipo"];
 
@@ -44,7 +45,8 @@ const schema = z.object({
         product_id: z.string(),
         cantidad: z.number().min(1),
         precio: z.number(),
-        nombre: z.string()
+        nombre: z.string(),
+        descuento_porcentaje: z.union([z.number(), z.string()]).optional().nullable()
     })).default([]),
     owner_user_id: z.string().optional()
 });
@@ -157,14 +159,7 @@ export default function CreateOpportunityWizard() {
         ensurePhasesLoaded();
     }, []);
 
-    const {
-        register,
-        handleSubmit,
-        formState: { errors },
-        setValue,
-        watch,
-        trigger
-    } = useForm({
+    const form = useForm({
         resolver: zodResolver(schema),
         defaultValues: {
             account_id: '',
@@ -189,7 +184,35 @@ export default function CreateOpportunityWizard() {
         shouldUnregister: false
     });
 
+    const {
+        register,
+        handleSubmit,
+        formState: { errors },
+        setValue,
+        watch,
+        trigger,
+        reset
+    } = form;
+
+    const { hasDraft, clearDraft } = useFormDraft(form, 'crm_draft_opportunity', true);
+
     const searchParams = useSearchParams();
+
+    // Restaurar el account seleccionado en la UI si el borrador lo cargó
+    useEffect(() => {
+        const accountIdParam = searchParams.get('account_id');
+        if (hasDraft && !accountIdParam) {
+            const accId = form.getValues('account_id');
+            if (accId) {
+                db.accounts.get(accId).then(acc => {
+                    if (acc) {
+                        setSelectedAccount(acc);
+                        setAccountSearchTerm(acc.nombre);
+                    }
+                });
+            }
+        }
+    }, [hasDraft, searchParams, form]);
 
     // Auto-select account from URL param and jump to step 1
     useEffect(() => {
@@ -412,7 +435,8 @@ export default function CreateOpportunityWizard() {
                 product_id: product.id,
                 nombre: product.descripcion,
                 cantidad: 1,
-                precio: price
+                precio: price,
+                descuento_porcentaje: 0
             }]);
         }
         setSearchTerm("");
@@ -423,15 +447,25 @@ export default function CreateOpportunityWizard() {
         setValue("items", items.map((i: any) => i.product_id === productId ? { ...i, cantidad: validQty } : i));
     };
 
+    const updateDiscount = (productId: string, discountStr: string) => {
+        const val = parseFloat(discountStr);
+        const validDiscount = isNaN(val) ? "" : Math.max(0, Math.min(100, val));
+        setValue("items", items.map((i: any) => i.product_id === productId ? { ...i, descuento_porcentaje: validDiscount } : i));
+    };
+
     const removeProduct = (productId: string) => {
         setValue("items", items.filter((i: any) => i.product_id !== productId));
     };
 
     // Calculate total from items
     useEffect(() => {
-        const total = (items || []).reduce((acc: number, curr: any) => 
-            acc + ((Number(curr.precio) || 0) * (Number(curr.cantidad) || 0)), 0
-        );
+        const total = (items || []).reduce((acc: number, curr: any) => {
+            const basePrice = Number(curr.precio) || 0;
+            const qty = Number(curr.cantidad) || 0;
+            const discountPercent = Number(curr.descuento_porcentaje) || 0;
+            const discountedPrice = basePrice * (1 - (discountPercent / 100));
+            return acc + (discountedPrice * qty);
+        }, 0);
         setValue("amount", total);
     }, [items, setValue]);
 
@@ -457,6 +491,7 @@ export default function CreateOpportunityWizard() {
 
             console.log('[Wizard] Submitting sanitized opportunity data:', sanitizedData);
             await createOpportunity(sanitizedData);
+            clearDraft();
             router.push("/oportunidades");
         } catch (err) {
             console.error(err);
@@ -486,6 +521,26 @@ export default function CreateOpportunityWizard() {
     return (
         <div className="max-w-3xl mx-auto space-y-6">
             <h1 className="text-2xl font-bold text-slate-800">Nueva Oportunidad</h1>
+
+            {hasDraft && (
+                <div className="bg-blue-50 border border-blue-200 text-blue-800 px-4 py-3 rounded-lg flex items-center justify-between shadow-sm">
+                    <span className="text-sm font-medium">Hemos recuperado tu borrador de una sesión anterior.</span>
+                    <button 
+                        onClick={() => {
+                            if (window.confirm("¿Seguro que quieres borrar este borrador y empezar de cero?")) {
+                                clearDraft();
+                                reset();
+                                setStep(0);
+                                setSelectedAccount(null);
+                                setAccountSearchTerm("");
+                            }
+                        }}
+                        className="text-sm bg-white border border-blue-200 px-3 py-1 rounded hover:bg-blue-100 transition-colors font-semibold"
+                    >
+                        Empezar de cero
+                    </button>
+                </div>
+            )}
 
             {/* Steps Indicator */}
             <div className="flex items-center space-x-4 mb-8 overflow-x-auto pb-2">
@@ -744,53 +799,6 @@ export default function CreateOpportunityWizard() {
                                 placeholder="Notas adicionales sobre esta oportunidad..."
                             />
                         </div>
-
-                        {/* Fifth Row - Orígenes */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 pt-4 border-t border-slate-100">
-                            <div className="space-y-2">
-                                <label htmlFor="origen_oportunidad" className="text-sm font-medium">Origen de la Oportunidad</label>
-                                <input
-                                    id="origen_oportunidad"
-                                    placeholder="Ej: Llamada, Evento..."
-                                    {...register("origen_oportunidad")}
-                                    className="w-full p-2 border rounded-lg hover:border-blue-300 focus:border-blue-500 transition-colors"
-                                />
-                                {errors.origen_oportunidad && <p className="text-sm text-red-500 mt-1">{errors.origen_oportunidad.message as string}</p>}
-                            </div>
-
-                            <div className="space-y-2">
-                                <label htmlFor="url_origen" className="text-sm font-medium">URL Origen</label>
-                                <input
-                                    id="url_origen"
-                                    placeholder="https://..."
-                                    {...register("url_origen")}
-                                    className="w-full p-2 border rounded-lg hover:border-blue-300 focus:border-blue-500 transition-colors"
-                                />
-                                {errors.url_origen && <p className="text-sm text-red-500 mt-1">{errors.url_origen.message as string}</p>}
-                            </div>
-
-                            <div className="space-y-2">
-                                <label htmlFor="fuente_conversion" className="text-sm font-medium">Fuente de Conversión</label>
-                                <input
-                                    id="fuente_conversion"
-                                    placeholder="Ej: Google Ads, Referido..."
-                                    {...register("fuente_conversion")}
-                                    className="w-full p-2 border rounded-lg hover:border-blue-300 focus:border-blue-500 transition-colors"
-                                />
-                                {errors.fuente_conversion && <p className="text-sm text-red-500 mt-1">{errors.fuente_conversion.message as string}</p>}
-                            </div>
-
-                            <div className="space-y-2">
-                                <label htmlFor="categoria_oportunidad" className="text-sm font-medium">Categoría de Interés</label>
-                                <input
-                                    id="categoria_oportunidad"
-                                    placeholder="Ej: Cocinas, Baños..."
-                                    {...register("categoria_oportunidad")}
-                                    className="w-full p-2 border rounded-lg hover:border-blue-300 focus:border-blue-500 transition-colors"
-                                />
-                                {errors.categoria_oportunidad && <p className="text-sm text-red-500 mt-1">{errors.categoria_oportunidad.message as string}</p>}
-                            </div>
-                        </div>
                     </div>
                 )}
 
@@ -870,22 +878,43 @@ export default function CreateOpportunityWizard() {
                                     <div key={item.product_id} className="flex items-center gap-4 p-3 bg-white border border-slate-200 rounded-xl shadow-sm">
                                         <div className="flex-1">
                                             <div className="font-medium text-sm text-slate-800">{item.nombre}</div>
-                                            <div className="text-xs text-slate-500">{currencyId} {new Intl.NumberFormat().format(item.precio || 0)} c/u</div>
+                                            <div className="text-xs text-slate-500">{currencyId} {new Intl.NumberFormat().format(item.precio || 0)} c/u base</div>
+                                            {(Number(item.descuento_porcentaje) || 0) > 0 && (
+                                                <div className="text-xs text-emerald-600 font-medium mt-0.5">
+                                                    Precio con desc: {currencyId} {new Intl.NumberFormat().format((item.precio || 0) * (1 - (Number(item.descuento_porcentaje) || 0) / 100))} c/u
+                                                </div>
+                                            )}
                                         </div>
-                                        <div className="flex items-center gap-2">
-                                            <input
-                                                type="number"
-                                                className="w-16 p-1 border rounded text-center text-sm"
-                                                value={isNaN(item.cantidad) ? "" : item.cantidad}
-                                                onChange={(e) => updateQuantity(item.product_id, parseInt(e.target.value))}
-                                            />
-                                            <button
-                                                type="button"
-                                                onClick={() => removeProduct(item.product_id)}
-                                                className="p-1 text-red-500 hover:bg-red-50 rounded"
-                                            >
-                                                <Trash2 className="w-4 h-4" />
-                                            </button>
+                                        <div className="flex items-center gap-2 mt-2 sm:mt-0">
+                                            <div className="flex flex-col items-center">
+                                                <span className="text-[10px] text-slate-500 uppercase font-semibold mb-1">Cant.</span>
+                                                <input
+                                                    type="number"
+                                                    className="w-16 p-1 border rounded text-center text-sm"
+                                                    value={isNaN(item.cantidad) ? "" : item.cantidad}
+                                                    onChange={(e) => updateQuantity(item.product_id, parseInt(e.target.value))}
+                                                />
+                                            </div>
+                                            <div className="flex flex-col items-center">
+                                                <span className="text-[10px] text-slate-500 uppercase font-semibold mb-1">Desc %</span>
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    max="100"
+                                                    className="w-16 p-1 border rounded text-center text-sm"
+                                                    value={item.descuento_porcentaje === "" ? "" : (item.descuento_porcentaje ?? 0)}
+                                                    onChange={(e) => updateDiscount(item.product_id, e.target.value)}
+                                                />
+                                            </div>
+                                            <div className="flex flex-col items-center justify-end h-full mt-4">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => removeProduct(item.product_id)}
+                                                    className="p-1.5 text-red-500 hover:bg-red-50 rounded"
+                                                >
+                                                    <Trash2 className="w-5 h-5" />
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                 ))

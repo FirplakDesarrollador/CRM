@@ -9,6 +9,7 @@ import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useState, useEffect } from "react";
 import { Loader2, User, Building2, Medal } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { useFormDraft } from "@/lib/hooks/useFormDraft";
 import AccountContactsTab from "./AccountContactsTab";
 import AccountOpportunitiesTab from "./AccountOpportunitiesTab";
 import { Briefcase } from "lucide-react";
@@ -184,14 +185,7 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
     // Tab State
     // Tab State moved to top
 
-    const {
-        register,
-        handleSubmit,
-        watch,
-        setValue,
-        reset,
-        formState: { errors, isDirty },
-    } = useForm<AccountFormData>({
+    const form = useForm<AccountFormData>({
         resolver: zodResolver(accountSchema),
         shouldUnregister: false,
         defaultValues: {
@@ -214,6 +208,17 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             comentarios: account?.comentarios || ""
         }
     });
+
+    const {
+        register,
+        handleSubmit,
+        watch,
+        setValue,
+        reset,
+        formState: { errors, isDirty },
+    } = form;
+
+    const { clearDraft } = useFormDraft(form, 'crm_draft_account', !account);
 
     // Update form when account changes (ONLY if not modified by user to avoid overwriting)
     useEffect(() => {
@@ -386,6 +391,7 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                 await updateAccount(account.id, payload);
             } else {
                 await createAccount(payload);
+                clearDraft(); // Limpiar borrador si es creación exitosa
             }
 
             onSuccess();

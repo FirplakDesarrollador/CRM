@@ -87,6 +87,7 @@ export function useActivities(filters?: { opportunity_id?: string, advisor_id?: 
             user_id: userId,
             tipo_actividad: data.tipo_actividad || 'EVENTO',
             asunto: (data.asunto || 'Nueva Actividad').trim(),
+            descripcion: data.descripcion || undefined,
             fecha_inicio: toISODateString(data.fecha_inicio),
             fecha_fin: data.fecha_fin ? toISODateString(data.fecha_fin) : undefined,
             is_completed: !!data.is_completed,
