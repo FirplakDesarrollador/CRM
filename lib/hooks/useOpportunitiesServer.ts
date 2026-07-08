@@ -230,7 +230,9 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
 
                 if (accountOwnerIds && accountOwnerIds.length > 0) {
                     localOpps = localOpps.filter(o => o.owner_user_id && accountOwnerIds.includes(o.owner_user_id));
-                } else if (userFilter !== 'unrestricted') {
+                }
+                
+                if (userFilter !== 'unrestricted') {
                     if (userFilter === 'mine') {
                         localOpps = localOpps.filter(o => 
                             o.owner_user_id === currentUserId || 
@@ -433,7 +435,9 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
 
             if (accountOwnerIds && accountOwnerIds.length > 0) {
                 query = query.in('owner_user_id', accountOwnerIds);
-            } else if (userFilter !== 'unrestricted') {
+            }
+            
+            if (userFilter !== 'unrestricted') {
                 if (userFilter === 'mine') {
                     const ids = [currentUserId, ...(user?.coordinadores || [])].filter(Boolean);
                     const idsString = ids.join(',');
