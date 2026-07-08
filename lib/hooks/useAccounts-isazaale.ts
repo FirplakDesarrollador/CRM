@@ -1,0 +1,169 @@
+import { useLiveQuery } from "dexie-react-hooks";
+import { db, LocalCuenta } from "@/lib/db";
+import { syncEngine } from "@/lib/sync";
+import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabase";
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+
+export function useAccounts(filters?: { advisor_id?: string | null, showAll?: boolean }) {
+    const { user, isVendedor } = useCurrentUser();
+    const userId = user?.id;
+
+    // Live Query from Local DB (Dexie)
+    const accounts = useLiveQuery(async () => {
+        // Priority 1: Specific advisor filter from Dashboard
+        if (filters?.advisor_id) {
+            return db.accounts.where('owner_user_id').equals(filters.advisor_id).toArray();
+        }
+
+        // Priority 2: Global visibility (for Opportunity Wizard)
+        if (filters?.showAll) {
+            return db.accounts.toArray();
+        }
+
+        // Priority 3: Vendedor role restriction
+        if (isVendedor && userId) {
+            return db.accounts.filter(a => 
+                a.owner_user_id === userId || 
+                (!a.owner_user_id && a.created_by === userId)
+            ).toArray();
+        }
+
+        return db.accounts.toArray();
+    }, [isVendedor, userId, filters?.advisor_id, filters?.showAll]);
+    const isLoading = false; // Background sync handles loading
+
+    const createAccount = async (data: Partial<LocalCuenta>) => {
+        const id = crypto.randomUUID();
+        const { data: { user } } = await supabase.auth.getUser();
+
+        const toNum = (val: any) => (val !== undefined && val !== null && val !== "") ? Number(val) : null;
+
+        const sanitizedData = {
+            ...data,
+            subclasificacion_id: toNum(data.subclasificacion_id),
+            departamento_id: toNum(data.departamento_id),
+            ciudad_id: toNum(data.ciudad_id),
+            pais_id: toNum(data.pais_id)
+        };
+
+        const newAccount = {
+            ...sanitizedData,
+            id,
+            created_by: user?.id,
+            owner_user_id: user?.id,
+            updated_at: new Date().toISOString()
+        };
+        await db.accounts.add(newAccount as LocalCuenta);
+        await syncEngine.queueMutation('CRM_Cuentas', id, newAccount, { isSnapshot: true });
+
+        // AUTO-CREATE CONTACT FOR 'PROPIO' CHANNEL
+        if (sanitizedData.canal_id === 'PROPIO') {
+            const contactId = crypto.randomUUID();
+            const contactData = {
+                id: contactId,
+                account_id: id,
+                nombre: sanitizedData.nombre || 'Cliente',
+                cargo: 'Cliente final',
+                telefono: sanitizedData.telefono || null,
+                email: (sanitizedData as any).email || null,
+                es_principal: true,
+                created_by: user?.id,
+                updated_by: user?.id,
+                updated_at: new Date().toISOString()
+            };
+            await db.contacts.add(contactData as any);
+            await syncEngine.queueMutation('CRM_Contactos', contactId, contactData, { isSnapshot: true });
+            console.log('[useAccounts] Auto-created contact for PROPIO account:', contactId);
+        }
+
+        return id;
+    };
+
+
+    const updateAccount = async (id: string, updates: Partial<LocalCuenta>) => {
+        console.log('[useAccounts] DEBUG - updateAccount original updates:', JSON.stringify(updates));
+
+        // Defensive conversion: ensure numeric IDs are numbers, not strings from form
+        const { _sync_metadata, ...sanitized } = updates;
+        
+        const toNum = (val: any) => (val !== undefined && val !== null && val !== "") ? Number(val) : null;
+        
+        // Ensure email and telefono are preserved even if they are null strings
+        const sanitizedUpdates: any = {
+            ...sanitized,
+            subclasificacion_id: toNum((updates as any).subclasificacion_id),
+            departamento_id: toNum((updates as any).departamento_id),
+            ciudad_id: toNum((updates as any).ciudad_id),
+            pais_id: toNum((updates as any).pais_id),
+            telefono: (updates as any).telefono !== undefined ? (updates as any).telefono : sanitized.telefono,
+            email: (updates as any).email !== undefined ? (updates as any).email : (sanitized as any).email
+        };
+
+        console.log('[useAccounts] DEBUG - sanitizedUpdates result:', JSON.stringify(sanitizedUpdates));
+        
+        const currentLocal = await db.accounts.get(id);
+        const fullUpdates = { ...sanitizedUpdates, updated_at: new Date().toISOString() };
+        await db.accounts.update(id, fullUpdates);
+        
+        const mergedRecord = { ...currentLocal, ...fullUpdates } as LocalCuenta;
+        console.log('[useAccounts] DEBUG - Queuing mutation for sync (Atomic Snapshot):', mergedRecord);
+        await syncEngine.queueMutation('CRM_Cuentas', id, mergedRecord, { isSnapshot: true });
+    };
+
+    const deleteAccount = async (id: string) => {
+        console.log('[useAccounts] deleteAccount - Starting cascade delete for:', id);
+
+        // 1. Delete Contacts associated with this account (server-side)
+        const { data: contacts } = await supabase.from('CRM_Contactos').select('id').eq('account_id', id);
+        if (contacts && contacts.length > 0) {
+            const contactIds = contacts.map(c => c.id);
+            await supabase.from('CRM_Contactos').update({ is_deleted: true }).in('id', contactIds);
+            console.log('[useAccounts] Deleted contacts:', contactIds.length);
+        }
+
+        // 2. Get Opportunities associated with this account
+        const { data: opportunities } = await supabase.from('CRM_Oportunidades').select('id').eq('account_id', id);
+        if (opportunities && opportunities.length > 0) {
+            const oppIds = opportunities.map(o => o.id);
+
+            // 3. Delete Activities associated with these opportunities
+            await supabase.from('CRM_Actividades').update({ is_deleted: true }).in('opportunity_id', oppIds);
+
+            // 4. Get Quotes associated with these opportunities
+            const { data: quotes } = await supabase.from('CRM_Cotizaciones').select('id').in('opportunity_id', oppIds);
+            if (quotes && quotes.length > 0) {
+                const quoteIds = quotes.map(q => q.id);
+
+                // 5. Delete Quote Items
+                await supabase.from('CRM_CotizacionItems').update({ is_deleted: true }).in('cotizacion_id', quoteIds);
+
+                // 6. Delete Quotes
+                await supabase.from('CRM_Cotizaciones').update({ is_deleted: true }).in('id', quoteIds);
+            }
+
+            // 7. Delete Opportunities
+            await supabase.from('CRM_Oportunidades').update({ is_deleted: true }).in('id', oppIds);
+            console.log('[useAccounts] Deleted opportunities:', oppIds.length);
+        }
+
+        // 8. Finally Delete the Account itself
+        const { error } = await supabase.from('CRM_Cuentas').update({ is_deleted: true }).eq('id', id);
+        if (error) {
+            console.error('[useAccounts] Error deleting account:', error);
+            throw error;
+        }
+
+        // Also remove from local Dexie DB for offline consistency
+        await db.accounts.delete(id);
+        console.log('[useAccounts] Account deleted successfully:', id);
+    };
+
+    return {
+        accounts: accounts || [],
+        isLoading,
+        createAccount,
+        updateAccount,
+        deleteAccount
+    };
+}

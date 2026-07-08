@@ -1,0 +1,1717 @@
+"use client";
+
+import { useOpportunities, useQuotes, useQuoteItems } from "@/lib/hooks/useOpportunities";
+import { DetailHeader } from "@/components/ui/DetailHeader";
+import { useState, useEffect } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { FileText, Plus, AlertCircle, Check, Trash2, Loader2, Truck, Package, Building, ChevronRight, TrendingUp, User, Users, Copy } from "lucide-react";
+import Link from "next/link";
+import { cn } from "@/lib/utils";
+import { db } from "@/lib/db";
+import { ProbabilityDonut } from "@/components/ui/ProbabilityDonut";
+import { syncEngine } from "@/lib/sync";
+import { useLiveQuery } from "dexie-react-hooks";
+import { formatColombiaDate, isDateOverdue, toInputDate, parseColombiaDate } from "@/lib/date-utils";
+import {
+    Calendar as CalendarIcon,
+    CheckCircle2,
+    Circle,
+    Clock,
+    ListTodo,
+    Search as SearchIcon
+} from "lucide-react";
+import { useActivities, LocalActivity } from "@/lib/hooks/useActivities";
+import { CreateActivityModal } from "@/components/activities/CreateActivityModal";
+import { supabase } from "@/lib/supabase";
+import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { LossReasonModal } from "@/components/oportunidades/LossReasonModal";
+import { CollaboratorsTab } from "@/components/oportunidades/CollaboratorsTab";
+import { AssignedTab } from "@/components/oportunidades/AssignedTab";
+import { DollarSign } from "lucide-react";
+import { useSyncStore } from "@/lib/stores/useSyncStore";
+
+export default function OpportunityDetailPage() {
+    const params = useParams();
+    const router = useRouter();
+    const id = params.id as string;
+    const { opportunities, deleteOpportunity } = useOpportunities();
+    const { user: currentUser, role: userRole } = useCurrentUser();
+    const setIsLoadingData = useSyncStore(state => state.setIsLoadingData);
+
+    const phases = useLiveQuery(() => db.phases.toArray());
+    const phaseMap = new Map(phases?.map(p => [p.id, p.nombre]));
+
+    const opportunity = opportunities?.find(o => o.id === id);
+    const [serverOpportunity, setServerOpportunity] = useState<any>(null);
+    const [isFetchingServer, setIsFetchingServer] = useState(false);
+
+    // Fallback: If not found locally, try to fetch from server (JIT Sync)
+    useEffect(() => {
+        const fetchFromServer = async () => {
+            if (opportunities && !opportunity && !isFetchingServer && !serverOpportunity) {
+                if (!navigator.onLine) {
+                    console.warn(`[JIT Sync] Offline: Cannot fetch opportunity ${id}`);
+                    setServerOpportunity('NOT_FOUND');
+                    return;
+                }
+                console.log(`[JIT Sync] Opportunity ${id} not found locally. Fetching from server...`);
+                setIsFetchingServer(true);
+                setIsLoadingData(true);
+                try {
+                    // Fetch Opportunity
+                    const { data: oppData, error: oppError } = await supabase
+                        .from('CRM_Oportunidades')
+                        .select('*')
+                        .eq('id', id)
+                        .single();
+
+                    if (oppData && !oppError) {
+                        console.log(`[JIT Sync] Found opportunity on server. Saving locally...`);
+                        await db.opportunities.put(oppData);
+
+                        // Fetch Collaborators (Defensive)
+                        try {
+                            const { data: collabs, error: collabsError } = await supabase
+                                .from('CRM_Oportunidades_Colaboradores')
+                                .select('*')
+                                .eq('oportunidad_id', id);
+
+                            if (collabs && !collabsError) {
+                                await db.opportunityCollaborators.bulkPut(collabs);
+                            }
+                        } catch (err) {
+                            console.warn("Could not fetch collaborators from server (table might be missing):", err);
+                        }
+
+                    } else if (oppError) {
+                        console.warn(`[JIT Sync] Opportunity not found on server either:`, oppError.message);
+                        setServerOpportunity('NOT_FOUND');
+                    }
+                } catch (err) {
+                    console.error(`[JIT Sync] Error fetching opportunity:`, err);
+                    setServerOpportunity('NOT_FOUND');
+                } finally {
+                    setIsFetchingServer(false);
+                    setIsLoadingData(false);
+                }
+            }
+        };
+
+        fetchFromServer();
+    }, [id, opportunity, opportunities, isFetchingServer, serverOpportunity]);
+
+    const searchParams = useSearchParams();
+    const initialTab = searchParams.get('tab') as any;
+    const [activeTab, setActiveTab] = useState<'resumen' | 'colaboradores' | 'cotizaciones' | 'productos' | 'actividades' | 'asignado'>(initialTab || 'resumen');
+
+    // Sincronizar pestaña con parámetro de URL si cambia
+    useEffect(() => {
+        const tab = searchParams.get('tab');
+        if (tab && ['resumen', 'colaboradores', 'cotizaciones', 'productos', 'actividades', 'asignado'].includes(tab)) {
+            setActiveTab(tab as any);
+        }
+    }, [searchParams]);
+    
+    // Save state for cross-module restoration
+    useEffect(() => {
+        if (id) {
+            // We only save the ID part, the list page will handle the rest.
+            // We need to preserve existing filters if possible, but at minimum the ID.
+            const saved = sessionStorage.getItem('crm_oportunidades_state');
+            const params = new URLSearchParams(saved || '');
+            params.set('id', id);
+            sessionStorage.setItem('crm_oportunidades_state', params.toString());
+        }
+    }, [id]);
+
+    // Modal state for delete confirmation
+    const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+    const [isDeleting, setIsDeleting] = useState(false);
+
+    const handleDelete = async () => {
+        setIsDeleting(true);
+        try {
+            await deleteOpportunity(id);
+            setIsDeleteModalOpen(false); // Close modal before navigation
+            router.push("/oportunidades?view=list");
+        } catch (error) {
+            console.error("Error deleting opportunity:", error);
+            setIsDeleting(false);
+            setIsDeleteModalOpen(false);
+        }
+    };
+
+    // Note: Splash screen removed to allow non-blocking navigation.
+    // Progress is now shown via the global LoadingOverlay.
+
+    if (!opportunity) {
+        if (serverOpportunity === 'NOT_FOUND') {
+            return (
+                <div className="min-h-screen bg-slate-50 flex items-center justify-center flex-col gap-4">
+                    <AlertCircle className="w-12 h-12 text-slate-300" />
+                    <p className="text-slate-500 font-medium text-lg">Oportunidad no encontrada</p>
+                    <button onClick={() => router.push("/oportunidades")} className="text-blue-600 font-bold hover:underline">
+                        Volver al listado
+                    </button>
+                </div>
+            );
+        }
+        return (
+            <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+                <div className="flex flex-col items-center gap-2">
+                    <Loader2 className="w-6 h-6 text-slate-300 animate-spin" />
+                    <p className="text-slate-400">Cargando oportunidad...</p>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="min-h-screen bg-slate-50">
+            <DetailHeader
+                title={opportunity.nombre}
+                subtitle={`${opportunity.currency_id} ${opportunity.amount}`}
+                status={
+                    opportunity.estado_id === 2 ? 'Ganada' :
+                        opportunity.estado_id === 3 ? 'Perdida' :
+                            opportunity.estado_id === 4 ? 'Cancelada' :
+                                (phaseMap.get(opportunity.fase_id) || opportunity.fase || 'Prospecto')
+                }
+                backHref="/oportunidades?view=list"
+                actions={[
+                    ...(userRole === 'ADMIN' || userRole === 'COORDINADOR' || opportunity.owner_user_id === currentUser?.id || opportunity.created_by === currentUser?.id ? [{
+                        label: "Eliminar Oportunidad",
+                        icon: Trash2,
+                        variant: 'danger' as const,
+                        onClick: () => setIsDeleteModalOpen(true)
+                    }] : [])
+                ]}
+            />
+
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+
+                {/* Sub-Tabs Nav */}
+                <div className="flex space-x-2 border-b border-slate-200 mb-6 w-full overflow-x-auto">
+                    {[
+                        { id: 'resumen', label: 'Resumen', icon: TrendingUp },
+                        { id: 'colaboradores', label: 'Colaboradores', icon: Users },
+                        { id: 'cotizaciones', label: 'Cotizaciones', icon: FileText },
+                        { id: 'productos', label: 'Productos', icon: Package },
+                        { id: 'actividades', label: 'Actividades', icon: ListTodo },
+                        ...(userRole === 'ADMIN' || userRole === 'COORDINADOR' ? [{ id: 'asignado', label: 'Asignado', icon: User }] : [])
+                    ].map((tab, idx) => (
+                        <button
+                            key={tab.id}
+                            onClick={() => setActiveTab(tab.id as any)}
+                            className={cn(
+                                "flex items-center gap-1.5 px-2.5 pb-3 text-[13px] font-medium border-b-2 transition-colors whitespace-nowrap",
+                                activeTab === tab.id
+                                    ? "border-blue-600 text-blue-600"
+                                    : "border-transparent text-slate-500 hover:text-slate-800 hover:border-slate-300"
+                            )}
+                        >
+                            <tab.icon size={14} />
+                            {tab.label}
+                        </button>
+                    ))}
+                </div>
+
+                {/* Content */}
+                {activeTab === 'cotizaciones' && (
+                    <QuotesTab opportunityId={id} currency={opportunity.currency_id || 'COP'} />
+                )}
+
+                {activeTab === 'colaboradores' && (
+                    <CollaboratorsTab opportunityId={id} />
+                )}
+
+                {activeTab === 'productos' && (
+                    <ProductsTab opportunityId={id} />
+                )}
+
+                {activeTab === 'resumen' && (
+                    <SummaryTab opportunity={opportunity} />
+                )}
+
+                {activeTab === 'actividades' && (
+                    <ActivitiesTab opportunityId={id} accountId={opportunity?.account_id} />
+                )}
+
+                {(userRole === 'ADMIN' || userRole === 'COORDINADOR') && activeTab === 'asignado' && (
+                    <AssignedTab opportunityId={id} currentOwnerId={opportunity.owner_user_id || null} />
+                )}
+            </div>
+
+            <ConfirmationModal
+                isOpen={isDeleteModalOpen}
+                onClose={() => setIsDeleteModalOpen(false)}
+                onConfirm={handleDelete}
+                title="Eliminar Oportunidad"
+                message="¿Estás seguro de que deseas eliminar esta oportunidad? Esta acción no se puede deshacer."
+                confirmLabel="Eliminar Oportunidad"
+                variant="danger"
+                isLoading={isDeleting}
+            />
+
+        </div>
+    );
+}
+
+const LOSS_REASONS = [
+    "Precio elevado",
+    "Compra en la competencia por precio",
+    "No contesta",
+    "Lo pospone",
+    "No va a comprar",
+    "Tiempos de entrega",
+    "No hay medida o color",
+];
+
+function SummaryTab({ opportunity }: { opportunity: any }) {
+    const { updateOpportunity } = useOpportunities();
+    const { quotes } = useQuotes(opportunity.id);
+    const [localAmount, setLocalAmount] = useState(opportunity.amount || 0);
+    const [localClosingDate, setLocalClosingDate] = useState(toInputDate(opportunity.fecha_cierre_estimada));
+    const [localOrigen, setLocalOrigen] = useState(opportunity.origen_oportunidad || "");
+    const [localUrlOrigen, setLocalUrlOrigen] = useState(opportunity.url_origen || "");
+    const [localFuente, setLocalFuente] = useState(opportunity.fuente_conversion || "");
+    const [localCategoriaOportunidad, setLocalCategoriaOportunidad] = useState(opportunity.categoria_oportunidad || "");
+    const [isSaving, setIsSaving] = useState(false);
+    const [isSavingDate, setIsSavingDate] = useState(false);
+    const [isSavingOrigen, setIsSavingOrigen] = useState(false);
+    const [isSavingUrl, setIsSavingUrl] = useState(false);
+    const [isSavingFuente, setIsSavingFuente] = useState(false);
+    const [isSavingCategoria, setIsSavingCategoria] = useState(false);
+
+    // Loss reason inline fields
+    const [localRazonPerdida, setLocalRazonPerdida] = useState(opportunity.razon_perdida || "");
+    const [localComentariosPerdida, setLocalComentariosPerdida] = useState(opportunity.comentarios_perdida || "");
+    const [isSavingLossReason, setIsSavingLossReason] = useState(false);
+    const [isSavingComentarios, setIsSavingComentarios] = useState(false);
+    const [localComentarios, setLocalComentarios] = useState(opportunity.comentarios || "");
+    const [isSavingComentariosMain, setIsSavingComentariosMain] = useState(false);
+    const [localDireccion, setLocalDireccion] = useState(opportunity.direccion_entrega || "");
+    const [isSavingDireccion, setIsSavingDireccion] = useState(false);
+
+    // Modal state (kept for backward compat but no longer used for blocking)
+    const [isLossReasonModalOpen, setIsLossReasonModalOpen] = useState(false);
+    const [pendingPhaseId, setPendingPhaseId] = useState<number | null>(null);
+    const [ownerSellerName, setOwnerSellerName] = useState<string | null>(null);
+    const [reporterName, setReporterName] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (opportunity?.owner_user_id) {
+            supabase
+                .from('CRM_Usuarios')
+                .select('full_name')
+                .eq('id', opportunity.owner_user_id)
+                .single()
+                .then(({ data }) => {
+                    if (data?.full_name) setOwnerSellerName(data.full_name);
+                });
+        }
+        if (opportunity?.created_by) {
+            supabase
+                .from('CRM_Usuarios')
+                .select('full_name')
+                .eq('id', opportunity.created_by)
+                .single()
+                .then(({ data }) => {
+                    if (data?.full_name) setReporterName(data.full_name);
+                });
+        }
+    }, [opportunity?.owner_user_id, opportunity?.created_by]);
+
+    // Segments Logic
+    const [segments, setSegments] = useState<any[]>([]);
+    const [localSegmentId, setLocalSegmentId] = useState<string>(opportunity.segmento_id ? String(opportunity.segmento_id) : "");
+    const [isSavingSegment, setIsSavingSegment] = useState(false);
+
+    // Sync local state when prop updates
+    useEffect(() => {
+        setLocalSegmentId(opportunity.segmento_id ? String(opportunity.segmento_id) : "");
+        setLocalClosingDate(toInputDate(opportunity.fecha_cierre_estimada));
+        setLocalOrigen(opportunity.origen_oportunidad || "");
+        setLocalUrlOrigen(opportunity.url_origen || "");
+        setLocalFuente(opportunity.fuente_conversion || "");
+        setLocalRazonPerdida(opportunity.razon_perdida || "");
+        setLocalComentariosPerdida(opportunity.comentarios_perdida || "");
+        setLocalComentarios(opportunity.comentarios || "");
+        setLocalDireccion(opportunity.direccion_entrega || "");
+        setLocalCategoriaOportunidad(opportunity.categoria_oportunidad || "");
+    }, [opportunity.segmento_id, opportunity.fecha_cierre_estimada, opportunity.origen_oportunidad, opportunity.url_origen, opportunity.fuente_conversion, opportunity.razon_perdida, opportunity.comentarios_perdida, opportunity.comentarios, opportunity.direccion_entrega, opportunity.categoria_oportunidad]);
+
+    useEffect(() => {
+        const fetchSegments = async () => {
+            const { data } = await supabase.from('CRM_Segmentos').select('*');
+            if (data) setSegments(data);
+        };
+        fetchSegments();
+    }, []);
+
+    const handleSegmentChange = async (newId: string) => {
+        setLocalSegmentId(newId);
+        setIsSavingSegment(true);
+        try {
+            await updateOpportunity(opportunity.id, { segmento_id: newId ? Number(newId) : null });
+        } finally {
+            setIsSavingSegment(false);
+        }
+    };
+
+
+    // Fetch Account
+    const account = useLiveQuery(
+        () => db.accounts.get(opportunity.account_id),
+        [opportunity.account_id]
+    );
+
+    const [isFetchingAccount, setIsFetchingAccount] = useState(false);
+    const [isOfflineAccount, setIsOfflineAccount] = useState(false);
+
+    // Rollback for Account (JIT Sync)
+    useEffect(() => {
+        const fetchAccountFromServer = async () => {
+            if (opportunity.account_id && !account && !isFetchingAccount && !isOfflineAccount) {
+                if (!navigator.onLine) {
+                    setIsOfflineAccount(true);
+                    return;
+                }
+                console.log(`[JIT Sync] Account ${opportunity.account_id} not found locally. Fetching from server...`);
+                setIsFetchingAccount(true);
+                try {
+                    const { data, error } = await supabase
+                        .from('CRM_Cuentas')
+                        .select('*')
+                        .eq('id', opportunity.account_id)
+                        .single();
+
+                    if (data && !error) {
+                        console.log(`[JIT Sync] Found account on server. Saving locally...`);
+                        await db.accounts.put(data);
+                    } else if (error) {
+                        console.warn(`[JIT Sync] Error fetching account from server:`, error);
+                    }
+                } catch (err) {
+                    console.error("Error fetching account from server", err);
+                } finally {
+                    setIsFetchingAccount(false);
+                    // Keep isFetchingServer clean if we inadvertently mutated it in other flows, but actually we shouldn't touch it here
+                }
+            }
+        };
+        fetchAccountFromServer();
+    }, [opportunity.account_id, account, isFetchingAccount, isOfflineAccount]);
+
+    const effectiveAccount = account || (isOfflineAccount ? {
+        id: opportunity.account_id,
+        nombre: "Cliente Offline (Datos Parciales)",
+        canal_id: null,
+        subclasificacion_id: null,
+        nit: "",
+        telefono: "",
+        direccion: "",
+        ciudad: ""
+    } : null);
+
+    // Fetch Phases for Channel (with deduplication by orden in case of DB integrity issues)
+    const phases = useLiveQuery(
+        async () => {
+            if (!effectiveAccount?.canal_id) return [];
+            const raw = await db.phases.where('canal_id').equals(effectiveAccount.canal_id).sortBy('orden');
+            // Deduplicate by orden, keeping the entry with the lowest id
+            const seen = new Map<number, typeof raw[0]>();
+            for (const phase of raw) {
+                if (!seen.has(phase.orden)) {
+                    seen.set(phase.orden, phase);
+                }
+            }
+            return Array.from(seen.values()).sort((a, b) => a.orden - b.orden);
+        },
+        [account?.canal_id]
+    );
+
+    // Computed: both loss reason fields are filled
+    const lossFieldsComplete = localRazonPerdida.trim() !== "" && localComentariosPerdida.trim() !== "";
+
+    const handlePhaseChange = async (phaseId: number) => {
+        const targetPhase = phases?.find(p => p.id === phaseId);
+
+        // Check if target is "Cerrada Perdida"
+        const normalizedName = targetPhase?.nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") || "";
+
+        if (normalizedName.includes('perdida')) {
+            // Block if loss reason fields are not filled
+            if (!lossFieldsComplete) return;
+
+            const lostPhase = phases?.find(p => p.id === phaseId);
+            await updateOpportunity(opportunity.id, {
+                fase_id: phaseId,
+                razon_perdida: localRazonPerdida,
+                comentarios_perdida: localComentariosPerdida,
+                estado_id: 3,
+                probability: lostPhase?.probability ?? 0
+            });
+            return;
+        }
+
+        // Check if target is "Cerrada Ganada"
+        if (normalizedName.includes('ganada')) {
+            await updateOpportunity(opportunity.id, {
+                fase_id: phaseId,
+                estado_id: 2, // Explicitly set to Won status
+                probability: targetPhase?.probability ?? 100 // Propagate phase probability
+            });
+            return;
+        }
+
+        // Default: just update phase, reset estado to Open if coming from a closed state
+        await updateOpportunity(opportunity.id, {
+            fase_id: phaseId,
+            estado_id: 1, // Reset to Open status when moving to any other phase
+            probability: targetPhase?.probability ?? 0 // Propagate phase probability
+        });
+    };
+
+    // Legacy: kept for backward compat, no longer used
+    const confirmLossReason = async (reasonId: number) => {
+        if (pendingPhaseId) {
+            const lostPhase = phases?.find(p => p.id === pendingPhaseId);
+            await updateOpportunity(opportunity.id, {
+                fase_id: pendingPhaseId,
+                razon_perdida_id: reasonId,
+                estado_id: 3,
+                probability: lostPhase?.probability ?? 0
+            });
+            setIsLossReasonModalOpen(false);
+            setPendingPhaseId(null);
+        }
+    };
+
+    if (!effectiveAccount) {
+        return (
+            <div className="p-12 text-center bg-white rounded-2xl border border-slate-200">
+                <Loader2 className="w-6 h-6 text-blue-600 animate-spin mx-auto mb-4" />
+                <p className="text-slate-500 font-medium">Cargando datos del cliente...</p>
+                {isFetchingAccount && <p className="text-xs text-slate-400 mt-1">Buscando en el servidor...</p>}
+            </div>
+        );
+    }
+
+    const currentPhaseIndex = phases?.findIndex(p => p.id === opportunity.fase_id) ?? -1;
+
+    return (
+        <div className="space-y-6 animate-in fade-in duration-500">
+
+            {/* Timeline Card */}
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <h3 className="font-bold text-slate-900 mb-10">Fases de Venta</h3>
+
+                {!phases || phases.length === 0 ? (
+                    <div className="text-center text-slate-400 text-sm py-4">
+                        No hay fases definidas para el canal {effectiveAccount.canal_id || 'seleccionado'}.
+                    </div>
+                ) : (
+                    <div className="overflow-x-auto pb-16">
+                        <div className="relative pt-16 min-w-[800px] px-2">
+                            {/* Connecting Line - Extends to the start of the bifurcation */}
+                            <div
+                                className="absolute top-19 left-0 h-1 bg-slate-100 rounded-full z-0"
+                                style={{ width: 'calc(100% - 292px)' }}
+                            />
+
+                            <div className="flex justify-between items-start relative z-10 w-full">
+                                {phases.map((phase, index) => {
+                                    const normalizedPhaseName = phase.nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                                    const isFinal = normalizedPhaseName.includes('cerrada') || normalizedPhaseName.includes('ganada') || normalizedPhaseName.includes('perdida');
+                                    if (isFinal) return null; // Skip final phases in main loop
+
+                                    const isCompleted = currentPhaseIndex > index;
+                                    const isCurrent = currentPhaseIndex === index;
+                                    const isPending = currentPhaseIndex < index;
+
+                                    return (
+                                        <button
+                                            key={phase.id}
+                                            onClick={() => handlePhaseChange(phase.id)}
+                                            data-testid={`opportunity-phase-btn-${phase.id}`}
+                                            data-phase-id={phase.id}
+                                            className="flex flex-col items-center group w-24 focus:outline-none relative z-10"
+                                        >
+                                            <div className={cn(
+                                                "w-8 h-8 rounded-full flex items-center justify-center border-4 transition-all duration-300",
+                                                isCompleted ? "bg-blue-600 border-blue-600 text-white" :
+                                                    isCurrent ? "bg-white border-blue-600 scale-125 shadow-md" :
+                                                        "bg-white border-slate-200 text-slate-300 group-hover:border-blue-200"
+                                            )}>
+                                                {isCompleted && <Check className="w-4 h-4" />}
+                                                {isCurrent && <div className="w-2.5 h-2.5 bg-blue-600 rounded-full animate-pulse" />}
+                                                {isPending && <span className="text-[10px] font-bold text-slate-400">{index + 1}</span>}
+                                            </div>
+                                            <span className={cn(
+                                                "mt-3 text-[10px] font-bold text-center uppercase tracking-wide transition-colors duration-300",
+                                                isCurrent ? "text-blue-700" :
+                                                    isCompleted ? "text-blue-600" : "text-slate-400 group-hover:text-slate-600"
+                                            )}>
+                                                {phase.nombre}
+                                            </span>
+                                        </button>
+                                    );
+                                })}
+
+                                {/* Bifurcation for Final Phases */}
+                                <div className="relative h-28 w-[292px] shrink-0" style={{ marginTop: '-34px' }}>
+                                    {/* Curved SVG Lines for Bifurcation */}
+                                    <svg className="absolute left-0 top-0 w-full h-full pointer-events-none z-0">
+                                        {/* Main path splitting - Y=48 aligns with horizontal line (top-19 = 76px, container at 64px - 32px margin = 32px, so 76-32=44 → use 48 for visual alignment) */}
+                                        <path
+                                            d="M 0 48 C 30 48, 50 16, 90 16"
+                                            fill="none"
+                                            stroke="#f1f5f9"
+                                            strokeWidth="4"
+                                            strokeLinecap="round"
+                                        />
+                                        <path
+                                            d="M 0 48 C 30 48, 50 96, 90 96"
+                                            fill="none"
+                                            stroke="#f1f5f9"
+                                            strokeWidth="4"
+                                            strokeLinecap="round"
+                                        />
+                                    </svg>
+
+                                    {phases.filter(p => {
+                                        const normalized = p.nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                                        return normalized.includes('cerrada') || normalized.includes('ganada') || normalized.includes('perdida');
+                                    }).map((phase) => {
+                                        const isWon = phase.nombre.toLowerCase().includes('ganada');
+                                        const isActive = opportunity.fase_id === phase.id;
+
+                                        const isLostPhase = phase.nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes('perdida');
+                                        const isBlocked = isLostPhase && !lossFieldsComplete;
+
+                                        return (
+                                            <button
+                                                key={phase.id}
+                                                onClick={() => !isBlocked && handlePhaseChange(phase.id)}
+                                                data-testid={`opportunity-phase-btn-${phase.id}`}
+                                                data-phase-id={phase.id}
+                                                title={isBlocked ? "Completa los campos de pérdida en la tarjeta Información de Negocio" : undefined}
+                                                disabled={isBlocked}
+                                                // Align buttons with the ends of the SVG paths (Y=16 and Y=96)
+                                                style={{ top: isWon ? '16px' : '96px', transform: 'translateY(-50%)' }}
+                                                className={cn(
+                                                    "absolute left-[88px] flex items-center gap-2 px-3 py-2 rounded-full text-[10px] font-bold uppercase tracking-wider border transition-all z-10 whitespace-nowrap",
+                                                    isBlocked
+                                                        ? "bg-slate-50 border-slate-200 text-slate-300 cursor-not-allowed opacity-60"
+                                                        : isActive
+                                                            ? (isWon ? "bg-green-100 text-green-700 border-green-200 shadow-sm ring-2 ring-green-500/20" : "bg-red-100 text-red-700 border-red-200 shadow-sm ring-2 ring-red-500/20")
+                                                            : "bg-white border-slate-200 text-slate-400 hover:border-slate-300 hover:bg-slate-50"
+                                                )}
+                                            >
+                                                <div className={cn(
+                                                    "w-2 h-2 rounded-full",
+                                                    isBlocked ? "bg-slate-300" : isWon ? "bg-green-500" : "bg-red-500"
+                                                )} />
+                                                {phase.nombre}
+                                                {isBlocked && <span className="ml-0.5 text-[8px] opacity-70">🔒</span>}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            {/* Commission Badge - Only shown for Won opportunities */}
+            {opportunity.estado_id === 2 && (
+                <CommissionBadge opportunityId={opportunity.id} />
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Business Info Card */}
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-blue-300 transition-all flex flex-col">
+                    <div className="flex items-center gap-3 mb-6">
+                        <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg">
+                            <TrendingUp className="w-6 h-6" />
+                        </div>
+                        <div>
+                            <h3 className="font-bold text-slate-900 text-lg">Información de Negocio</h3>
+                            <p className="text-xs text-slate-500">Valor y métricas financieras</p>
+                        </div>
+                    </div>
+
+                    <div className="space-y-4 flex-1">
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                                ID Oportunidad
+                            </label>
+                            <div className="flex items-center gap-2">
+                                <div className="flex-1 px-3 py-1.5 bg-slate-50 border border-slate-100 rounded-lg text-slate-500 font-mono text-[11px] truncate">
+                                    {opportunity.id}
+                                </div>
+                                <button
+                                    onClick={() => {
+                                        navigator.clipboard.writeText(opportunity.id);
+                                        // Simple alert or toast if available, but here we don't have a toast system visible
+                                        // We can use a local state for "Copied!" feedback if desired
+                                    }}
+                                    className="p-1.5 hover:bg-slate-100 rounded-md text-slate-400 hover:text-blue-600 transition-colors"
+                                    title="Copiar ID"
+                                >
+                                    <Copy size={14} />
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Probability Donut - Always derived from current phase */}
+                        <div
+                            className="flex items-center justify-between bg-slate-50 p-4 rounded-xl border border-slate-100 mb-4"
+                            data-testid="opportunity-probability-section"
+                        >
+                            <div>
+                                <h4 className="font-bold text-slate-700 text-sm">Probabilidad de Éxito</h4>
+                                <p className="text-xs text-slate-400 mt-1">Calculado según fase actual</p>
+                            </div>
+                            <ProbabilityDonut
+                                percentage={
+                                    opportunity.estado_id === 2 ? 100 : // Cerrada Ganada = 100%
+                                        opportunity.estado_id === 3 ? 0 :   // Cerrada Perdida = 0%
+                                            // Always re-derive from current phase for accuracy;
+                                            // fall back to stored probability only if phase not found locally
+                                            (opportunity?.fase_id ? (phases?.find(p => p.id === opportunity.fase_id)?.probability ?? opportunity?.probability) : opportunity?.probability) ?? 0
+                                }
+                                size={64}
+                                strokeWidth={6}
+                            />
+                        </div>
+
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                                Valor de la Oportunidad (Importe)
+                            </label>
+                            {(!quotes || quotes.length === 0) ? (
+                                <div className="space-y-2">
+                                    <div className="relative group">
+                                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">$</span>
+                                        <input
+                                            type="number"
+                                            value={localAmount}
+                                            onChange={(e) => setLocalAmount(Number(e.target.value))}
+                                            onBlur={async () => {
+                                                if (localAmount !== opportunity.amount) {
+                                                    setIsSaving(true);
+                                                    await updateOpportunity(opportunity.id, { amount: localAmount });
+                                                    setIsSaving(false);
+                                                }
+                                            }}
+                                            className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 font-bold focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none"
+                                            placeholder="Ingrese el valor estimado"
+                                        />
+                                        {isSaving && (
+                                            <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                                <Loader2 className="w-4 h-4 text-blue-600 animate-spin" />
+                                            </div>
+                                        )}
+                                    </div>
+                                    <p className="text-[10px] text-slate-400">
+                                        No hay cotizaciones activas. Puede editar este valor manualmente.
+                                    </p>
+                                </div>
+                            ) : (
+                                <div className="space-y-2">
+                                    <div className="p-3 bg-blue-50 border border-blue-100 rounded-xl">
+                                        <div className="text-xl font-bold text-blue-700 flex items-center gap-1.5">
+                                            <span className="text-blue-500 font-medium">$</span>
+                                            {new Intl.NumberFormat().format(opportunity.amount || 0)}
+                                            <span className="ml-1 text-xs font-medium text-blue-500">{opportunity.currency_id}</span>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-1.5 text-[10px] font-bold text-blue-600 uppercase tracking-tight">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-blue-600" />
+                                        Valor vinculado a cotización activa
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="pt-4 border-t border-slate-100 grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Fecha Cierre Estimada</label>
+                                <div className="relative group">
+                                    <input
+                                        type="date"
+                                        value={localClosingDate}
+                                        onChange={(e) => setLocalClosingDate(e.target.value)}
+                                        onBlur={async () => {
+                                            if (localClosingDate !== opportunity.fecha_cierre_estimada) {
+                                                setIsSavingDate(true);
+                                                await updateOpportunity(opportunity.id, { fecha_cierre_estimada: localClosingDate ? localClosingDate : null });
+                                                setIsSavingDate(false);
+                                            }
+                                        }}
+                                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-bold text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none"
+                                    />
+                                    {isSavingDate && (
+                                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                            <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Moneda</label>
+                                <div className="px-3 py-1.5 bg-slate-50 rounded-lg text-slate-700 font-bold text-sm">
+                                    {opportunity.currency_id}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* SEGMENTO SELECTOR */}
+                        <div className="pt-4 border-t border-slate-100">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                                Segmento (Subclasificación)
+                            </label>
+                            <div className="relative group">
+                                <select
+                                    className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-bold text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none disabled:opacity-50"
+                                    value={localSegmentId}
+                                    onChange={(e) => handleSegmentChange(e.target.value)}
+                                    disabled={!effectiveAccount.subclasificacion_id || segments.length === 0}
+                                >
+                                    <option value="">Seleccione un segmento...</option>
+                                    {segments
+                                        .filter(seg => effectiveAccount.subclasificacion_id && seg.subclasificacion_id === Number(effectiveAccount.subclasificacion_id))
+                                        .map(seg => (
+                                            <option key={seg.id} value={String(seg.id)}>
+                                                {seg.nombre}
+                                            </option>
+                                        ))
+                                    }
+                                </select>
+                                {isSavingSegment && (
+                                    <div className="absolute right-8 top-1/2 -translate-y-1/2">
+                                        <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                    </div>
+                                )}
+                                {!effectiveAccount.subclasificacion_id && (
+                                    <p className="text-[10px] text-orange-500 mt-1">
+                                        La cuenta no tiene subclasificación u origen offline.
+                                    </p>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="pt-4 border-t border-slate-100">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Estado</label>
+                            <div className={cn(
+                                "px-3 py-1.5 rounded-lg font-bold text-sm border",
+                                opportunity.estado_id === 2 ? "bg-green-50 text-green-700 border-green-100" :
+                                    opportunity.estado_id === 3 ? "bg-red-50 text-red-700 border-red-100" :
+                                        opportunity.estado_id === 4 ? "bg-slate-50 text-slate-700 border-slate-200" :
+                                            "bg-blue-50 text-blue-700 border-blue-100"
+                            )}>
+                                {opportunity.status || (
+                                    opportunity.estado_id === 1 ? 'Abierta' :
+                                        opportunity.estado_id === 2 ? 'Ganada' :
+                                            opportunity.estado_id === 3 ? 'Perdida' :
+                                                opportunity.estado_id === 4 ? 'Cancelada' : 'Abierta'
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Dirección de entrega Section */}
+                        <div className="pt-4 border-t border-slate-100">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Dirección de Entrega</label>
+                            <div className="relative group">
+                                <input
+                                    type="text"
+                                    value={localDireccion}
+                                    onChange={(e) => setLocalDireccion(e.target.value)}
+                                    onBlur={async () => {
+                                        if (localDireccion !== (opportunity.direccion_entrega || "")) {
+                                            setIsSavingDireccion(true);
+                                            try {
+                                                await updateOpportunity(opportunity.id, { direccion_entrega: localDireccion });
+                                            } finally {
+                                                setIsSavingDireccion(false);
+                                            }
+                                        }
+                                    }}
+                                    className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none placeholder:text-slate-400"
+                                    placeholder="Dirección de despacho..."
+                                />
+                                {isSavingDireccion && (
+                                    <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                        <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                    </div>
+                                )}
+                            </div>
+                            <p className="text-[9px] text-slate-400 italic mt-1">Requerido por logística para el procesamiento del pedido.</p>
+                        </div>
+
+                        {/* Orígenes Section */}
+                        <div className="pt-4 border-t border-slate-100 space-y-4">
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Origen de la Oportunidad</label>
+                                <div className="relative group">
+                                    <input
+                                        type="text"
+                                        value={localOrigen}
+                                        onChange={(e) => setLocalOrigen(e.target.value)}
+                                        onBlur={async () => {
+                                            if (localOrigen !== opportunity.origen_oportunidad) {
+                                                setIsSavingOrigen(true);
+                                                await updateOpportunity(opportunity.id, { origen_oportunidad: localOrigen });
+                                                setIsSavingOrigen(false);
+                                            }
+                                        }}
+                                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none placeholder:text-slate-400"
+                                        placeholder="Ej: Llamada, Evento..."
+                                    />
+                                    {isSavingOrigen && (
+                                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                            <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">URL Origen</label>
+                                <div className="relative group">
+                                    <input
+                                        type="text"
+                                        value={localUrlOrigen}
+                                        onChange={(e) => setLocalUrlOrigen(e.target.value)}
+                                        onBlur={async () => {
+                                            if (localUrlOrigen !== opportunity.url_origen) {
+                                                setIsSavingUrl(true);
+                                                await updateOpportunity(opportunity.id, { url_origen: localUrlOrigen });
+                                                setIsSavingUrl(false);
+                                            }
+                                        }}
+                                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none placeholder:text-slate-400"
+                                        placeholder="https://..."
+                                    />
+                                    {isSavingUrl && (
+                                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                            <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Fuente de Conversión</label>
+                                <div className="relative group">
+                                    <input
+                                        type="text"
+                                        value={localFuente}
+                                        onChange={(e) => setLocalFuente(e.target.value)}
+                                        onBlur={async () => {
+                                            if (localFuente !== opportunity.fuente_conversion) {
+                                                setIsSavingFuente(true);
+                                                await updateOpportunity(opportunity.id, { fuente_conversion: localFuente });
+                                                setIsSavingFuente(false);
+                                            }
+                                        }}
+                                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none placeholder:text-slate-400"
+                                        placeholder="Ej: Google Ads, Referido..."
+                                    />
+                                    {isSavingFuente && (
+                                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                            <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                                    Categoría de Interés (Categoría Oportunidad)
+                                </label>
+                                <div className="relative group">
+                                    <input
+                                        type="text"
+                                        value={localCategoriaOportunidad}
+                                        onChange={(e) => setLocalCategoriaOportunidad(e.target.value)}
+                                        onBlur={async () => {
+                                            if (localCategoriaOportunidad !== opportunity.categoria_oportunidad) {
+                                                setIsSavingCategoria(true);
+                                                await updateOpportunity(opportunity.id, { categoria_oportunidad: localCategoriaOportunidad });
+                                                setIsSavingCategoria(false);
+                                            }
+                                        }}
+                                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none placeholder:text-slate-400"
+                                        placeholder="Ej: Cocinas, Baños..."
+                                    />
+                                    {isSavingCategoria && (
+                                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                            <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Comentarios Section */}
+                        <div className="pt-4 border-t border-slate-100">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Comentarios</label>
+                            <div className="relative group">
+                                <textarea
+                                    value={localComentarios}
+                                    onChange={(e) => setLocalComentarios(e.target.value)}
+                                    onBlur={async () => {
+                                        if (localComentarios !== (opportunity.comentarios || "")) {
+                                            setIsSavingComentariosMain(true);
+                                            try {
+                                                await updateOpportunity(opportunity.id, { comentarios: localComentarios });
+                                            } finally {
+                                                setIsSavingComentariosMain(false);
+                                            }
+                                        }
+                                    }}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && !e.shiftKey) {
+                                            e.preventDefault();
+                                            (e.target as HTMLTextAreaElement).blur();
+                                        }
+                                    }}
+                                    rows={3}
+                                    className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none placeholder:text-slate-400 resize-none"
+                                    placeholder="Agregue comentarios generales aquí..."
+                                />
+                                {isSavingComentariosMain && (
+                                    <div className="absolute right-3 top-3">
+                                        <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Loss Reason Section — Required for Cerrada Perdida */}
+                        <div className="pt-4 border-t border-red-100 space-y-3" data-testid="loss-reason-section">
+                            <div className="flex items-center gap-2 mb-1">
+                                <div className="w-2 h-2 rounded-full bg-red-400" />
+                                <span className="text-[10px] font-bold text-red-500 uppercase tracking-wider">Pérdida</span>
+                                <span className="text-[10px] text-slate-400">(obligatorio para cerrar como perdida)</span>
+                            </div>
+
+                            {/* Razón de pérdida */}
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                                    Razón de Pérdida
+                                    {!localRazonPerdida && <span className="text-red-400 ml-1">*</span>}
+                                </label>
+                                <div className="relative group">
+                                    <select
+                                        data-testid="razon-perdida-select"
+                                        value={localRazonPerdida}
+                                        onChange={async (e) => {
+                                            setLocalRazonPerdida(e.target.value);
+                                            setIsSavingLossReason(true);
+                                            try {
+                                                await updateOpportunity(opportunity.id, { razon_perdida: e.target.value || null });
+                                            } finally {
+                                                setIsSavingLossReason(false);
+                                            }
+                                        }}
+                                        className={cn(
+                                            "w-full px-3 py-1.5 bg-slate-50 border rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-red-400 focus:bg-white transition-all outline-none",
+                                            localRazonPerdida ? "border-slate-200" : "border-red-200 bg-red-50"
+                                        )}
+                                    >
+                                        <option value="">Seleccione una razón...</option>
+                                        {LOSS_REASONS.map(r => (
+                                            <option key={r} value={r}>{r}</option>
+                                        ))}
+                                    </select>
+                                    {isSavingLossReason && (
+                                        <div className="absolute right-8 top-1/2 -translate-y-1/2">
+                                            <Loader2 className="w-3 h-3 text-red-400 animate-spin" />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Comentarios de pérdida */}
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                                    Comentarios de Pérdida
+                                    {!localComentariosPerdida && <span className="text-red-400 ml-1">*</span>}
+                                </label>
+                                <div className="relative group">
+                                    <textarea
+                                        data-testid="comentarios-perdida-textarea"
+                                        value={localComentariosPerdida}
+                                        onChange={(e) => setLocalComentariosPerdida(e.target.value)}
+                                        onBlur={async () => {
+                                            if (localComentariosPerdida !== (opportunity.comentarios_perdida || "")) {
+                                                setIsSavingComentarios(true);
+                                                try {
+                                                    await updateOpportunity(opportunity.id, { comentarios_perdida: localComentariosPerdida || null });
+                                                } finally {
+                                                    setIsSavingComentarios(false);
+                                                }
+                                            }
+                                        }}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter' && !e.shiftKey) {
+                                                e.preventDefault();
+                                                (e.target as HTMLTextAreaElement).blur();
+                                            }
+                                        }}
+                                        rows={3}
+                                        placeholder="Describe el motivo de la pérdida..."
+                                        className={cn(
+                                            "w-full px-3 py-1.5 bg-slate-50 border rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-red-400 focus:bg-white transition-all outline-none placeholder:text-slate-400 resize-none",
+                                            localComentariosPerdida ? "border-slate-200" : "border-red-200 bg-red-50"
+                                        )}
+                                    />
+                                    {isSavingComentarios && (
+                                        <div className="absolute right-3 top-3">
+                                            <Loader2 className="w-3 h-3 text-red-400 animate-spin" />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {!lossFieldsComplete && (
+                                <p className="text-[10px] text-red-400 flex items-center gap-1">
+                                    <span>🔒</span>
+                                    Completa estos campos para poder marcar la oportunidad como <strong>Cerrada Perdida</strong>.
+                                </p>
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                {/* Account Card */}
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-blue-300 transition-all flex flex-col justify-between">
+                    <div>
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
+                                <Building className="w-6 h-6" />
+                            </div>
+                            <div>
+                                <h3 className="font-bold text-slate-900 text-lg">Información del Cliente</h3>
+                                <p className="text-xs text-slate-500">Datos principales de la cuenta</p>
+                            </div>
+                        </div>
+
+                        <div className="space-y-3">
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Nombre / Razón Social</label>
+                                <p className="text-slate-900 font-medium">{effectiveAccount.nombre}</p>
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">NIT</label>
+                                    <p className="text-slate-700">{effectiveAccount.nit || 'No registrado'}</p>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Teléfono</label>
+                                    <p className="text-slate-700">{effectiveAccount.telefono || 'No registrado'}</p>
+                                </div>
+                            </div>
+                            {effectiveAccount.direccion && (
+                                <div>
+                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Dirección</label>
+                                    <p className="text-slate-700">{effectiveAccount.direccion} {effectiveAccount.ciudad && `• ${effectiveAccount.ciudad}`}</p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    <Link
+                        href={`/cuentas?id=${effectiveAccount.id}`}
+                        className="mt-6 w-full py-2 bg-slate-50 hover:bg-blue-50 text-blue-600 text-sm font-bold rounded-xl border border-slate-100 hover:border-blue-200 text-center transition-all flex items-center justify-center gap-2"
+                    >
+                        Ver detalles en Cuentas <ChevronRight className="w-4 h-4" />
+                    </Link>
+                </div>
+
+                {/* Seller Card (New) */}
+                <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {ownerSellerName && (
+                        <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex items-center gap-4">
+                            <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-sm text-blue-600">
+                                <User className="w-6 h-6" />
+                            </div>
+                            <div>
+                                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Vendedor Asignado</p>
+                                <p className="text-lg font-bold text-slate-900">{ownerSellerName}</p>
+                            </div>
+                        </div>
+                    )}
+                    {reporterName && (
+                        <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex items-center gap-4">
+                            <div className="p-3 bg-white rounded-xl border border-slate-200 shadow-sm text-emerald-600">
+                                <User className="w-6 h-6" />
+                            </div>
+                            <div>
+                                <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Reportado por</p>
+                                <p className="text-lg font-bold text-slate-900">{reporterName}</p>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            <LossReasonModal
+                isOpen={isLossReasonModalOpen}
+                onClose={() => {
+                    setIsLossReasonModalOpen(false);
+                    setPendingPhaseId(null);
+                }}
+                onConfirm={confirmLossReason}
+            />
+        </div>
+    );
+}
+
+function ProductsTab({ opportunityId }: { opportunityId: string }) {
+    const { opportunities } = useOpportunities();
+    const opportunity = opportunities?.find(o => o.id === opportunityId);
+    const { quotes } = useQuotes(opportunityId);
+
+    // 1. Determine "Active" quote (Winner or Latest)
+    const sortedQuotes = [...(quotes || [])].sort((a, b) =>
+        new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime()
+    );
+    const defaultQuote = sortedQuotes.find(q => q.status === 'WINNER') || sortedQuotes[0];
+
+    // 2. State for User Selection
+    const [selectedQuoteId, setSelectedQuoteId] = useState<string | null>(null);
+
+    // Sync state with default if not yet selected
+    const effectiveQuote = selectedQuoteId
+        ? quotes?.find(q => q.id === selectedQuoteId)
+        : defaultQuote;
+
+    const { items: quoteItems } = useQuoteItems(effectiveQuote?.id);
+    const { updateOpportunity } = useOpportunities();
+
+    const itemsToShow = (quoteItems && quoteItems.length > 0)
+        ? quoteItems
+        : (opportunity?.items || []);
+
+    // Effect: Synchronize opportunity amount with effective quote whenever quote changes
+    useEffect(() => {
+        if (effectiveQuote && opportunity && effectiveQuote.total_amount !== opportunity.amount) {
+            updateOpportunity(opportunityId, { amount: effectiveQuote.total_amount });
+        }
+    }, [effectiveQuote?.id, effectiveQuote?.total_amount, opportunity?.id, opportunity?.amount]);
+
+    if (!effectiveQuote && itemsToShow.length === 0) {
+        return (
+            <div className="text-center py-12 bg-white rounded-xl border border-slate-200 text-slate-400">
+                No hay productos asociados. Agregue productos en el asistente o cree una cotización.
+            </div>
+        );
+    }
+
+    return (
+        <div className="space-y-4">
+            <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                <div className="flex items-center gap-4">
+                    <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
+                        <Package className="w-5 h-5" />
+                    </div>
+                    <div>
+                        <h3 className="font-bold text-slate-800 leading-tight">
+                            Productos
+                        </h3>
+                        <div className="flex items-center gap-2 mt-1">
+                            <span className="text-xs text-slate-500">Viendo cotización:</span>
+                            {/* Quote Selector Dropdown */}
+                            {quotes && quotes.length > 0 ? (
+                                <select
+                                    className="text-xs font-bold text-blue-600 bg-blue-50 border-none rounded-md py-1 pl-2 pr-8 cursor-pointer focus:ring-2 focus:ring-blue-500"
+                                    value={effectiveQuote?.id || ''}
+                                    onChange={(e) => {
+                                        const qId = e.target.value;
+                                        setSelectedQuoteId(qId);
+                                        const selected = quotes?.find(q => q.id === qId);
+                                        if (selected && opportunity) {
+                                            updateOpportunity(opportunityId, { amount: selected.total_amount });
+                                        }
+                                    }}
+                                >
+                                    {sortedQuotes.map(q => (
+                                        <option key={q.id} value={q.id}>
+                                            {q.numero_cotizacion} {q.status === 'WINNER' ? '(Ganadora)' : ''} - {new Date(q.updated_at || 0).toLocaleDateString()}
+                                        </option>
+                                    ))}
+                                </select>
+                            ) : (
+                                <span className="text-xs text-slate-400 font-medium">Borrador Original</span>
+                            )}
+                        </div>
+                    </div>
+                </div>
+
+                {effectiveQuote && (
+                    <Link
+                        href={`/oportunidades/${opportunityId}/cotizaciones/${effectiveQuote.id}`}
+                        className="text-sm bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors"
+                    >
+                        Editar en Cotizador
+                    </Link>
+                )}
+            </div>
+
+            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                <table className="w-full text-left text-sm">
+                    <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase text-[10px] font-bold">
+                        <tr>
+                            <th className="px-4 py-3">Descripción</th>
+                            <th className="px-4 py-3 text-center">Cant.</th>
+                            <th className="px-4 py-3 text-right">Unitario</th>
+                            <th className="px-4 py-3 text-center">Dcto. %</th>
+                            <th className="px-4 py-3 text-right">Subtotal</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                        {itemsToShow.map((item: any) => {
+                            const unitPrice = item.precio_unitario || item.precio || 0;
+                            const discount = item.discount_pct || 0;
+                            const effectiveSubtotal = item.subtotal || (item.cantidad * unitPrice * (1 - discount / 100));
+
+                            return (
+                                <tr key={item.id || item.product_id}>
+                                    <td className="px-4 py-3 font-medium text-slate-900 min-w-[300px] max-w-sm">
+                                        <div className="line-clamp-2 leading-tight">
+                                            {item.descripcion_linea || item.nombre}
+                                        </div>
+                                    </td>
+                                    <td className="px-4 py-3 text-center text-slate-600">{item.cantidad}</td>
+                                    <td className="px-4 py-3 text-right text-slate-600">
+                                        ${new Intl.NumberFormat().format(unitPrice)}
+                                    </td>
+                                    <td className="px-4 py-3 text-center text-slate-600 font-medium">
+                                        {discount > 0 ? (
+                                            <span className="text-emerald-600">-{discount}%</span>
+                                        ) : (
+                                            <span className="text-slate-400">0%</span>
+                                        )}
+                                    </td>
+                                    <td className="px-4 py-3 text-right font-bold text-slate-900">
+                                        ${new Intl.NumberFormat().format(effectiveSubtotal)}
+                                    </td>
+                                </tr>
+                            );
+                        })}
+                    </tbody>
+                    <tfoot className="bg-slate-50 font-bold border-t border-slate-200">
+                        <tr>
+                            <td colSpan={4} className="px-4 py-3 text-right text-slate-500">Total</td>
+                            <td className="px-4 py-3 text-right text-blue-600 text-lg">
+                                ${new Intl.NumberFormat().format(
+                                    itemsToShow.reduce((acc: number, item: any) =>
+                                        acc + (item.subtotal || (item.cantidad * (item.precio_unitario || item.precio || 0) * (1 - (item.discount_pct || 0) / 100))), 0
+                                    )
+                                )}
+                            </td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+    );
+}
+
+function QuotesTab({ opportunityId, currency }: { opportunityId: string, currency: string }) {
+    const { quotes, createQuote, markAsWinner, deleteQuote } = useQuotes(opportunityId);
+    const [isCreating, setIsCreating] = useState(false);
+    const [processingId, setProcessingId] = useState<string | null>(null);
+
+    // Modal State
+    const [modalAction, setModalAction] = useState<{ type: 'GENERATE' | 'DELETE', data: any } | null>(null);
+    const [isActionLoading, setIsActionLoading] = useState(false);
+
+    const handleCreate = async () => {
+        setIsCreating(true);
+        try {
+            const newId = await createQuote(opportunityId, { currency_id: currency });
+            window.location.href = `/oportunidades/${opportunityId}/cotizaciones/${newId}`;
+        } catch (e) {
+            console.error(e);
+            setIsCreating(false);
+        }
+    };
+
+    const handleMarkWinner = (quote: any) => {
+        setModalAction({ type: 'GENERATE', data: quote });
+    };
+
+    const handleDelete = (quote: any) => {
+        setModalAction({ type: 'DELETE', data: quote });
+    };
+
+    const executeAction = async () => {
+        if (!modalAction) return;
+        setIsActionLoading(true);
+        try {
+            if (modalAction.type === 'GENERATE') {
+                setProcessingId(modalAction.data.id);
+                // @ts-ignore
+                await markAsWinner(modalAction.data.id);
+            } else if (modalAction.type === 'DELETE') {
+                await deleteQuote(modalAction.data.id);
+            }
+            setModalAction(null);
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setIsActionLoading(false);
+            setProcessingId(null);
+        }
+    };
+
+    const checkSapReady = (q: any) => {
+        // Validation logic matching SapDataEditor
+        return q.fecha_facturacion && q.tipo_facturacion && q.orden_compra;
+    };
+
+    return (
+        <div className="space-y-4">
+            <div className="flex justify-between items-center bg-blue-50 p-4 rounded-lg border border-blue-100">
+                <div>
+                    <h3 className="font-bold text-blue-900">Cotizaciones</h3>
+                    <p className="text-sm text-blue-700">Gestiona las propuestas comerciales para este negocio.</p>
+                </div>
+                <button
+                    onClick={handleCreate}
+                    disabled={isCreating}
+                    className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2"
+                >
+                    <Plus className="w-4 h-4" />
+                    {isCreating ? "Creando..." : "Nueva Cotización"}
+                </button>
+            </div>
+
+            {(!quotes || quotes.length === 0) ? (
+                <div className="text-center py-12 text-slate-400">
+                    No hay cotizaciones aún. Crea la primera.
+                </div>
+            ) : (
+                <div className="grid gap-4">
+                    {[...quotes].sort((a, b) => new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime()).map(q => {
+                        const isReady = checkSapReady(q);
+                        const isProcessing = processingId === q.id;
+
+                        return (
+                            <div key={q.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:border-blue-400 flex justify-between group relative overflow-hidden">
+                                <button
+                                    onClick={(e) => {
+                                        e.preventDefault();
+                                        handleDelete(q);
+                                    }}
+                                    className="absolute top-2 right-2 p-1.5 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all z-10 opacitiy-0 group-hover:opacity-100"
+                                    title="Eliminar Cotización"
+                                >
+                                    <Trash2 className="w-4 h-4" />
+                                </button>
+
+                                <Link href={`/oportunidades/${opportunityId}/cotizaciones/${q.id}`} className="flex-1">
+                                    <div className="flex items-center gap-3">
+                                        <h4 className="font-bold text-slate-800 hover:text-blue-600 transition-colors">{q.numero_cotizacion}</h4>
+                                        <span className={cn(
+                                            "text-[10px] font-bold px-2 py-0.5 rounded-full uppercase",
+                                            q.status === 'WINNER' ? "bg-green-100 text-green-700" :
+                                                q.status === 'REJECTED' ? "bg-red-100 text-red-700" :
+                                                    "bg-slate-100 text-slate-600"
+                                        )}>
+                                            {q.status === 'WINNER' ? 'Ganada / Pedido' : q.status}
+                                        </span>
+                                        {q.is_winner && <Check className="w-4 h-4 text-green-600" />}
+                                    </div>
+                                    <p className="text-xs text-slate-500 mt-1">
+                                        Creada el {formatColombiaDate(q.updated_at || new Date(), "dd/MM/yyyy")}
+                                    </p>
+                                </Link>
+
+                                <div className="text-right flex flex-col items-end gap-2 pr-6">
+                                    <p className="font-bold text-slate-900 text-lg">
+                                        {q.currency_id} {new Intl.NumberFormat().format(q.total_amount || 0)}
+                                    </p>
+
+                                    {q.status !== 'WINNER' && q.status !== 'REJECTED' && (
+                                        <div className="flex items-center gap-2">
+                                            {isReady ? (
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.preventDefault();
+                                                        handleMarkWinner(q);
+                                                    }}
+                                                    disabled={isProcessing}
+                                                    className="bg-green-600 hover:bg-green-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 transition-colors disabled:opacity-50"
+                                                >
+                                                    {isProcessing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Truck className="w-3 h-3" />}
+                                                    Generar Pedido
+                                                </button>
+                                            ) : (
+                                                <div className="flex items-center gap-1 text-[10px] text-orange-500 bg-orange-50 px-2 py-1 rounded-md" title="Complete los campos en la pestaña Datos SAP">
+                                                    <AlertCircle className="w-3 h-3" />
+                                                    Incompleta para SAP
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+
+            <ConfirmationModal
+                isOpen={!!modalAction}
+                onClose={() => setModalAction(null)}
+                onConfirm={executeAction}
+                title={modalAction?.type === 'GENERATE' ? "Generar Pedido" : "Eliminar Cotización"}
+                message={modalAction?.type === 'GENERATE'
+                    ? `¿Confirmas que deseas generar el pedido para la cotización ${modalAction.data.numero_cotizacion}? Esto cerrará las demás cotizaciones.`
+                    : `¿Confirmas que deseas eliminar la cotización ${modalAction?.data.numero_cotizacion}? Esta acción no se puede deshacer.`}
+                confirmLabel={modalAction?.type === 'GENERATE' ? "Generar Pedido" : "Eliminar"}
+                variant={modalAction?.type === 'GENERATE' ? 'info' : 'danger'}
+                isLoading={isActionLoading}
+            />
+        </div>
+    );
+}
+
+function ActivitiesTab({ opportunityId, accountId }: { opportunityId: string, accountId?: string }) {
+    const { activities, createActivity, updateActivity, toggleComplete } = useActivities({ opportunity_id: opportunityId });
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [selectedActivity, setSelectedActivity] = useState<LocalActivity | null>(null);
+    const { opportunities } = useOpportunities();
+
+    const sortedActivities = activities?.sort((a, b) => new Date(b.fecha_inicio).getTime() - new Date(a.fecha_inicio).getTime());
+
+    // Catalogs
+    const classifications = useLiveQuery(() => db.activityClassifications.toArray().then(arr => arr.filter(c => !c.is_deleted)), []) || [];
+    const subclassifications = useLiveQuery(() => db.activitySubclassifications.toArray().then(arr => arr.filter(s => !s.is_deleted)), []) || [];
+
+    // PROACTIVE SYNC: If catalogs are empty, trigger a pull
+    useEffect(() => {
+        if (classifications.length === 0 && navigator.onLine) {
+            console.log("[ActivitiesTab] Catalogs empty, triggering sync...");
+            syncEngine.triggerSync();
+        }
+    }, [classifications.length]);
+
+    return (
+        <div className="space-y-4">
+            <div className="flex justify-between items-center bg-blue-50 p-4 rounded-lg border border-blue-100">
+                <div>
+                    <h3 className="font-bold text-blue-900">Actividades</h3>
+                    <p className="text-sm text-blue-700">Gestiona tareas y eventos para esta oportunidad.</p>
+                </div>
+                <button
+                    onClick={() => setIsModalOpen(true)}
+                    className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 flex items-center gap-2"
+                >
+                    <Plus className="w-4 h-4" />
+                    Nueva Actividad
+                </button>
+            </div>
+
+            {(!sortedActivities || sortedActivities.length === 0) ? (
+                <div className="text-center py-12 bg-white rounded-xl border border-slate-200 text-slate-400">
+                    <div className="flex justify-center mb-3">
+                        <CalendarIcon className="w-10 h-10 text-slate-200" />
+                    </div>
+                    No hay actividades programadas. <br />
+                    Crea una tarea o evento para dar seguimiento.
+                </div>
+            ) : (
+                <div className="grid gap-4">
+                    {sortedActivities.map((act) => {
+                        const isOverdue = isDateOverdue(act.fecha_inicio) && !act.is_completed;
+
+                        // Resolve Names (Robust matching using String conversion for type-safety)
+                        const clsName = classifications.find(c => String(c.id) === String(act.clasificacion_id))?.nombre;
+                        const subName = subclassifications.find(s => String(s.id) === String(act.subclasificacion_id))?.nombre;
+
+                        return (
+                            <div
+                                key={act.id}
+                                className={cn(
+                                    "group p-4 bg-white rounded-2xl border transition-all hover:shadow-md cursor-pointer",
+                                    act.is_completed
+                                        ? "border-slate-100 opacity-75"
+                                        : isOverdue
+                                            ? "border-red-200 bg-red-50/30 hover:border-red-300 hover:shadow-red-100"
+                                            : act.tipo_actividad === 'TAREA'
+                                                ? "border-emerald-200 hover:border-emerald-300 hover:shadow-emerald-100"
+                                                : "border-blue-200 hover:border-blue-300 hover:shadow-blue-100"
+                                )}
+                                onClick={() => {
+                                    setSelectedActivity(act);
+                                    setIsModalOpen(true);
+                                }}
+                            >
+                                <div className="flex items-start gap-4">
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            toggleComplete(act.id, !act.is_completed);
+                                        }}
+                                        className="mt-1 transition-colors"
+                                    >
+                                        {act.is_completed ? (
+                                            <CheckCircle2 className="w-6 h-6 text-emerald-500" />
+                                        ) : isOverdue ? (
+                                            <AlertCircle className="w-6 h-6 text-red-500" />
+                                        ) : (
+                                            <Circle className="w-6 h-6 text-slate-300 hover:text-blue-400" />
+                                        )}
+                                    </button>
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex flex-col sm:flex-row justify-between items-start gap-2">
+                                            <div>
+                                                <h4 className={cn(
+                                                    "font-bold text-lg",
+                                                    act.is_completed ? "text-slate-500 line-through" : isOverdue ? "text-red-700" : "text-slate-900"
+                                                )}>
+                                                    {act.asunto}
+                                                </h4>
+                                                <div className="flex flex-wrap gap-1 mt-1">
+                                                        {clsName && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{clsName}</span>}
+                                                        {subName && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200">{subName}</span>}
+                                                        {act.prioridad && (
+                                                            <span className={cn(
+                                                                "text-[10px] font-bold px-1.5 py-0.5 rounded border",
+                                                                act.prioridad === 'Alta' ? "bg-red-50 text-red-600 border-red-100" :
+                                                                act.prioridad === 'Media' ? "bg-amber-50 text-amber-600 border-amber-100" :
+                                                                "bg-blue-50 text-blue-600 border-blue-100"
+                                                            )}>
+                                                                {act.prioridad}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                {/* DEBUG INDICATOR */}
+                                                {act.clasificacion_id && !clsName && (
+                                                    <div className="text-[10px] text-red-500 font-bold mt-1">Error L: {act.clasificacion_id}</div>
+                                                )}
+                                            </div>
+                                            {act.tipo_actividad === 'EVENTO' ? (
+                                                <div className={cn(
+                                                    "flex items-center gap-2 text-xs font-medium px-2 py-1 rounded-lg",
+                                                    isOverdue ? "text-red-600 bg-red-100" : "text-blue-600 bg-blue-50"
+                                                )}>
+                                                    <Clock className="w-3.5 h-3.5" />
+                                                    {formatColombiaDate(act.fecha_inicio, "dd/MM/yyyy p")}
+                                                </div>
+                                            ) : (
+                                                <div className={cn(
+                                                    "flex items-center gap-2 text-xs font-medium px-2 py-1 rounded-lg",
+                                                    isOverdue ? "text-red-600 bg-red-100" : "text-emerald-600 bg-emerald-50"
+                                                )}>
+                                                    {isOverdue ? <AlertCircle className="w-3.5 h-3.5" /> : <ListTodo className="w-3.5 h-3.5" />}
+                                                    Tarea {act.fecha_inicio && `- ${formatColombiaDate(act.fecha_inicio, "dd/MM/yyyy")}`}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {act.descripcion && (
+                                            <p className="text-sm text-slate-500 mt-1 line-clamp-2">{act.descripcion}</p>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+
+            {isModalOpen && (
+                <CreateActivityModal
+                    onClose={() => {
+                        setIsModalOpen(false);
+                        setSelectedActivity(null);
+                    }}
+                    onSubmit={async (data: any) => {
+                        console.log("[ActivitiesTab] Modal Submitted Data:", data);
+                        if (selectedActivity) {
+                            await updateActivity(selectedActivity.id, data);
+                        } else {
+                            await createActivity(data);
+                        }
+                        setIsModalOpen(false);
+                        setSelectedActivity(null);
+                    }}
+                    opportunities={opportunities}
+                    initialOpportunityId={opportunityId}
+                    initialAccountId={accountId}
+                    initialData={selectedActivity}
+                />
+            )}
+
+        </div>
+    );
+}
+
+function CommissionBadge({ opportunityId }: { opportunityId: string }) {
+    const [total, setTotal] = useState<number | null>(null);
+    const [currency, setCurrency] = useState('COP');
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchCommission = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('CRM_ComisionLedger')
+                    .select('monto_comision, currency_id, tipo_evento')
+                    .eq('oportunidad_id', opportunityId);
+
+                if (error || !data || data.length === 0) {
+                    setLoading(false);
+                    return;
+                }
+
+                let sum = 0;
+                for (const entry of data) {
+                    sum += Number(entry.monto_comision) || 0;
+                }
+                setTotal(sum);
+                setCurrency(data[0].currency_id || 'COP');
+            } catch {
+                // silently fail
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchCommission();
+    }, [opportunityId]);
+
+    if (loading || total === null) return null;
+
+    const formatted = new Intl.NumberFormat('es-CO', {
+        style: 'currency',
+        currency: currency,
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+    }).format(total);
+
+    return (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+                <div className="p-2 bg-emerald-100 text-emerald-600 rounded-xl">
+                    <DollarSign className="w-5 h-5" />
+                </div>
+                <div>
+                    <p className="text-xs font-bold text-emerald-600 uppercase tracking-wider">Comision Devengada</p>
+                    <p className="text-lg font-bold text-emerald-800">{formatted}</p>
+                </div>
+            </div>
+            <Link href="/comisiones/ledger" className="text-xs font-bold text-emerald-700 hover:underline">
+                Ver detalle
+            </Link>
+        </div>
+    );
+}
