@@ -2,6 +2,8 @@ import { db, OutboxItem } from './db';
 import { supabase } from './supabase';
 import { v4 as uuidv4 } from 'uuid';
 import { useSyncStore } from './stores/useSyncStore';
+import { useUserStore } from './stores/useUserStore';
+import { useAuditLogStore } from './stores/useAuditLogStore';
 
 const TABLE_PRIORITY: Record<string, number> = {
     'CRM_Cuentas': 1,
@@ -1917,6 +1919,60 @@ export class SyncEngine {
         try {
             const now = Date.now();
             const items: OutboxItem[] = [];
+
+            // --- Registro de Log de Auditoría Local ---
+            try {
+                const tableMapping: Record<string, string> = {
+                    'CRM_Cuentas': 'accounts',
+                    'CRM_Oportunidades': 'opportunities',
+                    'CRM_Contactos': 'contacts',
+                    'CRM_Cotizaciones': 'quotes',
+                    'CRM_Actividades': 'activities',
+                    'CRM_Pedidos': 'pedidos'
+                };
+                const dexieTable = tableMapping[entityTable];
+                let isCreate = true;
+                let entityName = '';
+
+                if (dexieTable) {
+                    const localTable = (db as any)[dexieTable];
+                    if (localTable) {
+                        const existing = await localTable.get(entityId);
+                        if (existing) {
+                            isCreate = false;
+                            entityName = existing.nombre || existing.full_name || existing.asunto || existing.numero_cotizacion || existing.salesOrderNumber || existing.id || '';
+                        }
+                    }
+                }
+
+                if (isCreate) {
+                    entityName = changes.nombre || changes.full_name || changes.asunto || changes.numero_cotizacion || changes.salesOrderNumber || changes.id || '';
+                }
+
+                const userEmail = useUserStore.getState().user?.email || 'Usuario Offline';
+
+                // Filtrar campos modificados irrelevantes
+                const ignoredFields = ['id', '_sync_metadata', 'updated_at', 'updated_by', 'created_at', 'created_by'];
+                const changedFields = Object.keys(changes).filter(k => !ignoredFields.includes(k) && changes[k] !== undefined);
+
+                if (isCreate || changedFields.length > 0) {
+                    const details = isCreate
+                        ? 'Creación del registro'
+                        : `Modificó: ${changedFields.join(', ')}`;
+
+                    useAuditLogStore.getState().addLog({
+                        user_email: userEmail,
+                        entity_type: entityTable,
+                        entity_id: entityId,
+                        entity_name: entityName || 'Registro sin nombre',
+                        action_type: isCreate ? 'CREATE' : 'UPDATE',
+                        details: details
+                    });
+                }
+            } catch (auditErr) {
+                console.error('[Sync] Error registering audit log:', auditErr);
+            }
+            // ------------------------------------------
 
             if (options.isSnapshot) {
                 // Modo Snapshot: Enviar todo el objeto como una sola mutación atómica

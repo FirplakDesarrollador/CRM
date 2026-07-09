@@ -3,6 +3,21 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-07-09 — Ingest: Log de Auditoría Local (Historial de Modificaciones)
+
+Implementación de un log de modificaciones y creaciones locales por usuario en el módulo de Configuración.
+- Se implementó la persistencia local en Zustand + LocalStorage (`useAuditLogStore`), evitando sobrecargar Supabase.
+- Se integró la interceptación centralizada en `SyncEngine.queueMutation` para detectar si una acción es `CREATE` o `UPDATE` y resolver el nombre amigable de la entidad antes de aplicar la mutación.
+- Se añadió el componente visual premium responsivo de Historial al final de la página de Configuración (`/configuracion`).
+- Páginas creadas/actualizadas: `wiki/pages/auditoria-local.md`, `wiki/INDEX.md`, `wiki/LOG.md`.
+
+## 2026-07-09 — Lint: Motor de guardado sin internet (sincronizacion-offline)
+
+Ejecución de la rutina de validación /wiki-lint sobre el motor de guardado sin internet (Dexie / SyncEngine).
+- Hallazgos: Se contrastó la página `sincronizacion-offline.md` con el código actual. Se encontró que omitía el "Modo Snapshot" de mutaciones (`_complete_snapshot_`), el cual está plenamente soportado tanto en `SyncEngine` como en la función de base de datos `process_field_updates`. También se identificaron múltiples mecanismos de auto-curación (Self-Healing) del motor que no estaban documentados.
+- Correcciones aplicadas: Se actualizó `wiki/pages/sincronizacion-offline.md` incorporando la descripción del Modo Snapshot, su procesamiento por LWW a nivel de base de datos, y los 4 flujos de auto-curación principales (NIT duplicado, cuenta padre faltante, fase inválida y actividad huérfana).
+- Estado de enlaces: Ningún enlace roto o huérfano detectado en esta sección.
+
 ## 2026-07-08 — Ingest: Soporte de Columnas y Reporte S&OP Comercial
 
 Adición de soporte técnico y de negocio para la generación del informe de S&OP Comercial.
