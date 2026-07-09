@@ -6,16 +6,20 @@ El CRM Firplak registra localmente las modificaciones y creaciones de datos por 
 
 El registro de auditoría es **puramente local y offline-first**, persistido en el `localStorage` mediante un store de Zustand con middleware de persistencia (`useAuditLogStore`).
 
-### Registro Centralizado en SyncEngine
-Todo cambio de datos offline-first se encola a través del método `queueMutation` de `SyncEngine` (`lib/sync.ts`). Hemos interceptado este flujo para:
-1. **Determinar la Acción:** Consulta de forma asíncrona la tabla correspondiente de Dexie por `entityId`. Si el registro existe es un `UPDATE`; si no existe, es un `CREATE`.
-2. **Resolver el Nombre Legible:**
+### Registro Centralizado en Hooks de Dexie
+Todo cambio de datos offline-first se intercepta de forma reactiva y nativa a nivel de base de datos local usando los **hooks globales de Dexie** (`creating` y `updating`) en [lib/auditHooks.ts](file:///c:/Users/isaza/OneDrive/Documentos/CRM%20FIRPLAK/CRM/lib/auditHooks.ts). Esto garantiza la comparación precisa del estado original contra el modificado antes de que se persista en disco:
+
+1. **Aislamiento de la Sincronización:** Para evitar registrar cambios de fondo provenientes del servidor (como descargas de red del SyncEngine), el motor establece la propiedad `db.isPulling = true` durante el ciclo de sync, bloqueando temporalmente el encolamiento de auditoría en los hooks de Dexie.
+2. **Determinar la Acción:** 
+   - El hook `creating` clasifica la acción como `CREATE`.
+   - El hook `updating` la clasifica como `UPDATE`.
+3. **Resolver el Nombre Legible:**
    - Para entidades maestras, utiliza campos como `nombre`, `full_name`, `asunto`, o `numero_cotizacion`.
-   - Para líneas de detalle (`CRM_CotizacionItems`, `CRM_PedidoItems`), recupera contextualmente la cotización o pedido padre de Dexie y la asocia al nombre del producto, ej: `Mezclador Lavamanos en COT-052139`.
-3. **Detalles de Cambios:** 
+   - Para líneas de detalle (`quoteItems`, `pedidoItems`), recupera contextualmente la cotización o pedido padre de Dexie y la asocia al nombre del producto, ej: `Mezclador Lavamanos en COT-052139`.
+4. **Detalles de Cambios:** 
    - **En `CREATE`:** Registra un resumen legible de lo creado (ej: `Agregó item: Mezclador Lavamanos x5`).
-   - **En `UPDATE`:** Filtra los campos internos y compara los valores campo a campo contra el registro en Dexie antes del cambio. Si el valor de un campo es distinto, lo incluye con su valor anterior y nuevo (ej: `Modificó: cantidad (2 → 5), total_amount (120000 → 300000)`). Si no hay cambios reales en los valores (común en re-guardados de snapshots), omite el registro para evitar ruido.
-4. **Persistencia:** Almacena los últimos 50 registros de auditoría en la UI del dispositivo mediante `useAuditLogStore.getState().addLog(...)`.
+   - **En `UPDATE`:** El hook recibe `mods` (sólo las claves modificadas) y `obj` (el registro anterior original). Compara los valores campo por campo (filtrando campos internos) y genera la transición `(valor_anterior → valor_nuevo)` (ej: `Modificó: cantidad (2 → 5), total_amount (120000 → 300000)`). Si no hay cambios reales en los valores, omite el registro.
+5. **Persistencia y Desacoplamiento:** Los logs se encolan asíncronamente con `setTimeout(..., 0)` para liberar de inmediato la transacción de Dexie y se guardan en `useAuditLogStore`.
 
 ### Modelo de Datos del Log (`AuditLogItem`)
 

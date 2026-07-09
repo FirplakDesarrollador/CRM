@@ -1,4 +1,5 @@
 import Dexie, { Table } from 'dexie';
+import { registerAuditHooks } from './auditHooks';
 
 // Define Types for Local Tables (Mirroring Server)
 // We add 'sync_status' to track if a row is fully synced or has pending changes (though Outbox is primary)
@@ -302,6 +303,7 @@ export class CRMFirplakDB extends Dexie {
     opportunityCollaborators!: Table<LocalOpportunityCollaborator, string>; // New table
     pedidos!: Table<LocalPedido, string>;
     pedidoItems!: Table<LocalPedidoItem, string>;
+    isPulling: boolean = false;
 
     constructor() {
         super('CRMFirplakDB');
@@ -327,6 +329,7 @@ export class CRMFirplakDB extends Dexie {
             pedidos: 'uuid_generado, cotizacion_id, opportunity_id',
             pedidoItems: 'id, pedido_uuid'
         });
+        registerAuditHooks(this);
     }
 }
 
