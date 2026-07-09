@@ -388,3 +388,26 @@ Prevention Rule:
 
 Tags:
 [navigation] [deep-linking] [ux] [consistency]
+
+## [Bug ID: 20260709-01]
+
+Context:
+Filtering activities for restricted roles (like Vendedor) in app/actividades/page.tsx during the initial load state when the user object is not yet populated by useCurrentUser hook.
+
+What I Did:
+The code originally had: if (!canViewAll && user) { ... return false; }. When user is null during loading, the condition evaluates to falsy, bypassing the role check and leaking all activities to the restricted user.
+
+Problem:
+If a Vendedor selects "Todas las actividades", they momentarily (or permanently if they pause/error out) see all activities from all users because the role-based filter was bypassed when user is null.
+
+Root Cause:
+A logical flaw in the if statement: combining the negated permission check (!canViewAll) with the presence check of the user object (&& user) using a boolean AND. If user is null, the && user clause makes the entire expression falsy, skipping the block that is responsible for hiding unauthorized records.
+
+Fix Applied:
+Separated the checks. First verify if (!canViewAll). Then, inside that block, explicitly check if (!user) return false; to deny access to all records while the user object is loading.
+
+Prevention Rule:
+When implementing client-side role-based filtering (where a lack of permission should result in hiding data), NEVER combine the permission check with a null-check of the user object using &&. If the user object is missing, the permission check MUST still run and default to denying access (fail-secure).
+
+Tags:
+[react] [security] [data-leak] [filtering]
