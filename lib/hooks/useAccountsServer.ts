@@ -84,6 +84,7 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
     }, [userRole, currentUserId]);
 
     const fetchAccounts = useCallback(async (isLoadMore = false) => {
+        if (!currentUserId) return; // Prevent leak while user loads
         const setIsLoadingData = useSyncStore.getState().setIsLoadingData;
         setLoading(true);
         setIsLoadingData(true);

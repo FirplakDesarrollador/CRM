@@ -56,6 +56,7 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
     }, [userRole, currentUserId]);
 
     const fetchContacts = useCallback(async (isLoadMore = false) => {
+        if (!currentUserId) return; // Prevent leak while user loads
         const setIsLoadingData = useSyncStore.getState().setIsLoadingData;
         setLoading(true);
         setIsLoadingData(true);
