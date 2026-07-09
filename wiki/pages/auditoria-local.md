@@ -10,9 +10,11 @@ El registro de auditoría es **puramente local y offline-first**, persistido en 
 Todo cambio de datos offline-first se encola a través del método `queueMutation` de `SyncEngine` (`lib/sync.ts`). Hemos interceptado este flujo para:
 1. **Determinar la Acción:** Consulta de forma asíncrona la tabla correspondiente de Dexie por `entityId`. Si el registro existe es un `UPDATE`; si no existe, es un `CREATE`.
 2. **Resolver el Nombre Legible:**
-   - Para un `CREATE`, extrae campos como `nombre`, `full_name`, `asunto`, `numero_cotizacion`, o `salesOrderNumber` del payload de cambios.
-   - Para un `UPDATE`, recupera el registro de Dexie antes de ser modificado para extraer su nombre descriptivo actual.
-3. **Detalles de Cambios:** En las modificaciones, compara las claves alteradas (ignorando campos técnicos como `id`, `_sync_metadata`, etc.) y genera una descripción legible como: `Modificó: telefono, email, direccion`.
+   - Para entidades maestras, utiliza campos como `nombre`, `full_name`, `asunto`, o `numero_cotizacion`.
+   - Para líneas de detalle (`CRM_CotizacionItems`, `CRM_PedidoItems`), recupera contextualmente la cotización o pedido padre de Dexie y la asocia al nombre del producto, ej: `Mezclador Lavamanos en COT-052139`.
+3. **Detalles de Cambios:** 
+   - **En `CREATE`:** Registra un resumen legible de lo creado (ej: `Agregó item: Mezclador Lavamanos x5`).
+   - **En `UPDATE`:** Filtra los campos internos y compara los valores campo a campo contra el registro en Dexie antes del cambio. Si el valor de un campo es distinto, lo incluye con su valor anterior y nuevo (ej: `Modificó: cantidad (2 → 5), total_amount (120000 → 300000)`). Si no hay cambios reales en los valores (común en re-guardados de snapshots), omite el registro para evitar ruido.
 4. **Persistencia:** Almacena los últimos 50 registros de auditoría en la UI del dispositivo mediante `useAuditLogStore.getState().addLog(...)`.
 
 ### Modelo de Datos del Log (`AuditLogItem`)

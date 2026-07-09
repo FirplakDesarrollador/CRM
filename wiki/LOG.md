@@ -8,6 +8,7 @@
 Implementación de un log de modificaciones y creaciones locales por usuario en el módulo de Configuración.
 - Se implementó la persistencia local en Zustand + LocalStorage (`useAuditLogStore`), evitando sobrecargar Supabase.
 - Se integró la interceptación centralizada en `SyncEngine.queueMutation` para detectar si una acción es `CREATE` o `UPDATE` y resolver el nombre amigable de la entidad antes de aplicar la mutación.
+- **Optimización de Detalle y Contexto:** Se añadió resolución inteligente para sub-items (ej: `Mezclador Lavamanos en COT-052139`) y comparación fina de cambios campo por campo mostrando flechas de transición `(valor_anterior → valor_nuevo)` y filtrando snapshots sin modificaciones reales.
 - Se añadió el componente visual premium responsivo de Historial al final de la página de Configuración (`/configuracion`).
 - Páginas creadas/actualizadas: `wiki/pages/auditoria-local.md`, `wiki/INDEX.md`, `wiki/LOG.md`.
 

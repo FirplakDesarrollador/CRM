@@ -1927,38 +1927,98 @@ export class SyncEngine {
                     'CRM_Oportunidades': 'opportunities',
                     'CRM_Contactos': 'contacts',
                     'CRM_Cotizaciones': 'quotes',
+                    'CRM_CotizacionItems': 'quoteItems',
                     'CRM_Actividades': 'activities',
-                    'CRM_Pedidos': 'pedidos'
+                    'CRM_Pedidos': 'pedidos',
+                    'CRM_PedidoItems': 'pedidoItems'
                 };
                 const dexieTable = tableMapping[entityTable];
                 let isCreate = true;
+                let existing: any = null;
                 let entityName = '';
 
                 if (dexieTable) {
                     const localTable = (db as any)[dexieTable];
                     if (localTable) {
-                        const existing = await localTable.get(entityId);
+                        existing = await localTable.get(entityId);
                         if (existing) {
                             isCreate = false;
-                            entityName = existing.nombre || existing.full_name || existing.asunto || existing.numero_cotizacion || existing.salesOrderNumber || existing.id || '';
                         }
                     }
                 }
 
-                if (isCreate) {
-                    entityName = changes.nombre || changes.full_name || changes.asunto || changes.numero_cotizacion || changes.salesOrderNumber || changes.id || '';
+                // Resolver nombre amigable de la entidad
+                if (entityTable === 'CRM_CotizacionItems' || entityTable === 'CRM_PedidoItems') {
+                    // Resolver contexto de la cotización o pedido padre
+                    let parentContext = '';
+                    try {
+                        if (entityTable === 'CRM_CotizacionItems') {
+                            const cotId = existing?.cotizacion_id || changes.cotizacion_id;
+                            if (cotId) {
+                                const parentQuote = await db.quotes.get(cotId);
+                                if (parentQuote) {
+                                    parentContext = ` en ${parentQuote.numero_cotizacion || 'Cotización'}`;
+                                }
+                            }
+                        } else {
+                            const pedUuid = existing?.pedido_uuid || changes.pedido_uuid;
+                            if (pedUuid) {
+                                const parentPedido = await db.pedidos.where('uuid_generado').equals(pedUuid).first();
+                                if (parentPedido) {
+                                    parentContext = ` en Pedido ${parentPedido.salesOrderNumber || parentPedido.id || ''}`;
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('[Sync] Failed to resolve parent context for items:', e);
+                    }
+
+                    const itemDesc = existing?.descripcion_linea || changes.descripcion_linea || existing?.producto_id || changes.producto_id || 'Línea de producto';
+                    entityName = `${itemDesc}${parentContext}`;
+                } else {
+                    if (existing) {
+                        entityName = existing.nombre || existing.full_name || existing.asunto || existing.numero_cotizacion || existing.salesOrderNumber || existing.id || '';
+                    } else {
+                        entityName = changes.nombre || changes.full_name || changes.asunto || changes.numero_cotizacion || changes.salesOrderNumber || changes.id || '';
+                    }
                 }
 
                 const userEmail = useUserStore.getState().user?.email || 'Usuario Offline';
 
-                // Filtrar campos modificados irrelevantes
-                const ignoredFields = ['id', '_sync_metadata', 'updated_at', 'updated_by', 'created_at', 'created_by'];
-                const changedFields = Object.keys(changes).filter(k => !ignoredFields.includes(k) && changes[k] !== undefined);
+                // Filtrar campos modificados irrelevantes y comparar valores reales
+                const ignoredFields = ['id', '_sync_metadata', 'updated_at', 'updated_by', 'created_at', 'created_by', 'cotizacion_id', 'pedido_uuid', 'pedido_id', 'opportunity_id', 'account_id'];
+                
+                const changedFields: string[] = [];
+                const detailsList: string[] = [];
+
+                for (const [key, val] of Object.entries(changes)) {
+                    if (ignoredFields.includes(key) || val === undefined) continue;
+                    
+                    if (existing) {
+                        const oldVal = existing[key];
+                        // Comparación simple de valores
+                        const oldStr = oldVal !== null && oldVal !== undefined ? String(oldVal) : '';
+                        const newStr = val !== null && val !== undefined ? String(val) : '';
+                        
+                        if (oldStr !== newStr) {
+                            changedFields.push(key);
+                            if (oldStr.length < 25 && newStr.length < 25) {
+                                detailsList.push(`${key} (${oldStr} → ${newStr})`);
+                            } else {
+                                detailsList.push(key);
+                            }
+                        }
+                    } else {
+                        changedFields.push(key);
+                    }
+                }
 
                 if (isCreate || changedFields.length > 0) {
                     const details = isCreate
-                        ? 'Creación del registro'
-                        : `Modificó: ${changedFields.join(', ')}`;
+                        ? (entityTable === 'CRM_CotizacionItems' || entityTable === 'CRM_PedidoItems'
+                            ? `Agregó item: ${changes.descripcion_linea || changes.producto_id || ''} x${changes.cantidad || 0}`
+                            : 'Creación del registro')
+                        : `Modificó: ${detailsList.join(', ')}`;
 
                     useAuditLogStore.getState().addLog({
                         user_email: userEmail,
