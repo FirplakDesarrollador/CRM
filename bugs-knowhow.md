@@ -411,3 +411,26 @@ When implementing client-side role-based filtering (where a lack of permission s
 
 Tags:
 [react] [security] [data-leak] [filtering]
+
+## [Bug ID: 20260709-02]
+
+Context:
+Role-based filtering in server-side hooks (useAccountsServer.ts, useOpportunitiesServer.ts) when restricting data visibility for a VENDEDOR.
+
+What I Did:
+The filtering logic originally included const ids = [currentUserId, ...(user?.coordinadores || [])] to determine which records a Vendedor was allowed to see.
+
+Problem:
+Vendedores were able to see all accounts and opportunities owned by their coordinators. If a coordinator owned many accounts (or all accounts in a specific channel), the Vendedor would see all of them, bypassing the strict "only see your own" rule.
+
+Root Cause:
+A misunderstanding of the user.coordinadores array. A user's coordinadores array contains the IDs of their bosses. A Vendedor should NEVER see their boss's data. Only a boss (COORDINADOR) should see their subordinates' data (subordinateIds). Including user.coordinadores in the allowed IDs for a Vendedor inadvertently granted them upward visibility.
+
+Fix Applied:
+Removed user?.coordinadores from the allowed IDs for the VENDEDOR role. For Vendedores, the ID list is now strictly [currentUserId]. For Coordinators, it correctly uses [currentUserId, ...subordinateIds].
+
+Prevention Rule:
+When implementing data visibility rules, NEVER grant a user access to records owned by the IDs in their user.coordinadores array. Upward visibility is a security flaw. Always use subordinateIds for downward visibility (managers seeing team data) and only currentUserId for individual contributors.
+
+Tags:
+[react] [security] [data-leak] [filtering] [rbac]
