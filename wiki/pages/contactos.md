@@ -15,6 +15,10 @@ Los contactos (`/contactos`, tabla `CRM_Contactos`) son las personas asociadas a
 - Permisos: todos los roles ven/crean/editan; borrar requiere COORDINADOR o ADMIN
   (ver [[roles-y-permisos]]).
 
+## Notas operativas
+
+- `CreateContactWizard` crea contactos asociados a una cuenta en 3 pasos. El submit final valida que el wizard este en Confirmacion y el boton "Crear Contacto" queda deshabilitado brevemente al entrar al ultimo paso.
+
 ## Fuentes
 
 - `app/contactos/page.tsx`, `components/contactos/`

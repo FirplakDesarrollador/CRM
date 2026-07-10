@@ -191,7 +191,7 @@ function ContactsContent() {
         const term = accountSearchTerm.toLowerCase();
         return accounts.filter((acc: any) => 
             acc.nombre?.toLowerCase().includes(term) || 
-            acc.nit?.toLowerCase().includes(term)
+            String(acc.nit || '').toLowerCase().includes(term)
         );
     }, [accounts, accountSearchTerm]);
 

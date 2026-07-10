@@ -4,6 +4,7 @@ import { useContacts } from "@/lib/hooks/useContacts";
 import { useContactsServer } from "@/lib/hooks/useContactsServer";
 import { useState, useEffect } from "react";
 import { ContactForm } from "./ContactForm";
+import { CreateContactWizard } from "./CreateContactWizard";
 import { LocalContact } from "@/lib/db";
 import { Edit2, Trash2, Phone, Mail, User, Search } from "lucide-react";
 import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
@@ -79,14 +80,24 @@ export function ContactList({ accountId }: ContactListProps) {
     });
 
     if (isEditing) {
-        return (
-            <ContactForm
-                accountId={accountId}
-                existingContact={editingContact}
-                onSuccess={handleSuccess}
-                onCancel={() => setIsEditing(false)}
-            />
-        );
+        if (editingContact) {
+            return (
+                <ContactForm
+                    accountId={accountId}
+                    existingContact={editingContact}
+                    onSuccess={handleSuccess}
+                    onCancel={() => setIsEditing(false)}
+                />
+            );
+        } else {
+            return (
+                <CreateContactWizard
+                    accountId={accountId}
+                    onSuccess={handleSuccess}
+                    onCancel={() => setIsEditing(false)}
+                />
+            );
+        }
     }
 
     return (

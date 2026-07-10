@@ -298,9 +298,7 @@ function AccountsContent() {
                     <button
                         data-testid="accounts-create-button"
                         onClick={() => {
-                            setShowCreate(true);
-                            setEditingAccount(null);
-                            document.getElementById('main-content')?.scrollTo({ top: 0, behavior: 'smooth' });
+                            router.push("/cuentas/nueva");
                         }}
                         className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 whitespace-nowrap shadow-sm transition-all"
                     >

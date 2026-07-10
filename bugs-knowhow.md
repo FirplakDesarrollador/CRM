@@ -388,3 +388,164 @@ Prevention Rule:
 
 Tags:
 [navigation] [deep-linking] [ux] [consistency]
+
+---
+
+## [Bug ID: 20260709-01]
+
+Context:
+Búsqueda de cuentas al crear un contacto nuevo en `app/contactos/page.tsx` y `page-isazaale.tsx`.
+
+What I Did:
+Realicé una búsqueda de cuentas por término ingresado.
+
+Problem:
+La aplicación crasheó mostrando la pantalla roja con el error: `acc.nit?.toLowerCase is not a function`.
+
+Root Cause:
+Al crear una cuenta con un NIT numérico (como `999999999`), el motor almacena el NIT como tipo `number` (o se lee como tal desde IndexedDB/Supabase). Al filtrar las cuentas en la lista de contactos, el código ejecutaba `acc.nit?.toLowerCase()`, arrojando una excepción porque los números no poseen el método `toLowerCase`.
+
+Fix Applied:
+Se convirtió explícitamente el NIT a tipo String usando `String(acc.nit || '')` antes de llamar a `.toLowerCase().includes(term)`.
+
+Prevention Rule:
+**Defensive Type Casting on Search Filters**: Al filtrar u operar sobre campos alfanuméricos ingresados por el usuario o importados (como NITs, códigos postales, IDs o teléfonos), NUNCA asumas que su tipo de dato en JS/TS es siempre `string`. Si vas a aplicar métodos de cadena como `.toLowerCase()`, `.trim()` o `.includes()`, castea el valor explícitamente primero mediante `String(valor || '')`.
+
+Tags:
+[types] [typescript] [search] [accounts] [contacts] [crash]
+
+---
+
+## [Bug ID: 20260709-02]
+
+Context:
+Wizard de creación de cuentas (`CreateAccountWizard.tsx`). El usuario estaba en el Paso 1 (Información Base), seleccionó un canal de venta en un `<select>`, y presionó Enter.
+
+What I Did:
+Implementé un `onKeyDown` en el `<form>` que interceptaba Enter únicamente cuando `e.target instanceof HTMLInputElement`. Esto cubría inputs de texto pero no `<select>`, `<button type="button">`, ni otros elementos focusables.
+
+Problem:
+Al presionar Enter estando enfocado en un `<select>` (ej. Canal de Venta), el formulario se enviaba inmediatamente saltando los pasos 2 y 3 del wizard. El registro se creaba incompleto.
+
+Root Cause:
+La condición `e.target instanceof HTMLInputElement` solo es verdadera para `<input>`. Cuando el foco está en un `<select>`, `<button>`, o cualquier otro elemento HTML, la condición es falsa, el `preventDefault()` no se ejecuta, y el Enter dispara el submit nativo del `<form>`.
+
+Fix Applied:
+Se cambió la condición a verificar por `tagName` del target casteado como `HTMLElement`. Ahora se bloquea Enter en TODOS los elementos excepto `<textarea>` (donde Enter es un salto de línea válido) y botones `type="submit"` (donde Enter debe enviar el formulario). Aplicado en los 4 wizards: Cuentas, Contactos, Actividades, Pedidos.
+
+Prevention Rule:
+**Enter Key in Multi-Step Wizards**: Todo formulario que use un wizard multi-paso DEBE incluir un `onKeyDown` en el `<form>` que bloquee Enter globalmente excepto para `<textarea>` y `type="submit"`. NUNCA usar `instanceof HTMLInputElement` como condición—usar `target.tagName !== 'TEXTAREA'` para cubrir todos los tipos de elemento (input, select, button, div contentEditable, etc.).
+
+Tags:
+[wizard] [form-submit] [enter-key] [ux] [data-loss]
+
+---
+
+## [Bug ID: 20260709-03]
+
+Context:
+`npm run dev` con Next.js 16.1.1/Turbopack en Windows.
+
+Problem:
+El servidor arrancaba, pero al abrir rutas aparecian errores como:
+`Cannot find module 'next/dist/server/app-render/work-async-storage.external.js'`,
+`Cannot find module 'react/jsx-runtime'`, `build-manifest.json ENOENT` y
+`Persisting failed: Another write batch or compaction is already active`.
+
+Root Cause:
+Cache corrupta o bloqueada de Next/Turbopack mientras habia procesos `node`
+anteriores escribiendo en paralelo. Los modulos realmente existian en
+`node_modules`; el problema estaba en artefactos regenerables (`.next` y
+`C:\Users\isaza\.next-crm`).
+
+Fix Applied:
+1. Detener procesos `node` que estaban escuchando en los puertos de desarrollo.
+2. Borrar `.next` del proyecto.
+3. Borrar `C:\Users\isaza\.next-crm`.
+4. Levantar de nuevo `npm run dev`.
+
+Prevention Rule:
+**Next/Turbopack Cache Reset**: Si Next reporta modulos existentes como faltantes
+o aparecen errores SST/build-manifest durante `next dev`, primero verificar si
+hay varios procesos `node` activos y limpiar caches regenerables antes de
+reinstalar dependencias.
+
+Tags:
+[nextjs] [turbopack] [cache] [windows] [dev-server]
+
+---
+
+## [Bug ID: 20260709-04]
+
+Context:
+Wizard de creacion de cuentas en `app/cuentas/nueva/CreateAccountWizard.tsx`.
+
+Problem:
+Al terminar el paso 2, la cuenta podia crearse inmediatamente y redirigir a
+`/cuentas?id=...`, sin darle oportunidad al usuario de diligenciar el paso 3
+de clasificacion.
+
+Root Cause:
+El boton final `Crear Cuenta` aparece en la misma posicion que `Siguiente`.
+En transiciones rapidas, doble clics o activaciones repetidas podian disparar
+el submit del formulario justo despues de pasar al ultimo paso.
+
+Fix Applied:
+Se definio `LAST_STEP_INDEX`, se bloqueo cualquier submit que no ocurra desde
+el ultimo paso, y se agrego una ventana corta de habilitacion para el boton
+final. Al entrar al paso 3, `Crear Cuenta` inicia deshabilitado por 500 ms,
+evitando que un segundo clic heredado cree la cuenta antes de que el usuario
+interactue con la pantalla final.
+
+Prevention Rule:
+**Wizard Final Submit Guard**: En wizards multi-paso, el `onSubmit` debe validar
+explicitamente que el usuario esta en el ultimo paso. Si el boton final ocupa
+la misma posicion que el boton de avance, deshabilitar el submit brevemente al
+entrar al ultimo paso para evitar creaciones accidentales por doble clic.
+
+Tags:
+[wizard] [accounts] [form-submit] [double-click] [ux]
+
+---
+
+## [Bug ID: 20260710-01]
+
+Context:
+Wizards de creacion con boton de avance y boton final ubicados en la misma zona visual: actividades, contactos, pedidos y oportunidades.
+
+Problem:
+Al completar el penultimo paso, un doble clic o activacion repetida sobre "Siguiente" podia impactar el boton final recien renderizado y disparar la creacion del registro antes de que el usuario diligenciara o revisara el ultimo paso.
+
+Root Cause:
+React cambia de paso y reemplaza el boton "Siguiente" por el boton final en la misma posicion. Sin una guarda temporal, el segundo click del usuario puede caer sobre el boton de submit inmediatamente despues del render.
+
+Fix Applied:
+Cada wizard define un indice de ultimo paso, valida en `onSubmit` que el submit venga desde ese paso, y deshabilita el boton final durante 500 ms al entrar a la pantalla final. Se agrego cobertura E2E para actividades usando `/e2e/activities-wizard` y se mantuvo la prueba de cuentas.
+
+Prevention Rule:
+**Delayed Final Submit in Wizards**: Todo wizard de creacion cuyo boton final reemplace visualmente a "Siguiente" debe tener una guarda de ultimo paso y un delay corto antes de habilitar el submit final. La prueba E2E debe hacer doble clic en "Siguiente" desde el penultimo paso y verificar que no se cree ni se redirija.
+
+Tags:
+[wizard] [activities] [contacts] [orders] [opportunities] [form-submit] [double-click] [e2e]
+
+---
+
+## [Bug ID: 20260710-02]
+
+Context:
+Edicion de actividades tipo `TAREA` en `CreateActivityModal`, seccion "Actividades (Checklist Planner)".
+
+Problem:
+Los items agregados al checklist se veian en pantalla, pero no quedaban registrados en Dexie/Supabase ni se enviaban a Microsoft Planner.
+
+Root Cause:
+El checklist vive en estado React (`checklist`) y no en `react-hook-form`, asi que `useFormAutoSave` no detectaba cambios al agregar, editar, marcar o borrar items. Adicionalmente, `useActivities.updateActivity` filtraba `_sync_metadata` fuera de los cambios permitidos, por lo que el lugar natural para persistir `checklist` se descartaba antes de llegar a Dexie/outbox/Supabase.
+
+Fix Applied:
+Se agrego autosave debounced especifico para checklist en `CreateActivityModal`. Cada cambio guarda `checklist` dentro de `_sync_metadata`, intenta PATCH a `/api/microsoft/planner/tasks/[taskId]` y marca `pending_planner_update` cuando Planner no responde. `useActivities.updateActivity` ahora permite `_sync_metadata`, y `SyncEngine` procesa `pending_planner_update` para reintentar el PATCH.
+
+Prevention Rule:
+**Autosave External State**: Si un editor usa auto-save basado en `react-hook-form`, cualquier estado externo al formulario (checklists, adjuntos, asistentes, tags, ordenamientos) debe tener su propio autosave o debe sincronizarse explicitamente al form. Si el estado se guarda en metadata, la allowlist del hook de persistencia debe incluir esa columna.
+
+Tags:
+[activities] [planner] [checklist] [autosave] [dexie] [supabase] [sync]

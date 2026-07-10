@@ -19,16 +19,24 @@ visitas y eventos del equipo comercial. Pueden asociarse a [[oportunidades]] y a
 ## Funcionalidad
 
 - Creación rápida vía `CreateActivityModal` desde varios módulos (también desde tiendas
-  con `CreateStoreActivityModal`).
+  con `CreateStoreActivityModal`). La creación se estructura como un Wizard de 3 pasos (Tipo & Asunto, Clasificación & Fechas, Detalles).
+- En edición, se eliminan los botones de guardado manual y se implementa guardado automático (auto-save) debounced (1.5 segundos) con indicador visual (`AutoSaveIndicator`) integrado vía `useFormAutoSave`.
 - Vencimiento: las actividades no completadas después de su fecha generan
   [[notificaciones]] de tipo `ACTIVITY_OVERDUE` (Edge Function
   `check-overdue-activities`, ejecutada por cron).
 - Visibilidad por rol: VENDEDOR solo las propias; COORDINADOR/ADMIN todas
   (ver [[roles-y-permisos]]; RLS ajustado en `20260428_fix_activities_rls`).
 
+## Notas operativas
+
+- El wizard de creacion de `CreateActivityModal` protege el submit final con `ACTIVITY_WIZARD_LAST_STEP`: solo crea desde el ultimo paso y el boton final queda deshabilitado brevemente al entrar a "Detalles".
+- La ruta dev-only `/e2e/activities-wizard` monta el modal sin login y precarga una clasificacion local para probar que un doble clic en "Siguiente" no cree la actividad antes del ultimo paso.
+- El checklist de Planner en tareas vive fuera de `react-hook-form`, por lo que tiene autosave propio: guarda `checklist` en `_sync_metadata`, lo encola para Supabase/Dexie mediante `useActivities.updateActivity` y manda PATCH a `/api/microsoft/planner/tasks/[taskId]`. Si el PATCH falla, marca `pending_planner_update` para reintento desde `SyncEngine`.
+
 ## Fuentes
 
 - `app/actividades/page.tsx`, `components/activities/CreateActivityModal.tsx`
+- `app/e2e/activities-wizard/`, `app/e2e/activities-checklist/`, `e2e/create_activity_wizard.spec.ts`, `e2e/activity_checklist_autosave.spec.ts`
 - `lib/hooks/useActivities.ts`, `useActivitiesServer.ts`, `useActivityClassifications.ts`
 - `supabase/functions/check-overdue-activities/`
 - `docs/NOTIFICACIONES_ACTIVIDADES_VENCIDAS.md`

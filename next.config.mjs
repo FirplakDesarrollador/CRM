@@ -5,19 +5,12 @@ const nextConfig = {
     typescript: {
         ignoreBuildErrors: true,
     },
-    eslint: {
-        ignoreDuringBuilds: true,
-    },
     devIndicators: {
         appIsrStatus: false,
         buildActivity: false,
     },
     // Turbopack config (Next.js 16 default)
     turbopack: {},
-    // Forzado de Webpack para compatibilidad con PWA
-    webpack: (config) => {
-        return config;
-    },
     compiler: {
         removeConsole: process.env.NODE_ENV === "production",
     },

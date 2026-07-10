@@ -50,6 +50,10 @@ El dashboard consume RPCs de embudo (`get_sales_funnel_rpc`, versión filtrada, 
 agrupación por fase `20260304`) que agrupan oportunidades por fase. Ver
 [[dashboard-e-indicadores]].
 
+## Notas operativas
+
+- `CreateOpportunityWizard` usa `LAST_STEP_INDEX` y una ventana corta de habilitacion para impedir que un doble clic al avanzar cree la oportunidad antes de revisar el ultimo paso de Equipo.
+
 ## Fuentes
 
 - `app/oportunidades/` (páginas), `components/oportunidades/`, `components/opportunities/`

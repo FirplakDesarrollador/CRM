@@ -20,6 +20,12 @@ que determina su lista de precios.
 
 ## UI
 
+- Creación mediante `app/cuentas/nueva/CreateAccountWizard.tsx`: wizard de 3 pasos
+  (información base, ubicación/contacto y clasificación). La cuenta solo se crea
+  desde el último paso con `Crear Cuenta`; el submit está protegido contra avances
+  o doble clics que intenten saltarse la clasificación.
+- Prueba E2E dev-only en `/e2e/cuentas-wizard` para validar el wizard sin depender
+  de cookies de Supabase; en producción la ruta devuelve 404.
 - Listado con filtros (`AccountFilters`, `UserPickerFilter`), vista de galería de tarjetas premium responsiva en desktop y mobile. Columna de acciones editar/eliminar solo para ADMIN.
 - Detalle con pestañas: contactos, oportunidades, actividades, sucursales (branches) y
   asignados (`components/cuentas/Account*Tab.tsx`).
@@ -43,5 +49,8 @@ que determina su lista de precios.
 ## Fuentes
 
 - `app/cuentas/page.tsx`, `components/cuentas/`
+- `app/cuentas/nueva/CreateAccountWizard.tsx`
+- `app/e2e/cuentas-wizard/page.tsx`, `e2e/create_account_wizard.spec.ts`,
+  `playwright.e2e.config.ts`
 - `lib/hooks/useAccounts.ts`, `useAccountsServer.ts`, `lib/db.ts` (interfaz `LocalCuenta`)
 - Migraciones: `20260108_sales_channels`, `20260113_premium_clients`, `20260119_subclassifications`, `20260218_add_account_owner`

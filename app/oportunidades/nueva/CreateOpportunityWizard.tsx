@@ -21,6 +21,7 @@ import { useUsers } from "@/lib/hooks/useUsers";
 import { useFormDraft } from "@/lib/hooks/useFormDraft";
 
 const STEP_LABELS = ["Cuenta", "Datos del Negocio", "Productos", "Equipo"];
+const LAST_STEP_INDEX = STEP_LABELS.length - 1;
 
 const schema = z.object({
     account_id: z.string().min(1, "Debe seleccionar una cuenta"),
@@ -64,6 +65,7 @@ export default function CreateOpportunityWizard() {
     const [searchTerm, setSearchTerm] = useState("");
     const [accountSearchTerm, setAccountSearchTerm] = useState("");
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [canSubmitFinalStep, setCanSubmitFinalStep] = useState(false);
     const [showAccountDropdown, setShowAccountDropdown] = useState(false);
     const [selectedAccount, setSelectedAccount] = useState<any>(null);
     const [segments, setSegments] = useState<any[]>([]);
@@ -402,6 +404,20 @@ export default function CreateOpportunityWizard() {
     const currencyId = watch("currency_id");
     const ownerUserId = watch("owner_user_id"); // Propietario efectivo de la oportunidad
 
+    useEffect(() => {
+        if (step !== LAST_STEP_INDEX) {
+            setCanSubmitFinalStep(false);
+            return;
+        }
+
+        setCanSubmitFinalStep(false);
+        const timer = window.setTimeout(() => {
+            setCanSubmitFinalStep(true);
+        }, 500);
+
+        return () => window.clearTimeout(timer);
+    }, [step]);
+
     const addProduct = (product: PriceListProduct) => {
         const channel = selectedAccount?.canal_id || 'DIST_NAC';
         let price = 0;
@@ -470,6 +486,10 @@ export default function CreateOpportunityWizard() {
     }, [items, setValue]);
 
     const onSubmit = async (data: any) => {
+        if (step !== LAST_STEP_INDEX || !canSubmitFinalStep) {
+            return;
+        }
+
         setIsSubmitting(true);
         try {
             // Defensive conversion for numeric IDs
@@ -514,7 +534,7 @@ export default function CreateOpportunityWizard() {
         }
 
         if (isValid) {
-            setStep(s => Math.min(s + 1, 3));
+            setStep(s => Math.min(s + 1, LAST_STEP_INDEX));
         }
     };
 
@@ -551,12 +571,23 @@ export default function CreateOpportunityWizard() {
                             {idx + 1}
                         </div>
                         <span className={`ml-2 text-sm ${idx === step ? 'font-bold text-slate-900' : 'text-slate-500'}`}>{label}</span>
-                        {idx < 3 && <div className="ml-4 w-8 h-0.5 bg-slate-200" />}
+                        {idx < LAST_STEP_INDEX && <div className="ml-4 w-8 h-0.5 bg-slate-200" />}
                     </div>
                 ))}
             </div>
 
-            <form onSubmit={handleSubmit(onSubmit)} className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+            <form
+                onSubmit={handleSubmit(onSubmit)}
+                onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                        const target = e.target as HTMLElement;
+                        if (target.tagName !== 'TEXTAREA') {
+                            e.preventDefault();
+                        }
+                    }
+                }}
+                className="bg-white p-6 rounded-xl shadow-sm border border-slate-200"
+            >
 
                 {/* STEP 1: ACCOUNT */}
                 {step === 0 && (
@@ -961,7 +992,7 @@ export default function CreateOpportunityWizard() {
                         Atrás
                     </button>
 
-                    {step < 3 ? (
+                    {step < LAST_STEP_INDEX ? (
                         <button
                             type="button"
                             onClick={nextStep}
@@ -972,10 +1003,10 @@ export default function CreateOpportunityWizard() {
                     ) : (
                         <button
                             type="submit"
-                            disabled={isSubmitting}
+                            disabled={isSubmitting || !canSubmitFinalStep}
                             className={cn(
                                 "bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-2 shadow-lg shadow-green-200 transition-all",
-                                isSubmitting && "bg-slate-400 opacity-70 cursor-not-allowed"
+                                (isSubmitting || !canSubmitFinalStep) && "bg-slate-400 opacity-70 cursor-not-allowed"
                             )}
                         >
                             {isSubmitting ? (

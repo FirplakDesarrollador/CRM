@@ -420,6 +420,44 @@ export class SyncEngine {
                     }
                 }
 
+                const plannerMetadata = metadataChange?.value;
+                if (plannerMetadata?.pending_planner_update && plannerMetadata.checklist) {
+                    let msPlannerId = changes.find(c => c.field === 'ms_planner_id')?.value;
+                    if (!msPlannerId) {
+                        try {
+                            const localAct = await db.activities.get(actId);
+                            msPlannerId = localAct?.ms_planner_id;
+                        } catch (e) { }
+                    }
+
+                    if (msPlannerId && msPlannerId !== 'ERROR') {
+                        console.log(`[Sync] Found pending Planner checklist update for task ${msPlannerId}...`);
+                        try {
+                            const res = await fetch(`/api/microsoft/planner/tasks/${msPlannerId}`, {
+                                method: 'PATCH',
+                                headers: { 'Content-Type': 'application/json' },
+                                credentials: 'include',
+                                body: JSON.stringify({
+                                    checklist: plannerMetadata.checklist,
+                                    assigneeIds: plannerMetadata.assigneeIds || []
+                                })
+                            });
+
+                            if (!res.ok) {
+                                console.error(`[Sync] Failed to update Planner checklist:`, await res.text());
+                            } else {
+                                const newMeta = { ...plannerMetadata };
+                                delete newMeta.pending_planner_update;
+                                metadataChange.value = newMeta;
+                                await db.activities.update(actId, { _sync_metadata: newMeta });
+                                console.log(`[Sync] Successfully updated Planner checklist for ${msPlannerId}`);
+                            }
+                        } catch (e) {
+                            console.error(`[Sync] Exception updating Planner checklist:`, e);
+                        }
+                    }
+                }
+
                 if (metadataChange && metadataChange.value && metadataChange.value.pending_calendar) {
                     console.log(`[Sync] Found offline activity with pending Calendar creation: ${actId}`);
                     try {

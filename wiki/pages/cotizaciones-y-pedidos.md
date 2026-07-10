@@ -47,10 +47,13 @@ planos de hidromasaje, fecha de entrega.
 
 - Lista pedidos con estado (`estado_pedido`) y número de orden de venta
   (`sales_order_number`) provenientes de SAP.
-- `PedidosEditor` edita datos logísticos y cantidades de ítems; los cambios de ítems se
-  calculan de forma diferencial (`updatePedidoItems` en `usePedidos.ts`) y se encolan al
-  [[sincronizacion-offline|outbox]] (ver `bugs-knowhow.md` §5 por el histórico).
+- `PedidoEditorForm` en `PedidosEditor.tsx` gestiona la creación y edición. La creación se estructuró como un Wizard de 3 pasos (Cantidades a Pedir, Datos Logísticos SAP, Datos Adicionales).
+- En edición, se eliminan los botones de guardado manual y se implementa guardado automático (auto-save) debounced (1.5 segundos) con indicador visual (`AutoSaveIndicator`) integrado vía `useFormAutoSave`. Los cambios de ítems se calculan de forma diferencial (`updatePedidoItems` en `usePedidos.ts`) y se encolan al [[sincronizacion-offline|outbox]] (ver `bugs-knowhow.md` §5 por el histórico).
 - ⚠️ El pull de pedidos mapea `id` del servidor → `uuid_generado` local.
+
+## Notas operativas
+
+- `PedidoEditorForm` protege "Crear Pedido Parcial" con indice de ultimo paso y habilitacion diferida del boton final. Esto evita creaciones por doble clic heredado desde "Siguiente" al pasar de Datos SAP a Datos Adicionales.
 
 ## Fuentes
 

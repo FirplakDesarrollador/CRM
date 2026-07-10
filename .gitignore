@@ -50,6 +50,7 @@ token.json
 .env
 
 # Playwright
+.playwright-cli/
 node_modules/
 /test-results/
 /playwright-report/

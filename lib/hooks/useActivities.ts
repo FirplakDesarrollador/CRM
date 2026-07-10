@@ -52,7 +52,7 @@ export function useActivities(filters?: { opportunity_id?: string, advisor_id?: 
         'fecha_inicio', 'fecha_fin', 'ms_planner_id', 'ms_event_id', 'created_at', 'updated_at',
         'is_completed', 'created_by', 'updated_by', 'is_deleted',
         'tipo_actividad', 'clasificacion_id', 'subclasificacion_id', 'Tarea_planner',
-        'teams_meeting_url', 'microsoft_attendees'
+        'teams_meeting_url', 'microsoft_attendees', '_sync_metadata'
     ]);
 
     const createActivity = async (data: Partial<LocalActivity>) => {
@@ -71,7 +71,7 @@ export function useActivities(filters?: { opportunity_id?: string, advisor_id?: 
                     localStorage.setItem('cachedUserId', user.id); // Refresh cache
                 }
             }
-        } catch (e) {
+        } catch {
             // Offline - try to get cached user ID from localStorage
             userId = localStorage.getItem('cachedUserId');
         }
@@ -101,14 +101,14 @@ export function useActivities(filters?: { opportunity_id?: string, advisor_id?: 
             teams_meeting_url: data.teams_meeting_url || null,
             Tarea_planner: data.Tarea_planner || null,
             // Capture any sync metadata passed from UI (like pending_planner)
-            _sync_metadata: (data as any)._sync_metadata || {},
+            _sync_metadata: data._sync_metadata || {},
             updated_at: new Date().toISOString()
         };
 
         // Ensure we don't have undefined fields that become null in JSON
         const cleanActivity = Object.fromEntries(
-            Object.entries(newActivity).filter(([_, v]) => v !== undefined)
-        ) as any;
+            Object.entries(newActivity).filter(([, v]) => v !== undefined)
+        ) as Partial<LocalActivity>;
 
         if (cleanActivity._sync_metadata && Object.keys(cleanActivity._sync_metadata).length === 0) {
             delete cleanActivity._sync_metadata;
