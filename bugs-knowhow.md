@@ -549,3 +549,53 @@ Prevention Rule:
 
 Tags:
 [activities] [planner] [checklist] [autosave] [dexie] [supabase] [sync]
+
+---
+
+## [Bug ID: 20260710-03]
+
+Context:
+Filtrado de actividades para roles restringidos, como VENDEDOR, en `app/actividades/page.tsx` durante el estado inicial de carga cuando `useCurrentUser` todavia no ha poblado `user`.
+
+What I Did:
+La logica original usaba una condicion equivalente a `if (!canViewAll && user) { ... return false; }`. Cuando `user` era `null` durante la carga, la condicion completa era falsa y se saltaba el filtro de rol.
+
+Problem:
+Un VENDEDOR podia ver momentanea o permanentemente todas las actividades al seleccionar "Todas las actividades", porque el filtro de seguridad no se aplicaba mientras `user` estaba vacio.
+
+Root Cause:
+Combinar la negacion de permiso (`!canViewAll`) con la presencia del usuario (`&& user`) crea un bypass fail-open. Si `user` aun no esta disponible, el bloque que debia ocultar registros no autorizados no corre.
+
+Fix Applied:
+Se separaron las condiciones: primero se verifica `if (!canViewAll)` y dentro se valida explicitamente `if (!user) return false`, denegando acceso mientras el usuario carga.
+
+Prevention Rule:
+**Fail-Secure Role Filters**: En filtros client-side donde la falta de permiso debe ocultar datos, nunca combines el check de permiso con el null-check del usuario usando `&&`. Si el usuario no esta cargado, el filtro debe negar por defecto.
+
+Tags:
+[react] [security] [data-leak] [filtering]
+
+---
+
+## [Bug ID: 20260710-04]
+
+Context:
+Filtrado por rol en hooks server-side (`useAccountsServer.ts`, `useOpportunitiesServer.ts`) al restringir visibilidad para VENDEDOR.
+
+What I Did:
+La logica incluia `const ids = [currentUserId, ...(user?.coordinadores || [])]` para determinar que registros podia ver un VENDEDOR.
+
+Problem:
+Los VENDEDORES podian ver cuentas y oportunidades propiedad de sus coordinadores. Si un coordinador tenia muchas cuentas, el vendedor heredaba visibilidad ascendente, saltandose la regla de "solo lo propio".
+
+Root Cause:
+Interpretacion incorrecta de `user.coordinadores`: ese arreglo contiene IDs de jefes del usuario, no subordinados. Un vendedor nunca debe ver datos de su jefe; solo un COORDINADOR debe ver hacia abajo usando `subordinateIds`.
+
+Fix Applied:
+Se elimino `user?.coordinadores` del conjunto de IDs permitidos para VENDEDOR. Para vendedores la lista queda estrictamente `[currentUserId]`; para coordinadores se usa `[currentUserId, ...subordinateIds]`.
+
+Prevention Rule:
+**No Upward Visibility**: Nunca concedas acceso a registros cuyo propietario este en `user.coordinadores`. Eso es visibilidad ascendente y es una fuga de seguridad. Usa `subordinateIds` solo para visibilidad descendente de managers y `currentUserId` para contribuidores individuales.
+
+Tags:
+[react] [security] [data-leak] [filtering] [rbac]

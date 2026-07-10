@@ -439,7 +439,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
             
             if (userFilter !== 'unrestricted') {
                 if (userFilter === 'mine') {
-                    const ids = [currentUserId, ...(user?.coordinadores || [])].filter(Boolean);
+                    const ids = [currentUserId].filter(Boolean);
                     const idsString = ids.join(',');
                     query = query.or(`owner_user_id.in.(${idsString}),and(owner_user_id.is.null,created_by.in.(${idsString}))`);
                 } else if (userFilter === 'collab') {
@@ -466,7 +466,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                     query = query.eq('colaboradores.usuario_id', currentUserId);
                 } else if (userFilter === 'all') {
                     if (userRole !== 'ADMIN') {
-                        const ids = [currentUserId, ...(user?.coordinadores || [])].filter(Boolean);
+                        const ids = userRole === 'COORDINADOR' ? [currentUserId, ...subordinateIds].filter(Boolean) : [currentUserId].filter(Boolean);
                         const idsString = ids.join(',');
                         const { data: collabRows } = await supabase
                             .from('CRM_Oportunidades_Colaboradores')
@@ -487,7 +487,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                         const ids = [currentUserId, ...subordinateIds].filter(Boolean);
                         query = query.in('owner_user_id', ids);
                     } else if (userRole !== 'ADMIN') {
-                        const ids = [currentUserId, ...(user?.coordinadores || [])].filter(Boolean);
+                        const ids = [currentUserId].filter(Boolean);
                         query = query.in('owner_user_id', ids);
                     }
                 } else if (userFilter === 'web') {

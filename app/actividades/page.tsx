@@ -317,7 +317,9 @@ function ActivitiesContent() {
 
         return activities.filter(act => {
             // Apply role-based filtering: VENDEDOR and similar roles only see their own activities or those of opportunities they collaborate on
-            if (!canViewAll && user) {
+            if (!canViewAll) {
+                if (!user) return false; // Prevent leak while loading
+                
                 const isOwner = act.user_id === user.id;
                 const isCollaborator = act.opportunity_id ? collaborativeOppIds.has(act.opportunity_id) : false;
                 if (!isOwner && !isCollaborator) {

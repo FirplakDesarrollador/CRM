@@ -84,6 +84,7 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
     }, [userRole, currentUserId]);
 
     const fetchAccounts = useCallback(async (isLoadMore = false) => {
+        if (!currentUserId) return; // Prevent leak while user loads
         const setIsLoadingData = useSyncStore.getState().setIsLoadingData;
         setLoading(true);
         setIsLoadingData(true);
@@ -259,7 +260,7 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                     .filter(Boolean) || [];
 
                 if (isVendedor) {
-                    const ids = [currentUserId, ...(user?.coordinadores || [])].filter(Boolean);
+                    const ids = [currentUserId].filter(Boolean);
                     const idsString = ids.join(',');
                     let orFilter = `owner_user_id.in.(${idsString}),and(owner_user_id.is.null,created_by.in.(${idsString}))`;
                     if (collabAccountIds.length > 0) {
