@@ -24,6 +24,12 @@ type EntidadType = typeof ENTIDADES[number]['id'];
 // const CANALES = ['Retail', 'Constructoras', 'Grandes Superficies', 'Institucional', 'Exportaciones', 'E-commerce', 'Showroom'];
 const ESTADOS_OPPORTUNIDADES = ['Abierta', 'Ganada', 'Perdida', 'Suspendida'];
 const MESES_ES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+const ESTADO_IDS_BY_NAME: Record<string, number[]> = {
+    Abierta: [1],
+    Ganada: [2, 11],
+    Perdida: [3, 14],
+    Suspendida: [4]
+};
 
 export default function InformesPage() {
     const { role, isLoading: isLoadingUser } = useCurrentUser();
@@ -592,7 +598,10 @@ export default function InformesPage() {
             }
 
             if (selectedEstado && selectedEntidad === 'oportunidades') {
-                query = query.eq('estado', selectedEstado);
+                const estadoIds = ESTADO_IDS_BY_NAME[selectedEstado];
+                if (estadoIds?.length) {
+                    query = query.in('estado_id', estadoIds);
+                }
             }
 
             // Execute Query
