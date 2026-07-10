@@ -8,16 +8,17 @@ import { CommissionDashboard } from '@/components/comisiones/CommissionDashboard
 import { BonusRulesManager } from '@/components/comisiones/BonusRulesManager';
 import { CommissionCategoryManager } from '@/components/comisiones/CommissionCategoryManager';
 import { CommissionLedgerTable } from '@/components/comisiones/CommissionLedgerTable';
+import { CommissionSettings } from '@/components/comisiones/CommissionSettings';
 import { useCommissionLedger } from '@/lib/hooks/useCommissionLedger';
 import { useCommissionRules } from '@/lib/hooks/useCommissionRules';
 import { CommissionRuleForm } from '@/components/comisiones/CommissionRuleForm';
 import { CommissionRuleTable } from '@/components/comisiones/CommissionRuleTable';
 import { CommissionRulesUploader } from '@/components/comisiones/CommissionRulesUploader';
-import { DollarSign, LayoutDashboard, Settings, Target, Tag, BookOpen, Plus, Upload, Loader2, CreditCard } from 'lucide-react';
+import { DollarSign, LayoutDashboard, Settings, Target, Tag, BookOpen, Plus, Upload, Loader2, CreditCard, Sliders } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/components/ui/utils';
 
-type TabType = 'dashboard' | 'reglas' | 'bonos' | 'categorias' | 'ledger';
+type TabType = 'dashboard' | 'reglas' | 'bonos' | 'categorias' | 'ledger' | 'configuracion';
 
 export default function ComisionesPage() {
     const { role, isLoading: userLoading } = useCurrentUser();
@@ -29,7 +30,7 @@ export default function ComisionesPage() {
 
     useEffect(() => {
         const tab = searchParams.get('tab') as TabType;
-        if (tab && ['dashboard', 'reglas', 'bonos', 'categorias', 'ledger'].includes(tab)) {
+        if (tab && ['dashboard', 'reglas', 'bonos', 'categorias', 'ledger', 'configuracion'].includes(tab)) {
             setActiveTab(tab);
         }
     }, [searchParams]);
@@ -136,6 +137,14 @@ export default function ComisionesPage() {
                             onClick={() => handleTabChange('ledger')}
                             icon={<BookOpen className="w-4 h-4" />}
                             label="Ledger"
+                        />
+                    )}
+                    {role === 'ADMIN' && (
+                        <TabButton
+                            active={activeTab === 'configuracion'}
+                            onClick={() => handleTabChange('configuracion')}
+                            icon={<Sliders className="w-4 h-4" />}
+                            label="Configuración"
                         />
                     )}
                 </div>
@@ -290,6 +299,8 @@ export default function ComisionesPage() {
                         />
                     </div>
                 )}
+
+                {activeTab === 'configuracion' && role === 'ADMIN' && <CommissionSettings />}
             </div>
         </div>
     );

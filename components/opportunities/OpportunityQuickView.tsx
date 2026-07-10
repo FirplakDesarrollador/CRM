@@ -1,9 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
-import { X, Save, AlertCircle, CheckCircle2, TrendingUp, Calendar, Hash, Percent } from "lucide-react";
-import { cn } from "@/components/ui/utils";
+import { X, TrendingUp, Calendar, Hash, Percent } from "lucide-react";
 import { ProbabilityDonut } from "@/components/ui/ProbabilityDonut";
 
 interface OpportunityQuickViewProps {
@@ -13,8 +12,28 @@ interface OpportunityQuickViewProps {
     onUpdate?: () => void;
 }
 
+type PhaseOption = {
+    id: number;
+    nombre: string;
+    orden?: number;
+    probability?: number | null;
+};
+
+type OpportunityRecord = {
+    id: string;
+    nombre?: string;
+    amount?: number;
+    currency_id?: string;
+    fecha_cierre_estimada?: string | null;
+    estado_id?: number | null;
+    fase_id?: number | null;
+    probability?: number | null;
+    fase_detail?: { probability?: number | null } | null;
+    cuenta?: { canal_id?: string | null } | null;
+};
+
 export function OpportunityQuickView({ opportunityId, isOpen, onClose, onUpdate }: OpportunityQuickViewProps) {
-    const [opportunity, setOpportunity] = useState<any>(null);
+    const [opportunity, setOpportunity] = useState<OpportunityRecord | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -22,14 +41,9 @@ export function OpportunityQuickView({ opportunityId, isOpen, onClose, onUpdate 
     // Edit Stats
     const [statusId, setStatusId] = useState<number | null>(null);
     const [phaseId, setPhaseId] = useState<number | null>(null);
+    const [phaseOptions, setPhaseOptions] = useState<PhaseOption[]>([]);
 
-    useEffect(() => {
-        if (isOpen && opportunityId) {
-            fetchOpportunity();
-        }
-    }, [isOpen, opportunityId]);
-
-    const fetchOpportunity = async () => {
+    const fetchOpportunity = useCallback(async () => {
         setIsLoading(true);
         setError(null);
         try {
@@ -37,35 +51,93 @@ export function OpportunityQuickView({ opportunityId, isOpen, onClose, onUpdate 
                 .from('CRM_Oportunidades')
                 .select(`
                     *,
-                    fase_detail:CRM_FasesOportunidad(probability)
+                    fase_detail:CRM_FasesOportunidad(probability),
+                    cuenta:CRM_Cuentas(canal_id)
                 `)
                 .eq('id', opportunityId)
-                .single();
+                .single<OpportunityRecord>();
 
             if (error) throw error;
 
-            // Map the probability from the joined phase if the opportunity probability is missing/zero
-            const probability = opp.probability || (opp.fase_detail as any)?.probability || 0;
-            setOpportunity({ ...opp, probability });
-            setStatusId(opp.estado_id);
-            setPhaseId(opp.fase_id);
+            let channelPhases: PhaseOption[] = [];
+            const canalId = opp.cuenta?.canal_id;
+            if (canalId) {
+                const { data: phases, error: phasesError } = await supabase
+                    .from('CRM_FasesOportunidad')
+                    .select('id, nombre, orden, probability')
+                    .eq('canal_id', canalId)
+                    .eq('is_active', true)
+                    .order('orden')
+                    .returns<PhaseOption[]>();
 
-        } catch (err: any) {
+                if (phasesError) throw phasesError;
+                channelPhases = phases || [];
+            }
+
+            // Map the probability from the joined phase if the opportunity probability is missing/zero
+            const probability = opp.probability || opp.fase_detail?.probability || 0;
+            setOpportunity({ ...opp, probability });
+            setStatusId(opp.estado_id ?? null);
+            setPhaseId(opp.fase_id ?? null);
+            setPhaseOptions(channelPhases);
+
+        } catch (err) {
             console.error("Error fetching opportunity:", err);
             setError("No se pudo cargar la oportunidad");
         } finally {
             setIsLoading(false);
         }
+    }, [opportunityId]);
+
+    useEffect(() => {
+        if (isOpen && opportunityId) {
+            fetchOpportunity();
+        }
+    }, [fetchOpportunity, isOpen, opportunityId]);
+
+    const normalizePhaseName = (name?: string) =>
+        (name || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+    const isClosedPhase = (phase?: PhaseOption) => {
+        const name = normalizePhaseName(phase?.nombre);
+        return name.includes('ganada') || name.includes('perdida');
+    };
+
+    const findPhaseForStatus = (nextStatusId: number) => {
+        if (nextStatusId === 2) {
+            return phaseOptions.find(phase => normalizePhaseName(phase.nombre).includes('ganada'));
+        }
+
+        if (nextStatusId === 3) {
+            return phaseOptions.find(phase => normalizePhaseName(phase.nombre).includes('perdida'));
+        }
+
+        if (nextStatusId === 1) {
+            const currentPhase = phaseOptions.find(phase => phase.id === phaseId);
+            if (!currentPhase || isClosedPhase(currentPhase)) {
+                return phaseOptions.find(phase => !isClosedPhase(phase));
+            }
+        }
+
+        return null;
+    };
+
+    const handleStatusChange = (nextStatusId: number) => {
+        setStatusId(nextStatusId);
+        const matchingPhase = findPhaseForStatus(nextStatusId);
+        if (matchingPhase) setPhaseId(matchingPhase.id);
     };
 
     const handleSave = async () => {
         setIsSaving(true);
         try {
+            const targetPhase = phaseOptions.find(phase => phase.id === phaseId);
             const { error } = await supabase
                 .from('CRM_Oportunidades')
                 .update({
                     estado_id: statusId,
                     fase_id: phaseId,
+                    probability: targetPhase?.probability ?? opportunity?.probability,
                     updated_at: new Date().toISOString()
                 })
                 .eq('id', opportunityId);
@@ -75,7 +147,7 @@ export function OpportunityQuickView({ opportunityId, isOpen, onClose, onUpdate 
             if (onUpdate) onUpdate();
             onClose();
 
-        } catch (err: any) {
+        } catch (err) {
             console.error("Error updating opportunity:", err);
             setError("Error al actualizar");
         } finally {
@@ -159,15 +231,11 @@ export function OpportunityQuickView({ opportunityId, isOpen, onClose, onUpdate 
                                 <select
                                     className="w-full p-2.5 rounded-xl border border-slate-200 bg-slate-50 font-medium text-slate-900"
                                     value={statusId || 0}
-                                    onChange={(e) => setStatusId(parseInt(e.target.value))}
+                                    onChange={(e) => handleStatusChange(parseInt(e.target.value))}
                                 >
-                                    {/* Assuming standard IDs based on known values or generic placeholder for now. 
-                                        Ideally fetch from CRM_Estados table if meaningful names needed. 
-                                        Using generic IDs for Quick View context based on typical CRM flow.
-                                    */}
                                     <option value={1}>Abierta</option>
-                                    <option value={4}>Ganada</option>
-                                    <option value={5}>Perdida</option>
+                                    <option value={2}>Ganada</option>
+                                    <option value={3}>Perdida</option>
                                 </select>
                             </div>
                         </>

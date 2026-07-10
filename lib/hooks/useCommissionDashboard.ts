@@ -63,6 +63,8 @@ export function useCommissionDashboard() {
 
             if (isVendedor) {
                 usersQuery = usersQuery.eq('id', currentUserId!);
+            } else if (role === 'COORDINADOR') {
+                usersQuery = usersQuery.or(`id.eq.${currentUserId},coordinadores.cs.{${currentUserId}}`);
             } else {
                 usersQuery = usersQuery.in('role', ['VENDEDOR', 'COORDINADOR', 'ADMIN']);
             }
@@ -70,7 +72,9 @@ export function useCommissionDashboard() {
             const { data: allUsers, error: usersError } = await usersQuery;
             if (usersError) throw new Error(`Users Error: ${usersError.message}`);
 
-            // 2. Fetch Ledger entries: VENDEDOR sees only own entries
+            const allowedUserIds = allUsers?.map(u => u.id) || [];
+
+            // 2. Fetch Ledger entries: VENDEDOR sees only own entries, COORDINADOR sees subordinates
             let query = supabase
                 .from('CRM_ComisionLedger')
                 .select(`
@@ -79,20 +83,37 @@ export function useCommissionDashboard() {
                     vendedor_id
                 `);
 
-            if (isVendedor) query = query.eq('vendedor_id', currentUserId!);
+            if (isVendedor) {
+                query = query.eq('vendedor_id', currentUserId!);
+            } else if (role === 'COORDINADOR') {
+                if (allowedUserIds.length > 0) {
+                    query = query.in('vendedor_id', allowedUserIds);
+                } else {
+                    // Prevent returning all records if allowedUserIds is empty
+                    query = query.eq('vendedor_id', 'none');
+                }
+            }
             if (dateFrom) query = query.gte('created_at', dateFrom);
             if (dateTo) query = query.lte('created_at', dateTo + 'T23:59:59Z');
 
             const { data: entries, error: ledgerError } = await query;
             if (ledgerError) throw new Error(`Ledger Error: ${ledgerError.message}`);
 
-            // 3. Fetch Open Opportunities: VENDEDOR sees only own
+            // 3. Fetch Open Opportunities: VENDEDOR sees only own, COORDINADOR sees subordinates
             let oppsQuery = supabase
                 .from('CRM_Oportunidades')
                 .select('id, owner_user_id, amount, account_id, account:CRM_Cuentas!account_id (canal_id)')
                 .eq('estado_id', 1);
 
-            if (isVendedor) oppsQuery = oppsQuery.eq('owner_user_id', currentUserId!);
+            if (isVendedor) {
+                oppsQuery = oppsQuery.eq('owner_user_id', currentUserId!);
+            } else if (role === 'COORDINADOR') {
+                if (allowedUserIds.length > 0) {
+                    oppsQuery = oppsQuery.in('owner_user_id', allowedUserIds);
+                } else {
+                    oppsQuery = oppsQuery.eq('owner_user_id', 'none');
+                }
+            }
 
             // If filtering by date, we might filter opportunities created in that date? 
             // Or usually Potential shows ALL currently open? 

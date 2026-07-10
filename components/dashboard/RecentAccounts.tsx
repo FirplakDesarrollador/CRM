@@ -34,7 +34,7 @@ export const RecentAccounts = ({ accounts, isLoading }: RecentAccountsProps) => 
                 {accounts.length > 0 ? accounts.map(account => (
                     <Link
                         key={account.id}
-                        href={`/cuentas/${account.id}`}
+                        href={`/cuentas?id=${account.id}`}
                         className="flex items-center gap-3 p-3 rounded-xl hover:bg-slate-50 transition-colors border border-transparent hover:border-slate-100 group"
                     >
                         <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-[#254153] group-hover:bg-white group-hover:shadow-sm transition-all">

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { db } from '@/lib/db';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
+import { useSyncStore } from '@/lib/stores/useSyncStore';
 
 export type ContactServer = {
     id: string;
@@ -35,11 +36,30 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
     const [searchTerm, setSearchTerm] = useState<string>("");
 
     // User Context
-    const { user, isVendedor } = useCurrentUser();
+    const { user, role: userRole, isVendedor } = useCurrentUser();
     const currentUserId = user?.id;
 
+    const [subordinateIds, setSubordinateIds] = useState<string[]>([]);
+
+    useEffect(() => {
+        if (userRole === 'COORDINADOR' && currentUserId) {
+            supabase
+                .from('CRM_Usuarios')
+                .select('id')
+                .contains('coordinadores', [currentUserId])
+                .then(({ data, error }) => {
+                    if (!error && data) {
+                        setSubordinateIds(data.map(u => u.id));
+                    }
+                });
+        }
+    }, [userRole, currentUserId]);
+
     const fetchContacts = useCallback(async (isLoadMore = false) => {
+        if (!currentUserId) return; // Prevent leak while user loads
+        const setIsLoadingData = useSyncStore.getState().setIsLoadingData;
         setLoading(true);
+        setIsLoadingData(true);
         try {
             // Calculate range
             const currentPage = isLoadMore ? pageRef.current + 1 : 1;
@@ -48,8 +68,23 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
 
             if (!navigator.onLine) {
                 console.log("[useContactsServer] Device is offline. Falling back to local Dexie database...");
-                let localContacts = await db.contacts.toArray();
+                let localContacts = (await db.contacts.toArray()).filter(c => !c.is_deleted);
                 
+                // Seller restriction for offline
+                if ((isVendedor || userRole === 'COORDINADOR') && currentUserId) {
+                    const idsToMatch = isVendedor ? [currentUserId] : [currentUserId, ...subordinateIds];
+
+                    // Get my accounts: Owner OR (No owner and I am creator)
+                    const myAccounts = await db.accounts.filter(a => 
+                        idsToMatch.includes(a.owner_user_id || 'dummy') || 
+                        (!a.owner_user_id && idsToMatch.includes(a.created_by || 'dummy'))
+                    ).toArray();
+                    const myAccountIds = new Set(myAccounts.map(a => a.id));
+                    
+                    // Filter contacts: MUST belong to my accounts
+                    localContacts = localContacts.filter(c => myAccountIds.has(c.account_id));
+                }
+
                 if (accountId) {
                     localContacts = localContacts.filter(c => c.account_id === accountId);
                 }
@@ -59,7 +94,8 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
                     const lowerSearch = searchTerm.toLowerCase();
                     localContacts = localContacts.filter(c => 
                         c.nombre.toLowerCase().includes(lowerSearch) ||
-                        (c.email && c.email.toLowerCase().includes(lowerSearch))
+                        (c.email && c.email.toLowerCase().includes(lowerSearch)) ||
+                        (c.telefono && c.telefono.toLowerCase().includes(lowerSearch))
                     );
                 }
 
@@ -92,6 +128,10 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
             }
 
             // Build query
+            // Use !inner join when filtering by account owner to enforce security
+            const needsAccountFilter = isVendedor || userRole === 'COORDINADOR';
+            const accountSelect = needsAccountFilter ? 'account:CRM_Cuentas!inner(nombre, owner_user_id)' : 'account:CRM_Cuentas(nombre)';
+            
             const selectFields = `
                 id,
                 account_id,
@@ -103,7 +143,7 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
                 created_at,
                 created_by,
                 updated_at,
-                account:CRM_Cuentas(nombre)
+                ${accountSelect}
             `;
 
             let query = supabase
@@ -111,12 +151,35 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
                 .select(selectFields, { count: 'exact' })
                 .eq('is_deleted', false);
 
+            if ((isVendedor || userRole === 'COORDINADOR') && currentUserId) {
+                const idsToMatch = isVendedor ? [currentUserId] : [currentUserId, ...subordinateIds].filter(Boolean);
+                const idsString = idsToMatch.join(',');
+
+                // Fetch IDs of accounts where user is owner OR (unassigned and user is creator)
+                const { data: myAccounts } = await supabase
+                    .from('CRM_Cuentas')
+                    .select('id')
+                    .or(`owner_user_id.in.(${idsString}),and(owner_user_id.is.null,created_by.in.(${idsString}))`)
+                    .eq('is_deleted', false);
+                
+                const myAccountIds = myAccounts?.map(a => a.id) || [];
+                
+                if (myAccountIds.length > 0) {
+                    // Contact MUST belong to an account I own/control
+                    query = query.in('account_id', myAccountIds);
+                } else {
+                    // I don't own any accounts, so I shouldn't see any contacts in strict mode
+                    // Filtering by a non-existent ID to ensure empty list
+                    query = query.eq('id', '00000000-0000-0000-0000-000000000000');
+                }
+            }
+
             if (accountId) {
                 query = query.eq('account_id', accountId);
             }
 
             if (searchTerm) {
-                query = query.or(`nombre.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%`);
+                query = query.or(`nombre.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%,telefono.ilike.%${searchTerm}%`);
             }
 
             // Order
@@ -137,6 +200,9 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
 
             const resultIds = result ? (result as any[]).map(r => r.id) : [];
             const optimisticUpdates: Record<string, Record<string, any>> = {};
+            const itemsToAdd: any[] = [];
+
+            // Group existing results for update
             for (const change of pendingChanges) {
                 if (resultIds.includes(change.entity_id)) {
                     if (!optimisticUpdates[change.entity_id]) {
@@ -146,29 +212,83 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
                 }
             }
 
+            // Identify NEW items that match the current accountId filter but aren't on server yet
+            if (accountId) {
+                const newContactIds = new Set(
+                    pendingChanges
+                        .filter(c => c.field_name === 'account_id' && c.new_value === accountId)
+                        .map(c => c.entity_id)
+                );
+
+                for (const newId of newContactIds) {
+                    if (!resultIds.includes(newId)) {
+                        // Find all fields for this new contact in outbox
+                        const fields = pendingChanges.filter(c => c.entity_id === newId);
+                        const newItem: any = { id: newId, account_id: accountId, _hasPendingSync: true };
+                        fields.forEach(f => newItem[f.field_name] = f.new_value);
+                        
+                        // Basic filtering for searchTerm if applicable
+                        if (searchTerm) {
+                            const term = searchTerm.toLowerCase();
+                            if (!newItem.nombre?.toLowerCase().includes(term) && !newItem.email?.toLowerCase().includes(term)) {
+                                continue;
+                            }
+                        }
+                        itemsToAdd.push(newItem);
+                    }
+                }
+            }
+
+            // --- OPTIMISTIC ACCOUNT NAMES ---
+            // Fetch account names for ANY contact that has a pending account_id change
+            const accountIdsToResolve = new Set<string>();
+            pendingChanges.forEach(c => {
+                if (c.field_name === 'account_id') accountIdsToResolve.add(c.new_value);
+            });
+            // Also include account IDs from current result set to be safe
+            result?.forEach((item: any) => {
+                const pendingId = optimisticUpdates[item.id]?.account_id;
+                if (pendingId) accountIdsToResolve.add(pendingId);
+            });
+
+            const accountNameMap: Record<string, string> = {};
+            if (accountIdsToResolve.size > 0) {
+                const localAccounts = await db.accounts.where('id').anyOf(Array.from(accountIdsToResolve)).toArray();
+                localAccounts.forEach(a => accountNameMap[a.id] = a.nombre);
+            }
+
             const flattenedResults = (result as any[]).map(item => {
                 const pending = optimisticUpdates[item.id];
                 const finalItem = pending ? { ...item, ...pending, _hasPendingSync: true } : item;
                 
+                // If account_id was updated optimistically, prioritize local name
+                let accountName = finalItem.account?.nombre || null;
+                if (pending?.account_id && accountNameMap[pending.account_id]) {
+                    accountName = accountNameMap[pending.account_id];
+                }
+
                 return {
                     ...finalItem,
                     cargo: finalItem.cargo || undefined,
                     email: finalItem.email || undefined,
                     telefono: finalItem.telefono || undefined,
-                    account_name: finalItem.account?.nombre || null
+                    account_name: accountName
                 };
             });
+
+            // Combine server results with new optimistic items
+            const finalData = [...itemsToAdd, ...flattenedResults];
 
             if (isLoadMore) {
                 setData(prev => {
                     const existingIds = new Set(prev.map(i => i.id));
-                    const newItems = flattenedResults.filter(i => !existingIds.has(i.id));
+                    const newItems = finalData.filter(i => !existingIds.has(i.id));
                     return [...prev, ...newItems];
                 });
                 setPage(currentPage);
                 pageRef.current = currentPage;
             } else {
-                setData(flattenedResults as any);
+                setData(finalData as any);
                 setPage(1);
                 pageRef.current = 1;
             }
@@ -182,8 +302,9 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
             console.error("Error fetching contacts:", err);
         } finally {
             setLoading(false);
+            useSyncStore.getState().setIsLoadingData(false);
         }
-    }, [pageSize, searchTerm, accountId]);
+    }, [pageSize, searchTerm, accountId, isVendedor, userRole, currentUserId, subordinateIds]);
 
     // Initial Fetch & Filter Fetch
     useEffect(() => {

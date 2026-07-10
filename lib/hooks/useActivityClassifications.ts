@@ -6,6 +6,7 @@ export interface ActivityClassification {
     nombre: string;
     tipo_actividad: 'EVENTO' | 'TAREA';
     created_at?: string;
+    is_deleted?: boolean;
 }
 
 export interface ActivitySubclassification {
@@ -13,6 +14,7 @@ export interface ActivitySubclassification {
     nombre: string;
     clasificacion_id: number;
     created_at?: string;
+    is_deleted?: boolean;
 }
 
 export function useActivityClassifications() {
@@ -26,8 +28,8 @@ export function useActivityClassifications() {
         setError(null);
         try {
             const [clsRes, subRes] = await Promise.all([
-                supabase.from('CRM_Activity_Clasificacion').select('*').order('nombre'),
-                supabase.from('CRM_Activity_Subclasificacion').select('*').order('nombre')
+                supabase.from('CRM_Activity_Clasificacion').select('*').eq('is_deleted', false).order('nombre'),
+                supabase.from('CRM_Activity_Subclasificacion').select('*').eq('is_deleted', false).order('nombre')
             ]);
 
             if (clsRes.error) throw clsRes.error;
@@ -65,14 +67,25 @@ export function useActivityClassifications() {
 
     const deleteClassification = async (id: number) => {
         try {
-            const { error } = await supabase
+            // Mark classification as deleted
+            const clsRes = await supabase
                 .from('CRM_Activity_Clasificacion')
-                .delete()
+                .update({ is_deleted: true })
                 .eq('id', id);
 
-            if (error) throw error;
+            if (clsRes.error) throw clsRes.error;
+
+            // Mark all related subclassifications as deleted too
+            const subRes = await supabase
+                .from('CRM_Activity_Subclasificacion')
+                .update({ is_deleted: true })
+                .eq('clasificacion_id', id);
+
+            if (subRes.error) {
+                console.warn('[useActivityClassifications] Error marking subclassifications as deleted:', subRes.error);
+            }
+
             setClassifications(prev => prev.filter(c => c.id !== id));
-            // Also remove related subclassifications from local state
             setSubclassifications(prev => prev.filter(s => s.clasificacion_id !== id));
             return { error: null };
         } catch (err: any) {
@@ -100,7 +113,7 @@ export function useActivityClassifications() {
         try {
             const { error } = await supabase
                 .from('CRM_Activity_Subclasificacion')
-                .delete()
+                .update({ is_deleted: true })
                 .eq('id', id);
 
             if (error) throw error;

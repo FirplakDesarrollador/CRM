@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { syncEngine } from '@/lib/sync';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 
 export type LedgerEntry = {
     id: string;
@@ -35,11 +36,30 @@ type UseLedgerProps = {
 };
 
 export function useCommissionLedger({ pageSize = 25 }: UseLedgerProps = {}) {
+    const { user, role } = useCurrentUser();
+    const currentUserId = user?.id || null;
+
     const [data, setData] = useState<LedgerEntry[]>([]);
     const [count, setCount] = useState(0);
     const [loading, setLoading] = useState(true);
     const [page, setPage] = useState(1);
     const [hasMore, setHasMore] = useState(true);
+
+    const [subordinateIds, setSubordinateIds] = useState<string[]>([]);
+
+    useEffect(() => {
+        if (role === 'COORDINADOR' && currentUserId) {
+            supabase
+                .from('CRM_Usuarios')
+                .select('id')
+                .contains('coordinadores', [currentUserId])
+                .then(({ data, error }) => {
+                    if (!error && data) {
+                        setSubordinateIds(data.map(u => u.id));
+                    }
+                });
+        }
+    }, [role, currentUserId]);
 
     // Filters
     const [tipoFilter, setTipoFilter] = useState<string | null>(null);
@@ -48,14 +68,6 @@ export function useCommissionLedger({ pageSize = 25 }: UseLedgerProps = {}) {
     const [oportunidadFilter, setOportunidadFilter] = useState<string | null>(null);
     const [dateFrom, setDateFrom] = useState<string | null>(null);
     const [dateTo, setDateTo] = useState<string | null>(null);
-
-    const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-
-    useEffect(() => {
-        syncEngine.getCurrentUser().then(({ data: { user } }) => {
-            if (user) setCurrentUserId(user.id);
-        });
-    }, []);
 
     const fetchLedger = useCallback(async (isLoadMore = false) => {
         if (!currentUserId) return;
@@ -82,6 +94,17 @@ export function useCommissionLedger({ pageSize = 25 }: UseLedgerProps = {}) {
             if (oportunidadFilter) query = query.eq('oportunidad_id', oportunidadFilter);
             if (dateFrom) query = query.gte('created_at', dateFrom);
             if (dateTo) query = query.lte('created_at', dateTo + 'T23:59:59Z');
+
+            if (role === 'VENDEDOR') {
+                query = query.eq('vendedor_id', currentUserId);
+            } else if (role === 'COORDINADOR') {
+                const ids = [currentUserId, ...subordinateIds].filter(Boolean);
+                if (ids.length > 0) {
+                    query = query.in('vendedor_id', ids);
+                } else {
+                    query = query.eq('vendedor_id', 'none');
+                }
+            }
 
             query = query.order('created_at', { ascending: false }).range(from, to);
 
@@ -110,11 +133,11 @@ export function useCommissionLedger({ pageSize = 25 }: UseLedgerProps = {}) {
         } finally {
             setLoading(false);
         }
-    }, [currentUserId, pageSize, page, tipoFilter, vendedorFilter, canalFilter, oportunidadFilter, dateFrom, dateTo]);
+    }, [currentUserId, pageSize, page, tipoFilter, vendedorFilter, canalFilter, oportunidadFilter, dateFrom, dateTo, role, subordinateIds]);
 
     useEffect(() => {
         fetchLedger(false);
-    }, [currentUserId, tipoFilter, vendedorFilter, canalFilter, oportunidadFilter, dateFrom, dateTo]);
+    }, [currentUserId, tipoFilter, vendedorFilter, canalFilter, oportunidadFilter, dateFrom, dateTo, role, subordinateIds]);
 
     const recordPagada = async (oportunidadId: string, sapPaymentRef: string) => {
         const { data: result, error } = await supabase.rpc('record_commission_pagada', {

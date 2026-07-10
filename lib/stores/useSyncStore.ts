@@ -9,6 +9,8 @@ interface SyncState {
     error: string | null;
     isPaused: boolean;
     isNavigating: boolean;
+    isLoadingData: boolean;
+    loadingCount: number;
     userRole: 'SALES' | 'COORDINATOR' | 'ADMIN';
 
     setOnline: (status: boolean) => void;
@@ -19,6 +21,7 @@ interface SyncState {
     setLastSyncTime: (time: string) => void;
     setError: (error: string | null) => void;
     setNavigating: (isNavigating: boolean) => void;
+    setIsLoadingData: (isLoading: boolean) => void;
     setUserRole: (role: 'SALES' | 'COORDINATOR' | 'ADMIN') => void;
 }
 
@@ -31,6 +34,8 @@ export const useSyncStore = create<SyncState>((set) => ({
     error: null,
     isPaused: false,
     isNavigating: false,
+    isLoadingData: false,
+    loadingCount: 0,
     userRole: 'ADMIN',
 
     setOnline: (status) => set({ isOnline: status }),
@@ -41,5 +46,12 @@ export const useSyncStore = create<SyncState>((set) => ({
     setLastSyncTime: (lastSyncTime) => set({ lastSyncTime }),
     setError: (error) => set({ error }),
     setNavigating: (isNavigating) => set({ isNavigating }),
+    setIsLoadingData: (isLoading) => set((state) => {
+        const newCount = isLoading ? state.loadingCount + 1 : Math.max(0, state.loadingCount - 1);
+        return { 
+            loadingCount: newCount,
+            isLoadingData: newCount > 0
+        };
+    }),
     setUserRole: (role) => set({ userRole: role }),
 }));

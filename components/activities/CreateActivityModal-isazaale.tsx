@@ -1,0 +1,1684 @@
+"use client";
+
+import Link from "next/link";
+import { useForm } from "react-hook-form";
+import { CalendarClock, ListTodo, Loader2, Users, Search, X, Video, Plus, CheckCircle2, AlertCircle, MoreVertical, Trash2, UserCog } from "lucide-react";
+import { useLiveQuery } from "dexie-react-hooks";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { cn } from "@/components/ui/utils";
+import { toInputDate, toInputDateTime } from "@/lib/date-utils";
+import { db, LocalActivityClassification, LocalActivitySubclassification } from "@/lib/db";
+import { syncEngine } from "@/lib/sync";
+import { supabase } from "@/lib/supabase";
+import { DateTimePicker } from "@/components/ui/DateTimePicker";
+import { useActivities } from "@/lib/hooks/useActivities";
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { OpportunityCombobox } from "@/components/opportunities/OpportunityCombobox";
+import { AccountCombobox } from "@/components/accounts/AccountCombobox";
+
+interface CreateActivityModalProps {
+    onClose: () => void;
+    onSubmit: (data: any) => void;
+    opportunities?: any[];
+    initialOpportunityId?: string;
+    initialAccountId?: string;
+    initialData?: any;
+}
+
+export function CreateActivityModal({ onClose, onSubmit, opportunities, initialOpportunityId, initialAccountId, initialData }: CreateActivityModalProps) {
+    const isEditing = !!initialData;
+    const { register, handleSubmit, watch, setValue, getValues, reset, formState: { dirtyFields } } = useForm({
+        defaultValues: {
+            asunto: initialData?.asunto || '',
+            descripcion: initialData?.descripcion || '',
+            tipo_actividad: (initialData?.tipo_actividad || 'EVENTO') as 'TAREA' | 'EVENTO',
+            clasificacion_id: initialData?.clasificacion_id ? String(initialData.clasificacion_id) : "",
+            subclasificacion_id: initialData?.subclasificacion_id ? String(initialData.subclasificacion_id) : "",
+            fecha_inicio: initialData?.fecha_inicio
+                ? (initialData.tipo_actividad === 'TAREA' ? toInputDate(initialData.fecha_inicio) : toInputDateTime(initialData.fecha_inicio))
+                : (initialData?.tipo_actividad === 'TAREA' ? toInputDate(new Date()) : toInputDateTime(new Date())),
+            fecha_fin: initialData?.fecha_fin
+                ? toInputDateTime(initialData.fecha_fin)
+                : toInputDateTime(new Date(Date.now() + 3600000)),
+            opportunity_id: initialData?.opportunity_id || initialOpportunityId || '',
+            account_id: initialData?.account_id || initialAccountId || '',
+            is_completed: !!initialData?.is_completed,
+            prioridad: initialData?.prioridad || 'Media'
+        }
+    });
+
+    const watchedAccountId = watch('account_id');
+    const watchedOpportunityId = watch('opportunity_id');
+
+    const relatedOpportunity = useLiveQuery(
+        () => watchedOpportunityId ? db.opportunities.get(watchedOpportunityId) : undefined,
+        [watchedOpportunityId]
+    );
+
+    const relatedAccount = useLiveQuery(
+        () => {
+            if (relatedOpportunity?.account_id) return db.accounts.get(relatedOpportunity.account_id);
+            if (watchedAccountId) return db.accounts.get(watchedAccountId);
+            return undefined;
+        },
+        [relatedOpportunity?.account_id, watchedAccountId]
+    );
+
+    const relatedContact = useLiveQuery(
+        () => relatedAccount?.id ? db.contacts.where('account_id').equals(relatedAccount.id).first() : undefined,
+        [relatedAccount?.id]
+    );
+
+    const [resolvedAccountName, setResolvedAccountName] = useState<string>("");
+    const opportunityAccountRef = useRef<string | null>(null);
+
+    useEffect(() => {
+        const fillAccount = async () => {
+            if (!watchedOpportunityId) return;
+
+            let accountId = null;
+
+            // 1. Try local cache for Opportunity
+            const localOpp = await db.opportunities.get(watchedOpportunityId);
+            if (localOpp?.account_id) {
+                accountId = localOpp.account_id;
+            } else if (navigator.onLine) {
+                // 2. Fallback to Supabase for Opportunity
+                const { data } = await supabase
+                    .from('CRM_Oportunidades')
+                    .select('account_id')
+                    .eq('id', watchedOpportunityId)
+                    .maybeSingle();
+                if (data?.account_id) accountId = data.account_id;
+            }
+
+            if (accountId) {
+                opportunityAccountRef.current = accountId;
+                setValue('account_id', accountId, { shouldDirty: true });
+
+                // Resolve account name independently
+                const localAcc = await db.accounts.get(accountId);
+                if (localAcc) {
+                    setResolvedAccountName(localAcc.nombre);
+                } else if (navigator.onLine) {
+                    const { data } = await supabase
+                        .from('CRM_Cuentas')
+                        .select('nombre')
+                        .eq('id', accountId)
+                        .maybeSingle();
+                    if (data?.nombre) setResolvedAccountName(data.nombre);
+                }
+            }
+        };
+
+        fillAccount();
+    }, [watchedOpportunityId, setValue]);
+
+    // Pre-resolve initial account name
+    useEffect(() => {
+        if (initialAccountId) {
+            db.accounts.get(initialAccountId).then(acc => {
+                if (acc) setResolvedAccountName(acc.nombre);
+            });
+        }
+    }, [initialAccountId]);
+
+    // Sync props to form if they change after mount (e.g. late loading from parent)
+    useEffect(() => {
+        if (initialOpportunityId && !getValues('opportunity_id')) {
+            setValue('opportunity_id', initialOpportunityId);
+        }
+    }, [initialOpportunityId, setValue, getValues]);
+
+    useEffect(() => {
+        if (initialAccountId && !getValues('account_id')) {
+            setValue('account_id', initialAccountId);
+        }
+    }, [initialAccountId, setValue, getValues]);
+
+    const [msConnected, setMsConnected] = useState<boolean>(false);
+    const [isTeamsMeeting, setIsTeamsMeeting] = useState<boolean>(!!initialData?.teams_meeting_url);
+    const [attendees, setAttendees] = useState<{ id: string; name: string; email: string }[]>(() => {
+        if (initialData?.microsoft_attendees) {
+            try {
+                const parsed = typeof initialData.microsoft_attendees === 'string'
+                    ? JSON.parse(initialData.microsoft_attendees)
+                    : initialData.microsoft_attendees;
+                return Array.isArray(parsed) ? parsed : [];
+            } catch (e) {
+                console.error("[CreateActivityModal] Error parsing attendees:", e);
+                return [];
+            }
+        }
+        return [];
+    });
+
+    const [msEventId, setMsEventId] = useState<string | null>(initialData?.ms_event_id || null);
+    const [msPlannerId, setMsPlannerId] = useState<string | null>(initialData?.ms_planner_id || null);
+    const [currentTeamsMeetingUrl, setCurrentTeamsMeetingUrl] = useState<string | null>(initialData?.teams_meeting_url || null);
+
+    const [userSearch, setUserSearch] = useState("");
+    const [searchResults, setSearchResults] = useState<{ id: string; displayName: string; mail?: string; userPrincipalName?: string; jobTitle?: string }[]>([]);
+    const [isSearching, setIsSearching] = useState(false);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
+    // Planner Integration State - Always sync tasks to Planner
+    const [syncToPlanner, setSyncToPlanner] = useState<boolean>(true);
+    const [plannerPlans, setPlannerPlans] = useState<{ id: string; title: string }[]>([]);
+    const [plannerBuckets, setPlannerBuckets] = useState<{ id: string; name: string }[]>([]);
+    const [selectedPlanId, setSelectedPlanId] = useState<string>("");
+    const [selectedBucketId, setSelectedBucketId] = useState<string>("");
+    const [loadingPlanner, setLoadingPlanner] = useState<boolean>(false);
+    const [checklist, setChecklist] = useState<{ id: string; title: string; isChecked: boolean }[]>(() => {
+        if (initialData?._sync_metadata?.checklist) {
+            return initialData._sync_metadata.checklist.map((item: any) => {
+                if (typeof item === 'string') return { id: crypto.randomUUID(), title: item, isChecked: false };
+                return item;
+            });
+        }
+        return [];
+    });
+    const [newChecklistItem, setNewChecklistItem] = useState("");
+
+    // Deletion State
+    const [isDeleting, setIsDeleting] = useState(false);
+    const [showMenu, setShowMenu] = useState(false);
+    const { updateActivity, deleteActivity } = useActivities({ opportunity_id: initialOpportunityId });
+
+    // Planner Status Sync State
+    const [isSyncingPlanner, setIsSyncingPlanner] = useState<boolean>(false);
+
+    // Sync Feedback State
+    const [syncFeedback, setSyncFeedback] = useState<{
+        planner?: 'success' | 'error' | null;
+        teams?: 'success' | 'error' | null;
+        message?: string;
+    }>({});
+
+    // Track if we already synced this activity instance to prevent loops
+    const hasSyncedRef = useRef<string | null>(null);
+
+    // Reassignment state (ADMIN / COORDINADOR only)
+    const { user: currentUser, role: currentRole } = useCurrentUser();
+    const canReassign = isEditing && (currentRole === 'ADMIN' || currentRole === 'COORDINADOR');
+    const [reassignUserId, setReassignUserId] = useState<string>(initialData?.user_id || '');
+    const [reassignableUsers, setReassignableUsers] = useState<{ id: string; full_name: string | null; email: string }[]>([]);
+
+    useEffect(() => {
+        if (!canReassign || !currentUser) return;
+        const fetchReassignableUsers = async () => {
+            if (currentRole === 'ADMIN') {
+                const { data } = await supabase
+                    .from('CRM_Usuarios')
+                    .select('id, full_name, email')
+                    .eq('is_active', true)
+                    .order('full_name');
+                if (data) setReassignableUsers(data);
+            } else {
+                // COORDINADOR: only themselves + their subordinates
+                const { data } = await supabase
+                    .from('CRM_Usuarios')
+                    .select('id, full_name, email')
+                    .eq('is_active', true)
+                    .or(`id.eq.${currentUser.id},coordinadores.cs.{${currentUser.id}}`)
+                    .order('full_name');
+                if (data) setReassignableUsers(data);
+            }
+        };
+        fetchReassignableUsers();
+    }, [canReassign, currentUser, currentRole]);
+
+    // Check Microsoft Connection
+    useEffect(() => {
+        async function checkMS() {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+
+            const { data } = await supabase
+                .from('CRM_MicrosoftTokens')
+                .select('user_id')
+                .eq('user_id', user.id)
+                .maybeSingle();
+
+            setMsConnected(!!data);
+        }
+        checkMS();
+    }, []);
+
+    useEffect(() => {
+        // Guard: solo sincronizar una vez por instancia de actividad.
+        // initialData puede cambiar cuando Dexie persiste ms_planner_id o ms_event_id,
+        // lo que dispararía el sync infinitamente sin este control.
+        if (!initialData?.id) return;
+        if (hasSyncedRef.current === initialData.id) return;
+        hasSyncedRef.current = initialData.id;
+
+        async function syncPlannerBidirectional() {
+            if (!initialData || !initialData.ms_planner_id) return;
+
+            setIsSyncingPlanner(true);
+            try {
+                const res = await fetch(`/api/microsoft/planner/tasks/${initialData.ms_planner_id}`, { credentials: 'include' });
+                if (res.ok) {
+                    const taskData = await res.json();
+
+                    let crmDateStr = initialData.updated_at || initialData.created_at;
+                    if (crmDateStr && !crmDateStr.endsWith('Z') && !crmDateStr.includes('+')) {
+                        // Supabase timestamps might lack the Z (UTC) indicator, causing them to parse as local time (future).
+                        crmDateStr += 'Z';
+                    }
+
+                    // Protect Plan and Bucket from being reset
+                    if (taskData.planId) setSelectedPlanId(taskData.planId);
+                    if (taskData.bucketId) {
+                        // Small timeout to bypass the plan loading effect that clears the bucket
+                        setTimeout(() => setSelectedBucketId(taskData.bucketId), 50);
+                    }
+
+                    // Prioritize the detailed _sync_metadata timestamp if available, fallback to entity timestamp
+                    const crmModifiedDate = initialData._sync_metadata?.last_modified
+                        ? initialData._sync_metadata.last_modified
+                        : (crmDateStr ? new Date(crmDateStr).getTime() : 0);
+
+                    const taskModifiedDate = taskData.lastModifiedDateTime ? new Date(taskData.lastModifiedDateTime).getTime() : 0;
+                    const detailsModifiedDate = taskData.details?.lastModifiedDateTime ? new Date(taskData.details.lastModifiedDateTime).getTime() : 0;
+                    const plannerModifiedDate = Math.max(taskModifiedDate, detailsModifiedDate);
+
+                    console.log(`[CreateActivityModal] Sync Comparison - CRM: ${new Date(crmModifiedDate).toISOString()} (${crmModifiedDate}) | Planner: ${new Date(plannerModifiedDate).toISOString()} (${plannerModifiedDate})`);
+
+                    const isPlannerNewer = plannerModifiedDate > (crmModifiedDate + 3000); // 3s leeway for API latency
+                    const isCrmNewer = crmModifiedDate > (plannerModifiedDate + 3000);
+
+                    // If Planner is completed but CRM is not, or Planner has notes and CRM doesn't
+                    const isCompleted = taskData.percentComplete === 100;
+                    const plannerWinsOnCompletion = isCompleted && !initialData.is_completed;
+                    const plannerFillsEmptyNotes = !initialData.descripcion && taskData.details?.description;
+
+                    if (isPlannerNewer || plannerWinsOnCompletion || plannerFillsEmptyNotes) {
+                        console.log(`[CreateActivityModal] Planner is newer. Syncing to UI...`);
+                        setMsPlannerId(taskData.id);
+
+                        setValue('asunto', taskData.title, { shouldDirty: true });
+
+                        if (taskData.details?.description !== undefined) {
+                            setValue('descripcion', taskData.details.description, { shouldDirty: true });
+                        }
+
+                        if (isPlannerNewer) {
+                            setValue('is_completed', isCompleted, { shouldDirty: true });
+                        }
+
+                        if (taskData.details?.checklist) {
+                            setChecklist(Object.entries(taskData.details.checklist).map(([id, item]: [string, any]) => ({ id, title: item.title, isChecked: item.isChecked })));
+                        }
+
+                        if (taskData.resolvedAssignees && taskData.resolvedAssignees.length > 0) {
+                            setAttendees(taskData.resolvedAssignees);
+                        }
+
+                        // Reset form with new data so dirtyFields is cleared
+                        reset({
+                            ...getValues(),
+                            asunto: taskData.title,
+                            descripcion: taskData.details?.description || '',
+                            is_completed: isCompleted,
+                        });
+                    } else if (isCrmNewer) {
+                        console.log(`[CreateActivityModal] CRM is newer. Retaining CRM data...`);
+                        setMsPlannerId(taskData.id);
+                        if (taskData.details?.checklist) {
+                            setChecklist(Object.entries(taskData.details.checklist).map(([id, item]: [string, any]) => ({ id, title: item.title, isChecked: item.isChecked })));
+                        }
+                        if (taskData.resolvedAssignees && taskData.resolvedAssignees.length > 0) {
+                            setAttendees(taskData.resolvedAssignees);
+                        }
+                    } else {
+                        // Same timestamps. Just populate UI details
+                        setMsPlannerId(taskData.id);
+                        if (taskData.details?.checklist) {
+                            setChecklist(Object.entries(taskData.details.checklist).map(([id, item]: [string, any]) => ({ id, title: item.title, isChecked: item.isChecked })));
+                        }
+                        if (taskData.resolvedAssignees && taskData.resolvedAssignees.length > 0) {
+                            setAttendees(taskData.resolvedAssignees);
+                        }
+                    }
+
+                    // Si está completado en planner y Planner es más reciente (o casi igual), lo disparamos localmente enseguida para no bloquear.
+                    if (isCompleted && !initialData.is_completed) {
+                        onSubmit({
+                            ...initialData,
+                            is_completed: true,
+                            asunto: taskData.title,
+                            descripcion: taskData.details?.description !== undefined ? taskData.details.description : (initialData.descripcion || '')
+                        });
+                    }
+                } else {
+                    console.error("[CreateActivityModal] Failed to sync planner bidirectional status:", await res.text());
+                }
+            } catch (err) {
+                console.error("[CreateActivityModal] Error fetching planner task:", err);
+            } finally {
+                setIsSyncingPlanner(false);
+            }
+        }
+
+        async function syncEventBidirectional() {
+            if (!initialData || initialData.tipo_actividad !== 'EVENTO') return;
+
+            setIsSyncingPlanner(true);
+            try {
+                let currentEventId = initialData.ms_event_id;
+
+                // CASE: Linked event - verify it exists
+                if (currentEventId) {
+                    const res = await fetch(`/api/microsoft/calendar/events/${currentEventId}`, { credentials: 'include' });
+                    if (res.ok) {
+                        const eventData = await res.json();
+
+                        let crmDateStr = initialData.updated_at || initialData.created_at;
+                        if (crmDateStr && !crmDateStr.endsWith('Z') && !crmDateStr.includes('+')) {
+                            crmDateStr += 'Z';
+                        }
+                        const crmModifiedDate = initialData._sync_metadata?.last_modified
+                            ? initialData._sync_metadata.last_modified
+                            : (crmDateStr ? new Date(crmDateStr).getTime() : 0);
+                        const eventModifiedDate = eventData.lastModifiedDateTime ? new Date(eventData.lastModifiedDateTime).getTime() : 0;
+
+                        const isEventNewer = eventModifiedDate > (crmModifiedDate + 10000);
+                        const isCrmNewer = crmModifiedDate > (eventModifiedDate + 10000);
+
+                        if (isEventNewer) {
+                            console.log(`[CreateActivityModal] Calendar Event is newer. Syncing to UI...`);
+                            setMsEventId(eventData.id);
+                            setValue('asunto', eventData.subject, { shouldDirty: true });
+                            if (eventData.body?.content) {
+                                setValue('descripcion', eventData.bodyPreview || eventData.body.content.replace(/<[^>]+>/g, ''), { shouldDirty: true });
+                            }
+                            if (eventData.attendees && eventData.attendees.length > 0) {
+                                setAttendees(eventData.attendees.map((a: any) => ({
+                                    id: a.emailAddress.address,
+                                    name: a.emailAddress.name,
+                                    email: a.emailAddress.address
+                                })));
+                            }
+                            setIsTeamsMeeting(!!eventData.isOnlineMeeting || !!eventData.onlineMeeting?.joinUrl);
+                            setCurrentTeamsMeetingUrl(eventData.onlineMeeting?.joinUrl || null);
+                        } else if (isCrmNewer) {
+                            console.log(`[CreateActivityModal] CRM is newer. Event will be updated on submit.`);
+                            setMsEventId(eventData.id);
+                            if (eventData.attendees && eventData.attendees.length > 0) {
+                                setAttendees(eventData.attendees.map((a: any) => ({
+                                    id: a.emailAddress.address,
+                                    name: a.emailAddress.name,
+                                    email: a.emailAddress.address
+                                })));
+                            }
+                            // Don't overwrite isTeamsMeeting here if CRM is newer and user might have just changed it in form
+                        } else {
+                            setMsEventId(eventData.id);
+                            if (eventData.onlineMeeting?.joinUrl) {
+                                setIsTeamsMeeting(true);
+                                setCurrentTeamsMeetingUrl(eventData.onlineMeeting?.joinUrl);
+                            }
+                            if (eventData.attendees && eventData.attendees.length > 0) {
+                                setAttendees(eventData.attendees.map((a: any) => ({
+                                    id: a.emailAddress.address,
+                                    name: a.emailAddress.name,
+                                    email: a.emailAddress.address
+                                })));
+                            }
+                        }
+                    } else if (res.status === 404) {
+                        console.warn(`[CreateActivityModal] Event not found in Outlook (Deleted). It will be recreated on submit.`);
+                        // We set ms_event_id to null locally so submit logic recreates it
+                        // Optional: updateActivity(initialData.id, { ms_event_id: null });
+                    }
+                }
+                // CASE: Not linked - check if it already exists in Outlook to avoid duplicates
+                else if (msConnected && initialData.asunto && initialData.fecha_inicio) {
+                    console.log(`[CreateActivityModal] Unlinked event. Searching Outlook to avoid duplicates...`);
+                    const searchRes = await fetch(`/api/microsoft/calendar/search-event?subject=${encodeURIComponent(initialData.asunto.trim())}&startTime=${encodeURIComponent(initialData.fecha_inicio)}`, { credentials: 'include' });
+
+                    if (searchRes.ok) {
+                        const { event: foundEvent } = await searchRes.json();
+                        if (foundEvent) {
+                            console.log(`[CreateActivityModal] Found existing event in Outlook. Linking to ID: ${foundEvent.id}`);
+                            // Link it immediately
+                            setMsEventId(foundEvent.id);
+                            setCurrentTeamsMeetingUrl(foundEvent.onlineMeeting?.joinUrl || null);
+                            updateActivity(initialData.id, {
+                                ms_event_id: foundEvent.id,
+                                teams_meeting_url: foundEvent.onlineMeeting?.joinUrl || null
+                            });
+                            // Refresh UI
+                            if (foundEvent.onlineMeeting?.joinUrl) setIsTeamsMeeting(true);
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error("[CreateActivityModal] Error in syncEventBidirectional:", err);
+            } finally {
+                setIsSyncingPlanner(false);
+            }
+        }
+
+        if (initialData?.id) {
+            console.log(`[CreateActivityModal] Triggering bidirectional sync for: ${initialData.id}`);
+        }
+
+        if (initialData?.tipo_actividad === 'TAREA') {
+            syncPlannerBidirectional();
+        } else if (initialData?.tipo_actividad === 'EVENTO') {
+            syncEventBidirectional();
+        }
+    }, [initialData, setValue, onSubmit]); // Fixed dependencies
+
+    // Load Catalogs
+    const classifications = useLiveQuery(() => db.activityClassifications.toArray().then(arr => arr.filter(c => !c.is_deleted)), []) || [];
+    const subclassifications = useLiveQuery(() => db.activitySubclassifications.toArray().then(arr => arr.filter(s => !s.is_deleted)), []) || [];
+
+    // PROACTIVE SYNC: If catalogs are empty, trigger a pull
+    useEffect(() => {
+        if (classifications.length === 0 && navigator.onLine) {
+            console.log("[CreateActivityModal] Catalogs empty, triggering sync...");
+            syncEngine.triggerSync();
+        }
+    }, [classifications.length]);
+
+    // DEBUG: Log initialData to diagnose classification issue
+    console.log("[CreateActivityModal] initialData received:", initialData);
+    console.log("[CreateActivityModal] clasificacion_id:", initialData?.clasificacion_id, "type:", typeof initialData?.clasificacion_id);
+    console.log("[CreateActivityModal] Available classifications:", classifications.length);
+
+
+
+    // Force form reset when initialData changes OR when classifications finish loading
+    // This fixes the timing issue where the select options don't exist yet when form resets
+    useEffect(() => {
+        if (initialData && classifications.length > 0) {
+            console.log("[CreateActivityModal] Resetting form with classifications loaded:", classifications.length);
+            reset({
+                asunto: initialData.asunto || '',
+                descripcion: initialData.descripcion || '',
+                tipo_actividad: (initialData.tipo_actividad || 'EVENTO') as 'TAREA' | 'EVENTO',
+                clasificacion_id: initialData.clasificacion_id ? String(initialData.clasificacion_id) : "",
+                subclasificacion_id: initialData.subclasificacion_id ? String(initialData.subclasificacion_id) : "",
+                fecha_inicio: initialData.fecha_inicio
+                    ? (initialData.tipo_actividad === 'TAREA' ? toInputDate(initialData.fecha_inicio) : toInputDateTime(initialData.fecha_inicio))
+                    : (initialData.tipo_actividad === 'TAREA' ? toInputDate(new Date()) : toInputDateTime(new Date())),
+                fecha_fin: initialData.fecha_fin
+                    ? toInputDateTime(initialData.fecha_fin)
+                    : toInputDateTime(new Date(Date.now() + 3600000)),
+                opportunity_id: initialData.opportunity_id || initialOpportunityId || '',
+                account_id: initialData.account_id || initialAccountId || '',
+                is_completed: !!initialData.is_completed,
+                prioridad: initialData.prioridad || 'Media'
+            });
+        }
+    }, [initialData, reset, initialOpportunityId, classifications.length]);
+
+    // Handle User Search
+    useEffect(() => {
+        const delayDebounceFn = setTimeout(async () => {
+            if (userSearch.length >= 2) {
+                setIsSearching(true);
+                try {
+                    const res = await fetch(`/api/microsoft/users?q=${encodeURIComponent(userSearch)}`);
+                    if (res.ok) {
+                        const data = await res.json();
+                        setSearchResults(data);
+                    }
+                } catch (error) {
+                    console.error("Error searching users:", error);
+                } finally {
+                    setIsSearching(false);
+                }
+            } else {
+                setSearchResults([]);
+            }
+        }, 300);
+
+        return () => clearTimeout(delayDebounceFn);
+    }, [userSearch]);
+
+    const addAttendee = (user: any) => {
+        console.log("[CreateActivityModal] Selecting attendee:", user);
+        if (!attendees.find(a => a.id === user.id)) {
+            const newAttendee = {
+                id: user.id,
+                name: user.displayName,
+                email: user.mail || user.userPrincipalName
+            };
+            console.log("[CreateActivityModal] Adding new attendee:", newAttendee);
+            setAttendees([...attendees, newAttendee]);
+        } else {
+            console.log("[CreateActivityModal] Attendee already in list");
+        }
+        setUserSearch("");
+        setSearchResults([]);
+    };
+
+    const removeAttendee = (id: string) => {
+        setAttendees(attendees.filter(a => a.id !== id));
+    };
+
+    const addChecklistItem = () => {
+        if (newChecklistItem.trim()) {
+            setChecklist([...checklist, { id: crypto.randomUUID(), title: newChecklistItem.trim(), isChecked: false }]);
+            setNewChecklistItem("");
+        }
+    };
+
+    const removeChecklistItem = (id: string) => {
+        setChecklist(checklist.filter((item) => item.id !== id));
+    };
+
+    const toggleChecklistItem = (id: string, isChecked: boolean) => {
+        setChecklist(checklist.map((item) => item.id === id ? { ...item, isChecked } : item));
+    };
+
+    // Planner: Load Plans directly when sync is enabled
+    const tipoActividad = watch('tipo_actividad');
+    useEffect(() => {
+        if (syncToPlanner && msConnected && tipoActividad === 'TAREA') {
+            console.log('[Planner] Loading plans... msConnected:', msConnected, 'tipo:', tipoActividad);
+            setLoadingPlanner(true);
+            setPlannerPlans([]);
+            // Don't wipe selections on initial mount if we are editing an existing task
+            if (!initialData?.ms_planner_id) {
+                setPlannerBuckets([]);
+                setSelectedPlanId("");
+                setSelectedBucketId("");
+            }
+            fetch('/api/microsoft/planner/plans', { credentials: 'include' })
+                .then(res => res.json())
+                .then(data => {
+                    const plans = data.plans || [];
+                    setPlannerPlans(plans);
+                    // Auto-select CRM default plan usando el flag isCrmDefault que devuelve la API
+                    // Esto es más confiable que comparar por nombre de texto con 95 planes
+                    if (!initialData?.ms_planner_id && !selectedPlanId) {
+                        const defaultPlan = plans.find((p: any) => p.isCrmDefault)
+                            || plans.find((p: any) => p.title === 'CRM Ventas'); // fallback
+                        if (defaultPlan) {
+                            console.log('[Planner] Auto-selecting plan:', defaultPlan.title, defaultPlan.id);
+                            setSelectedPlanId(defaultPlan.id);
+                        }
+                    }
+                })
+                .catch(err => console.error('[Planner] Error loading plans:', err))
+                .finally(() => setLoadingPlanner(false));
+        } else if (!initialData?.ms_planner_id) {
+            setPlannerPlans([]);
+            setPlannerBuckets([]);
+            setSelectedPlanId("");
+            setSelectedBucketId("");
+        }
+    }, [syncToPlanner, msConnected, tipoActividad]);
+
+
+    // Planner: Load Buckets when Plan is selected
+    useEffect(() => {
+        if (selectedPlanId) {
+            setLoadingPlanner(true);
+            setPlannerBuckets([]);
+            // Only wipe the bucket if the user manually changed the plan, not during initial load
+            if (!initialData?.ms_planner_id) {
+                setSelectedBucketId("");
+            }
+            fetch(`/api/microsoft/planner/buckets?planId=${selectedPlanId}`, { credentials: 'include' })
+                .then(res => res.json())
+                .then(data => {
+                    const buckets = data.buckets || [];
+                    setPlannerBuckets(buckets);
+                })
+                .catch(err => console.error('[Planner] Error loading buckets:', err))
+                .finally(() => setLoadingPlanner(false));
+        }
+    }, [selectedPlanId, initialData?.ms_planner_id]);
+
+    // Ref to track if we already auto-selected a bucket for this modal instance
+    const autoSelectedBucketRef = useRef<boolean>(false);
+
+    // Auto-select bucket based on mapped account/opportunity canal
+    useEffect(() => {
+        if (initialData?.ms_planner_id) return;
+        if (plannerBuckets.length === 0) return;
+        if (autoSelectedBucketRef.current) return;
+
+        // KEY FIX: If there's an opportunity OR explicitly selected account linked, 
+        // WAIT for the account to load before making any selection.
+        if ((watchedOpportunityId || watchedAccountId) && relatedAccount === undefined) {
+            console.log('[Planner BucketAutoSelect] Linked entity present but account not yet loaded — waiting...');
+            return;
+        }
+
+        // === DIAGNOSTIC LOGGING ===
+        console.log('[Planner BucketAutoSelect] Available buckets:', plannerBuckets.map(b => `"${b.name}"`).join(', '));
+        console.log('[Planner BucketAutoSelect] relatedAccount:', relatedAccount ? { id: relatedAccount.id, nombre: (relatedAccount as any).nombre, canal_id: relatedAccount.canal_id } : null);
+        console.log('[Planner BucketAutoSelect] watchedOpportunityId:', watchedOpportunityId);
+        console.log('[Planner BucketAutoSelect] watchedAccountId:', watchedAccountId);
+
+        let targetBucketName = 'To do';
+
+        if (relatedAccount && (relatedAccount as any).canal_id) {
+            const canal = String((relatedAccount as any).canal_id).toUpperCase().trim();
+            console.log('[Planner BucketAutoSelect] canal_id resolved to:', canal);
+
+            if (canal === 'TIENDA' || canal.includes('TIENDA')) {
+                targetBucketName = 'Tienda';
+            } else if (canal === 'DIST_INT' || (canal.includes('INTERNACIONAL') && canal.includes('DIST'))) {
+                targetBucketName = 'Distribución internacional';
+            } else if (canal === 'OBRAS_INT' || (canal.includes('INTERNACIONAL') && canal.includes('OBRA'))) {
+                targetBucketName = 'Obras internacional';
+            } else if (canal === 'PROPIO' || canal === 'E-COMMERCE' || canal === 'CLIENTE' || canal.includes('PROPIO') || canal.includes('CLIENTE')) {
+                targetBucketName = 'e-commerce';
+            } else if (canal === 'DIST_NAC' || (canal.includes('DISTRIB') && !canal.includes('INTER'))) {
+                targetBucketName = 'Distribución';
+            } else if (canal === 'OBRAS_NAC' || (canal.includes('OBRA') && !canal.includes('INTER'))) {
+                targetBucketName = 'Obras';
+            }
+            console.log('[Planner BucketAutoSelect] Resolved target bucket name:', targetBucketName);
+        } else {
+            console.log('[Planner BucketAutoSelect] No canal_id found — defaulting to "To do"');
+        }
+
+        // Robust matching logic
+        const getMatch = (targetName: string) => {
+            const normalizedTarget = targetName.toLowerCase().trim();
+            
+            // 1. PRIORIDAD: Coincidencia exacta (evita match codicioso de 'Distribución' con 'Distribución internacional')
+            const exactMatch = plannerBuckets.find(b => b.name.toLowerCase().trim() === normalizedTarget);
+            if (exactMatch) return exactMatch;
+
+            // 2. FALLBACK: Coincidencias parciales
+            return plannerBuckets.find(b => {
+                const name = b.name.toLowerCase().trim();
+                return name.includes(normalizedTarget) || normalizedTarget.includes(name);
+            });
+        };
+
+        let matchedBucket = getMatch(targetBucketName);
+        console.log('[Planner BucketAutoSelect] Primary match:', matchedBucket?.name ?? 'NO MATCH');
+
+        if (!matchedBucket && targetBucketName !== 'To do') {
+            const keyword = targetBucketName.split(' ')[0];
+            matchedBucket = getMatch(keyword);
+            console.log('[Planner BucketAutoSelect] Keyword fallback ("' + keyword + '"):', matchedBucket?.name ?? 'NO MATCH');
+        }
+
+        if (!matchedBucket && targetBucketName !== 'To do') {
+            matchedBucket = getMatch('To do');
+            console.log('[Planner BucketAutoSelect] "To do" fallback:', matchedBucket?.name ?? 'NO MATCH');
+        }
+
+        if (!matchedBucket && plannerBuckets.length > 0) {
+            matchedBucket = plannerBuckets[0];
+            console.log('[Planner BucketAutoSelect] First-bucket last-resort:', matchedBucket?.name);
+        }
+
+        if (matchedBucket) {
+            console.log('[Planner BucketAutoSelect] FINAL SELECTION →', matchedBucket.name);
+            autoSelectedBucketRef.current = true;
+            setSelectedBucketId(matchedBucket.id);
+        }
+    }, [plannerBuckets, relatedAccount, watchedOpportunityId, watchedAccountId, initialData?.ms_planner_id]);
+
+
+    const handleActualSubmit = async (data: any) => {
+        setIsSubmitting(true);
+        setSyncFeedback({}); // Reset feedback
+        try {
+            console.log("[CreateActivityModal] Raw Submit Data:", data);
+
+            // 1. Create or Update Calendar Event
+            let eventId = msEventId || initialData?.ms_event_id || null;
+            let teamsMeetingUrl = currentTeamsMeetingUrl || initialData?.teams_meeting_url || null;
+            let calendarSuccess = false;
+
+            const tipo = data.tipo_actividad;
+            if (msConnected && tipo === 'EVENTO') {
+                try {
+                    const eventPayload = {
+                        subject: data.asunto,
+                        description: data.descripcion,
+                        start: new Date(data.fecha_inicio).toISOString(),
+                        end: new Date(data.fecha_fin).toISOString(),
+                        attendees: attendees,
+                        isOnlineMeeting: isTeamsMeeting
+                    };
+
+                    if (eventId) {
+                        // UPDATE EXISTING EVENT
+                        const res = await fetch(`/api/microsoft/calendar/events/${eventId}`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'include',
+                            body: JSON.stringify(eventPayload)
+                        });
+
+                        if (res.ok) {
+                            calendarSuccess = true;
+                            const updatedEvent = await res.json();
+                            teamsMeetingUrl = isTeamsMeeting ? (updatedEvent.onlineMeeting?.joinUrl || teamsMeetingUrl) : null;
+                            console.log("[CreateActivityModal] Event Updated:", eventId);
+                            setSyncFeedback(prev => ({ ...prev, teams: 'success' }));
+                        } else {
+                            const err = await res.json();
+                            console.error("[CreateActivityModal] Failed to update Event:", err);
+                            if (!navigator.onLine || res.status >= 500) {
+                                console.log("[CreateActivityModal] Queuing Event sync for later.");
+                                setSyncFeedback(prev => ({ ...prev, teams: 'error', message: 'Guardado local. Se sincronizará luego.' }));
+                            } else {
+                                setSyncFeedback(prev => ({ ...prev, teams: 'error', message: err.error || 'Error actualizando Evento' }));
+                            }
+                        }
+
+                    } else {
+                        // CREATE NEW EVENT - but check for duplicates first to be safe
+                        console.log("[CreateActivityModal] Checking for duplicates in Outlook before creating...");
+                        const searchRes = await fetch(`/api/microsoft/calendar/search-event?subject=${encodeURIComponent(data.asunto.trim())}&startTime=${encodeURIComponent(new Date(data.fecha_inicio).toISOString())}`, { credentials: 'include' });
+
+                        let duplicateEvent = null;
+                        if (searchRes.ok) {
+                            const searchData = await searchRes.json();
+                            duplicateEvent = searchData.event;
+                        }
+
+                        if (duplicateEvent) {
+                            console.log("[CreateActivityModal] Found duplicate event in Outlook. Linking instead of creating:", duplicateEvent.id);
+                            eventId = duplicateEvent.id;
+                            const patchRes = await fetch(`/api/microsoft/calendar/events/${eventId}`, {
+                                method: 'PATCH',
+                                headers: { 'Content-Type': 'application/json' },
+                                credentials: 'include',
+                                body: JSON.stringify(eventPayload)
+                            });
+
+                            if (patchRes.ok) {
+                                calendarSuccess = true;
+                                const updatedEvent = await patchRes.json();
+                                teamsMeetingUrl = isTeamsMeeting ? (updatedEvent.onlineMeeting?.joinUrl || duplicateEvent.onlineMeeting?.joinUrl || teamsMeetingUrl) : null;
+                                console.log("[CreateActivityModal] Linked Event Updated:", eventId);
+                                setSyncFeedback(prev => ({ ...prev, teams: 'success' }));
+                            } else {
+                                console.error("[CreateActivityModal] Error patching duplicate event");
+                                // We linked it anyway
+                                eventId = duplicateEvent.id;
+                                teamsMeetingUrl = duplicateEvent.onlineMeeting?.joinUrl || teamsMeetingUrl;
+                                calendarSuccess = true;
+                            }
+                        } else {
+                            const res = await fetch('/api/microsoft/calendar/create-event', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                credentials: 'include',
+                                body: JSON.stringify(eventPayload)
+                            });
+
+                            if (res.ok) {
+                                const event = await res.json();
+                                eventId = event.id;
+                                teamsMeetingUrl = event.onlineMeeting?.joinUrl || null;
+                                calendarSuccess = !!eventId;
+                                console.log("[CreateActivityModal] Event Created:", eventId);
+                                setSyncFeedback(prev => ({ ...prev, teams: 'success' }));
+                            } else {
+                                const err = await res.json();
+                                console.error("[CreateActivityModal] Failed to create Event:", err);
+                                if (!navigator.onLine || res.status >= 500) {
+                                    console.log("[CreateActivityModal] Queuing Event sync for later.");
+                                    setSyncFeedback(prev => ({ ...prev, teams: 'error', message: 'Guardado local. Se sincronizará luego.' }));
+                                } else {
+                                    setSyncFeedback(prev => ({ ...prev, teams: 'error', message: err.error || 'Error creando Evento' }));
+                                }
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error("[CreateActivityModal] Event creation/update error:", e);
+                    setSyncFeedback(prev => ({ ...prev, teams: 'error', message: 'Guardado local. Se sincronizará luego.' }));
+                }
+            }
+
+            // 2. Create or Update Planner Task
+            let plannerId = msPlannerId || initialData?.ms_planner_id || null;
+            let plannerSuccess = false;
+
+            if (msConnected && tipo === 'TAREA') {
+                try {
+                    const assigneeIds = attendees.map(a => a.id);
+
+                    if (plannerId) {
+                        // --- UPDATE EXISTING PLANNER TASK ---
+                        const updatePayload: any = {};
+                        if (dirtyFields.asunto) updatePayload.title = data.asunto;
+                        if (dirtyFields.fecha_inicio) updatePayload.dueDateTime = data.fecha_inicio ? new Date(data.fecha_inicio).toISOString() : undefined;
+                        if (dirtyFields.descripcion) updatePayload.notes = data.descripcion;
+                        if (dirtyFields.is_completed) updatePayload.percentComplete = data.is_completed ? 100 : 0;
+                        if (selectedBucketId) updatePayload.bucketId = selectedBucketId;
+
+                        console.log("[CreateActivityModal] Planner Update Payload:", updatePayload);
+
+                        updatePayload.checklist = checklist;
+                        updatePayload.assigneeIds = assigneeIds;
+
+                        // Only hit planner if there is something actually dirty, or checklist/assignees were potentially modified
+                        // (We always send checklist/assignees safely via API, but at least we don't overwrite completed status if not dirty)
+                        const res = await fetch(`/api/microsoft/planner/tasks/${plannerId}`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'include',
+                            body: JSON.stringify(updatePayload)
+                        });
+
+                        if (res.ok) {
+                            plannerSuccess = true;
+                            console.log("[CreateActivityModal] Planner Task Updated:", plannerId);
+                            setSyncFeedback(prev => ({ ...prev, planner: 'success' }));
+                        } else {
+                            const err = await res.json();
+                            console.error("[CreateActivityModal] Failed to update Planner task:", err);
+                            if (!navigator.onLine || res.status >= 500) {
+                                console.log("[CreateActivityModal] Queuing Planner sync for later due to connection error.");
+                                setSyncFeedback(prev => ({ ...prev, planner: 'error', message: 'Guardado local. Se sincronizará con Planner luego.' }));
+                            } else {
+                                setSyncFeedback(prev => ({ ...prev, planner: 'error', message: err.error || 'Error actualizando tarea en Planner' }));
+                            }
+                        }
+                    } else if (syncToPlanner && selectedPlanId && selectedBucketId) {
+                        // --- CREATE NEW PLANNER TASK ---
+                        const res = await fetch('/api/microsoft/planner/tasks', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'include',
+                            body: JSON.stringify({
+                                planId: selectedPlanId,
+                                bucketId: selectedBucketId,
+                                title: data.asunto,
+                                dueDateTime: data.fecha_inicio ? new Date(data.fecha_inicio).toISOString() : undefined,
+                                notes: data.descripcion,
+                                checklist: checklist,
+                                assigneeIds: assigneeIds
+                            })
+                        });
+
+                        if (res.ok) {
+                            const taskResponse = await res.json();
+                            plannerId = taskResponse.task?.id || null;
+                            plannerSuccess = !!plannerId;
+                            console.log("[CreateActivityModal] Planner Task Created:", plannerId);
+                            setSyncFeedback(prev => ({ ...prev, planner: 'success' }));
+                        } else {
+                            const err = await res.json();
+                            console.error("[CreateActivityModal] Failed to create Planner task:", err);
+
+                            if (!navigator.onLine || res.status >= 500) {
+                                console.log("[CreateActivityModal] Queuing Planner sync for later due to connection error.");
+                                setSyncFeedback(prev => ({ ...prev, planner: 'error', message: 'Guardado local. Se sincronizará con Planner luego.' }));
+                            } else {
+                                setSyncFeedback(prev => ({ ...prev, planner: 'error', message: err.error || 'Error creando tarea en Planner' }));
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.error("[CreateActivityModal] Planner creation/update error:", e);
+                    console.log("[CreateActivityModal] Queuing Planner sync for later due to network error.");
+                    setSyncFeedback(prev => ({ ...prev, planner: 'error', message: 'Guardado local. Se sincronizará con Planner luego.' }));
+                }
+            }
+
+            // 3. Process for CRM
+            // Only submit fields that were actually changed to prevent resetting unmodified fields
+            const dataToSubmit: any = {};
+            if (isEditing) {
+                for (const key of Object.keys(data)) {
+                    if (dirtyFields[key as keyof typeof dirtyFields]) {
+                        dataToSubmit[key] = data[key as keyof typeof data];
+                    }
+                }
+                // Ensure tipo_actividad is always sent so backend knows logic to apply
+                dataToSubmit.tipo_actividad = data.tipo_actividad;
+            } else {
+                Object.assign(dataToSubmit, data);
+            }
+
+            const processed: any = {
+                ...dataToSubmit,
+                teams_meeting_url: teamsMeetingUrl,
+                ms_planner_id: plannerId,
+                ms_event_id: eventId,
+                microsoft_attendees: attendees.length > 0 ? JSON.stringify(attendees) : null,
+                _sync_metadata: initialData?._sync_metadata ? { ...initialData._sync_metadata } : {}
+            };
+
+            // Include user_id reassignment if changed
+            if (canReassign && reassignUserId && reassignUserId !== initialData?.user_id) {
+                processed.user_id = reassignUserId;
+            }
+
+            // Force metadata timestamps for changed fields to ensure CRM wins in LWW
+            if (isEditing) {
+                let anyDirty = false;
+                if (dirtyFields.asunto) { processed._sync_metadata.asunto = Date.now(); anyDirty = true; }
+                if (dirtyFields.descripcion) { processed._sync_metadata.descripcion = Date.now(); anyDirty = true; }
+                if (dirtyFields.fecha_inicio) { processed._sync_metadata.fecha_inicio = Date.now(); anyDirty = true; }
+                if (dirtyFields.is_completed) { processed._sync_metadata.is_completed = Date.now(); anyDirty = true; }
+
+                if (anyDirty) {
+                    processed._sync_metadata.last_modified = Date.now();
+                }
+            }
+
+            // If Planner sync was requested but failed/offline, queue it
+            if (syncToPlanner && data.tipo_actividad === 'TAREA' && !plannerId) {
+                processed._sync_metadata.pending_planner = true;
+                processed._sync_metadata.checklist = checklist;
+                // Add attendees to metadata for Planner
+                processed._sync_metadata.assigneeIds = attendees.map(a => a.id);
+                // In case plan/bucket load failed, keep the intent explicitly
+                processed._sync_metadata.planId = selectedPlanId || null;
+                processed._sync_metadata.bucketId = selectedBucketId || null;
+            }
+
+            // If Calendar sync was requested but failed/offline, queue it
+            // If Calendar sync was requested but failed/offline, queue it
+            if (data.tipo_actividad === 'EVENTO' && !eventId) {
+                processed._sync_metadata.pending_calendar = true;
+                processed._sync_metadata.assigneeIds = attendees.map(a => a.id);
+                processed._sync_metadata.isOnlineMeeting = isTeamsMeeting;
+            }
+
+            if (!isEditing || dirtyFields.clasificacion_id) {
+                processed.clasificacion_id = (data.clasificacion_id && data.clasificacion_id !== "") ? Number(data.clasificacion_id) : null;
+            }
+            if (!isEditing || dirtyFields.subclasificacion_id) {
+                processed.subclasificacion_id = (data.subclasificacion_id && data.subclasificacion_id !== "") ? Number(data.subclasificacion_id) : null;
+            }
+
+            console.log("[CreateActivityModal] Processed Submit Data:", processed);
+
+            // Show brief success feedback before closing
+            // Show brief success feedback before closing
+            if (plannerSuccess || teamsMeetingUrl) {
+                await new Promise(resolve => setTimeout(resolve, 800)); // Brief delay to show feedback
+            }
+
+            onSubmit(processed);
+        } catch (e: any) {
+            console.error("[CreateActivityModal] Uncaught error in submit:", e);
+            alert(`Error interno: ${e.message}`);
+        } finally {
+            setIsSubmitting(false);
+        }
+    };
+
+    const handleDelete = async () => {
+        if (!initialData?.id) return;
+        const confirmDelete = window.confirm("¿Estás seguro de que deseas eliminar definitivamente esta actividad? Esta acción no se puede deshacer.");
+        if (!confirmDelete) return;
+
+        setIsDeleting(true);
+        try {
+            // Delete from Planner if needed and connected
+            if (initialData.ms_planner_id && msConnected && navigator.onLine) {
+                try {
+                    const res = await fetch(`/api/microsoft/planner/tasks/${initialData.ms_planner_id}`, {
+                        method: 'DELETE',
+                        credentials: 'include'
+                    });
+
+                    if (!res.ok) {
+                        const errText = await res.text();
+                        console.error("[CreateActivityModal] Failed to delete from Planner:", res.status, errText);
+                    }
+                } catch (err) {
+                    console.error("[CreateActivityModal] Network error deleting from Planner:", err);
+                }
+            }
+
+            // Delete from Calendar if needed and connected
+            if (initialData.ms_event_id && msConnected && navigator.onLine) {
+                try {
+                    const res = await fetch(`/api/microsoft/calendar/events/${initialData.ms_event_id}`, {
+                        method: 'DELETE',
+                        credentials: 'include'
+                    });
+
+                    if (!res.ok) {
+                        const errText = await res.text();
+                        console.error("[CreateActivityModal] Failed to delete from Calendar:", res.status, errText);
+                    }
+                } catch (err) {
+                    console.error("[CreateActivityModal] Network error deleting from Calendar:", err);
+                }
+            }
+
+            await deleteActivity(initialData.id);
+            onClose();
+        } catch (e: any) {
+            console.error("[CreateActivityModal] Deletion error:", e);
+            alert(`Error al eliminar la actividad: ${e.message}`);
+        } finally {
+            setIsDeleting(false);
+            setShowMenu(false);
+        }
+    };
+
+    const tipo = watch('tipo_actividad');
+    const fechaInicio = watch('fecha_inicio');
+    const selectedClasificacionId = watch('clasificacion_id');
+
+    // Filtered Lists
+    const filteredClassifications = useMemo(() => {
+        console.log("[CreateActivityModal] Filtering classifications for type:", tipo);
+        console.log("[CreateActivityModal] All classifications:", classifications.map(c => ({ id: c.id, nombre: c.nombre, tipo: c.tipo_actividad })));
+        const filtered = classifications.filter(c => c.tipo_actividad === tipo);
+        console.log("[CreateActivityModal] Filtered classifications:", filtered.map(c => ({ id: c.id, nombre: c.nombre })));
+        console.log("[CreateActivityModal] Looking for ID:", initialData?.clasificacion_id, "Is it in filtered?", filtered.some(c => c.id === initialData?.clasificacion_id || String(c.id) === String(initialData?.clasificacion_id)));
+        return filtered;
+    }, [classifications, tipo, initialData?.clasificacion_id]);
+
+    const filteredSubclassifications = useMemo(() => {
+        if (!selectedClasificacionId) return [];
+        return subclassifications.filter(s => s.clasificacion_id === Number(selectedClasificacionId));
+    }, [subclassifications, selectedClasificacionId]);
+
+    // Auto-set fecha_fin as 1 hour after fecha_inicio for EVENTO
+    useEffect(() => {
+        if (tipo === 'EVENTO' && fechaInicio) {
+            try {
+                const start = new Date(fechaInicio);
+                if (!isNaN(start.getTime())) {
+                    const end = new Date(start.getTime() + 3600000); // +1 hour
+
+                    const formattedEnd = toInputDateTime(end);
+                    setValue('fecha_fin', formattedEnd, { shouldDirty: true });
+                }
+            } catch (e) {
+                console.error("Error setting end date", e);
+            }
+        }
+    }, [fechaInicio, tipo, setValue]);
+
+    return (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl md:rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col max-h-[95vh] md:max-h-[90vh]">
+                <div className="p-6 border-b border-slate-100 flex justify-between items-center shrink-0">
+                    <div>
+                        <h2 className="text-xl font-bold text-slate-900">{isEditing ? 'Editar Actividad' : 'Programar Actividad'}</h2>
+                        {relatedOpportunity && relatedAccount && (
+                            <div className="flex items-center gap-1.5 mt-1 text-sm flex-wrap">
+                                <Link href={`/cuentas?id=${relatedAccount.id}`} className="text-blue-600 hover:underline font-semibold transition-colors">
+                                    {relatedAccount.nombre}
+                                </Link>
+                                <span className="text-slate-400 font-medium">-</span>
+                                {relatedContact ? (
+                                    <div className="flex items-center gap-1">
+                                        <Link href={`/contactos?id=${relatedContact.id}`} className="text-blue-600 hover:underline font-semibold transition-colors">
+                                            {relatedContact.nombre}
+                                        </Link>
+                                        {relatedContact.telefono && (
+                                            <span className="text-slate-500 font-medium text-xs">({relatedContact.telefono})</span>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <span className="italic text-slate-400 font-medium text-xs">Sin contacto princ.</span>
+                                )}
+                                <span className="text-slate-400 font-medium">-</span>
+                                <Link href={`/oportunidades/${relatedOpportunity.id}`} className="text-blue-600 hover:underline font-semibold transition-colors">
+                                    {relatedOpportunity.nombre}
+                                </Link>
+                            </div>
+                        )}
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                        {isEditing && (
+                            <div className="relative">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowMenu(!showMenu)}
+                                    className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors"
+                                    title="Más opciones"
+                                >
+                                    <MoreVertical className="w-5 h-5" />
+                                </button>
+
+                                {showMenu && (
+                                    <>
+                                        <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />
+                                        <div className="absolute right-0 mt-1 w-48 bg-white rounded-xl shadow-lg border border-slate-100 py-1 z-20 animate-in fade-in slide-in-from-top-2">
+                                            <button
+                                                type="button"
+                                                onClick={handleDelete}
+                                                disabled={isDeleting}
+                                                className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2 disabled:opacity-50"
+                                            >
+                                                {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                                                {isDeleting ? 'Eliminando...' : 'Eliminar Actividad'}
+                                            </button>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+                        )}
+                        <button type="button" onClick={onClose} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors text-2xl leading-none">&times;</button>
+                    </div>
+                </div>
+
+                <form
+                    onSubmit={handleSubmit(handleActualSubmit, (errors) => {
+                        console.error("[CreateActivityModal] Validation Errors:", errors);
+                        alert(`Errores de validación: ${Object.keys(errors).join(', ')}. Revisa los campos obligatorios.`);
+                    })}
+                    className="p-4 md:p-6 space-y-4 overflow-y-auto flex-1 overscroll-contain pb-6"
+                >
+                    {isSyncingPlanner && (
+                        <div className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-xl text-xs font-bold animate-in fade-in slide-in-from-top-2">
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            Sincronizando estado con Microsoft Planner...
+                        </div>
+                    )}
+                    {/* Activity Type Selector */}
+                    <div className="flex bg-slate-100 p-1 rounded-xl">
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setValue('tipo_actividad', 'EVENTO');
+                                setValue('clasificacion_id', "");
+                                setValue('subclasificacion_id', "");
+                            }}
+                            className={cn(
+                                "flex-1 py-2 text-sm font-bold rounded-lg flex items-center justify-center gap-2 transition-all",
+                                tipo === 'EVENTO' ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                            )}
+                        >
+                            <CalendarClock className="w-4 h-4" /> Evento / Cita
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setValue('tipo_actividad', 'TAREA');
+                                setValue('clasificacion_id', "");
+                                setValue('subclasificacion_id', "");
+                            }}
+                            className={cn(
+                                "flex-1 py-2 text-sm font-bold rounded-lg flex items-center justify-center gap-2 transition-all",
+                                tipo === 'TAREA' ? "bg-white text-emerald-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                            )}
+                        >
+                            <ListTodo className="w-4 h-4" /> Tarea
+                        </button>
+                    </div>
+
+                    {/* Completion Toggle (Available for all types) */}
+                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 flex items-center justify-between animate-in slide-in-from-top-2 duration-200">
+                        <div className="space-y-0.5">
+                            <label className="text-xs font-bold text-slate-900 uppercase">Actividad Finalizada</label>
+                            <p className="text-[10px] text-slate-500">Marcar como completada</p>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                                type="checkbox"
+                                {...register('is_completed')}
+                                className="sr-only peer"
+                            />
+                            <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                        </label>
+                    </div>
+
+                    {/* REASSIGN ACTIVITY (ADMIN / COORDINADOR only) */}
+                    {canReassign && reassignableUsers.length > 0 && (
+                        <div className="bg-amber-50 p-4 rounded-2xl border border-amber-200 space-y-2 animate-in slide-in-from-top-2 duration-200">
+                            <label className="text-xs font-bold text-amber-800 uppercase flex items-center gap-2">
+                                <UserCog className="w-3.5 h-3.5" />
+                                Reasignar Actividad
+                            </label>
+                            <select
+                                value={reassignUserId}
+                                onChange={(e) => setReassignUserId(e.target.value)}
+                                className="w-full bg-white border border-amber-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
+                            >
+                                {reassignableUsers.map(u => (
+                                    <option key={u.id} value={u.id}>
+                                        {u.full_name || u.email}
+                                    </option>
+                                ))}
+                            </select>
+                            {reassignUserId !== initialData?.user_id && (
+                                <p className="text-[10px] text-amber-700 font-medium">
+                                    La actividad se transferirá al usuario seleccionado.
+                                </p>
+                            )}
+                        </div>
+                    )}
+
+                    {/* CLASSIFICATION SELECTORS */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                            <label className="text-xs font-bold text-slate-500 uppercase">
+                                Clasificación <span className="text-red-500">*</span>
+                            </label>
+                            <div className="relative">
+                                <select
+                                    {...register('clasificacion_id', {
+                                        required: "La clasificación es obligatoria",
+                                        onChange: (e) => {
+                                            console.log("[CreateActivityModal] Classification Selected:", e.target.value);
+                                            setValue('subclasificacion_id', "");
+                                        }
+                                    })}
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all appearance-none"
+                                >
+                                    <option value="">{classifications.length === 0 ? 'Sincronizando...' : 'Seleccione...'}</option>
+                                    {filteredClassifications.map(c => (
+                                        <option key={c.id} value={String(c.id)}>{c.nombre}</option>
+                                    ))}
+                                    {/* If current classification is not in filtered list, show it anyway (historical data) */}
+                                    {initialData?.clasificacion_id &&
+                                        !filteredClassifications.some(c => String(c.id) === String(initialData.clasificacion_id)) &&
+                                        classifications.find(c => String(c.id) === String(initialData.clasificacion_id)) && (
+                                            <option
+                                                key={initialData.clasificacion_id}
+                                                value={String(initialData.clasificacion_id)}
+                                                className="text-amber-600"
+                                            >
+                                                {classifications.find(c => String(c.id) === String(initialData.clasificacion_id))?.nombre} (otro tipo)
+                                            </option>
+                                        )}
+                                </select>
+                                {classifications.length === 0 && (
+                                    <div className="absolute right-10 top-1/2 -translate-y-1/2">
+                                        <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Show Subclassification ONLY if the selected classification has options */}
+                        {filteredSubclassifications.length > 0 && (
+                            <div className="space-y-1 animate-in fade-in slide-in-from-left-2 duration-200">
+                                <label className="text-xs font-bold text-slate-500 uppercase">
+                                    Subclasificación <span className="text-red-500">*</span>
+                                </label>
+                                <select
+                                    {...register('subclasificacion_id', { required: "La subclasificación es requerida" })}
+                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all appearance-none"
+                                >
+                                    <option value="">Seleccione...</option>
+                                    {filteredSubclassifications.map(s => (
+                                        <option key={s.id} value={String(s.id)}>{s.nombre}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Priority Selector */}
+                    <div className="space-y-1">
+                        <label className="text-xs font-bold text-slate-500 uppercase">Prioridad</label>
+                        <div className="flex gap-2">
+                            {['Baja', 'Media', 'Alta'].map((p) => (
+                                <button
+                                    key={p}
+                                    type="button"
+                                    onClick={() => setValue('prioridad', p as any)}
+                                    className={cn(
+                                        "flex-1 py-2 text-xs font-bold rounded-lg border transition-all",
+                                        watch('prioridad') === p 
+                                            ? (p === 'Alta' ? "bg-red-50 border-red-200 text-red-600 shadow-sm" : 
+                                               p === 'Media' ? "bg-amber-50 border-amber-200 text-amber-600 shadow-sm" : 
+                                               "bg-blue-50 border-blue-200 text-blue-600 shadow-sm")
+                                            : "bg-white border-slate-200 text-slate-500 hover:border-slate-300"
+                                    )}
+                                >
+                                    {p}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="space-y-1">
+                        <label className="text-xs font-bold text-slate-500 uppercase">Asunto <span className="text-red-500">*</span></label>
+                        <input
+                            {...register('asunto', { required: true })}
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                            placeholder={tipo === 'TAREA' ? "Ej. Llamar a seguimiento" : "Ej. Reunión de presentación"}
+                        />
+                    </div>
+
+                    {/* MICROSOFT INTEGRATION (Teams/Guests for EVENTO, Collaborators/Checklist for TAREA) */}
+                    {msConnected && (
+                        <div className="space-y-4 animate-in fade-in slide-in-from-top-4 duration-300">
+
+
+                            {/* COLLABORATORS / ATTENDEES (Unified search) */}
+                            <div className="space-y-2">
+                                <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2">
+                                    <Users className="w-3.5 h-3.5" />
+                                    {tipo === 'TAREA' ? 'Colaboradores (Tenant Microsoft)' : 'Invitados (Tenant Microsoft)'}
+                                </label>
+                                <div className="relative">
+                                    <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400">
+                                        {isSearching ? <Loader2 className="w-4 h-4 animate-spin text-blue-500" /> : <Search className="w-4 h-4" />}
+                                    </div>
+                                    <input
+                                        type="text"
+                                        value={userSearch}
+                                        onChange={(e) => setUserSearch(e.target.value)}
+                                        placeholder="Buscar por nombre o correo..."
+                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-11 pr-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                                    />
+
+                                    {userSearch.length >= 2 && !isSearching && searchResults.length === 0 && (
+                                        <div className="absolute z-50 left-0 right-0 top-full mt-2 bg-white border border-slate-100 rounded-xl shadow-xl p-4 text-center text-slate-500 text-sm">
+                                            No se encontraron personas con "{userSearch}"
+                                        </div>
+                                    )}
+
+                                    {searchResults.length > 0 && (
+                                        <div className="absolute z-50 left-0 right-0 top-full mt-2 bg-white border border-slate-100 rounded-xl shadow-xl overflow-hidden animate-in fade-in slide-in-from-top-2 max-h-60 overflow-y-auto">
+                                            {searchResults.map((user) => (
+                                                <button
+                                                    key={user.id}
+                                                    type="button"
+                                                    onMouseDown={(e) => {
+                                                        e.preventDefault();
+                                                        addAttendee(user);
+                                                    }}
+                                                    className="w-full px-4 py-3 flex items-start gap-3 hover:bg-slate-50 transition-colors border-b border-slate-50 last:border-0 text-left"
+                                                >
+                                                    <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold shrink-0">
+                                                        {user.displayName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()}
+                                                    </div>
+                                                    <div className="flex flex-col min-w-0">
+                                                        <span className="text-sm font-bold text-slate-900 truncate">{user.displayName}</span>
+                                                        <span className="text-[10px] text-slate-500 font-medium truncate uppercase tracking-wider">
+                                                            {user.jobTitle || 'Usuario del Tenant'}
+                                                        </span>
+                                                        <span className="text-[10px] text-slate-400 truncate">
+                                                            {user.mail || user.userPrincipalName}
+                                                        </span>
+                                                    </div>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* List of selected users */}
+                                <div className="flex flex-wrap gap-2">
+                                    {attendees.map((a) => (
+                                        <div
+                                            key={a.id}
+                                            className="bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 group animate-in zoom-in-50"
+                                        >
+                                            <span className="max-w-[120px] truncate">{a.name}</span>
+                                            <button
+                                                type="button"
+                                                onClick={() => removeAttendee(a.id)}
+                                                className="hover:text-red-500 transition-colors"
+                                            >
+                                                <X className="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* PLANNER CHECKLIST (Only for TAREA) */}
+                            {tipo === 'TAREA' && (
+                                <div className="space-y-2 py-2">
+                                    <label className="text-xs font-bold text-slate-500 uppercase flex items-center gap-2">
+                                        <ListTodo className="w-3.5 h-3.5" /> Actividades (Checklist Planner)
+                                    </label>
+                                    <div className="flex gap-2">
+                                        <input
+                                            type="text"
+                                            value={newChecklistItem}
+                                            onChange={(e) => setNewChecklistItem(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter') {
+                                                    e.preventDefault();
+                                                    addChecklistItem();
+                                                }
+                                            }}
+                                            placeholder="Nueva actividad..."
+                                            className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={addChecklistItem}
+                                            className="bg-emerald-50 text-emerald-600 p-3 rounded-xl hover:bg-emerald-100 transition-colors"
+                                        >
+                                            <Plus className="w-5 h-5" />
+                                        </button>
+                                    </div>
+
+                                    {checklist.length > 0 && (
+                                        <div className="bg-slate-50/50 border border-slate-100 rounded-xl p-2 space-y-1 mt-2">
+                                            {checklist.map((item) => (
+                                                <div key={item.id} className="flex items-center justify-between p-2 bg-white border border-slate-100 rounded-lg group animate-in slide-in-from-left-2 shadow-sm gap-2">
+                                                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                                                        <input 
+                                                            type="checkbox" 
+                                                            checked={item.isChecked} 
+                                                            onChange={(e) => toggleChecklistItem(item.id, e.target.checked)}
+                                                            className="w-4 h-4 rounded-sm border-slate-300 text-emerald-600 focus:ring-emerald-500/20 cursor-pointer"
+                                                        />
+                                                        <input 
+                                                            type="text" 
+                                                            value={item.title}
+                                                            onChange={(e) => {
+                                                                const newTitle = e.target.value;
+                                                                setChecklist(checklist.map((c) => c.id === item.id ? { ...c, title: newTitle } : c));
+                                                            }}
+                                                            className={cn(
+                                                                "text-sm flex-1 bg-transparent border-none p-0 focus:ring-0 truncate",
+                                                                item.isChecked ? "text-slate-400 line-through" : "text-slate-700"
+                                                            )}
+                                                        />
+                                                    </div>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => removeChecklistItem(item.id)}
+                                                        className="text-slate-300 hover:text-red-500 transition-colors p-1 shrink-0"
+                                                    >
+                                                        <X className="w-3.5 h-3.5" />
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {tipo === 'TAREA' ? (
+                            <>
+                                <DateTimePicker
+                                    value={fechaInicio || ''}
+                                    onChange={(val) => setValue('fecha_inicio', val)}
+                                    label="Fecha Vencimiento"
+                                    required
+                                    minDate={new Date()}
+                                    showTime={false}
+                                />
+
+                                {/* Planner Sync Section - Always On */}
+                                {msConnected && (
+                                    <div className="col-span-full space-y-3">
+                                        {/* Planner Header */}
+                                        <div className="flex items-center gap-2 p-3 bg-linear-to-r from-emerald-50 to-teal-50 rounded-xl border border-emerald-200">
+                                            <div className="w-8 h-8 rounded-lg bg-linear-to-br from-emerald-500 to-teal-600 flex items-center justify-center">
+                                                <ListTodo className="w-4 h-4 text-white" />
+                                            </div>
+                                            <div>
+                                                <p className="text-xs font-bold text-emerald-700">Sincronización con Planner</p>
+                                                <p className="text-[10px] text-emerald-600">La tarea se creará automáticamente en Microsoft Planner</p>
+                                            </div>
+                                        </div>
+
+                                        {/* Planner Cascade Selectors - Always visible */}
+                                        <div className="space-y-3">
+                                            {/* Plan Selector */}
+                                            <div className="space-y-1">
+                                                <label className="text-xs font-bold text-slate-500 uppercase">
+                                                    Plan <span className="text-red-500">*</span>
+                                                </label>
+                                                <div className="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-3 text-slate-600 font-medium select-none cursor-not-allowed">
+                                                    {loadingPlanner ? 'Cargando planes...' : (plannerPlans.find(p => p.id === selectedPlanId)?.title || 'CRM Ventas')}
+                                                </div>
+                                            </div>
+                                            {/* Bucket Selector */}
+                                            {selectedPlanId && (
+                                                <div className="space-y-1">
+                                                    <label className="text-xs font-bold text-slate-500 uppercase">
+                                                        Bucket <span className="text-red-500">*</span>
+                                                    </label>
+                                                    <select
+                                                        value={selectedBucketId}
+                                                        onChange={(e) => setSelectedBucketId(e.target.value)}
+                                                        disabled={loadingPlanner}
+                                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                                                    >
+                                                        <option value="">
+                                                            {loadingPlanner ? 'Cargando buckets...' : plannerBuckets.length === 0 ? 'No hay buckets en este plan' : 'Seleccione un bucket...'}
+                                                        </option>
+                                                        {plannerBuckets.map((b) => (
+                                                            <option key={b.id} value={b.id}>{b.name}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                            )}
+
+                                            {/* Planner Selection Summary */}
+                                            {selectedBucketId && (
+                                                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3">
+                                                    <p className="text-xs text-emerald-700 font-medium">
+                                                        ✓ La tarea se creará en Planner automáticamente
+                                                    </p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+                            </>
+                        ) : (
+                            <>
+                                <DateTimePicker
+                                    value={fechaInicio || ''}
+                                    onChange={(val) => setValue('fecha_inicio', val)}
+                                    label="Fecha Inicio"
+                                    required
+                                    minDate={new Date()}
+                                    showTime={true}
+                                />
+                                <DateTimePicker
+                                    value={watch('fecha_fin') || ''}
+                                    onChange={(val) => setValue('fecha_fin', val)}
+                                    label="Fecha Fin"
+                                    minDate={fechaInicio ? new Date(fechaInicio) : new Date()}
+                                    showTime={true}
+                                />
+                            </>
+                        )}
+                    </div>
+
+                    <div className="space-y-1">
+                        <label className="text-xs font-bold text-slate-500 uppercase">Oportunidad Relacionada</label>
+                        <OpportunityCombobox
+                            value={watch('opportunity_id')}
+                            accountId={watch('account_id')}
+                            onChange={(val) => setValue('opportunity_id', val, { shouldDirty: true, shouldValidate: true })}
+                            disabled={!!initialOpportunityId}
+                        />
+                    </div>
+
+                    <div className="space-y-1">
+                        <label className="text-xs font-bold text-slate-500 uppercase">Cuenta Relacionada</label>
+                        <AccountCombobox
+                            value={watch('account_id')}
+                            initialLabel={resolvedAccountName}
+                            onChange={(val) => {
+                                setValue('account_id', val, { shouldDirty: true, shouldValidate: true });
+                                // Logic: Clear opportunity if the new account doesn't match the current opportunity's account
+                                const currentOppId = getValues('opportunity_id');
+                                if (currentOppId && opportunityAccountRef.current !== val) {
+                                    setValue('opportunity_id', '', { shouldDirty: true });
+                                    opportunityAccountRef.current = null;
+                                }
+                            }}
+                        />
+                    </div>
+
+                    <div className="space-y-1">
+                        <textarea
+                            {...register('descripcion')}
+                            rows={3}
+                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all resize-none"
+                            placeholder="Notas adicionales..."
+                        />
+                    </div>
+
+                    {/* Sync Feedback Display */}
+                    {(syncFeedback.planner || syncFeedback.teams) && (
+                        <div className="bg-slate-50 rounded-xl p-3 border border-slate-200 space-y-2 animate-in slide-in-from-top-2 duration-200">
+                            {syncFeedback.planner === 'success' && (
+                                <div className="flex items-center gap-2 text-emerald-600">
+                                    <CheckCircle2 className="w-5 h-5" />
+                                    <span className="text-sm font-medium">✓ Tarea creada en Microsoft Planner</span>
+                                </div>
+                            )}
+                            {syncFeedback.planner === 'error' && (
+                                <div className="flex items-center gap-2 text-red-600">
+                                    <AlertCircle className="w-5 h-5" />
+                                    <span className="text-sm font-medium">Error sincronizando con Planner</span>
+                                </div>
+                            )}
+                            {syncFeedback.teams === 'success' && (
+                                <div className="flex items-center gap-2 text-blue-600">
+                                    <CheckCircle2 className="w-5 h-5" />
+                                    <span className="text-sm font-medium">✓ Reunión creada en Teams</span>
+                                </div>
+                            )}
+                            {syncFeedback.teams === 'error' && (
+                                <div className="flex items-center gap-2 text-red-600">
+                                    <AlertCircle className="w-5 h-5" />
+                                    <span className="text-sm font-medium">Error creando reunión Teams</span>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    <div className="flex gap-3 pt-6 mt-auto border-t border-slate-100 bg-white shrink-0 sticky bottom-0">
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="flex-1 px-4 py-3 border border-slate-200 rounded-xl font-bold text-slate-600 hover:bg-slate-50"
+                        >
+                            Cancelar
+                        </button>
+                        <button
+                            type="submit"
+                            disabled={isSubmitting}
+                            className={cn(
+                                "flex-1 text-white px-4 py-3 rounded-xl font-bold shadow-lg transition-colors flex items-center justify-center gap-2",
+                                isSubmitting ? "bg-slate-400 opacity-70" : (tipo === 'TAREA' ? "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200" : "bg-blue-600 hover:bg-blue-700 shadow-blue-200")
+                            )}
+                        >
+                            {isSubmitting ? (
+                                <><Loader2 className="w-5 h-5 animate-spin" /> Procesando...</>
+                            ) : (
+                                isEditing ? 'Guardar Cambios' : (tipo === 'TAREA' ? 'Crear Tarea' : 'Agendar Evento')
+                            )}
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+}

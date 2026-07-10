@@ -39,36 +39,40 @@ export function useContacts(accountId?: string) {
         }
 
         await db.contacts.add(newContact);
-        await syncEngine.queueMutation('CRM_Contactos', id, newContact);
+        await syncEngine.queueMutation('CRM_Contactos', id, newContact, { isSnapshot: true });
         return id;
     };
 
     const updateContact = async (id: string, updates: Partial<LocalContact>) => {
         const fullUpdates = { ...updates, updated_at: new Date().toISOString() };
-        const currentContact = await db.contacts.get(id);
+        
+        // Use db.contacts.get to check local existence, but if not found, we'll still proceed with a PUT
+        const currentLocal = await db.contacts.get(id);
 
-        if (!currentContact) {
-            console.error("Contact not found for update:", id);
-            return;
-        }
-
-        // Handle principal switch
         if (fullUpdates.es_principal) {
-            await db.contacts
-                .where('account_id').equals(currentContact.account_id)
-                .modify({ es_principal: false });
+            // Priority: use provided account_id, fallback to current local, then to initial hook accountId
+            const targetAccountId = fullUpdates.account_id || currentLocal?.account_id || accountId;
+            if (targetAccountId) {
+                await db.contacts
+                    .where('account_id').equals(targetAccountId)
+                    .modify({ es_principal: false });
+            }
         }
 
-        await db.contacts.update(id, fullUpdates);
-
-        // Prepare sync payload with required fields for UPSERT safety
-        // The RPC likely attempts an insert if it can't find the row (or purely for validation),
-        // so we must provide NOT NULL fields like account_id.
-        const syncPayload = { ...fullUpdates };
-        if (!syncPayload.account_id) syncPayload.account_id = currentContact.account_id;
-        if (!syncPayload.created_by && currentContact.created_by) syncPayload.created_by = currentContact.created_by;
-
-        await syncEngine.queueMutation('CRM_Contactos', id, syncPayload);
+        // --- THE FIX ---
+        // Instead of .update (which fails if ID doesn't exist), use .put for Upsert-safety.
+        // We merge with current local state if it exists, otherwise we rely on updates + required fields.
+        if (currentLocal) {
+            const merged = { ...currentLocal, ...fullUpdates };
+            await db.contacts.put(merged);
+            // ATENCIÓN: Usamos isSnapshot: true para asegurar que si el contacto no existe en el servidor
+            // (por ejemplo, si falló la creación inicial), se inserte con todos los campos obligatorios.
+            await syncEngine.queueMutation('CRM_Contactos', id, merged, { isSnapshot: true });
+        } else {
+            const newRecord = { id, ...fullUpdates } as LocalContact;
+            await db.contacts.put(newRecord);
+            await syncEngine.queueMutation('CRM_Contactos', id, newRecord, { isSnapshot: true });
+        }
     };
 
     const deleteContact = async (id: string) => {

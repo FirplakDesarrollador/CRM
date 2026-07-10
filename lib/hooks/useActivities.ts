@@ -52,7 +52,7 @@ export function useActivities(filters?: { opportunity_id?: string, advisor_id?: 
         'fecha_inicio', 'fecha_fin', 'ms_planner_id', 'ms_event_id', 'created_at', 'updated_at',
         'is_completed', 'created_by', 'updated_by', 'is_deleted',
         'tipo_actividad', 'clasificacion_id', 'subclasificacion_id', 'Tarea_planner',
-        'teams_meeting_url', 'microsoft_attendees'
+        'teams_meeting_url', 'microsoft_attendees', '_sync_metadata'
     ]);
 
     const createActivity = async (data: Partial<LocalActivity>) => {
@@ -71,7 +71,7 @@ export function useActivities(filters?: { opportunity_id?: string, advisor_id?: 
                     localStorage.setItem('cachedUserId', user.id); // Refresh cache
                 }
             }
-        } catch (e) {
+        } catch {
             // Offline - try to get cached user ID from localStorage
             userId = localStorage.getItem('cachedUserId');
         }
@@ -87,6 +87,7 @@ export function useActivities(filters?: { opportunity_id?: string, advisor_id?: 
             user_id: userId,
             tipo_actividad: data.tipo_actividad || 'EVENTO',
             asunto: (data.asunto || 'Nueva Actividad').trim(),
+            descripcion: data.descripcion || undefined,
             fecha_inicio: toISODateString(data.fecha_inicio),
             fecha_fin: data.fecha_fin ? toISODateString(data.fecha_fin) : undefined,
             is_completed: !!data.is_completed,
@@ -100,14 +101,14 @@ export function useActivities(filters?: { opportunity_id?: string, advisor_id?: 
             teams_meeting_url: data.teams_meeting_url || null,
             Tarea_planner: data.Tarea_planner || null,
             // Capture any sync metadata passed from UI (like pending_planner)
-            _sync_metadata: (data as any)._sync_metadata || {},
+            _sync_metadata: data._sync_metadata || {},
             updated_at: new Date().toISOString()
         };
 
         // Ensure we don't have undefined fields that become null in JSON
         const cleanActivity = Object.fromEntries(
-            Object.entries(newActivity).filter(([_, v]) => v !== undefined)
-        ) as any;
+            Object.entries(newActivity).filter(([, v]) => v !== undefined)
+        ) as Partial<LocalActivity>;
 
         if (cleanActivity._sync_metadata && Object.keys(cleanActivity._sync_metadata).length === 0) {
             delete cleanActivity._sync_metadata;
@@ -117,7 +118,7 @@ export function useActivities(filters?: { opportunity_id?: string, advisor_id?: 
         await db.activities.add(cleanActivity as LocalActivity);
 
         console.log("[useActivities] Queueing Mutation for Sync:", id);
-        await syncEngine.queueMutation('CRM_Actividades', id, cleanActivity);
+        await syncEngine.queueMutation('CRM_Actividades', id, cleanActivity, { isSnapshot: true });
         return id;
     };
 
@@ -146,13 +147,23 @@ export function useActivities(filters?: { opportunity_id?: string, advisor_id?: 
         console.log("[useActivities] Sanitized changes for sync:", changes);
 
         await db.activities.update(id, changes);
-        await syncEngine.queueMutation('CRM_Actividades', id, changes);
+        
+        // For snapshots, we MUST send the full object from Dexie to ensure all required fields (like user_id) 
+        // are present and we don't accidentally nullify other fields on the server.
+        const fullActivity = await db.activities.get(id);
+        if (fullActivity) {
+            await syncEngine.queueMutation('CRM_Actividades', id, fullActivity, { isSnapshot: true });
+        }
     };
 
     const toggleComplete = async (id: string, isCompleted: boolean) => {
         const updated_at = new Date().toISOString();
         await db.activities.update(id, { is_completed: isCompleted, updated_at });
-        await syncEngine.queueMutation('CRM_Actividades', id, { is_completed: isCompleted, updated_at });
+        
+        const fullActivity = await db.activities.get(id);
+        if (fullActivity) {
+            await syncEngine.queueMutation('CRM_Actividades', id, fullActivity, { isSnapshot: true });
+        }
 
         // If completed, also mark related notifications as read in the background
         if (isCompleted) {

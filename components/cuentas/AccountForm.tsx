@@ -9,6 +9,7 @@ import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useState, useEffect } from "react";
 import { Loader2, User, Building2, Medal } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { useFormDraft } from "@/lib/hooks/useFormDraft";
 import AccountContactsTab from "./AccountContactsTab";
 import AccountOpportunitiesTab from "./AccountOpportunitiesTab";
 import { Briefcase } from "lucide-react";
@@ -16,6 +17,10 @@ import { cn } from "@/components/ui/utils";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { AccountAssignedTab } from "./AccountAssignedTab";
 import AccountBranchesTab from "./AccountBranchesTab";
+import AccountActivitiesTab from "./AccountActivitiesTab";
+import { ListTodo } from "lucide-react";
+import { useFormAutoSave } from "@/lib/hooks/useFormAutoSave";
+import { AutoSaveIndicator } from "@/components/ui/AutoSaveIndicator";
 
 // Schema
 const accountSchema = z.object({
@@ -33,7 +38,9 @@ const accountSchema = z.object({
     ciudad_id: z.string().nullable().optional(),
     ciudad: z.string().nullable().optional(), // Keep for backward compat
     es_premium: z.boolean().optional(),
-    nivel_premium: z.enum(['ORO', 'PLATA', 'BRONCE']).nullable().optional(),
+    nivel_premium: z.enum(['PREMIUM', 'DESTACADO', 'ACTIVO']).nullable().optional(),
+    ignorar_limites_descuento: z.boolean().optional(),
+    comentarios: z.string().nullable().optional(),
 });
 
 type AccountFormData = z.infer<typeof accountSchema>;
@@ -46,9 +53,9 @@ interface AccountFormProps {
 
 export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) {
     const { createAccount, updateAccount } = useAccounts();
-    const { role: userRole } = useCurrentUser();
+    const { role: userRole, isAdmin } = useCurrentUser();
     const [parents, setParents] = useState<any[]>([]);
-    const [activeTab, setActiveTab] = useState<'info' | 'contacts' | 'opportunities' | 'branches' | 'assigned'>('info');
+    const [activeTab, setActiveTab] = useState<'info' | 'contacts' | 'opportunities' | 'branches' | 'assigned' | 'activities'>('info');
     const [hasBranches, setHasBranches] = useState(false);
 
     // Live Query for Subclassifications from local DB
@@ -180,15 +187,9 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
     // Tab State
     // Tab State moved to top
 
-    const {
-        register,
-        handleSubmit,
-        watch,
-        setValue,
-        reset,
-        formState: { errors, isDirty },
-    } = useForm<AccountFormData>({
+    const form = useForm<AccountFormData>({
         resolver: zodResolver(accountSchema),
+        shouldUnregister: false,
         defaultValues: {
             nombre: account?.nombre || "",
             nit_base: account?.nit_base || "",
@@ -204,8 +205,50 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             ciudad_id: account?.ciudad_id ? String(account.ciudad_id) : "",
             ciudad: account?.ciudad || "",
             es_premium: account?.es_premium || false,
-            nivel_premium: account?.nivel_premium || null
+            nivel_premium: account?.nivel_premium || null,
+            ignorar_limites_descuento: account?.ignorar_limites_descuento || false,
+            comentarios: account?.comentarios || ""
         }
+    });
+
+    const {
+        register,
+        handleSubmit,
+        watch,
+        setValue,
+        reset,
+        formState: { errors, isDirty },
+    } = form;
+
+    const { clearDraft } = useFormDraft(form, 'crm_draft_account', !account);
+
+    const onAutoSave = async (data: AccountFormData) => {
+        if (!account?.id) return;
+        const payload: any = {
+            nombre: data.nombre,
+            nit_base: data.nit_base,
+            id_cuenta_principal: data.is_child ? data.id_cuenta_principal : null,
+            canal_id: data.canal_id,
+            subclasificacion_id: data.subclasificacion_id ? Number(data.subclasificacion_id) : null,
+            telefono: data.telefono || null,
+            email: data.email || null,
+            direccion: data.direccion || null,
+            pais_id: data.pais_id ? Number(data.pais_id) : null,
+            departamento_id: data.departamento_id ? Number(data.departamento_id) : null,
+            ciudad_id: data.ciudad_id ? Number(data.ciudad_id) : null,
+            ciudad: data.ciudad_id ? citiesList.find(c => String(c.id) === data.ciudad_id)?.nombre : (data.ciudad || null),
+            es_premium: !!data.nivel_premium,
+            nivel_premium: data.nivel_premium || null,
+            ignorar_limites_descuento: data.ignorar_limites_descuento || false,
+            comentarios: data.comentarios || null
+        };
+        await updateAccount(account.id, payload);
+    };
+
+    const { status: autoSaveStatus } = useFormAutoSave({
+        form,
+        onSave: onAutoSave,
+        isEnabled: !!account?.id
     });
 
     // Update form when account changes (ONLY if not modified by user to avoid overwriting)
@@ -227,7 +270,9 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                 ciudad_id: account.ciudad_id ? String(account.ciudad_id) : "",
                 ciudad: account.ciudad || "",
                 es_premium: account.es_premium || false,
-                nivel_premium: account.nivel_premium || null
+                nivel_premium: account.nivel_premium || null,
+                ignorar_limites_descuento: account.ignorar_limites_descuento || false,
+                comentarios: account.comentarios || ""
             }, { keepDefaultValues: true });
         }
     }, [account, reset, isDirty]);
@@ -362,7 +407,9 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                 ciudad_id: data.ciudad_id ? Number(data.ciudad_id) : null,
                 ciudad: data.ciudad_id ? citiesList.find(c => String(c.id) === data.ciudad_id)?.nombre : (data.ciudad || null),
                 es_premium: !!data.nivel_premium,
-                nivel_premium: data.nivel_premium || null
+                nivel_premium: data.nivel_premium || null,
+                ignorar_limites_descuento: data.ignorar_limites_descuento || false,
+                comentarios: data.comentarios || null
             };
 
             // DEBUG: Log the final payload
@@ -375,6 +422,7 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                 await updateAccount(account.id, payload);
             } else {
                 await createAccount(payload);
+                clearDraft(); // Limpiar borrador si es creación exitosa
             }
 
             onSuccess();
@@ -387,9 +435,9 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
     };
 
     return (
-        <div className="bg-white rounded-lg dark:bg-slate-900">
+        <div className="bg-white rounded-lg">
             {/* Tabs Header */}
-            <div className="flex border-b border-gray-200 dark:border-slate-800 mb-4">
+            <div className="flex border-b border-gray-200 mb-4">
                 <button
                     type="button"
                     onClick={() => setActiveTab('info')}
@@ -457,6 +505,20 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                         Asignado
                     </button>
                 )}
+
+                {account?.id && (
+                    <button
+                        type="button"
+                        onClick={() => setActiveTab('activities')}
+                        className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'activities'
+                            ? "border-blue-600 text-blue-600"
+                            : "border-transparent text-gray-500 hover:text-gray-700"
+                            }`}
+                    >
+                        <ListTodo size={16} />
+                        Actividades
+                    </button>
+                )}
             </div>
 
             {activeTab === 'info' ? (
@@ -495,19 +557,19 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                                     type="button"
                                     onClick={() => {
                                         const current = watch("nivel_premium");
-                                        const newVal = current === 'ORO' ? null : 'ORO';
+                                        const newVal = current === 'PREMIUM' ? null : 'PREMIUM';
                                         setValue("nivel_premium", newVal);
                                         setValue("es_premium", !!newVal);
                                     }}
                                     className={cn(
                                         "flex-1 flex flex-col items-center justify-center p-3 rounded-lg border-2 transition-all",
-                                        watch("nivel_premium") === 'ORO'
+                                        watch("nivel_premium") === 'PREMIUM'
                                             ? "bg-amber-50 border-amber-400 text-amber-700 shadow-sm"
                                             : "bg-white border-slate-100 text-slate-400 hover:border-amber-200 hover:text-amber-600/70"
                                     )}
                                 >
-                                    <Medal className={cn("w-6 h-6 mb-1", watch("nivel_premium") === 'ORO' ? "fill-amber-400 text-amber-500" : "fill-none")} />
-                                    <span className="text-xs font-bold">ORO</span>
+                                    <Medal className={cn("w-6 h-6 mb-1", watch("nivel_premium") === 'PREMIUM' ? "fill-amber-400 text-amber-500" : "fill-none")} />
+                                    <span className="text-xs font-bold uppercase transition-colors">Premium</span>
                                 </button>
 
                                 {/* PLATA */}
@@ -515,19 +577,19 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                                     type="button"
                                     onClick={() => {
                                         const current = watch("nivel_premium");
-                                        const newVal = current === 'PLATA' ? null : 'PLATA';
+                                        const newVal = current === 'DESTACADO' ? null : 'DESTACADO';
                                         setValue("nivel_premium", newVal);
                                         setValue("es_premium", !!newVal);
                                     }}
                                     className={cn(
                                         "flex-1 flex flex-col items-center justify-center p-3 rounded-lg border-2 transition-all",
-                                        watch("nivel_premium") === 'PLATA'
+                                        watch("nivel_premium") === 'DESTACADO'
                                             ? "bg-slate-100 border-slate-400 text-slate-700 shadow-sm"
                                             : "bg-white border-slate-100 text-slate-400 hover:border-slate-300 hover:text-slate-600/70"
                                     )}
                                 >
-                                    <Medal className={cn("w-6 h-6 mb-1", watch("nivel_premium") === 'PLATA' ? "fill-slate-300 text-slate-500" : "fill-none")} />
-                                    <span className="text-xs font-bold">PLATA</span>
+                                    <Medal className={cn("w-6 h-6 mb-1", watch("nivel_premium") === 'DESTACADO' ? "fill-slate-300 text-slate-500" : "fill-none")} />
+                                    <span className="text-xs font-bold uppercase transition-colors">Destacado</span>
                                 </button>
 
                                 {/* BRONCE */}
@@ -535,25 +597,42 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                                     type="button"
                                     onClick={() => {
                                         const current = watch("nivel_premium");
-                                        const newVal = current === 'BRONCE' ? null : 'BRONCE';
+                                        const newVal = current === 'ACTIVO' ? null : 'ACTIVO';
                                         setValue("nivel_premium", newVal);
                                         setValue("es_premium", !!newVal);
                                     }}
                                     className={cn(
                                         "flex-1 flex flex-col items-center justify-center p-3 rounded-lg border-2 transition-all",
-                                        watch("nivel_premium") === 'BRONCE'
+                                        watch("nivel_premium") === 'ACTIVO'
                                             ? "bg-orange-50 border-orange-400 text-orange-700 shadow-sm"
                                             : "bg-white border-slate-100 text-slate-400 hover:border-orange-200 hover:text-orange-600/70"
                                     )}
                                 >
-                                    <Medal className={cn("w-6 h-6 mb-1", watch("nivel_premium") === 'BRONCE' ? "fill-orange-400 text-orange-600" : "fill-none")} />
-                                    <span className="text-xs font-bold">BRONCE</span>
+                                    <Medal className={cn("w-6 h-6 mb-1", watch("nivel_premium") === 'ACTIVO' ? "fill-orange-400 text-orange-600" : "fill-none")} />
+                                    <span className="text-xs font-bold uppercase transition-colors">Activo</span>
                                 </button>
                             </div>
 
                             {/* Hidden field for es_premium compatibility */}
                             <input type="hidden" {...register("es_premium")} />
                         </div>
+
+                        {/* Toggle Ignorar Límites de Descuento (SOLO ADMIN) */}
+                        {isAdmin && (
+                            <div className="pt-6">
+                                <label className="text-sm font-bold text-slate-700 flex items-center gap-2 mb-2 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        {...register("ignorar_limites_descuento")}
+                                        className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 cursor-pointer"
+                                    />
+                                    Ignorar reglas de límite de descuento en oportunidades
+                                </label>
+                                <p className="text-xs text-slate-500">
+                                    Si está activado, en las cotizaciones de esta cuenta no se aplicará la restricción del porcentaje máximo de descuento.
+                                </p>
+                            </div>
+                        )}
                     </div>
 
                     {/* Sales Channel Selector (NEW) */}
@@ -713,6 +792,23 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                         </div>
                     </div>
 
+                    {/* Comentarios */}
+                    <div className="space-y-1">
+                        <label className="text-sm font-medium">Comentarios</label>
+                        <textarea
+                            {...register("comentarios")}
+                            rows={3}
+                            className="w-full border p-2 rounded bg-white focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+                            placeholder="Agregue información adicional aquí..."
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' && !e.shiftKey) {
+                                    e.preventDefault();
+                                    e.currentTarget.form?.requestSubmit();
+                                }
+                            }}
+                        />
+                    </div>
+
                     {assignedUserName && (
                         <div className="mt-4 p-3 bg-slate-50 rounded-lg border border-slate-100 flex items-center gap-3">
                             <div className="p-2 bg-white rounded-full border border-slate-200 shadow-sm text-blue-600">
@@ -725,19 +821,30 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                         </div>
                     )}
 
-                    <div className="flex justify-end gap-2 pt-4">
-                        <button data-testid="accounts-form-cancel" type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">
-                            Cancelar
-                        </button>
-                        <button
-                            data-testid="accounts-form-save"
-                            type="submit"
-                            disabled={isSubmitting}
-                            className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center"
-                        >
-                            {isSubmitting && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
-                            Guardar Cuenta
-                        </button>
+                    <div className="flex justify-end items-center gap-4 pt-4 border-t border-slate-100">
+                        {account?.id ? (
+                            <>
+                                <AutoSaveIndicator status={autoSaveStatus} />
+                                <button data-testid="accounts-form-cancel" type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">
+                                    Cerrar
+                                </button>
+                            </>
+                        ) : (
+                            <>
+                                <button data-testid="accounts-form-cancel" type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">
+                                    Cancelar
+                                </button>
+                                <button
+                                    data-testid="accounts-form-save"
+                                    type="submit"
+                                    disabled={isSubmitting}
+                                    className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center"
+                                >
+                                    {isSubmitting && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
+                                    Guardar Cuenta
+                                </button>
+                            </>
+                        )}
                     </div>
 
                 </form>
@@ -765,6 +872,15 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                         // Logic to open branch account - In this CRM context, we can reuse the handleEdit if it's available in props or similar
                         // For now, it will just show the information.
                     }} />}
+                    <div className="flex justify-end pt-4 border-t mt-4">
+                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">
+                            Cerrar
+                        </button>
+                    </div>
+                </div>
+            ) : activeTab === 'activities' ? (
+                <div className="p-4">
+                    {account?.id && <AccountActivitiesTab accountId={account.id} />}
                     <div className="flex justify-end pt-4 border-t mt-4">
                         <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">
                             Cerrar

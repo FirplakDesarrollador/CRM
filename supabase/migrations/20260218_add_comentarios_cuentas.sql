@@ -1,0 +1,1 @@
+ALTER TABLE "CRM_Cuentas" ADD COLUMN IF NOT EXISTS comentarios TEXT;

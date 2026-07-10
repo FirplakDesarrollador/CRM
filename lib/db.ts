@@ -1,4 +1,5 @@
 import Dexie, { Table } from 'dexie';
+import { registerAuditHooks } from './auditHooks';
 
 // Define Types for Local Tables (Mirroring Server)
 // We add 'sync_status' to track if a row is fully synced or has pending changes (though Outbox is primary)
@@ -12,7 +13,7 @@ export interface OutboxItem {
     new_value: any;
     field_timestamp: number;
     user_id?: string;
-    status: 'PENDING' | 'SYNCING' | 'FAILED';
+    status: 'PENDING' | 'SYNCING' | 'FAILED' | 'COMPLETED';
     retry_count: number;
     error?: string;
 }
@@ -27,7 +28,8 @@ export interface LocalCuenta {
     canal_id: string; // Nuevo campo obligatorio
     subclasificacion_id?: number | null; // Nuevo campo opcional
     es_premium?: boolean;
-    nivel_premium?: 'ORO' | 'PLATA' | 'BRONCE' | null; // Nuevo campo jerárquico
+    nivel_premium?: 'PREMIUM' | 'DESTACADO' | 'ACTIVO' | null; // Nuevo campo jerárquico
+    ignorar_limites_descuento?: boolean; // Toggle para saltar límites de descuento
     telefono?: string;
     email?: string; // Added field
     direccion?: string;
@@ -41,6 +43,7 @@ export interface LocalCuenta {
     created_by?: string;
     updated_by?: string;
     updated_at?: string;
+    comentarios?: string;
 }
 
 export interface LocalPais {
@@ -62,6 +65,7 @@ export interface LocalCiudad {
 
 // Types for Quotes
 export interface LocalQuote {
+    comentarios?: string;
     id: string;
     opportunity_id: string;
     numero_cotizacion: string;
@@ -93,6 +97,23 @@ export interface LocalQuote {
     incoterm?: string;
     seguro?: number;
 
+    // PDF / F-V-29 Nuevos Campos
+    cliente_final?: string;
+    email_contacto?: string;
+    contacto_ventas?: string;
+    contacto_logistico?: string;
+    contacto_tesoreria?: string;
+    dir_envio_factura_tipo?: string;
+    servicio_subida_hidromasaje?: boolean;
+    piso_entrega?: number;
+    tiene_escaleras?: boolean;
+    planos_hidromasaje?: string;
+    fecha_entrega?: string;
+    nit_cliente_final?: string;
+    entrega_en_obra?: boolean;
+    bodega_externa?: boolean;
+    bodega_firplak?: boolean;
+
     created_by?: string;
     updated_by?: string;
     updated_at?: string;
@@ -101,7 +122,7 @@ export interface LocalQuote {
 export interface LocalQuoteItem {
     id: string;
     cotizacion_id: string;
-    producto_id: string;
+    producto_id: string | null;
     cantidad: number;
     precio_unitario: number;
     subtotal: number;
@@ -114,8 +135,82 @@ export interface LocalQuoteItem {
     updated_at?: string;
 }
 
+export interface LocalPedido {
+    id?: number;
+    uuid_generado: string;
+    cotizacion_id: string;
+    opportunity_id?: string;
+    estado_pedido: 'PLANEADO' | 'ENVIADO_SAP' | null;
+    
+    // Legacy fields
+    salesOrderNumber?: string;
+    reference?: string;
+    stateSalesOrder?: string;
+    amountSalesOrder?: string;
+    company?: string;
+    opportunity?: string;
+
+    // SAP Data (mapped to EXTRA_...)
+    fecha_minima_requerida?: string;
+    fecha_facturacion?: string;
+    tipo_facturacion?: string;
+    notas_sap?: string;
+    formas_pago?: string;
+    facturacion_electronica?: boolean;
+    oc_cot?: string;
+    cierre_facturacion?: string;
+    es_muestra?: boolean;
+    aplica_contrato?: boolean;
+    multa_incumplimiento?: boolean;
+    orden_compra?: string;
+    puerto_embarque?: string;
+    terminos_pago?: string;
+    puerto_destino?: string;
+    via_transporte?: string;
+    flete?: number;
+    incoterm?: string;
+    seguro?: number;
+
+    currency_id?: string;
+    responsible?: string;
+    "EXTRA_Gran Total"?: string;
+
+    // Nuevos campos F-V-29
+    cliente_final?: string;
+    email_contacto?: string;
+    contacto_ventas?: string;
+    contacto_logistico?: string;
+    contacto_tesoreria?: string;
+    dir_envio_factura_tipo?: string;
+    servicio_subida_hidromasaje?: boolean;
+    piso_entrega?: number;
+    tiene_escaleras?: boolean;
+    planos_hidromasaje?: string;
+    fecha_entrega?: string;
+    nit_cliente_final?: string;
+    entrega_en_obra?: boolean;
+    bodega_externa?: boolean;
+    bodega_firplak?: boolean;
+
+    created_by?: string;
+    updated_by?: string;
+    updated_at?: string;
+    created_at?: string;
+}
+
+export interface LocalPedidoItem {
+    id: string;
+    pedido_uuid: string;
+    producto_id: string;
+    cantidad: number;
+    precio_unitario: number;
+    descuento?: number;
+    created_at?: string;
+}
+
 // Types for Contacts
 export interface LocalContact {
+    comentarios?: string;
     id: string;
     account_id: string;
     nombre: string;
@@ -178,6 +273,10 @@ export interface LocalOportunidad {
     origen_oportunidad?: string | null;
     url_origen?: string | null;
     fuente_conversion?: string | null;
+    created_by?: string;
+    updated_by?: string;
+    comentarios?: string;
+    direccion_entrega?: string;
 }
 
 export class CRMFirplakDB extends Dexie {
@@ -202,10 +301,13 @@ export class CRMFirplakDB extends Dexie {
     activitySubclassifications!: Table<LocalActivitySubclassification, number>;
     lossReasons!: Table<LocalLossReason, number>;
     opportunityCollaborators!: Table<LocalOpportunityCollaborator, string>; // New table
+    pedidos!: Table<LocalPedido, string>;
+    pedidoItems!: Table<LocalPedidoItem, string>;
+    isPulling: boolean = false;
 
     constructor() {
         super('CRMFirplakDB');
-        this.version(10).stores({
+        this.version(11).stores({
             outbox: 'id, entity_type, status, field_timestamp, field_name',
             fileQueue: 'id, status',
             accounts: 'id, nit, nombre, owner_user_id',
@@ -223,8 +325,11 @@ export class CRMFirplakDB extends Dexie {
             activityClassifications: 'id, tipo_actividad',
             activitySubclassifications: 'id, clasificacion_id',
             lossReasons: 'id',
-            opportunityCollaborators: 'id, oportunidad_id, usuario_id' // New table
+            opportunityCollaborators: 'id, oportunidad_id, usuario_id', // New table
+            pedidos: 'uuid_generado, cotizacion_id, opportunity_id',
+            pedidoItems: 'id, pedido_uuid'
         });
+        registerAuditHooks(this);
     }
 }
 
@@ -267,12 +372,14 @@ export interface LocalActivityClassification {
     id: number;
     nombre: string;
     tipo_actividad: 'TAREA' | 'EVENTO';
+    is_deleted?: boolean;
 }
 
 export interface LocalActivitySubclassification {
     id: number;
     nombre: string;
     clasificacion_id: number;
+    is_deleted?: boolean;
 }
 
 export interface LocalLossReason {

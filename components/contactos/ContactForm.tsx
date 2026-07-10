@@ -1,11 +1,15 @@
-
 import { useContacts } from "@/lib/hooks/useContacts";
 import { db, LocalContact } from "@/lib/db";
 import { useForm } from "react-hook-form";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
+import { useFormDraft } from "@/lib/hooks/useFormDraft";
 import { ContactImportButton } from "./ContactImportButton";
 import { ParsedContact } from "@/lib/vcard";
+import { AccountSelector } from "./AccountSelector";
+import { Building } from "lucide-react";
+import { useFormAutoSave } from "@/lib/hooks/useFormAutoSave";
+import { AutoSaveIndicator } from "@/components/ui/AutoSaveIndicator";
 
 interface ContactFormProps {
     accountId: string;
@@ -17,20 +21,52 @@ interface ContactFormProps {
 export function ContactForm({ accountId, existingContact, onSuccess, onCancel }: ContactFormProps) {
     const { createContact, updateContact, contacts } = useContacts(accountId);
 
-    // Initialize default values based on existingContact
-    const defaultValues: Partial<LocalContact> = existingContact ? {
-        nombre: existingContact.nombre,
-        cargo: existingContact.cargo || "",
-        email: existingContact.email || "",
-        telefono: existingContact.telefono || "",
-        es_principal: existingContact.es_principal || false
-    } : {
-        es_principal: false
+    const defaultValues: Partial<LocalContact> = {
+        nombre: existingContact?.nombre || "",
+        cargo: existingContact?.cargo || "",
+        email: existingContact?.email || "",
+        account_id: existingContact?.account_id || accountId || "",
+        telefono: existingContact?.telefono || "",
+        es_principal: existingContact?.es_principal || false,
+        comentarios: existingContact?.comentarios || "",
     };
 
-    const { register, handleSubmit, reset, setValue, formState: { errors, isSubmitting } } = useForm<LocalContact>({
-        defaultValues
+    const form = useForm<LocalContact>({
+        defaultValues: defaultValues as any
     });
+
+    const { register, handleSubmit, reset, setValue, watch, formState: { errors, isSubmitting } } = form;
+
+    const { clearDraft } = useFormDraft(form, 'crm_draft_contact', !existingContact);
+
+    const onAutoSave = async (data: LocalContact) => {
+        if (!existingContact?.id) return;
+        const payload: any = {
+            nombre: data.nombre,
+            cargo: data.cargo || null,
+            email: data.email || null,
+            telefono: data.telefono || null,
+            es_principal: data.es_principal,
+            comentarios: data.comentarios || null,
+            account_id: selectedAccountId || data.account_id
+        };
+        await updateContact(existingContact.id, payload);
+    };
+
+    const { status: autoSaveStatus } = useFormAutoSave({
+        form,
+        onSave: onAutoSave,
+        isEnabled: !!existingContact?.id
+    });
+
+    useEffect(() => {
+        // En modo creación, useFormDraft ya maneja el estado inicial. No sobreescribir aquí.
+        if (existingContact) {
+            reset(defaultValues as any);
+        }
+    }, [existingContact?.id, accountId, reset]);
+
+    const selectedAccountId = watch("account_id");
 
     const handleImport = (imported: ParsedContact) => {
         // Deduplication Check
@@ -48,75 +84,91 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel }:
         if (imported.title) setValue("cargo", imported.title);
         if (imported.email) setValue("email", imported.email);
         if (imported.tel) setValue("telefono", imported.tel);
-        if (imported.org) {
-            // We don't have an explicit 'Company' field in LocalContact visible in this form usually, 
-            // but if we did, we would set it. 
-            // For now, let's append it to notes or ignore if not present in form.
-            // LocalContact doesn't seem to have 'notes' or 'organization' in the interface shown in creating/editing.
-        }
     };
 
-    // Clean reset when switching between add/edit or changing contacts
-    useEffect(() => {
-        if (existingContact) {
-            reset({
-                nombre: existingContact.nombre,
-                cargo: existingContact.cargo || "",
-                email: existingContact.email || "",
-                telefono: existingContact.telefono || "",
-                es_principal: existingContact.es_principal || false
-            });
-        } else {
-            reset({
-                nombre: "",
-                cargo: "",
-                email: "",
-                telefono: "",
-                es_principal: false
-            });
-        }
-    }, [existingContact, reset]);
-
-    const onSubmit = async (data: LocalContact) => {
+    const onSubmit = async (formData: LocalContact) => {
         try {
+            // MERGE: Ensure selectedAccountId from watch is prioritized over current formData to avoid hook-form delays
+            const data = { ...formData, account_id: selectedAccountId || formData.account_id };
+            console.log("[ContactForm] Final submission data:", { 
+                id: existingContact?.id, 
+                name: data.nombre, 
+                account_id: data.account_id 
+            });
+
+            if (!data.account_id) {
+                alert("Debes seleccionar una cuenta para el contacto");
+                return;
+            }
+
             // Check for duplicates
             const checkDuplicates = async () => {
-                // Build OR query components
                 const checks = [];
-                if (data.email) checks.push(`email.eq.${data.email}`);
-                if (data.telefono) checks.push(`telefono.eq.${data.telefono}`);
-                if (data.nombre) checks.push(`nombre.eq.${data.nombre}`); // Global name check per requirement
+                if (data.email) checks.push({ field: 'email', value: data.email });
+                if (data.telefono) checks.push({ field: 'telefono', value: data.telefono });
+                if (data.nombre) checks.push({ field: 'nombre', value: data.nombre });
 
                 if (checks.length === 0) return null;
 
-                let query = supabase
-                    .from('CRM_Contactos')
-                    .select('id, nombre, email, telefono')
-                    .or(checks.join(','));
+                // 1. LOCAL CHECK (Dexie) - Crucial for offline or pending sync items
+                try {
+                    const localResults = await db.contacts.filter(c => {
+                        if (existingContact?.id && c.id === existingContact.id) return false;
+                        
+                        const matchName = data.nombre && c.nombre?.toLowerCase() === data.nombre.toLowerCase();
+                        const matchEmail = data.email && c.email?.toLowerCase() === data.email.toLowerCase();
+                        const matchPhone = data.telefono && c.telefono === data.telefono;
+                        
+                        return !!(matchName || matchEmail || matchPhone);
+                    }).toArray();
 
-                if (existingContact?.id) {
-                    query = query.neq('id', existingContact.id);
+                    if (localResults.length > 0) {
+                        return localResults.map(r => ({ ...r, source: 'local' }));
+                    }
+                } catch (e) {
+                    console.warn("[ContactForm] local duplicate check failed:", e);
                 }
 
-                const { data: duplicates, error } = await query;
-                if (error) {
-                    console.error("Error checking contact duplicates:", error);
+                // 2. SERVER CHECK (Supabase)
+                try {
+                    const orFilters = [];
+                    if (data.email) orFilters.push(`email.eq.${data.email}`);
+                    if (data.telefono) orFilters.push(`telefono.eq.${data.telefono}`);
+                    if (data.nombre) orFilters.push(`nombre.eq.${data.nombre}`);
+
+                    let query = supabase
+                        .from('CRM_Contactos')
+                        .select('id, nombre, email, telefono')
+                        .or(orFilters.join(','));
+
+                    if (existingContact?.id) {
+                        query = query.neq('id', existingContact.id);
+                    }
+
+                    const { data: duplicates, error } = await query;
+                    if (error) throw error;
+                    return duplicates?.map(d => ({ ...d, source: 'server' })) || null;
+                } catch (error: any) {
+                    console.error("Error checking contact duplicates on server:", error);
+                    // If server check fails, we already did local check. 
+                    // We might want to warn the user but local is ok for now.
                     return null;
                 }
-                return duplicates;
             };
 
-            const duplicates = await checkDuplicates();
+            const duplicatesResponse = await checkDuplicates();
 
-            if (duplicates && duplicates.length > 0) {
-                const nameConflict = duplicates.find((d: any) => d.nombre.toLowerCase() === data.nombre.toLowerCase());
-                const emailConflict = data.email ? duplicates.find((d: any) => d.email?.toLowerCase() === data.email?.toLowerCase()) : null;
-                const phoneConflict = data.telefono ? duplicates.find((d: any) => d.telefono === data.telefono) : null;
+            if (duplicatesResponse && duplicatesResponse.length > 0) {
+                const nameConflict = duplicatesResponse.find((d: any) => d.nombre.toLowerCase() === data.nombre.toLowerCase());
+                const emailConflict = data.email ? duplicatesResponse.find((d: any) => d.email?.toLowerCase() === data.email?.toLowerCase()) : null;
+                const phoneConflict = data.telefono ? duplicatesResponse.find((d: any) => d.telefono === data.telefono) : null;
 
                 let errorMessage = "";
-                if (nameConflict) errorMessage += `\n- El nombre "${data.nombre}" ya existe.`;
-                if (emailConflict) errorMessage += `\n- El email "${data.email}" ya existe.`;
-                if (phoneConflict) errorMessage += `\n- El teléfono "${data.telefono}" ya existe.`;
+                const sourceInfo = duplicatesResponse[0].source === 'local' ? " (Pendiente de sincronizar)" : "";
+                
+                if (nameConflict) errorMessage += `\n- El nombre "${data.nombre}" ya existe${sourceInfo}.`;
+                if (emailConflict) errorMessage += `\n- El email "${data.email}" ya existe${sourceInfo}.`;
+                if (phoneConflict) errorMessage += `\n- El teléfono "${data.telefono}" ya existe${sourceInfo}.`;
 
                 if (errorMessage) {
                     alert(`No se puede guardar. Se encontraron contactos duplicados:${errorMessage}`);
@@ -127,7 +179,8 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel }:
             if (existingContact) {
                 await updateContact(existingContact.id, data);
             } else {
-                await createContact({ ...data, account_id: accountId });
+                await createContact(data);
+                clearDraft(); // Limpiar borrador si es creación exitosa
             }
             onSuccess();
         } catch (error) {
@@ -137,20 +190,36 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel }:
     };
 
     return (
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-6 p-8 border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-3xl shadow-xl shadow-slate-200/50 dark:shadow-none">
-            <div className="flex justify-between items-center border-b border-slate-100 dark:border-slate-800 pb-4">
-                <h3 className="text-2xl font-black text-slate-800 dark:text-slate-100 tracking-tight">
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-6 p-8 border border-slate-200 bg-white rounded-3xl shadow-xl shadow-slate-200/50">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-4">
+                <h3 className="text-2xl font-black text-slate-800 tracking-tight">
                     {existingContact ? 'Editar Contacto' : 'Nuevo Contacto'}
                 </h3>
                 {!existingContact && <ContactImportButton onContactImported={handleImport} />}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-3 md:col-span-2">
+                    <label className="text-sm font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mb-1">
+                        <Building size={14} className="text-[#254153]" />
+                        Cuenta Vinculada
+                    </label>
+                    <input type="hidden" {...register("account_id")} />
+                    <AccountSelector
+                        value={selectedAccountId || ""}
+                        initialAccountName={(existingContact as any)?.account_name}
+                        onChange={(val) => {
+                            console.log("[ContactForm] Changing account_id to:", val);
+                            setValue("account_id", val, { shouldDirty: true, shouldValidate: true });
+                        }}
+                    />
+                </div>
+
                 <div className="space-y-2">
                     <label className="block text-xs font-black uppercase text-slate-500 tracking-widest ml-1">Nombre Completo *</label>
                     <input
                         {...register("nombre", { required: "El nombre es obligatorio" })}
-                        className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 rounded-2xl focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] transition-all outline-none font-bold text-slate-700 dark:text-slate-200"
+                        className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] transition-all outline-none font-bold text-slate-700"
                         placeholder="Ej. Juan Pérez"
                     />
                     {errors.nombre && <span className="text-red-500 font-bold text-[10px] uppercase ml-1 tracking-wider">{errors.nombre.message}</span>}
@@ -160,7 +229,7 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel }:
                     <label className="block text-xs font-black uppercase text-slate-500 tracking-widest ml-1">Cargo / Posición</label>
                     <input
                         {...register("cargo")}
-                        className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 rounded-2xl focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] transition-all outline-none font-bold text-slate-700 dark:text-slate-200"
+                        className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] transition-all outline-none font-bold text-slate-700"
                         placeholder="Ej. Gerente Comercial"
                     />
                 </div>
@@ -170,7 +239,7 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel }:
                     <input
                         type="email"
                         {...register("email")}
-                        className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 rounded-2xl focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] transition-all outline-none font-bold text-slate-700 dark:text-slate-200"
+                        className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] transition-all outline-none font-bold text-slate-700"
                         placeholder="ejemplo@correo.com"
                     />
                 </div>
@@ -179,39 +248,64 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel }:
                     <label className="block text-xs font-black uppercase text-slate-500 tracking-widest ml-1">Teléfono Móvil</label>
                     <input
                         {...register("telefono")}
-                        className="w-full p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 rounded-2xl focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] transition-all outline-none font-bold text-slate-700 dark:text-slate-200"
+                        className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] transition-all outline-none font-bold text-slate-700"
                         placeholder="+57 300 123 4567"
+                    />
+                </div>
+
+                <div className="space-y-2 md:col-span-2">
+                    <label className="block text-xs font-black uppercase text-slate-500 tracking-widest ml-1">Comentarios</label>
+                    <textarea
+                        {...register("comentarios")}
+                        className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] transition-all outline-none font-bold text-slate-700 resize-none"
+                        placeholder="Información adicional sobre el contacto..."
+                        rows={3}
                     />
                 </div>
             </div>
 
-            <div className="flex items-center gap-3 p-4 bg-emerald-50/50 dark:bg-emerald-900/10 rounded-2xl border border-emerald-100 dark:border-emerald-900/20">
+            <div className="flex items-center gap-3 p-4 bg-emerald-50/50 rounded-2xl border border-emerald-100">
                 <input
                     type="checkbox"
                     id="es_principal"
                     {...register("es_principal")}
                     className="h-5 w-5 rounded-lg border-slate-300 text-emerald-600 focus:ring-emerald-500 transition-all cursor-pointer"
                 />
-                <label htmlFor="es_principal" className="text-sm font-black text-emerald-800 dark:text-emerald-400 cursor-pointer">
+                <label htmlFor="es_principal" className="text-sm font-black text-emerald-800 cursor-pointer">
                     Marcar como Contacto Principal de la cuenta
                 </label>
             </div>
 
-            <div className="flex justify-end gap-3 pt-6 border-t border-slate-100 dark:border-slate-800">
-                <button
-                    type="button"
-                    onClick={onCancel}
-                    className="px-6 py-3 text-sm font-bold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all active:scale-95"
-                >
-                    Cancelar
-                </button>
-                <button
-                    type="submit"
-                    disabled={isSubmitting}
-                    className="px-8 py-3 text-sm font-extrabold text-white bg-[#254153] border border-transparent rounded-xl hover:bg-[#1a2f3d] shadow-lg shadow-[#254153]/20 disabled:opacity-50 transition-all hover:scale-[1.02] active:scale-[0.98]"
-                >
-                    {isSubmitting ? 'Guardando...' : 'Guardar Contacto'}
-                </button>
+            <div className="flex justify-end items-center gap-3 pt-6 border-t border-slate-100">
+                {existingContact ? (
+                    <>
+                        <AutoSaveIndicator status={autoSaveStatus} />
+                        <button
+                            type="button"
+                            onClick={onCancel}
+                            className="px-6 py-3 text-sm font-bold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all active:scale-95"
+                        >
+                            Cerrar
+                        </button>
+                    </>
+                ) : (
+                    <>
+                        <button
+                            type="button"
+                            onClick={onCancel}
+                            className="px-6 py-3 text-sm font-bold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all active:scale-95"
+                        >
+                            Cancelar
+                        </button>
+                        <button
+                            type="submit"
+                            disabled={isSubmitting}
+                            className="px-8 py-3 text-sm font-extrabold text-white bg-[#254153] border border-transparent rounded-xl hover:bg-[#1a2f3d] shadow-lg shadow-[#254153]/20 disabled:opacity-50 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                        >
+                            {isSubmitting ? 'Guardando...' : 'Guardar Contacto'}
+                        </button>
+                    </>
+                )}
             </div>
         </form>
     );

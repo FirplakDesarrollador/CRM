@@ -8,17 +8,19 @@ import { useSyncStore } from "@/lib/stores/useSyncStore";
 import { useEffect, useState, useCallback } from "react";
 import { syncEngine } from "@/lib/sync";
 import { usePathname } from "next/navigation";
-import { LoadingOverlay } from "@/components/ui/LoadingOverlay";
+
 import { supabase } from "@/lib/supabase";
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
     const setOnline = useSyncStore((state) => state.setOnline);
     const pathname = usePathname();
     const isLoginPage = pathname === '/login';
+    const isE2EPage = process.env.NODE_ENV !== 'production' && pathname.startsWith('/e2e');
+    const isPublicPage = isLoginPage || isE2EPage;
 
     // Auth state listener - Redirect to login when signed out (critical for mobile)
     useEffect(() => {
-        if (isLoginPage) return; // Don't listen on login page
+        if (isPublicPage) return; // Don't listen on public pages
 
         // Check initial session
         const checkSession = async () => {
@@ -35,7 +37,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         checkSession();
 
         // Listen for auth state changes (SIGNED_OUT, etc.)
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
 
             if (event === 'SIGNED_OUT') {
                 // Clear any cached data
@@ -49,7 +51,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         return () => {
             subscription.unsubscribe();
         };
-    }, [isLoginPage]);
+    }, [isPublicPage]);
 
     // Global monitoring of online status
     useEffect(() => {
@@ -76,7 +78,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
     // Sync: initial + periodic (5 min) + visibility change (user returns to tab)
     useEffect(() => {
-        if (isLoginPage) return;
+        if (isPublicPage) return;
 
         // 1. Initial sync on mount
         syncEngine.triggerSync();
@@ -100,20 +102,20 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             clearInterval(intervalId);
             document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
-    }, [isLoginPage]);
+    }, [isPublicPage]);
 
     const [isCollapsed, setIsCollapsed] = useState(false);
 
     // PERF FIX: Stable callback reference prevents Sidebar (React.memo) from re-rendering
     const toggleSidebar = useCallback(() => setIsCollapsed(prev => !prev), []);
 
-    if (isLoginPage) {
+    if (isPublicPage) {
         return <>{children}</>;
     }
 
     return (
         <div className="flex h-screen bg-slate-50 overflow-hidden">
-            <LoadingOverlay />
+
             {/* Sidebar (Desktop) */}
             <Sidebar isCollapsed={isCollapsed} toggleSidebar={toggleSidebar} />
 

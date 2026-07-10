@@ -32,7 +32,7 @@ const AVAILABLE_MODULES = [
     { value: '/contactos', label: 'Contactos' },
     { value: '/actividades', label: 'Actividades' },
     { value: '/pedidos', label: 'Pedidos' },
-    { value: '/archivos', label: 'Archivos' },
+    { value: '/informes', label: 'Informes' },
     { value: '/configuracion', label: 'Configuración' },
 ];
 

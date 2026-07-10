@@ -4,6 +4,7 @@ import { ChevronLeft, MoreHorizontal, FileText, CheckCircle2, Trash2 } from "luc
 import Link from "next/link";
 import { cn } from "@/components/ui/utils";
 import { useState, useRef, useEffect } from "react";
+import { useRouter } from "next/navigation";
 
 export interface HeaderAction {
     label: string;
@@ -16,11 +17,13 @@ interface DetailHeaderProps {
     title: string;
     subtitle: string;
     status: string;
-    backHref: string;
+    backHref?: string;
+    onBack?: () => void;
     actions?: HeaderAction[];
 }
 
-export function DetailHeader({ title, subtitle, status, backHref, actions }: DetailHeaderProps) {
+export function DetailHeader({ title, subtitle, status, backHref, onBack, actions }: DetailHeaderProps) {
+    const router = useRouter();
     const [showMenu, setShowMenu] = useState(false);
     const menuRef = useRef<HTMLDivElement>(null);
 
@@ -39,9 +42,15 @@ export function DetailHeader({ title, subtitle, status, backHref, actions }: Det
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                 <div className="py-4 flex items-center justify-between">
                     <div className="flex items-center gap-4">
-                        <Link href={backHref} className="p-2 hover:bg-slate-100 rounded-full text-slate-500">
+                        <button 
+                            onClick={() => {
+                                if (onBack) onBack();
+                                else if (backHref) router.push(backHref);
+                            }}
+                            className="p-2 hover:bg-slate-100 rounded-full text-slate-500 transition-colors"
+                        >
                             <ChevronLeft className="w-5 h-5" />
-                        </Link>
+                        </button>
                         <div>
                             <h1 className="text-xl font-bold text-slate-900">{title}</h1>
                             <div className="flex items-center text-sm text-slate-500 gap-2">

@@ -11,10 +11,6 @@ const nextConfig = {
     },
     // Turbopack config (Next.js 16 default)
     turbopack: {},
-    // Forzado de Webpack para compatibilidad con PWA
-    webpack: (config) => {
-        return config;
-    },
     compiler: {
         removeConsole: process.env.NODE_ENV === "production",
     },
@@ -148,7 +144,8 @@ const withPWA = withPWAInit({
                 },
             },
             {
-                urlPattern: /.*/i,
+                // Excluir blob: URLs para que las descargas de PDF (y otros blobs) funcionen correctamente
+                urlPattern: /^(?!blob:).*/i,
                 handler: "StaleWhileRevalidate",
                 options: {
                     cacheName: "others",

@@ -17,6 +17,8 @@ export interface SalesFunnelFilters {
     subclasificacion_id: number | null;
     nivel_premium: 'ORO' | 'PLATA' | 'BRONCE' | null;
     search_query?: string | null;
+    date_from?: string | null;
+    date_to?: string | null;
 }
 
 export function useSalesFunnel(filters?: SalesFunnelFilters) {
@@ -52,7 +54,9 @@ export function useSalesFunnel(filters?: SalesFunnelFilters) {
                     p_advisor_id: filters?.advisor_id || null,
                     p_subclasificacion_id: filters?.subclasificacion_id || null,
                     p_nivel_premium: filters?.nivel_premium || null,
-                    p_search_query: filters?.search_query || null
+                    p_search_query: filters?.search_query || null,
+                    p_date_from: filters?.date_from || null,
+                    p_date_to: filters?.date_to || null
                 });
 
                 if (rpcError) throw rpcError;
@@ -82,6 +86,8 @@ export function useSalesFunnel(filters?: SalesFunnelFilters) {
         filters?.subclasificacion_id,
         filters?.nivel_premium,
         filters?.search_query,
+        filters?.date_from,
+        filters?.date_to,
         revision
     ]);
 

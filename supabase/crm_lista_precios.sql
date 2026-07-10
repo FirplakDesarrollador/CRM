@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS "CRM_ListaDePrecios" (
     pvp_sin_iva numeric(18, 2),
     lista_base_exportaciones numeric(18, 2),
     lista_base_obras numeric(18, 2),
+    planta text,
+    familia text,
     created_at timestamp with time zone DEFAULT now(),
     updated_at timestamp with time zone DEFAULT now()
 );

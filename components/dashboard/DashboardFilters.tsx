@@ -2,7 +2,7 @@
 
 import React from "react";
 import { useDashboardFilters } from "@/lib/hooks/useDashboardFilters";
-import { Filter, X, Search } from "lucide-react";
+import { Filter, X, Search, Calendar } from "lucide-react";
 import { FilterCombobox } from "@/components/dashboard/FilterCombobox";
 
 export interface DashboardFilterState {
@@ -11,6 +11,8 @@ export interface DashboardFilterState {
     subclasificacion_id: number | null;
     nivel_premium: 'ORO' | 'PLATA' | 'BRONCE' | null;
     search_query: string | null;
+    date_from: string | null;
+    date_to: string | null;
 }
 
 interface DashboardFiltersProps {
@@ -34,11 +36,13 @@ export function DashboardFilters({ filters, onFilterChange }: DashboardFiltersPr
             advisor_id: null,
             subclasificacion_id: null,
             nivel_premium: null,
-            search_query: null
+            search_query: null,
+            date_from: null,
+            date_to: null
         });
     };
 
-    const hasFilters = filters.canal_id || filters.advisor_id || filters.subclasificacion_id || filters.nivel_premium || filters.search_query;
+    const hasFilters = filters.canal_id || filters.advisor_id || filters.subclasificacion_id || filters.nivel_premium || filters.search_query || filters.date_from || filters.date_to;
 
     return (
         <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 mb-6 flex flex-wrap items-center gap-6 transition-all duration-300">
@@ -108,6 +112,32 @@ export function DashboardFilters({ filters, onFilterChange }: DashboardFiltersPr
                         onChange={(value) => handleChange("nivel_premium", value as 'ORO' | 'PLATA' | 'BRONCE' | null)}
                         placeholder="Nivel Premium ✨"
                     />
+                </div>
+
+                {/* Rango de Fechas */}
+                <div className="flex items-center gap-2 bg-slate-50 border border-slate-100 rounded-xl px-3 py-1.5 shrink-0">
+                    <Calendar className="w-4 h-4 text-slate-400" />
+                    <div className="flex items-center gap-2">
+                        <div className="flex flex-col">
+                            <span className="text-[9px] font-black pointer-events-none text-slate-400 uppercase leading-none mb-1">Desde</span>
+                            <input
+                                type="date"
+                                className="bg-transparent border-none text-[11px] font-bold text-slate-600 focus:outline-none p-0 h-auto cursor-pointer"
+                                value={filters.date_from || ""}
+                                onChange={(e) => handleChange("date_from", e.target.value)}
+                            />
+                        </div>
+                        <div className="w-px h-6 bg-slate-200 mx-1" />
+                        <div className="flex flex-col">
+                            <span className="text-[9px] font-black pointer-events-none text-slate-400 uppercase leading-none mb-1">Hasta</span>
+                            <input
+                                type="date"
+                                className="bg-transparent border-none text-[11px] font-bold text-slate-600 focus:outline-none p-0 h-auto cursor-pointer"
+                                value={filters.date_to || ""}
+                                onChange={(e) => handleChange("date_to", e.target.value)}
+                            />
+                        </div>
+                    </div>
                 </div>
 
                 {hasFilters && (

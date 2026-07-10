@@ -8,15 +8,20 @@ import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronRight, Check } from "lucide-react";
+import { cn } from "@/components/ui/utils";
 import { AccountForm } from "@/components/cuentas/AccountForm";
 import { useProductSearch, PriceListProduct } from "@/lib/hooks/useProducts";
 import { Trash2, PlusCircle, Search, Loader2 } from "lucide-react";
 import { db } from "@/lib/db";
 import { useLiveQuery } from "dexie-react-hooks";
-import { cn } from "@/components/ui/utils";
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { useConfig } from "@/lib/hooks/useConfig";
 import { CollaboratorSelector, CollaboratorEntry } from "@/components/oportunidades/CollaboratorSelector";
+import { useUsers } from "@/lib/hooks/useUsers";
+import { useFormDraft } from "@/lib/hooks/useFormDraft";
 
 const STEP_LABELS = ["Cuenta", "Datos del Negocio", "Productos", "Equipo"];
+const LAST_STEP_INDEX = STEP_LABELS.length - 1;
 
 const schema = z.object({
     account_id: z.string().min(1, "Debe seleccionar una cuenta"),
@@ -33,24 +38,34 @@ const schema = z.object({
     origen_oportunidad: z.string().optional().nullable(),
     url_origen: z.string().optional().nullable(),
     fuente_conversion: z.string().optional().nullable(),
+    categoria_oportunidad: z.string().optional().nullable(),
     probability: z.coerce.number().min(0).max(100).default(0).optional().nullable(),
+    comentarios: z.string().optional().nullable(),
+    direccion_entrega: z.string().optional().nullable(),
     items: z.array(z.object({
         product_id: z.string(),
         cantidad: z.number().min(1),
         precio: z.number(),
-        nombre: z.string()
-    })).default([])
+        nombre: z.string(),
+        descuento_porcentaje: z.union([z.number(), z.string()]).optional().nullable()
+    })).default([]),
+    owner_user_id: z.string().optional()
 });
 
 export default function CreateOpportunityWizard() {
     const router = useRouter();
     const { createOpportunity } = useOpportunities();
-    const { accounts } = useAccounts();
+    const { user } = useCurrentUser();
+    const { config } = useConfig();
+    const { accounts } = useAccounts({ showAll: true });
+    const { users } = useUsers();
 
     const [step, setStep] = useState(0);
     const [showAccountModal, setShowAccountModal] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
     const [accountSearchTerm, setAccountSearchTerm] = useState("");
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [canSubmitFinalStep, setCanSubmitFinalStep] = useState(false);
     const [showAccountDropdown, setShowAccountDropdown] = useState(false);
     const [selectedAccount, setSelectedAccount] = useState<any>(null);
     const [segments, setSegments] = useState<any[]>([]);
@@ -146,14 +161,7 @@ export default function CreateOpportunityWizard() {
         ensurePhasesLoaded();
     }, []);
 
-    const {
-        register,
-        handleSubmit,
-        formState: { errors },
-        setValue,
-        watch,
-        trigger
-    } = useForm({
+    const form = useForm({
         resolver: zodResolver(schema),
         defaultValues: {
             account_id: '',
@@ -170,11 +178,43 @@ export default function CreateOpportunityWizard() {
             url_origen: '',
             fuente_conversion: '',
             probability: 0,
-            items: []
-        }
+            comentarios: '',
+            direccion_entrega: '',
+            items: [],
+            owner_user_id: ''
+        },
+        shouldUnregister: false
     });
 
+    const {
+        register,
+        handleSubmit,
+        formState: { errors },
+        setValue,
+        watch,
+        trigger,
+        reset
+    } = form;
+
+    const { hasDraft, clearDraft } = useFormDraft(form, 'crm_draft_opportunity', true);
+
     const searchParams = useSearchParams();
+
+    // Restaurar el account seleccionado en la UI si el borrador lo cargó
+    useEffect(() => {
+        const accountIdParam = searchParams.get('account_id');
+        if (hasDraft && !accountIdParam) {
+            const accId = form.getValues('account_id');
+            if (accId) {
+                db.accounts.get(accId).then(acc => {
+                    if (acc) {
+                        setSelectedAccount(acc);
+                        setAccountSearchTerm(acc.nombre);
+                    }
+                });
+            }
+        }
+    }, [hasDraft, searchParams, form]);
 
     // Auto-select account from URL param and jump to step 1
     useEffect(() => {
@@ -212,6 +252,26 @@ export default function CreateOpportunityWizard() {
                 setValue("account_id", acc.id);
                 setSelectedAccount(acc);
                 setAccountSearchTerm(acc.nombre);
+                
+                // Lógica de comisión automática (Igual que en handleSelectAccount)
+                if (user && acc.owner_user_id && acc.owner_user_id !== user.id) {
+                    const creatorPct = Number(config?.commission_creator_default_pct || 5);
+                    setValue("owner_user_id", acc.owner_user_id);
+                    setCollaborators([
+                        {
+                            usuario_id: user.id,
+                            porcentaje: creatorPct,
+                            rol: 'CREADOR',
+                            full_name: user.full_name || user.email,
+                            isLocked: true // Fixed 5% for creator on someone else's account
+                        }
+                    ]);
+                    console.log(`[Wizard-JIT] Cuenta de tercero detectada: ${acc.id}. Asignando propietario ${acc.owner_user_id}`);
+                } else {
+                    setValue("owner_user_id", user?.id || '');
+                    setCollaborators([]);
+                }
+
                 // Inherit location from account
                 if (acc.pais_id) {
                     setValue("pais_id", Number(acc.pais_id));
@@ -221,6 +281,9 @@ export default function CreateOpportunityWizard() {
                 }
                 if (acc.ciudad_id) {
                     setValue("ciudad_id", Number(acc.ciudad_id));
+                }
+                if (acc.direccion) {
+                    setValue("direccion_entrega", acc.direccion);
                 }
                 setStep(1); // Advance to "Datos del Negocio"
             }
@@ -245,6 +308,25 @@ export default function CreateOpportunityWizard() {
         setAccountSearchTerm(acc.nombre);
         setShowAccountDropdown(false);
 
+        // Lógica de comisión automática si el creador no es el dueño de la cuenta
+        if (user && acc.owner_user_id && acc.owner_user_id !== user.id) {
+            const creatorPct = Number(config?.commission_creator_default_pct || 5);
+            setValue("owner_user_id", acc.owner_user_id);
+            setCollaborators([
+                {
+                    usuario_id: user.id,
+                    porcentaje: creatorPct,
+                    rol: 'CREADOR',
+                    full_name: user.full_name || user.email,
+                    isLocked: true // Fixed 5% for creator on someone else's account
+                }
+            ]);
+            console.log(`[Wizard] Cuenta de tercero detectada. Dueño: ${acc.owner_user_id}. Asignando ${creatorPct}% al creador.`);
+        } else {
+            setValue("owner_user_id", user?.id);
+            setCollaborators([]);
+        }
+
         // Inherit location from account
         if (acc.pais_id) {
             setValue("pais_id", Number(acc.pais_id));
@@ -254,6 +336,9 @@ export default function CreateOpportunityWizard() {
         }
         if (acc.ciudad_id) {
             setValue("ciudad_id", Number(acc.ciudad_id));
+        }
+        if (acc.direccion) {
+            setValue("direccion_entrega", acc.direccion);
         }
     };
 
@@ -317,30 +402,45 @@ export default function CreateOpportunityWizard() {
     const items: any[] = watch("items") || [];
     const amount = watch("amount") || 0;
     const currencyId = watch("currency_id");
+    const ownerUserId = watch("owner_user_id"); // Propietario efectivo de la oportunidad
+
+    useEffect(() => {
+        if (step !== LAST_STEP_INDEX) {
+            setCanSubmitFinalStep(false);
+            return;
+        }
+
+        setCanSubmitFinalStep(false);
+        const timer = window.setTimeout(() => {
+            setCanSubmitFinalStep(true);
+        }, 500);
+
+        return () => window.clearTimeout(timer);
+    }, [step]);
 
     const addProduct = (product: PriceListProduct) => {
         const channel = selectedAccount?.canal_id || 'DIST_NAC';
         let price = 0;
 
-        // Strict Price Selection
+        // Strict Price Selection with Number casting
         switch (channel) {
             case 'OBRAS_NAC':
-                price = product.lista_base_obras || 0;
+                price = Number(product.lista_base_obras) || 0;
                 break;
             case 'OBRAS_INT':
             case 'DIST_INT':
-                price = product.lista_base_exportaciones || 0;
+                price = Number(product.lista_base_exportaciones) || 0;
                 break;
             case 'PROPIO':
-                price = product.distribuidor_pvp_iva || 0;
+                price = Number(product.distribuidor_pvp_iva) || 0;
                 break;
             case 'DIST_NAC':
             default:
-                price = product.lista_base_cop || 0;
+                price = Number(product.lista_base_cop) || 0;
         }
 
-        // Fallback if 0
-        if (price === 0) price = product.lista_base_cop || 0;
+        // Fallback robusto if 0
+        if (price === 0) price = Number(product.lista_base_cop) || Number(product.pvp_sin_iva) || 0;
 
         const existing = items.find((i: any) => i.product_id === product.id);
         if (existing) {
@@ -351,7 +451,8 @@ export default function CreateOpportunityWizard() {
                 product_id: product.id,
                 nombre: product.descripcion,
                 cantidad: 1,
-                precio: price
+                precio: price,
+                descuento_porcentaje: 0
             }]);
         }
         setSearchTerm("");
@@ -362,19 +463,34 @@ export default function CreateOpportunityWizard() {
         setValue("items", items.map((i: any) => i.product_id === productId ? { ...i, cantidad: validQty } : i));
     };
 
+    const updateDiscount = (productId: string, discountStr: string) => {
+        const val = parseFloat(discountStr);
+        const validDiscount = isNaN(val) ? "" : Math.max(0, Math.min(100, val));
+        setValue("items", items.map((i: any) => i.product_id === productId ? { ...i, descuento_porcentaje: validDiscount } : i));
+    };
+
     const removeProduct = (productId: string) => {
         setValue("items", items.filter((i: any) => i.product_id !== productId));
     };
 
     // Calculate total from items
     useEffect(() => {
-        if (items.length > 0) {
-            const total = items.reduce((acc: number, curr: any) => acc + ((curr.precio || 0) * (curr.cantidad || 1)), 0);
-            setValue("amount", total);
-        }
+        const total = (items || []).reduce((acc: number, curr: any) => {
+            const basePrice = Number(curr.precio) || 0;
+            const qty = Number(curr.cantidad) || 0;
+            const discountPercent = Number(curr.descuento_porcentaje) || 0;
+            const discountedPrice = basePrice * (1 - (discountPercent / 100));
+            return acc + (discountedPrice * qty);
+        }, 0);
+        setValue("amount", total);
     }, [items, setValue]);
 
     const onSubmit = async (data: any) => {
+        if (step !== LAST_STEP_INDEX || !canSubmitFinalStep) {
+            return;
+        }
+
+        setIsSubmitting(true);
         try {
             // Defensive conversion for numeric IDs
             const sanitizedData = {
@@ -395,9 +511,11 @@ export default function CreateOpportunityWizard() {
 
             console.log('[Wizard] Submitting sanitized opportunity data:', sanitizedData);
             await createOpportunity(sanitizedData);
+            clearDraft();
             router.push("/oportunidades");
         } catch (err) {
             console.error(err);
+            setIsSubmitting(false);
         }
     };
 
@@ -416,13 +534,33 @@ export default function CreateOpportunityWizard() {
         }
 
         if (isValid) {
-            setStep(s => Math.min(s + 1, 3));
+            setStep(s => Math.min(s + 1, LAST_STEP_INDEX));
         }
     };
 
     return (
         <div className="max-w-3xl mx-auto space-y-6">
             <h1 className="text-2xl font-bold text-slate-800">Nueva Oportunidad</h1>
+
+            {hasDraft && (
+                <div className="bg-blue-50 border border-blue-200 text-blue-800 px-4 py-3 rounded-lg flex items-center justify-between shadow-sm">
+                    <span className="text-sm font-medium">Hemos recuperado tu borrador de una sesión anterior.</span>
+                    <button 
+                        onClick={() => {
+                            if (window.confirm("¿Seguro que quieres borrar este borrador y empezar de cero?")) {
+                                clearDraft();
+                                reset();
+                                setStep(0);
+                                setSelectedAccount(null);
+                                setAccountSearchTerm("");
+                            }
+                        }}
+                        className="text-sm bg-white border border-blue-200 px-3 py-1 rounded hover:bg-blue-100 transition-colors font-semibold"
+                    >
+                        Empezar de cero
+                    </button>
+                </div>
+            )}
 
             {/* Steps Indicator */}
             <div className="flex items-center space-x-4 mb-8 overflow-x-auto pb-2">
@@ -433,12 +571,23 @@ export default function CreateOpportunityWizard() {
                             {idx + 1}
                         </div>
                         <span className={`ml-2 text-sm ${idx === step ? 'font-bold text-slate-900' : 'text-slate-500'}`}>{label}</span>
-                        {idx < 3 && <div className="ml-4 w-8 h-0.5 bg-slate-200" />}
+                        {idx < LAST_STEP_INDEX && <div className="ml-4 w-8 h-0.5 bg-slate-200" />}
                     </div>
                 ))}
             </div>
 
-            <form onSubmit={handleSubmit(onSubmit)} className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+            <form
+                onSubmit={handleSubmit(onSubmit)}
+                onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                        const target = e.target as HTMLElement;
+                        if (target.tagName !== 'TEXTAREA') {
+                            e.preventDefault();
+                        }
+                    }
+                }}
+                className="bg-white p-6 rounded-xl shadow-sm border border-slate-200"
+            >
 
                 {/* STEP 1: ACCOUNT */}
                 {step === 0 && (
@@ -648,6 +797,18 @@ export default function CreateOpportunityWizard() {
                             </div>
                         </div>
 
+                        <div>
+                            <label className="text-sm font-medium">Dirección de entrega</label>
+                            <input 
+                                {...register("direccion_entrega")} 
+                                className="w-full p-2 border rounded-lg" 
+                                placeholder="Ej. Calle 10 # 20 - 30, Bodega 4" 
+                            />
+                            <p className="text-[10px] text-slate-500 italic mt-0.5">
+                                Este dato es obligatorio para el despacho de pedidos.
+                            </p>
+                        </div>
+
                         <div className="grid grid-cols-2 gap-4">
                             <div>
                                 <label className="text-sm font-medium">Valor Estimado</label>
@@ -659,41 +820,15 @@ export default function CreateOpportunityWizard() {
                                 <input type="date" {...register("fecha_cierre_estimada")} className="w-full p-2 border rounded-lg" />
                             </div>
                         </div>
-
-                        {/* Fifth Row - Orígenes */}
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-4 border-t border-slate-100">
-                            <div className="space-y-2">
-                                <label htmlFor="origen_oportunidad" className="text-sm font-medium">Origen de la Oportunidad</label>
-                                <input
-                                    id="origen_oportunidad"
-                                    placeholder="Ej: Llamada, Evento..."
-                                    {...register("origen_oportunidad")}
-                                    className="w-full p-2 border rounded-lg hover:border-blue-300 focus:border-blue-500 transition-colors"
-                                />
-                                {errors.origen_oportunidad && <p className="text-sm text-red-500 mt-1">{errors.origen_oportunidad.message as string}</p>}
-                            </div>
-
-                            <div className="space-y-2">
-                                <label htmlFor="url_origen" className="text-sm font-medium">URL Origen</label>
-                                <input
-                                    id="url_origen"
-                                    placeholder="https://..."
-                                    {...register("url_origen")}
-                                    className="w-full p-2 border rounded-lg hover:border-blue-300 focus:border-blue-500 transition-colors"
-                                />
-                                {errors.url_origen && <p className="text-sm text-red-500 mt-1">{errors.url_origen.message as string}</p>}
-                            </div>
-
-                            <div className="space-y-2">
-                                <label htmlFor="fuente_conversion" className="text-sm font-medium">Fuente de Conversión</label>
-                                <input
-                                    id="fuente_conversion"
-                                    placeholder="Ej: Google Ads, Referido..."
-                                    {...register("fuente_conversion")}
-                                    className="w-full p-2 border rounded-lg hover:border-blue-300 focus:border-blue-500 transition-colors"
-                                />
-                                {errors.fuente_conversion && <p className="text-sm text-red-500 mt-1">{errors.fuente_conversion.message as string}</p>}
-                            </div>
+                        
+                        <div>
+                            <label className="text-sm font-medium">Comentarios / Observaciones</label>
+                            <textarea 
+                                {...register("comentarios")} 
+                                className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-none" 
+                                rows={3} 
+                                placeholder="Notas adicionales sobre esta oportunidad..."
+                            />
                         </div>
                     </div>
                 )}
@@ -732,13 +867,13 @@ export default function CreateOpportunityWizard() {
                                             const channel = selectedAccount?.canal_id || 'DIST_NAC';
                                             let displayPrice = 0;
                                             switch (channel) {
-                                                case 'OBRAS_NAC': displayPrice = product.lista_base_obras || 0; break;
+                                                case 'OBRAS_NAC': displayPrice = Number(product.lista_base_obras) || 0; break;
                                                 case 'OBRAS_INT':
-                                                case 'DIST_INT': displayPrice = product.lista_base_exportaciones || 0; break;
-                                                case 'PROPIO': displayPrice = product.distribuidor_pvp_iva || 0; break;
-                                                default: displayPrice = product.lista_base_cop || 0;
+                                                case 'DIST_INT': displayPrice = Number(product.lista_base_exportaciones) || 0; break;
+                                                case 'PROPIO': displayPrice = Number(product.distribuidor_pvp_iva) || 0; break;
+                                                default: displayPrice = Number(product.lista_base_cop) || 0;
                                             }
-                                            if (displayPrice === 0) displayPrice = product.lista_base_cop || 0;
+                                            if (Number(displayPrice) === 0) displayPrice = Number(product.lista_base_cop) || Number(product.pvp_sin_iva) || 0;
 
                                             return (
                                                 <button
@@ -774,22 +909,43 @@ export default function CreateOpportunityWizard() {
                                     <div key={item.product_id} className="flex items-center gap-4 p-3 bg-white border border-slate-200 rounded-xl shadow-sm">
                                         <div className="flex-1">
                                             <div className="font-medium text-sm text-slate-800">{item.nombre}</div>
-                                            <div className="text-xs text-slate-500">{currencyId} {new Intl.NumberFormat().format(item.precio || 0)} c/u</div>
+                                            <div className="text-xs text-slate-500">{currencyId} {new Intl.NumberFormat().format(item.precio || 0)} c/u base</div>
+                                            {(Number(item.descuento_porcentaje) || 0) > 0 && (
+                                                <div className="text-xs text-emerald-600 font-medium mt-0.5">
+                                                    Precio con desc: {currencyId} {new Intl.NumberFormat().format((item.precio || 0) * (1 - (Number(item.descuento_porcentaje) || 0) / 100))} c/u
+                                                </div>
+                                            )}
                                         </div>
-                                        <div className="flex items-center gap-2">
-                                            <input
-                                                type="number"
-                                                className="w-16 p-1 border rounded text-center text-sm"
-                                                value={isNaN(item.cantidad) ? "" : item.cantidad}
-                                                onChange={(e) => updateQuantity(item.product_id, parseInt(e.target.value))}
-                                            />
-                                            <button
-                                                type="button"
-                                                onClick={() => removeProduct(item.product_id)}
-                                                className="p-1 text-red-500 hover:bg-red-50 rounded"
-                                            >
-                                                <Trash2 className="w-4 h-4" />
-                                            </button>
+                                        <div className="flex items-center gap-2 mt-2 sm:mt-0">
+                                            <div className="flex flex-col items-center">
+                                                <span className="text-[10px] text-slate-500 uppercase font-semibold mb-1">Cant.</span>
+                                                <input
+                                                    type="number"
+                                                    className="w-16 p-1 border rounded text-center text-sm"
+                                                    value={isNaN(item.cantidad) ? "" : item.cantidad}
+                                                    onChange={(e) => updateQuantity(item.product_id, parseInt(e.target.value))}
+                                                />
+                                            </div>
+                                            <div className="flex flex-col items-center">
+                                                <span className="text-[10px] text-slate-500 uppercase font-semibold mb-1">Desc %</span>
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    max="100"
+                                                    className="w-16 p-1 border rounded text-center text-sm"
+                                                    value={item.descuento_porcentaje === "" ? "" : (item.descuento_porcentaje ?? 0)}
+                                                    onChange={(e) => updateDiscount(item.product_id, e.target.value)}
+                                                />
+                                            </div>
+                                            <div className="flex flex-col items-center justify-end h-full mt-4">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => removeProduct(item.product_id)}
+                                                    className="p-1.5 text-red-500 hover:bg-red-50 rounded"
+                                                >
+                                                    <Trash2 className="w-5 h-5" />
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                 ))
@@ -803,12 +959,25 @@ export default function CreateOpportunityWizard() {
                 {/* STEP 4: TEAM */}
                 {step === 3 && (
                     <div className="space-y-4">
-                        <h2 className="text-lg font-semibold">Asignación</h2>
-                        <p className="text-sm text-slate-500">Tú serás el propietario (Owner) por defecto.</p>
-                        <CollaboratorSelector
-                            value={collaborators}
-                            onChange={setCollaborators}
-                        />
+                <h2 className="text-lg font-semibold">Asignación</h2>
+                <p className="text-sm text-slate-600 bg-slate-50 p-4 rounded-lg border border-slate-200">
+                    {ownerUserId === user?.id 
+                        ? "Tú eres el propietario de esta cuenta." 
+                        : (
+                            <span>
+                                El propietario de la cuenta es el asesor <strong>{users.find(u => u.id === ownerUserId)?.full_name || 'otro asesor'}</strong>. 
+                                <br />
+                                <span className="text-xs text-slate-500 mt-1 block">
+                                    Al no ser tu cuenta propia, se te asignará automáticamente una comisión del 5% como creador.
+                                </span>
+                            </span>
+                        )}
+                </p>
+                <CollaboratorSelector
+                    value={collaborators}
+                    onChange={setCollaborators}
+                    ownerId={ownerUserId}
+                />
                     </div>
                 )}
 
@@ -823,7 +992,7 @@ export default function CreateOpportunityWizard() {
                         Atrás
                     </button>
 
-                    {step < 3 ? (
+                    {step < LAST_STEP_INDEX ? (
                         <button
                             type="button"
                             onClick={nextStep}
@@ -834,9 +1003,17 @@ export default function CreateOpportunityWizard() {
                     ) : (
                         <button
                             type="submit"
-                            className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg text-sm font-medium flex items-center gap-2 shadow-lg shadow-green-200"
+                            disabled={isSubmitting || !canSubmitFinalStep}
+                            className={cn(
+                                "bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-2 shadow-lg shadow-green-200 transition-all",
+                                (isSubmitting || !canSubmitFinalStep) && "bg-slate-400 opacity-70 cursor-not-allowed"
+                            )}
                         >
-                            Crear Oportunidad <Check className="w-4 h-4" />
+                            {isSubmitting ? (
+                                <><Loader2 className="w-4 h-4 animate-spin" /> Procesando...</>
+                            ) : (
+                                <>{'Crear Oportunidad'} <Check className="w-4 h-4" /></>
+                            )}
                         </button>
                     )}
                 </div>

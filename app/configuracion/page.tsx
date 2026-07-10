@@ -16,7 +16,13 @@ import {
     LogOut,
     Target,
     DollarSign,
-    Bell
+    Bell,
+    History,
+    FileText,
+    Briefcase,
+    User2,
+    FileCheck,
+    Calendar
 } from 'lucide-react';
 import { useState, useEffect, Dispatch, SetStateAction, Suspense } from 'react';
 import dynamic from 'next/dynamic';
@@ -25,6 +31,7 @@ import { cn } from '@/components/ui/utils';
 import { supabase } from '@/lib/supabase';
 import { useConfig } from '@/lib/hooks/useConfig';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
+import { useAuditLogStore } from '@/lib/stores/useAuditLogStore';
 const PriceListUploader = dynamic(() => import('@/components/config/PriceListUploader').then(mod => mod.PriceListUploader), {
     loading: () => <div className="animate-pulse bg-slate-100 h-20 rounded-2xl" />,
     ssr: false
@@ -77,6 +84,7 @@ function ConfigPageContent() {
     const router = useRouter();
     const { isSyncing, pendingCount, lastSyncTime, error, isPaused, setPaused } = useSyncStore();
     const { user, role, realRole, viewMode, setViewMode } = useCurrentUser();
+    const { logs, clearLogs } = useAuditLogStore();
     const searchParams = useSearchParams();
     const [outboxItems, setOutboxItems] = useState<OutboxItem[]>([]);
     const [msConnected, setMsConnected] = useState<boolean | null>(null);
@@ -375,9 +383,104 @@ function ConfigPageContent() {
                         )}
 
                         {!error && !isSyncing && pendingCount === 0 && (
-                            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex items-center gap-3">
-                                <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-                                <p className="text-sm font-bold text-emerald-900">Todo el contenido está sincronizado con la nube.</p>
+                            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 flex items-center justify-between gap-3">
+                                <div className="flex items-center gap-3">
+                                    <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                                    <p className="text-sm font-bold text-emerald-900">Todo el contenido está sincronizado con la nube.</p>
+                                </div>
+                                {outboxItems.some(i => i.status === 'COMPLETED') && (
+                                    <button 
+                                        onClick={async () => {
+                                            await db.outbox.where('status').equals('COMPLETED').delete();
+                                        }}
+                                        className="text-[10px] font-bold text-emerald-700 hover:text-emerald-800 bg-emerald-100 hover:bg-emerald-200 px-2 py-1 rounded transition-colors whitespace-nowrap"
+                                    >
+                                        Limpiar historial
+                                    </button>
+                                )}
+                            </div>
+                        )}
+
+                        {outboxItems.filter(i => i.field_name !== '_sync_metadata').length > 0 && (
+                            <div className={cn(
+                                "rounded-2xl p-4 flex items-start gap-3",
+                                pendingCount > 0 
+                                    ? "bg-blue-50 border border-blue-200" 
+                                    : "bg-slate-50 border border-slate-200"
+                            )}>
+                                <RefreshCw className={cn(
+                                    "w-5 h-5 shrink-0 mt-0.5", 
+                                    isSyncing ? "animate-spin text-blue-600" : "text-slate-400"
+                                )} />
+                                <div className="space-y-1 w-full">
+                                    <p className={cn(
+                                        "text-sm font-bold",
+                                        pendingCount > 0 ? "text-blue-900" : "text-slate-700"
+                                    )}>
+                                        {pendingCount > 0 
+                                            ? `Hay ${pendingCount} ${pendingCount === 1 ? 'cambio pendiente' : 'cambios pendientes'} de sincronización`
+                                            : "Historial reciente de sincronización"
+                                        }
+                                    </p>
+                                    <p className="text-xs text-slate-500 leading-relaxed">
+                                        {isSyncing ? 'Sincronizando con la nube...' : isPaused ? 'La sincronización está pausada.' : pendingCount > 0 ? 'Esperando a ser procesado en segundo plano.' : 'Todos los cambios han sido procesados.'}
+                                    </p>
+                                    
+                                    <div className="mt-3 bg-white/60 rounded-xl p-3 border border-slate-100">
+                                        <p className="text-xs font-bold text-slate-500 mb-2 uppercase tracking-tight">Últimos movimientos:</p>
+                                        <ul className="space-y-1">
+                                            {outboxItems
+                                                .filter(i => i.field_name !== '_sync_metadata')
+                                                .sort((a, b) => b.field_timestamp - a.field_timestamp)
+                                                .slice(0, 10)
+                                                .map(item => {
+                                                    const entityNames: Record<string, string> = {
+                                                        'CRM_Cuentas': 'Cuenta',
+                                                        'CRM_Oportunidades': 'Oportunidad',
+                                                        'CRM_Contactos': 'Contacto',
+                                                        'CRM_Actividades': 'Actividad',
+                                                        'CRM_Pedidos': 'Pedido',
+                                                        'CRM_PedidoItems': 'Item Pedido',
+                                                        'CRM_Cotizaciones': 'Cotización',
+                                                        'CRM_Oportunidades_Colaboradores': 'Colaborador'
+                                                    };
+                                                    
+                                                    const displayValue = typeof item.new_value === 'object' 
+                                                        ? 'Actualizado' 
+                                                        : (item.new_value?.toString() || 'Vacío');
+
+                                                    return (
+                                                        <li key={item.id} className="text-[10px] text-slate-600 flex justify-between items-center bg-white/50 px-2 py-1.5 rounded border border-slate-50">
+                                                            <div className="flex flex-col gap-0.5">
+                                                                <span className="flex items-center gap-1.5">
+                                                                    <span className="font-bold text-slate-700">{entityNames[item.entity_type] || item.entity_type}</span> 
+                                                                    <span className="opacity-40 text-[8px]">•</span> 
+                                                                    <span className="font-medium text-slate-500">{item.field_name}</span>
+                                                                </span>
+                                                                <span className="text-[9px] text-slate-400 italic truncate max-w-[180px]">
+                                                                    Valor: {displayValue}
+                                                                </span>
+                                                            </div>
+                                                            <span className={cn(
+                                                                "uppercase font-bold text-[8px] px-1.5 py-0.5 rounded-full",
+                                                                item.status === 'FAILED' ? "bg-red-100 text-red-600" :
+                                                                item.status === 'SYNCING' ? "bg-blue-200 text-blue-800" :
+                                                                item.status === 'COMPLETED' ? "bg-emerald-100 text-emerald-700" :
+                                                                "bg-amber-100 text-amber-600"
+                                                            )}>
+                                                                {item.status === 'COMPLETED' ? 'INGRESADO' : item.status}
+                                                            </span>
+                                                        </li>
+                                                    );
+                                                })}
+                                            {outboxItems.filter(i => i.field_name !== '_sync_metadata').length > 10 && (
+                                                <li className="text-[10px] text-slate-400 italic px-2 pt-1">
+                                                    + {outboxItems.filter(i => i.field_name !== '_sync_metadata').length - 10} elementos más en la tabla inferior...
+                                                </li>
+                                            )}
+                                        </ul>
+                                    </div>
+                                </div>
                             </div>
                         )}
                     </div>
@@ -447,10 +550,12 @@ function ConfigPageContent() {
                 {/* Session Card */}
                 <div className="md:col-span-2 bg-white rounded-3xl border border-slate-200 shadow-sm p-6">
                     <div className="flex items-center gap-2 mb-4">
-                        <LogOut className="w-5 h-5 text-slate-600" />
-                        <h3 className="font-bold text-slate-900">Sesión</h3>
+                        <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center text-slate-600">
+                            <Settings className="w-5 h-5" />
+                        </div>
+                        <h3 className="font-bold text-slate-900">Perfil de Usuario</h3>
                     </div>
-                    <p className="text-sm text-slate-500 mb-6">Administra tu acceso a la aplicación.</p>
+                    <p className="text-sm text-slate-500 mb-6">Administra tu perfil y preferencias de vista.</p>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         {/* User Info */}
@@ -513,16 +618,10 @@ function ConfigPageContent() {
                             </div>
                         </div>
 
-                        {/* Logout Button */}
-                        <div className="flex flex-col justify-center">
-                            <button
-                                onClick={confirmLogout}
-                                className="w-full flex items-center justify-center gap-2 px-4 py-4 bg-red-50 text-red-700 hover:bg-red-100 rounded-xl text-sm font-bold transition-colors border border-red-200"
-                            >
-                                <LogOut className="w-4 h-4" />
-                                Cerrar Sesión
-                            </button>
-                            <p className="text-xs text-slate-400 text-center mt-3">Asegúrate de sincronizar antes de salir.</p>
+                        <div className="flex flex-col justify-center gap-2">
+                             <p className="text-xs text-slate-500 font-medium bg-slate-50 p-4 rounded-xl border border-slate-100 italic">
+                                Puedes cambiar entre modo Administrador y Vendedor para previsualizar cómo ven la plataforma tus colaboradores.
+                             </p>
                         </div>
                     </div>
                 </div>
@@ -575,7 +674,7 @@ function ConfigPageContent() {
             </div>
 
             {/* Outbox Debug Table */}
-            {outboxItems.length > 0 && (
+            {outboxItems.filter(i => i.field_name !== '_sync_metadata').length > 0 && (
                 <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
                     <div className="p-6 border-b border-slate-100 flex items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
@@ -617,7 +716,9 @@ function ConfigPageContent() {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-50">
-                                {outboxItems.map((item) => (
+                                {outboxItems
+                                    .filter(i => i.field_name !== '_sync_metadata')
+                                    .map((item) => (
                                     <tr key={item.id} className="hover:bg-slate-50/50 transition-colors">
                                         <td className="px-6 py-4">
                                             <span className="font-bold text-slate-900">{item.entity_type}</span>
@@ -634,9 +735,10 @@ function ConfigPageContent() {
                                                 "px-2 py-1 rounded-full text-[10px] font-bold uppercase",
                                                 item.status === 'PENDING' ? "bg-amber-100 text-amber-700" :
                                                     item.status === 'SYNCING' ? "bg-blue-100 text-blue-700" :
-                                                        "bg-red-100 text-red-700"
+                                                        item.status === 'COMPLETED' ? "bg-emerald-100 text-emerald-700" :
+                                                            "bg-red-100 text-red-700"
                                             )}>
-                                                {item.status}
+                                                {item.status === 'COMPLETED' ? 'INGRESADO' : item.status}
                                             </span>
                                         </td>
                                         <td className="px-6 py-4 max-w-[200px]">
@@ -713,6 +815,123 @@ function ConfigPageContent() {
                     </button>
                 </div>
             )}
+
+            {/* Registro de Auditoría Local (Últimos Movimientos) */}
+            <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+                    <div className="flex items-center gap-4">
+                        <div className="bg-slate-100 p-3 rounded-2xl text-slate-600">
+                            <History className="w-6 h-6 animate-pulse" style={{ animationDuration: '3s' }} />
+                        </div>
+                        <div>
+                            <h3 className="font-bold text-slate-900 text-lg">Historial de Modificaciones</h3>
+                            <p className="text-sm text-slate-500">Últimos movimientos realizados localmente en este dispositivo</p>
+                        </div>
+                    </div>
+                    {logs.length > 0 && (
+                        <button
+                            onClick={clearLogs}
+                            className="text-xs font-bold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-3 py-2 rounded-xl transition-all flex items-center gap-1.5 self-start sm:self-center border border-red-100/50"
+                        >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            Limpiar Historial
+                        </button>
+                    )}
+                </div>
+
+                {logs.length === 0 ? (
+                    <div className="text-center py-10 space-y-3 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+                        <History className="w-10 h-10 text-slate-300 mx-auto" />
+                        <div className="text-sm text-slate-500 font-medium">No se han registrado modificaciones locales aún</div>
+                        <p className="text-xs text-slate-400 max-w-xs mx-auto">Los cambios que realices en cuentas, oportunidades, contactos u otros módulos aparecerán aquí.</p>
+                    </div>
+                ) : (
+                    <div className="overflow-hidden border border-slate-100 rounded-2xl">
+                        <div className="max-h-[350px] overflow-y-auto divide-y divide-slate-100">
+                            {logs.map((log) => {
+                                // Resolver icono y color por tipo de entidad
+                                let Icon = FileText;
+                                let iconColor = 'bg-slate-100 text-slate-600';
+                                if (log.entity_type === 'CRM_Cuentas') {
+                                    Icon = User2;
+                                    iconColor = 'bg-emerald-50 text-emerald-600 border border-emerald-100';
+                                } else if (log.entity_type === 'CRM_Oportunidades') {
+                                    Icon = Briefcase;
+                                    iconColor = 'bg-blue-50 text-blue-600 border border-blue-100';
+                                } else if (log.entity_type === 'CRM_Contactos') {
+                                    Icon = User2;
+                                    iconColor = 'bg-amber-50 text-amber-600 border border-amber-100';
+                                } else if (log.entity_type === 'CRM_Cotizaciones') {
+                                    Icon = FileCheck;
+                                    iconColor = 'bg-violet-50 text-violet-600 border border-violet-100';
+                                } else if (log.entity_type === 'CRM_Pedidos') {
+                                    Icon = FileText;
+                                    iconColor = 'bg-indigo-50 text-indigo-600 border border-indigo-100';
+                                } else if (log.entity_type === 'CRM_Actividades') {
+                                    Icon = Calendar;
+                                    iconColor = 'bg-rose-50 text-rose-600 border border-rose-100';
+                                }
+
+                                const entityLabel = log.entity_type.replace('CRM_', '');
+
+                                return (
+                                    <div key={log.id} className="p-4 hover:bg-slate-50/50 transition-colors flex items-start gap-4">
+                                        <div className={cn("p-2.5 rounded-xl shrink-0", iconColor)}>
+                                            <Icon className="w-5 h-5" />
+                                        </div>
+                                        <div className="flex-1 min-w-0 space-y-1">
+                                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="font-bold text-slate-800 text-sm truncate max-w-[200px] sm:max-w-xs" title={log.entity_name}>
+                                                        {log.entity_name}
+                                                    </span>
+                                                    <span className="text-[10px] bg-slate-100 text-slate-600 font-bold px-1.5 py-0.5 rounded uppercase tracking-wider">
+                                                        {entityLabel}
+                                                    </span>
+                                                </div>
+                                                <span className="text-[10px] text-slate-400 font-medium sm:text-right shrink-0">
+                                                    {new Date(log.timestamp).toLocaleString()}
+                                                </span>
+                                            </div>
+                                            <p className="text-xs text-slate-500 font-semibold">{log.details}</p>
+                                            <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
+                                                <span className="font-bold text-slate-500">{log.user_email}</span>
+                                                <span>•</span>
+                                                <span className={cn(
+                                                    "font-bold uppercase tracking-wide px-1 rounded-[4px]",
+                                                    log.action_type === 'CREATE' ? "bg-emerald-50 text-emerald-600" : "bg-blue-50 text-blue-600"
+                                                )}>
+                                                    {log.action_type === 'CREATE' ? 'Creación' : 'Modificación'}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+            </div>
+
+            {/* Logout Tile */}
+            <div className="bg-red-50/30 rounded-3xl border border-red-100 p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex items-center gap-4">
+                    <div className="bg-red-100 p-3 rounded-2xl text-red-600">
+                        <LogOut className="w-6 h-6" />
+                    </div>
+                    <div>
+                        <h3 className="font-bold text-slate-900 text-lg">Cerrar Sesión</h3>
+                        <p className="text-sm text-slate-500">Salir de la aplicación de forma segura</p>
+                    </div>
+                </div>
+                <button
+                    onClick={confirmLogout}
+                    className="bg-red-600 hover:bg-red-700 text-white px-8 py-3 rounded-xl text-sm font-bold shadow-md shadow-red-100 transition-all flex items-center justify-center gap-2"
+                >
+                    <LogOut className="w-4 h-4" />
+                    Cerrar Sesión Ahora
+                </button>
+            </div>
 
 
             <ConfirmationModal

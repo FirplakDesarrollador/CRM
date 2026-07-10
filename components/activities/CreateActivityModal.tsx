@@ -15,18 +15,41 @@ import { useActivities } from "@/lib/hooks/useActivities";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { OpportunityCombobox } from "@/components/opportunities/OpportunityCombobox";
 import { AccountCombobox } from "@/components/accounts/AccountCombobox";
+import { useFormAutoSave } from "@/lib/hooks/useFormAutoSave";
+import { AutoSaveIndicator } from "@/components/ui/AutoSaveIndicator";
 
 interface CreateActivityModalProps {
     onClose: () => void;
     onSubmit: (data: any) => void;
     opportunities?: any[];
     initialOpportunityId?: string;
+    initialAccountId?: string;
     initialData?: any;
 }
 
-export function CreateActivityModal({ onClose, onSubmit, opportunities, initialOpportunityId, initialData }: CreateActivityModalProps) {
+const ACTIVITY_WIZARD_LAST_STEP = 2;
+
+type PlannerChecklistItem = {
+    id: string;
+    title: string;
+    isChecked: boolean;
+};
+
+const normalizePlannerChecklist = (items: PlannerChecklistItem[]) => {
+    return items
+        .map((item) => ({
+            id: item.id,
+            title: item.title.trim(),
+            isChecked: !!item.isChecked
+        }))
+        .filter((item) => item.title.length > 0);
+};
+
+export function CreateActivityModal({ onClose, onSubmit, opportunities, initialOpportunityId, initialAccountId, initialData }: CreateActivityModalProps) {
     const isEditing = !!initialData;
-    const { register, handleSubmit, watch, setValue, getValues, reset, formState: { dirtyFields } } = useForm({
+    const [wizardStep, setWizardStep] = useState(0);
+    const [canSubmitFinalStep, setCanSubmitFinalStep] = useState(false);
+    const form = useForm({
         defaultValues: {
             asunto: initialData?.asunto || '',
             descripcion: initialData?.descripcion || '',
@@ -40,12 +63,54 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                 ? toInputDateTime(initialData.fecha_fin)
                 : toInputDateTime(new Date(Date.now() + 3600000)),
             opportunity_id: initialData?.opportunity_id || initialOpportunityId || '',
-            account_id: initialData?.account_id || '',
-            is_completed: !!initialData?.is_completed
+            account_id: initialData?.account_id || initialAccountId || '',
+            is_completed: !!initialData?.is_completed,
+            prioridad: initialData?.prioridad || 'Media'
         }
     });
 
+    const { register, handleSubmit, watch, setValue, getValues, reset, formState: { dirtyFields } } = form;
+
+    const onAutoSave = async (data: any) => {
+        if (!isEditing || !initialData?.id) return;
+        const payload: any = {
+            asunto: data.asunto,
+            descripcion: data.descripcion || null,
+            tipo_actividad: data.tipo_actividad,
+            clasificacion_id: data.clasificacion_id ? Number(data.clasificacion_id) : null,
+            subclasificacion_id: data.subclasificacion_id ? Number(data.subclasificacion_id) : null,
+            fecha_inicio: data.fecha_inicio ? new Date(data.fecha_inicio).toISOString() : null,
+            fecha_fin: data.fecha_fin ? new Date(data.fecha_fin).toISOString() : null,
+            opportunity_id: data.opportunity_id || null,
+            account_id: data.account_id || null,
+            is_completed: !!data.is_completed,
+            prioridad: data.prioridad || 'Media'
+        };
+        await updateActivity(initialData.id, payload);
+    };
+
+    const { status: autoSaveStatus } = useFormAutoSave({
+        form,
+        onSave: onAutoSave,
+        isEnabled: isEditing
+    });
+
+    const watchedAccountId = watch('account_id');
     const watchedOpportunityId = watch('opportunity_id');
+
+    useEffect(() => {
+        if (isEditing || wizardStep !== ACTIVITY_WIZARD_LAST_STEP) {
+            setCanSubmitFinalStep(false);
+            return;
+        }
+
+        setCanSubmitFinalStep(false);
+        const timer = window.setTimeout(() => {
+            setCanSubmitFinalStep(true);
+        }, 500);
+
+        return () => window.clearTimeout(timer);
+    }, [isEditing, wizardStep]);
 
     const relatedOpportunity = useLiveQuery(
         () => watchedOpportunityId ? db.opportunities.get(watchedOpportunityId) : undefined,
@@ -53,8 +118,12 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
     );
 
     const relatedAccount = useLiveQuery(
-        () => relatedOpportunity?.account_id ? db.accounts.get(relatedOpportunity.account_id) : undefined,
-        [relatedOpportunity?.account_id]
+        () => {
+            if (relatedOpportunity?.account_id) return db.accounts.get(relatedOpportunity.account_id);
+            if (watchedAccountId) return db.accounts.get(watchedAccountId);
+            return undefined;
+        },
+        [relatedOpportunity?.account_id, watchedAccountId]
     );
 
     const relatedContact = useLiveQuery(
@@ -62,38 +131,72 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         [relatedAccount?.id]
     );
 
+    const [resolvedAccountName, setResolvedAccountName] = useState<string>("");
     const opportunityAccountRef = useRef<string | null>(null);
 
-    // Auto-fill account_id when opportunity changes
     useEffect(() => {
         const fillAccount = async () => {
             if (!watchedOpportunityId) return;
 
-            // 1. Try local cache
+            let accountId = null;
+
+            // 1. Try local cache for Opportunity
             const localOpp = await db.opportunities.get(watchedOpportunityId);
             if (localOpp?.account_id) {
-                opportunityAccountRef.current = localOpp.account_id;
-                setValue('account_id', localOpp.account_id, { shouldDirty: true });
-                return;
-            }
-
-            // 2. Fallback to Supabase if not found locally
-            if (navigator.onLine) {
-                const { data, error } = await supabase
+                accountId = localOpp.account_id;
+            } else if (navigator.onLine) {
+                // 2. Fallback to Supabase for Opportunity
+                const { data } = await supabase
                     .from('CRM_Oportunidades')
                     .select('account_id')
                     .eq('id', watchedOpportunityId)
                     .maybeSingle();
+                if (data?.account_id) accountId = data.account_id;
+            }
 
-                if (!error && data?.account_id) {
-                    opportunityAccountRef.current = data.account_id;
-                    setValue('account_id', data.account_id, { shouldDirty: true });
+            if (accountId) {
+                opportunityAccountRef.current = accountId;
+                setValue('account_id', accountId, { shouldDirty: true });
+
+                // Resolve account name independently
+                const localAcc = await db.accounts.get(accountId);
+                if (localAcc) {
+                    setResolvedAccountName(localAcc.nombre);
+                } else if (navigator.onLine) {
+                    const { data } = await supabase
+                        .from('CRM_Cuentas')
+                        .select('nombre')
+                        .eq('id', accountId)
+                        .maybeSingle();
+                    if (data?.nombre) setResolvedAccountName(data.nombre);
                 }
             }
         };
 
         fillAccount();
     }, [watchedOpportunityId, setValue]);
+
+    // Pre-resolve initial account name
+    useEffect(() => {
+        if (initialAccountId) {
+            db.accounts.get(initialAccountId).then(acc => {
+                if (acc) setResolvedAccountName(acc.nombre);
+            });
+        }
+    }, [initialAccountId]);
+
+    // Sync props to form if they change after mount (e.g. late loading from parent)
+    useEffect(() => {
+        if (initialOpportunityId && !getValues('opportunity_id')) {
+            setValue('opportunity_id', initialOpportunityId);
+        }
+    }, [initialOpportunityId, setValue, getValues]);
+
+    useEffect(() => {
+        if (initialAccountId && !getValues('account_id')) {
+            setValue('account_id', initialAccountId);
+        }
+    }, [initialAccountId, setValue, getValues]);
 
     const [msConnected, setMsConnected] = useState<boolean>(false);
     const [isTeamsMeeting, setIsTeamsMeeting] = useState<boolean>(!!initialData?.teams_meeting_url);
@@ -128,7 +231,15 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
     const [selectedPlanId, setSelectedPlanId] = useState<string>("");
     const [selectedBucketId, setSelectedBucketId] = useState<string>("");
     const [loadingPlanner, setLoadingPlanner] = useState<boolean>(false);
-    const [checklist, setChecklist] = useState<string[]>([]);
+    const [checklist, setChecklist] = useState<PlannerChecklistItem[]>(() => {
+        if (initialData?._sync_metadata?.checklist) {
+            return initialData._sync_metadata.checklist.map((item: any) => {
+                if (typeof item === 'string') return { id: crypto.randomUUID(), title: item, isChecked: false };
+                return item;
+            });
+        }
+        return [];
+    });
     const [newChecklistItem, setNewChecklistItem] = useState("");
 
     // Deletion State
@@ -148,6 +259,85 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
 
     // Track if we already synced this activity instance to prevent loops
     const hasSyncedRef = useRef<string | null>(null);
+    const hasInitializedChecklistAutoSaveRef = useRef(false);
+    const lastPersistedChecklistRef = useRef(JSON.stringify(normalizePlannerChecklist(checklist)));
+
+    const persistChecklist = useCallback(async (items: PlannerChecklistItem[]) => {
+        if (!isEditing || !initialData?.id || getValues('tipo_actividad') !== 'TAREA') {
+            return;
+        }
+
+        const normalizedChecklist = normalizePlannerChecklist(items);
+        const plannerId = msPlannerId || initialData.ms_planner_id || null;
+        const nextMetadata: any = {
+            ...(initialData._sync_metadata || {}),
+            checklist: normalizedChecklist,
+            checklist_updated_at: Date.now(),
+            last_modified: Date.now()
+        };
+
+        const assigneeIds = attendees.map((attendee) => attendee.id);
+        if (assigneeIds.length > 0) {
+            nextMetadata.assigneeIds = assigneeIds;
+        }
+        if (selectedPlanId) {
+            nextMetadata.planId = selectedPlanId;
+        }
+        if (selectedBucketId) {
+            nextMetadata.bucketId = selectedBucketId;
+        }
+
+        let plannerSynced = false;
+        if (plannerId && msConnected && navigator.onLine) {
+            try {
+                const res = await fetch(`/api/microsoft/planner/tasks/${plannerId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ checklist: normalizedChecklist })
+                });
+
+                if (!res.ok) {
+                    const errText = await res.text();
+                    console.error("[CreateActivityModal] Failed to update Planner checklist:", errText);
+                    nextMetadata.pending_planner_update = true;
+                    setSyncFeedback(prev => ({ ...prev, planner: 'error', message: 'Guardado local. Se sincronizara con Planner luego.' }));
+                } else {
+                    plannerSynced = true;
+                    delete nextMetadata.pending_planner_update;
+                    setSyncFeedback(prev => ({ ...prev, planner: 'success' }));
+                }
+            } catch (error) {
+                console.error("[CreateActivityModal] Error updating Planner checklist:", error);
+                nextMetadata.pending_planner_update = true;
+                setSyncFeedback(prev => ({ ...prev, planner: 'error', message: 'Guardado local. Se sincronizara con Planner luego.' }));
+            }
+        } else if (plannerId) {
+            nextMetadata.pending_planner_update = true;
+        } else if (selectedPlanId || selectedBucketId) {
+            nextMetadata.pending_planner = true;
+            nextMetadata.planId = selectedPlanId || null;
+            nextMetadata.bucketId = selectedBucketId || null;
+        }
+
+        await updateActivity(initialData.id, { _sync_metadata: nextMetadata } as any);
+
+        if (plannerSynced) {
+            window.setTimeout(() => {
+                setSyncFeedback(prev => prev.planner === 'success' ? { ...prev, planner: null } : prev);
+            }, 1500);
+        }
+    }, [
+        attendees,
+        getValues,
+        initialData,
+        isEditing,
+        msConnected,
+        msPlannerId,
+        selectedBucketId,
+        selectedPlanId,
+        updateActivity
+    ]);
 
     // Reassignment state (ADMIN / COORDINADOR only)
     const { user: currentUser, role: currentRole } = useCurrentUser();
@@ -182,6 +372,11 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
     // Check Microsoft Connection
     useEffect(() => {
         async function checkMS() {
+            if (process.env.NODE_ENV !== 'production' && window.location.pathname.startsWith('/e2e/')) {
+                setMsConnected(true);
+                return;
+            }
+
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) return;
 
@@ -197,6 +392,13 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
     }, []);
 
     useEffect(() => {
+        // Guard: solo sincronizar una vez por instancia de actividad.
+        // initialData puede cambiar cuando Dexie persiste ms_planner_id o ms_event_id,
+        // lo que dispararía el sync infinitamente sin este control.
+        if (!initialData?.id) return;
+        if (hasSyncedRef.current === initialData.id) return;
+        hasSyncedRef.current = initialData.id;
+
         async function syncPlannerBidirectional() {
             if (!initialData || !initialData.ms_planner_id) return;
 
@@ -252,6 +454,10 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                             setValue('is_completed', isCompleted, { shouldDirty: true });
                         }
 
+                        if (taskData.details?.checklist) {
+                            setChecklist(Object.entries(taskData.details.checklist).map(([id, item]: [string, any]) => ({ id, title: item.title, isChecked: item.isChecked })));
+                        }
+
                         if (taskData.resolvedAssignees && taskData.resolvedAssignees.length > 0) {
                             setAttendees(taskData.resolvedAssignees);
                         }
@@ -267,7 +473,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                         console.log(`[CreateActivityModal] CRM is newer. Retaining CRM data...`);
                         setMsPlannerId(taskData.id);
                         if (taskData.details?.checklist) {
-                            setChecklist(Object.values(taskData.details.checklist).map((item: any) => item.title));
+                            setChecklist(Object.entries(taskData.details.checklist).map(([id, item]: [string, any]) => ({ id, title: item.title, isChecked: item.isChecked })));
                         }
                         if (taskData.resolvedAssignees && taskData.resolvedAssignees.length > 0) {
                             setAttendees(taskData.resolvedAssignees);
@@ -276,7 +482,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                         // Same timestamps. Just populate UI details
                         setMsPlannerId(taskData.id);
                         if (taskData.details?.checklist) {
-                            setChecklist(Object.values(taskData.details.checklist).map((item: any) => item.title));
+                            setChecklist(Object.entries(taskData.details.checklist).map(([id, item]: [string, any]) => ({ id, title: item.title, isChecked: item.isChecked })));
                         }
                         if (taskData.resolvedAssignees && taskData.resolvedAssignees.length > 0) {
                             setAttendees(taskData.resolvedAssignees);
@@ -414,8 +620,8 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
     }, [initialData, setValue, onSubmit]); // Fixed dependencies
 
     // Load Catalogs
-    const classifications = useLiveQuery(() => db.activityClassifications.toArray(), []) || [];
-    const subclassifications = useLiveQuery(() => db.activitySubclassifications.toArray(), []) || [];
+    const classifications = useLiveQuery(() => db.activityClassifications.toArray().then(arr => arr.filter(c => !c.is_deleted)), []) || [];
+    const subclassifications = useLiveQuery(() => db.activitySubclassifications.toArray().then(arr => arr.filter(s => !s.is_deleted)), []) || [];
 
     // PROACTIVE SYNC: If catalogs are empty, trigger a pull
     useEffect(() => {
@@ -430,24 +636,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
     console.log("[CreateActivityModal] clasificacion_id:", initialData?.clasificacion_id, "type:", typeof initialData?.clasificacion_id);
     console.log("[CreateActivityModal] Available classifications:", classifications.length);
 
-    const { register, handleSubmit, watch, setValue, reset } = useForm({
-        defaultValues: {
-            asunto: initialData?.asunto || '',
-            descripcion: initialData?.descripcion || '',
-            tipo_actividad: (initialData?.tipo_actividad || 'EVENTO') as 'TAREA' | 'EVENTO',
-            clasificacion_id: initialData?.clasificacion_id ? String(initialData.clasificacion_id) : "",
-            subclasificacion_id: initialData?.subclasificacion_id ? String(initialData.subclasificacion_id) : "",
-            fecha_inicio: initialData?.fecha_inicio
-                ? (initialData.tipo_actividad === 'TAREA' ? toInputDate(initialData.fecha_inicio) : toInputDateTime(initialData.fecha_inicio))
-                : (initialData?.tipo_actividad === 'TAREA' ? toInputDate(new Date()) : toInputDateTime(new Date())),
-            fecha_fin: initialData?.fecha_fin
-                ? toInputDateTime(initialData.fecha_fin)
-                : toInputDateTime(new Date(Date.now() + 3600000)),
-            opportunity_id: initialData?.opportunity_id || initialOpportunityId || '',
-            is_completed: !!initialData?.is_completed,
-            prioridad: initialData?.prioridad || 'Media'
-        }
-    });
+
 
     // Force form reset when initialData changes OR when classifications finish loading
     // This fixes the timing issue where the select options don't exist yet when form resets
@@ -467,6 +656,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                     ? toInputDateTime(initialData.fecha_fin)
                     : toInputDateTime(new Date(Date.now() + 3600000)),
                 opportunity_id: initialData.opportunity_id || initialOpportunityId || '',
+                account_id: initialData.account_id || initialAccountId || '',
                 is_completed: !!initialData.is_completed,
                 prioridad: initialData.prioridad || 'Media'
             });
@@ -520,17 +710,49 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
 
     const addChecklistItem = () => {
         if (newChecklistItem.trim()) {
-            setChecklist([...checklist, newChecklistItem.trim()]);
+            setChecklist(prev => [...prev, { id: crypto.randomUUID(), title: newChecklistItem.trim(), isChecked: false }]);
             setNewChecklistItem("");
         }
     };
 
-    const removeChecklistItem = (index: number) => {
-        setChecklist(checklist.filter((_, i) => i !== index));
+    const removeChecklistItem = (id: string) => {
+        setChecklist(prev => prev.filter((item) => item.id !== id));
+    };
+
+    const toggleChecklistItem = (id: string, isChecked: boolean) => {
+        setChecklist(prev => prev.map((item) => item.id === id ? { ...item, isChecked } : item));
     };
 
     // Planner: Load Plans directly when sync is enabled
     const tipoActividad = watch('tipo_actividad');
+
+    useEffect(() => {
+        if (!isEditing || tipoActividad !== 'TAREA') return;
+
+        const serializedChecklist = JSON.stringify(normalizePlannerChecklist(checklist));
+        if (!hasInitializedChecklistAutoSaveRef.current) {
+            hasInitializedChecklistAutoSaveRef.current = true;
+            lastPersistedChecklistRef.current = serializedChecklist;
+            return;
+        }
+
+        if (serializedChecklist === lastPersistedChecklistRef.current) {
+            return;
+        }
+
+        const timer = window.setTimeout(async () => {
+            try {
+                await persistChecklist(checklist);
+                lastPersistedChecklistRef.current = serializedChecklist;
+            } catch (error) {
+                console.error("[CreateActivityModal] Error saving checklist:", error);
+                setSyncFeedback(prev => ({ ...prev, planner: 'error', message: 'No se pudo guardar el checklist.' }));
+            }
+        }, 900);
+
+        return () => window.clearTimeout(timer);
+    }, [checklist, isEditing, persistChecklist, tipoActividad]);
+
     useEffect(() => {
         if (syncToPlanner && msConnected && tipoActividad === 'TAREA') {
             console.log('[Planner] Loading plans... msConnected:', msConnected, 'tipo:', tipoActividad);
@@ -547,10 +769,15 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                 .then(data => {
                     const plans = data.plans || [];
                     setPlannerPlans(plans);
-                    // Auto-select "CRM Ventas" plan if it exists, only for NEW tasks
+                    // Auto-select CRM default plan usando el flag isCrmDefault que devuelve la API
+                    // Esto es más confiable que comparar por nombre de texto con 95 planes
                     if (!initialData?.ms_planner_id && !selectedPlanId) {
-                        const defaultPlan = plans.find((p: { title: string }) => p.title === 'CRM Ventas');
-                        if (defaultPlan) setSelectedPlanId(defaultPlan.id);
+                        const defaultPlan = plans.find((p: any) => p.isCrmDefault)
+                            || plans.find((p: any) => p.title === 'CRM Ventas'); // fallback
+                        if (defaultPlan) {
+                            console.log('[Planner] Auto-selecting plan:', defaultPlan.title, defaultPlan.id);
+                            setSelectedPlanId(defaultPlan.id);
+                        }
                     }
                 })
                 .catch(err => console.error('[Planner] Error loading plans:', err))
@@ -578,23 +805,112 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                 .then(data => {
                     const buckets = data.buckets || [];
                     setPlannerBuckets(buckets);
-                    // Auto-select "Proyecto CRM" bucket if it exists, only for NEW tasks
-                    if (!initialData?.ms_planner_id && !selectedBucketId) {
-                        const defaultBucket = buckets.find((b: { name: string }) => b.name === 'Proyecto CRM');
-                        if (defaultBucket) {
-                            setSelectedBucketId(defaultBucket.id);
-                        } else if (buckets.length === 1) {
-                            // If only one bucket, select it
-                            setSelectedBucketId(buckets[0].id);
-                        }
-                    }
                 })
                 .catch(err => console.error('[Planner] Error loading buckets:', err))
                 .finally(() => setLoadingPlanner(false));
         }
-    }, [selectedPlanId]);
+    }, [selectedPlanId, initialData?.ms_planner_id]);
+
+    // Ref to track if we already auto-selected a bucket for this modal instance
+    const autoSelectedBucketRef = useRef<boolean>(false);
+
+    // Auto-select bucket based on mapped account/opportunity canal
+    useEffect(() => {
+        if (initialData?.ms_planner_id) return;
+        if (plannerBuckets.length === 0) return;
+        if (autoSelectedBucketRef.current) return;
+
+        // KEY FIX: If there's an opportunity OR explicitly selected account linked, 
+        // WAIT for the account to load before making any selection.
+        if ((watchedOpportunityId || watchedAccountId) && relatedAccount === undefined) {
+            console.log('[Planner BucketAutoSelect] Linked entity present but account not yet loaded — waiting...');
+            return;
+        }
+
+        // === DIAGNOSTIC LOGGING ===
+        console.log('[Planner BucketAutoSelect] Available buckets:', plannerBuckets.map(b => `"${b.name}"`).join(', '));
+        console.log('[Planner BucketAutoSelect] relatedAccount:', relatedAccount ? { id: relatedAccount.id, nombre: (relatedAccount as any).nombre, canal_id: relatedAccount.canal_id } : null);
+        console.log('[Planner BucketAutoSelect] watchedOpportunityId:', watchedOpportunityId);
+        console.log('[Planner BucketAutoSelect] watchedAccountId:', watchedAccountId);
+
+        let targetBucketName = 'To do';
+
+        if (relatedAccount && (relatedAccount as any).canal_id) {
+            const canal = String((relatedAccount as any).canal_id).toUpperCase().trim();
+            console.log('[Planner BucketAutoSelect] canal_id resolved to:', canal);
+
+            if (canal === 'TIENDA' || canal.includes('TIENDA')) {
+                targetBucketName = 'Tienda';
+            } else if (canal === 'DIST_INT' || (canal.includes('INTERNACIONAL') && canal.includes('DIST'))) {
+                targetBucketName = 'Distribución internacional';
+            } else if (canal === 'OBRAS_INT' || (canal.includes('INTERNACIONAL') && canal.includes('OBRA'))) {
+                targetBucketName = 'Obras internacional';
+            } else if (canal === 'PROPIO' || canal === 'E-COMMERCE' || canal === 'CLIENTE' || canal.includes('PROPIO') || canal.includes('CLIENTE')) {
+                targetBucketName = 'e-commerce';
+            } else if (canal === 'DIST_NAC' || (canal.includes('DISTRIB') && !canal.includes('INTER'))) {
+                targetBucketName = 'Distribución';
+            } else if (canal === 'OBRAS_NAC' || (canal.includes('OBRA') && !canal.includes('INTER'))) {
+                targetBucketName = 'Obras';
+            }
+            console.log('[Planner BucketAutoSelect] Resolved target bucket name:', targetBucketName);
+        } else {
+            console.log('[Planner BucketAutoSelect] No canal_id found — defaulting to "To do"');
+        }
+
+        // Robust matching logic
+        const getMatch = (targetName: string) => {
+            const normalizedTarget = targetName.toLowerCase().trim();
+            
+            // 1. PRIORIDAD: Coincidencia exacta (evita match codicioso de 'Distribución' con 'Distribución internacional')
+            const exactMatch = plannerBuckets.find(b => b.name.toLowerCase().trim() === normalizedTarget);
+            if (exactMatch) return exactMatch;
+
+            // 2. FALLBACK: Coincidencias parciales
+            return plannerBuckets.find(b => {
+                const name = b.name.toLowerCase().trim();
+                return name.includes(normalizedTarget) || normalizedTarget.includes(name);
+            });
+        };
+
+        let matchedBucket = getMatch(targetBucketName);
+        console.log('[Planner BucketAutoSelect] Primary match:', matchedBucket?.name ?? 'NO MATCH');
+
+        if (!matchedBucket && targetBucketName !== 'To do') {
+            const keyword = targetBucketName.split(' ')[0];
+            matchedBucket = getMatch(keyword);
+            console.log('[Planner BucketAutoSelect] Keyword fallback ("' + keyword + '"):', matchedBucket?.name ?? 'NO MATCH');
+        }
+
+        if (!matchedBucket && targetBucketName !== 'To do') {
+            matchedBucket = getMatch('To do');
+            console.log('[Planner BucketAutoSelect] "To do" fallback:', matchedBucket?.name ?? 'NO MATCH');
+        }
+
+        if (!matchedBucket && plannerBuckets.length > 0) {
+            matchedBucket = plannerBuckets[0];
+            console.log('[Planner BucketAutoSelect] First-bucket last-resort:', matchedBucket?.name);
+        }
+
+        if (matchedBucket) {
+            console.log('[Planner BucketAutoSelect] FINAL SELECTION →', matchedBucket.name);
+            autoSelectedBucketRef.current = true;
+            setSelectedBucketId(matchedBucket.id);
+        }
+    }, [plannerBuckets, relatedAccount, watchedOpportunityId, watchedAccountId, initialData?.ms_planner_id]);
+
+
+    const isSubmittingRef = useRef(false);
 
     const handleActualSubmit = async (data: any) => {
+        if (!isEditing && (wizardStep !== ACTIVITY_WIZARD_LAST_STEP || !canSubmitFinalStep)) {
+            return;
+        }
+
+        if (isSubmittingRef.current) {
+            console.warn("[CreateActivityModal] Prevented double submit");
+            return;
+        }
+        isSubmittingRef.current = true;
         setIsSubmitting(true);
         setSyncFeedback({}); // Reset feedback
         try {
@@ -878,6 +1194,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
             console.error("[CreateActivityModal] Uncaught error in submit:", e);
             alert(`Error interno: ${e.message}`);
         } finally {
+            isSubmittingRef.current = false;
             setIsSubmitting(false);
         }
     };
@@ -978,13 +1295,13 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                         <h2 className="text-xl font-bold text-slate-900">{isEditing ? 'Editar Actividad' : 'Programar Actividad'}</h2>
                         {relatedOpportunity && relatedAccount && (
                             <div className="flex items-center gap-1.5 mt-1 text-sm flex-wrap">
-                                <Link href={`/cuentas/${relatedAccount.id}`} className="text-blue-600 hover:underline font-semibold transition-colors" target="_blank" rel="noopener noreferrer">
+                                <Link href={`/cuentas?id=${relatedAccount.id}`} className="text-blue-600 hover:underline font-semibold transition-colors">
                                     {relatedAccount.nombre}
                                 </Link>
                                 <span className="text-slate-400 font-medium">-</span>
                                 {relatedContact ? (
                                     <div className="flex items-center gap-1">
-                                        <Link href={`/contactos/${relatedContact.id}`} className="text-blue-600 hover:underline font-semibold transition-colors" target="_blank" rel="noopener noreferrer">
+                                        <Link href={`/contactos?id=${relatedContact.id}`} className="text-blue-600 hover:underline font-semibold transition-colors">
                                             {relatedContact.nombre}
                                         </Link>
                                         {relatedContact.telefono && (
@@ -995,7 +1312,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                     <span className="italic text-slate-400 font-medium text-xs">Sin contacto princ.</span>
                                 )}
                                 <span className="text-slate-400 font-medium">-</span>
-                                <Link href={`/oportunidades/${relatedOpportunity.id}`} className="text-blue-600 hover:underline font-semibold transition-colors" target="_blank" rel="noopener noreferrer">
+                                <Link href={`/oportunidades/${relatedOpportunity.id}`} className="text-blue-600 hover:underline font-semibold transition-colors">
                                     {relatedOpportunity.nombre}
                                 </Link>
                             </div>
@@ -1032,7 +1349,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                 )}
                             </div>
                         )}
-                        <button onClick={onClose} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors text-2xl leading-none">&times;</button>
+                        <button type="button" onClick={onClose} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors text-2xl leading-none">&times;</button>
                     </div>
                 </div>
 
@@ -1041,8 +1358,45 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                         console.error("[CreateActivityModal] Validation Errors:", errors);
                         alert(`Errores de validación: ${Object.keys(errors).join(', ')}. Revisa los campos obligatorios.`);
                     })}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                            const target = e.target as HTMLElement;
+                            if (target.tagName !== 'TEXTAREA') {
+                                e.preventDefault();
+                            }
+                        }
+                    }}
                     className="p-4 md:p-6 space-y-4 overflow-y-auto flex-1 overscroll-contain pb-6"
                 >
+                    {/* WIZARD PROGRESS BAR (if not editing) */}
+                    {!isEditing && (
+                        <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-100 relative">
+                            <div className="absolute top-1/2 left-0 right-0 h-0.5 bg-slate-100 -translate-y-1/2 z-0" />
+                            {["Tipo & Asunto", "Clasificación & Fechas", "Detalles"].map((label, idx) => {
+                                const isCompleted = wizardStep > idx;
+                                const isActive = wizardStep === idx;
+                                return (
+                                    <div key={label} className="flex flex-col items-center relative z-10">
+                                        <div className={cn(
+                                            "w-6 h-6 rounded-full flex items-center justify-center border font-bold text-xs transition-all duration-300",
+                                            isCompleted ? "bg-blue-600 border-blue-600 text-white" :
+                                            isActive ? "bg-white border-blue-600 text-blue-600 ring-4 ring-blue-50" :
+                                            "bg-white border-slate-200 text-slate-400"
+                                        )}>
+                                            {isCompleted ? <span className="text-white text-[10px]">✓</span> : idx + 1}
+                                        </div>
+                                        <span className={cn(
+                                            "mt-1 text-[9px] font-bold uppercase tracking-wider text-center hidden sm:block",
+                                            isActive ? "text-blue-600" : "text-slate-400"
+                                        )}>
+                                            {label}
+                                        </span>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+
                     {isSyncingPlanner && (
                         <div className="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-xl text-xs font-bold animate-in fade-in slide-in-from-top-2">
                             <Loader2 className="w-4 h-4 animate-spin" />
@@ -1050,7 +1404,8 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                         </div>
                     )}
                     {/* Activity Type Selector */}
-                    <div className="flex bg-slate-100 p-1 rounded-xl">
+                    {(isEditing || wizardStep === 0) && (
+                        <div className="flex bg-slate-100 p-1 rounded-xl">
                         <button
                             type="button"
                             onClick={() => {
@@ -1080,22 +1435,25 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                             <ListTodo className="w-4 h-4" /> Tarea
                         </button>
                     </div>
+                    )}
 
                     {/* Completion Toggle (Available for all types) */}
-                    <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 flex items-center justify-between animate-in slide-in-from-top-2 duration-200">
-                        <div className="space-y-0.5">
-                            <label className="text-xs font-bold text-slate-900 uppercase">Actividad Finalizada</label>
-                            <p className="text-[10px] text-slate-500">Marcar como completada</p>
+                    {isEditing && (
+                        <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 flex items-center justify-between animate-in slide-in-from-top-2 duration-200">
+                            <div className="space-y-0.5">
+                                <label className="text-xs font-bold text-slate-900 uppercase">Actividad Finalizada</label>
+                                <p className="text-[10px] text-slate-500">Marcar como completada</p>
+                            </div>
+                            <label className="relative inline-flex items-center cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    {...register('is_completed')}
+                                    className="sr-only peer"
+                                />
+                                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                            </label>
                         </div>
-                        <label className="relative inline-flex items-center cursor-pointer">
-                            <input
-                                type="checkbox"
-                                {...register('is_completed')}
-                                className="sr-only peer"
-                            />
-                            <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
-                        </label>
-                    </div>
+                    )}
 
                     {/* REASSIGN ACTIVITY (ADMIN / COORDINADOR only) */}
                     {canReassign && reassignableUsers.length > 0 && (
@@ -1124,126 +1482,109 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                     )}
 
                     {/* CLASSIFICATION SELECTORS */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="space-y-1">
-                            <label className="text-xs font-bold text-slate-500 uppercase">
-                                Clasificación <span className="text-red-500">*</span>
-                            </label>
-                            <div className="relative">
-                                <select
-                                    {...register('clasificacion_id', {
-                                        required: "La clasificación es obligatoria",
-                                        onChange: (e) => {
-                                            console.log("[CreateActivityModal] Classification Selected:", e.target.value);
-                                            setValue('subclasificacion_id', "");
-                                        }
-                                    })}
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all appearance-none"
-                                >
-                                    <option value="">{classifications.length === 0 ? 'Sincronizando...' : 'Seleccione...'}</option>
-                                    {filteredClassifications.map(c => (
-                                        <option key={c.id} value={String(c.id)}>{c.nombre}</option>
-                                    ))}
-                                    {/* If current classification is not in filtered list, show it anyway (historical data) */}
-                                    {initialData?.clasificacion_id &&
-                                        !filteredClassifications.some(c => String(c.id) === String(initialData.clasificacion_id)) &&
-                                        classifications.find(c => String(c.id) === String(initialData.clasificacion_id)) && (
-                                            <option
-                                                key={initialData.clasificacion_id}
-                                                value={String(initialData.clasificacion_id)}
-                                                className="text-amber-600"
-                                            >
-                                                {classifications.find(c => String(c.id) === String(initialData.clasificacion_id))?.nombre} (otro tipo)
-                                            </option>
-                                        )}
-                                </select>
-                                {classifications.length === 0 && (
-                                    <div className="absolute right-10 top-1/2 -translate-y-1/2">
-                                        <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* Show Subclassification ONLY if the selected classification has options */}
-                        {filteredSubclassifications.length > 0 && (
-                            <div className="space-y-1 animate-in fade-in slide-in-from-left-2 duration-200">
+                    {(isEditing || wizardStep === 1) && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-1">
                                 <label className="text-xs font-bold text-slate-500 uppercase">
-                                    Subclasificación <span className="text-red-500">*</span>
+                                    Clasificación <span className="text-red-500">*</span>
                                 </label>
-                                <select
-                                    {...register('subclasificacion_id', { required: "La subclasificación es requerida" })}
-                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all appearance-none"
-                                >
-                                    <option value="">Seleccione...</option>
-                                    {filteredSubclassifications.map(s => (
-                                        <option key={s.id} value={String(s.id)}>{s.nombre}</option>
-                                    ))}
-                                </select>
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Priority Selector */}
-                    <div className="space-y-1">
-                        <label className="text-xs font-bold text-slate-500 uppercase">Prioridad</label>
-                        <div className="flex gap-2">
-                            {['Baja', 'Media', 'Alta'].map((p) => (
-                                <button
-                                    key={p}
-                                    type="button"
-                                    onClick={() => setValue('prioridad', p as any)}
-                                    className={cn(
-                                        "flex-1 py-2 text-xs font-bold rounded-lg border transition-all",
-                                        watch('prioridad') === p 
-                                            ? (p === 'Alta' ? "bg-red-50 border-red-200 text-red-600 shadow-sm" : 
-                                               p === 'Media' ? "bg-amber-50 border-amber-200 text-amber-600 shadow-sm" : 
-                                               "bg-blue-50 border-blue-200 text-blue-600 shadow-sm")
-                                            : "bg-white border-slate-200 text-slate-500 hover:border-slate-300"
-                                    )}
-                                >
-                                    {p}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-
-                    <div className="space-y-1">
-                        <label className="text-xs font-bold text-slate-500 uppercase">Asunto <span className="text-red-500">*</span></label>
-                        <input
-                            {...register('asunto', { required: true })}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                            placeholder={tipo === 'TAREA' ? "Ej. Llamar a seguimiento" : "Ej. Reunión de presentación"}
-                        />
-                    </div>
-
-                    {/* MICROSOFT INTEGRATION (Teams/Guests for EVENTO, Collaborators/Checklist for TAREA) */}
-                    {msConnected && (
-                        <div className="space-y-4 animate-in fade-in slide-in-from-top-4 duration-300">
-                            {tipo === 'EVENTO' && (
-                                <div className="p-px bg-linear-to-r from-blue-500 to-indigo-500 rounded-2xl shadow-sm">
-                                    <div className="bg-white rounded-[15px] p-4 flex items-center justify-between">
-                                        <div className="flex items-center gap-3">
-                                            <div className="bg-blue-50 p-2 rounded-xl text-blue-600">
-                                                <Video className="w-5 h-5" />
-                                            </div>
-                                            <div className="space-y-0.5">
-                                                <label className="text-sm font-bold text-slate-900">Reunión de Teams</label>
-                                                <p className="text-[10px] text-slate-500 font-medium">Crea un enlace automático para esta reunión</p>
-                                            </div>
+                                <div className="relative">
+                                    <select
+                                        {...register('clasificacion_id', {
+                                            required: "La clasificación es obligatoria",
+                                            onChange: (e) => {
+                                                console.log("[CreateActivityModal] Classification Selected:", e.target.value);
+                                                setValue('subclasificacion_id', "");
+                                            }
+                                        })}
+                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all appearance-none"
+                                    >
+                                        <option value="">{classifications.length === 0 ? 'Sincronizando...' : 'Seleccione...'}</option>
+                                        {filteredClassifications.map(c => (
+                                            <option key={c.id} value={String(c.id)}>{c.nombre}</option>
+                                        ))}
+                                        {/* If current classification is not in filtered list, show it anyway (historical data) */}
+                                        {initialData?.clasificacion_id &&
+                                            !filteredClassifications.some(c => String(c.id) === String(initialData.clasificacion_id)) &&
+                                            classifications.find(c => String(c.id) === String(initialData.clasificacion_id)) && (
+                                                <option
+                                                    key={initialData.clasificacion_id}
+                                                    value={String(initialData.clasificacion_id)}
+                                                    className="text-amber-600"
+                                                >
+                                                    {classifications.find(c => String(c.id) === String(initialData.clasificacion_id))?.nombre} (otro tipo)
+                                                </option>
+                                            )}
+                                    </select>
+                                    {classifications.length === 0 && (
+                                        <div className="absolute right-10 top-1/2 -translate-y-1/2">
+                                            <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
                                         </div>
-                                        <label className="relative inline-flex items-center cursor-pointer">
-                                            <input
-                                                type="checkbox"
-                                                checked={isTeamsMeeting}
-                                                onChange={(e) => setIsTeamsMeeting(e.target.checked)}
-                                                className="sr-only peer"
-                                            />
-                                            <div className="w-11 h-6 bg-slate-100 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600 transition-all"></div>
-                                        </label>
-                                    </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Show Subclassification ONLY if the selected classification has options */}
+                            {filteredSubclassifications.length > 0 && (
+                                <div className="space-y-1 animate-in fade-in slide-in-from-left-2 duration-200">
+                                    <label className="text-xs font-bold text-slate-500 uppercase">
+                                        Subclasificación <span className="text-red-500">*</span>
+                                    </label>
+                                    <select
+                                        {...register('subclasificacion_id', { required: "La subclasificación es requerida" })}
+                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all appearance-none"
+                                    >
+                                        <option value="">Seleccione...</option>
+                                        {filteredSubclassifications.map(s => (
+                                            <option key={s.id} value={String(s.id)}>{s.nombre}</option>
+                                        ))}
+                                    </select>
                                 </div>
                             )}
+                        </div>
+                    )}
+
+                    {/* Priority Selector */}
+                    {(isEditing || wizardStep === 1) && (
+                        <div className="space-y-1">
+                            <label className="text-xs font-bold text-slate-500 uppercase">Prioridad</label>
+                            <div className="flex gap-2">
+                                {['Baja', 'Media', 'Alta'].map((p) => (
+                                    <button
+                                        key={p}
+                                        type="button"
+                                        onClick={() => setValue('prioridad', p as any)}
+                                        className={cn(
+                                            "flex-1 py-2 text-xs font-bold rounded-lg border transition-all",
+                                        watch('prioridad') === p
+                                            ? (p === 'Alta' ? "bg-red-50 border-red-200 text-red-600 shadow-sm" :
+                                               p === 'Media' ? "bg-amber-50 border-amber-200 text-amber-600 shadow-sm" :
+                                                   "bg-blue-50 border-blue-200 text-blue-600 shadow-sm")
+                                                : "bg-white border-slate-200 text-slate-500 hover:border-slate-300"
+                                        )}
+                                    >
+                                        {p}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {(isEditing || wizardStep === 0) && (
+                        <div className="space-y-1">
+                            <label className="text-xs font-bold text-slate-500 uppercase">Asunto <span className="text-red-500">*</span></label>
+                            <input
+                                {...register('asunto', { required: true })}
+                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                                placeholder={tipo === 'TAREA' ? "Ej. Llamar a seguimiento" : "Ej. Reunión de presentación"}
+                            />
+                        </div>
+                    )}
+
+                    {/* MICROSOFT INTEGRATION (Teams/Guests for EVENTO, Collaborators/Checklist for TAREA) */}
+                    {(isEditing || wizardStep === 2) && msConnected && (
+                        <div className="space-y-4 animate-in fade-in slide-in-from-top-4 duration-300">
+
 
                             {/* COLLABORATORS / ATTENDEES (Unified search) */}
                             <div className="space-y-2">
@@ -1350,16 +1691,32 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
 
                                     {checklist.length > 0 && (
                                         <div className="bg-slate-50/50 border border-slate-100 rounded-xl p-2 space-y-1 mt-2">
-                                            {checklist.map((item, index) => (
-                                                <div key={index} className="flex items-center justify-between p-2 bg-white border border-slate-100 rounded-lg group animate-in slide-in-from-left-2 shadow-sm">
-                                                    <div className="flex items-center gap-2">
-                                                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                                                        <span className="text-sm text-slate-700">{item}</span>
+                                            {checklist.map((item) => (
+                                                <div key={item.id} className="flex items-center justify-between p-2 bg-white border border-slate-100 rounded-lg group animate-in slide-in-from-left-2 shadow-sm gap-2">
+                                                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                                                        <input 
+                                                            type="checkbox" 
+                                                            checked={item.isChecked} 
+                                                            onChange={(e) => toggleChecklistItem(item.id, e.target.checked)}
+                                                            className="w-4 h-4 rounded-sm border-slate-300 text-emerald-600 focus:ring-emerald-500/20 cursor-pointer"
+                                                        />
+                                                        <input 
+                                                            type="text" 
+                                                            value={item.title}
+                                                            onChange={(e) => {
+                                                                const newTitle = e.target.value;
+                                                                setChecklist(prev => prev.map((c) => c.id === item.id ? { ...c, title: newTitle } : c));
+                                                            }}
+                                                            className={cn(
+                                                                "text-sm flex-1 bg-transparent border-none p-0 focus:ring-0 truncate",
+                                                                item.isChecked ? "text-slate-400 line-through" : "text-slate-700"
+                                                            )}
+                                                        />
                                                     </div>
                                                     <button
                                                         type="button"
-                                                        onClick={() => removeChecklistItem(index)}
-                                                        className="text-slate-300 hover:text-red-500 transition-colors p-1"
+                                                        onClick={() => removeChecklistItem(item.id)}
+                                                        className="text-slate-300 hover:text-red-500 transition-colors p-1 shrink-0"
                                                     >
                                                         <X className="w-3.5 h-3.5" />
                                                     </button>
@@ -1372,142 +1729,141 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                         </div>
                     )}
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        {tipo === 'TAREA' ? (
-                            <>
-                                <DateTimePicker
-                                    value={fechaInicio || ''}
-                                    onChange={(val) => setValue('fecha_inicio', val)}
-                                    label="Fecha Vencimiento"
-                                    required
-                                    minDate={new Date()}
-                                    showTime={false}
-                                />
+                    {(isEditing || wizardStep === 1) && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            {tipo === 'TAREA' ? (
+                                <>
+                                    <DateTimePicker
+                                        value={fechaInicio || ''}
+                                        onChange={(val) => setValue('fecha_inicio', val)}
+                                        label="Fecha Vencimiento"
+                                        required
+                                        minDate={new Date()}
+                                        showTime={false}
+                                    />
 
-                                {/* Planner Sync Section - Always On */}
-                                {msConnected && (
-                                    <div className="col-span-full space-y-3">
-                                        {/* Planner Header */}
-                                        <div className="flex items-center gap-2 p-3 bg-linear-to-r from-emerald-50 to-teal-50 rounded-xl border border-emerald-200">
-                                            <div className="w-8 h-8 rounded-lg bg-linear-to-br from-emerald-500 to-teal-600 flex items-center justify-center">
-                                                <ListTodo className="w-4 h-4 text-white" />
+                                    {/* Planner Sync Section - Always On */}
+                                    {msConnected && (
+                                        <div className="col-span-full space-y-3">
+                                            {/* Planner Header */}
+                                            <div className="flex items-center gap-2 p-3 bg-linear-to-r from-emerald-50 to-teal-50 rounded-xl border border-emerald-200">
+                                                <div className="w-8 h-8 rounded-lg bg-linear-to-br from-emerald-500 to-teal-600 flex items-center justify-center">
+                                                    <ListTodo className="w-4 h-4 text-white" />
+                                                </div>
+                                                <div>
+                                                    <p className="text-xs font-bold text-emerald-700">Sincronización con Planner</p>
+                                                    <p className="text-[10px] text-emerald-600">La tarea se creará automáticamente en Microsoft Planner</p>
+                                                </div>
                                             </div>
-                                            <div>
-                                                <p className="text-xs font-bold text-emerald-700">Sincronización con Planner</p>
-                                                <p className="text-[10px] text-emerald-600">La tarea se creará automáticamente en Microsoft Planner</p>
-                                            </div>
-                                        </div>
 
-                                        {/* Planner Cascade Selectors - Always visible */}
-                                        <div className="space-y-3">
-                                            {/* Plan Selector */}
-                                            <div className="space-y-1">
-                                                <label className="text-xs font-bold text-slate-500 uppercase">
-                                                    Plan <span className="text-red-500">*</span>
-                                                </label>
-                                                <select
-                                                    value={selectedPlanId}
-                                                    onChange={(e) => setSelectedPlanId(e.target.value)}
-                                                    disabled={loadingPlanner}
-                                                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-                                                >
-                                                    <option value="">
-                                                        {loadingPlanner ? 'Cargando planes...' : plannerPlans.length === 0 ? 'No hay planes disponibles' : 'Seleccione un plan...'}
-                                                    </option>
-                                                    {plannerPlans.map((p) => (
-                                                        <option key={p.id} value={p.id}>{p.title}</option>
-                                                    ))}
-                                                </select>
-                                            </div>
-                                            {/* Bucket Selector */}
-                                            {selectedPlanId && (
+                                            {/* Planner Cascade Selectors - Always visible */}
+                                            <div className="space-y-3">
+                                                {/* Plan Selector */}
                                                 <div className="space-y-1">
                                                     <label className="text-xs font-bold text-slate-500 uppercase">
-                                                        Bucket <span className="text-red-500">*</span>
+                                                        Plan <span className="text-red-500">*</span>
                                                     </label>
-                                                    <select
-                                                        value={selectedBucketId}
-                                                        onChange={(e) => setSelectedBucketId(e.target.value)}
-                                                        disabled={loadingPlanner}
-                                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-                                                    >
-                                                        <option value="">
-                                                            {loadingPlanner ? 'Cargando buckets...' : plannerBuckets.length === 0 ? 'No hay buckets en este plan' : 'Seleccione un bucket...'}
-                                                        </option>
-                                                        {plannerBuckets.map((b) => (
-                                                            <option key={b.id} value={b.id}>{b.name}</option>
-                                                        ))}
-                                                    </select>
+                                                    <div className="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-3 text-slate-600 font-medium select-none cursor-not-allowed">
+                                                        {loadingPlanner ? 'Cargando planes...' : (plannerPlans.find(p => p.id === selectedPlanId)?.title || 'CRM Ventas')}
+                                                    </div>
                                                 </div>
-                                            )}
+                                                {/* Bucket Selector */}
+                                                {selectedPlanId && (
+                                                    <div className="space-y-1">
+                                                        <label className="text-xs font-bold text-slate-500 uppercase">
+                                                            Bucket <span className="text-red-500">*</span>
+                                                        </label>
+                                                        <select
+                                                            value={selectedBucketId}
+                                                            onChange={(e) => setSelectedBucketId(e.target.value)}
+                                                            disabled={loadingPlanner}
+                                                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                                                        >
+                                                            <option value="">
+                                                                {loadingPlanner ? 'Cargando buckets...' : plannerBuckets.length === 0 ? 'No hay buckets en este plan' : 'Seleccione un bucket...'}
+                                                            </option>
+                                                            {plannerBuckets.map((b) => (
+                                                                <option key={b.id} value={b.id}>{b.name}</option>
+                                                            ))}
+                                                        </select>
+                                                    </div>
+                                                )}
 
-                                            {/* Planner Selection Summary */}
-                                            {selectedBucketId && (
-                                                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3">
-                                                    <p className="text-xs text-emerald-700 font-medium">
-                                                        ✓ La tarea se creará en Planner automáticamente
-                                                    </p>
-                                                </div>
-                                            )}
+                                                {/* Planner Selection Summary */}
+                                                {selectedBucketId && (
+                                                    <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3">
+                                                        <p className="text-xs text-emerald-700 font-medium">
+                                                            ✓ La tarea se creará en Planner automáticamente
+                                                        </p>
+                                                    </div>
+                                                )}
+                                            </div>
                                         </div>
-                                    </div>
-                                )}
-                            </>
-                        ) : (
-                            <>
-                                <DateTimePicker
-                                    value={fechaInicio || ''}
-                                    onChange={(val) => setValue('fecha_inicio', val)}
-                                    label="Fecha Inicio"
-                                    required
-                                    minDate={new Date()}
-                                    showTime={true}
+                                    )}
+                                </>
+                            ) : (
+                                <>
+                                    <DateTimePicker
+                                        value={fechaInicio || ''}
+                                        onChange={(val) => setValue('fecha_inicio', val)}
+                                        label="Fecha Inicio"
+                                        required
+                                        minDate={new Date()}
+                                        showTime={true}
+                                    />
+                                    <DateTimePicker
+                                        value={watch('fecha_fin') || ''}
+                                        onChange={(val) => setValue('fecha_fin', val)}
+                                        label="Fecha Fin"
+                                        minDate={fechaInicio ? new Date(fechaInicio) : new Date()}
+                                        showTime={true}
+                                    />
+                                </>
+                            )}
+                        </div>
+                    )}
+
+                    {(isEditing || wizardStep === 0) && (
+                        <>
+                            <div className="space-y-1">
+                                <label className="text-xs font-bold text-slate-500 uppercase">Oportunidad Relacionada</label>
+                                <OpportunityCombobox
+                                    value={watch('opportunity_id')}
+                                    accountId={watch('account_id')}
+                                    onChange={(val) => setValue('opportunity_id', val, { shouldDirty: true, shouldValidate: true })}
+                                    disabled={!!initialOpportunityId}
                                 />
-                                <DateTimePicker
-                                    value={watch('fecha_fin') || ''}
-                                    onChange={(val) => setValue('fecha_fin', val)}
-                                    label="Fecha Fin"
-                                    minDate={fechaInicio ? new Date(fechaInicio) : new Date()}
-                                    showTime={true}
+                            </div>
+
+                            <div className="space-y-1">
+                                <label className="text-xs font-bold text-slate-500 uppercase">Cuenta Relacionada</label>
+                                <AccountCombobox
+                                    value={watch('account_id')}
+                                    initialLabel={resolvedAccountName}
+                                    onChange={(val) => {
+                                        setValue('account_id', val, { shouldDirty: true, shouldValidate: true });
+                                        // Logic: Clear opportunity if the new account doesn't match the current opportunity's account
+                                        const currentOppId = getValues('opportunity_id');
+                                        if (currentOppId && opportunityAccountRef.current !== val) {
+                                            setValue('opportunity_id', '', { shouldDirty: true });
+                                            opportunityAccountRef.current = null;
+                                        }
+                                    }}
                                 />
-                            </>
-                        )}
-                    </div>
+                            </div>
+                        </>
+                    )}
 
-                    <div className="space-y-1">
-                        <label className="text-xs font-bold text-slate-500 uppercase">Oportunidad Relacionada</label>
-                        <OpportunityCombobox
-                            value={watch('opportunity_id')}
-                            accountId={watch('account_id')}
-                            onChange={(val) => setValue('opportunity_id', val, { shouldDirty: true, shouldValidate: true })}
-                            disabled={!!initialOpportunityId}
-                        />
-                    </div>
-
-                    <div className="space-y-1">
-                        <label className="text-xs font-bold text-slate-500 uppercase">Cuenta Relacionada</label>
-                        <AccountCombobox
-                            value={watch('account_id')}
-                            onChange={(val) => {
-                                setValue('account_id', val, { shouldDirty: true, shouldValidate: true });
-                                // Logic: Clear opportunity if the new account doesn't match the current opportunity's account
-                                const currentOppId = getValues('opportunity_id');
-                                if (currentOppId && opportunityAccountRef.current !== val) {
-                                    setValue('opportunity_id', '', { shouldDirty: true });
-                                    opportunityAccountRef.current = null;
-                                }
-                            }}
-                        />
-                    </div>
-
-                    <div className="space-y-1">
-                        <textarea
-                            {...register('descripcion')}
-                            rows={3}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all resize-none"
-                            placeholder="Notas adicionales..."
-                        />
-                    </div>
+                    {(isEditing || wizardStep === 2) && (
+                        <div className="space-y-1">
+                            <textarea
+                                {...register('descripcion')}
+                                rows={3}
+                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all resize-none"
+                                placeholder="Notas adicionales..."
+                            />
+                        </div>
+                    )}
 
                     {/* Sync Feedback Display */}
                     {(syncFeedback.planner || syncFeedback.teams) && (
@@ -1539,28 +1895,69 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                         </div>
                     )}
 
-                    <div className="flex gap-3 pt-6 mt-auto border-t border-slate-100 bg-white shrink-0 sticky bottom-0">
-                        <button
-                            type="button"
-                            onClick={onClose}
-                            className="flex-1 px-4 py-3 border border-slate-200 rounded-xl font-bold text-slate-600 hover:bg-slate-50"
-                        >
-                            Cancelar
-                        </button>
-                        <button
-                            type="submit"
-                            disabled={isSubmitting}
-                            className={cn(
-                                "flex-1 text-white px-4 py-3 rounded-xl font-bold shadow-lg transition-colors flex items-center justify-center gap-2",
-                                isSubmitting ? "bg-slate-400 opacity-70" : (tipo === 'TAREA' ? "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200" : "bg-blue-600 hover:bg-blue-700 shadow-blue-200")
-                            )}
-                        >
-                            {isSubmitting ? (
-                                <><Loader2 className="w-5 h-5 animate-spin" /> Procesando...</>
-                            ) : (
-                                isEditing ? 'Guardar Cambios' : (tipo === 'TAREA' ? 'Crear Tarea' : 'Agendar Evento')
-                            )}
-                        </button>
+                    <div className="flex justify-end items-center gap-3 pt-6 mt-auto border-t border-slate-100 bg-white shrink-0 sticky bottom-0">
+                        {isEditing ? (
+                            <>
+                                <AutoSaveIndicator status={autoSaveStatus} />
+                                <button
+                                    type="button"
+                                    onClick={onClose}
+                                    className="px-6 py-3 border border-slate-200 rounded-xl font-bold text-slate-600 hover:bg-slate-50 transition text-sm"
+                                >
+                                    Cerrar
+                                </button>
+                            </>
+                        ) : (
+                            <>
+                                {wizardStep > 0 ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => setWizardStep(prev => prev - 1)}
+                                        className="px-6 py-3 border border-slate-200 rounded-xl font-bold text-slate-600 hover:bg-slate-50 transition text-sm"
+                                    >
+                                        Atrás
+                                    </button>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        onClick={onClose}
+                                        className="px-6 py-3 border border-slate-200 rounded-xl font-bold text-slate-600 hover:bg-slate-50 transition text-sm"
+                                    >
+                                        Cancelar
+                                    </button>
+                                )}
+
+                                {wizardStep < ACTIVITY_WIZARD_LAST_STEP ? (
+                                    <button
+                                        type="button"
+                                        onClick={async () => {
+                                            let fields: any[] = [];
+                                            if (wizardStep === 0) fields = ["asunto"];
+                                            else if (wizardStep === 1) {
+                                                fields = ["clasificacion_id", "fecha_inicio"];
+                                                if (tipo === 'EVENTO') fields.push("fecha_fin");
+                                            }
+                                            const isValid = await form.trigger(fields as any);
+                                            if (isValid) setWizardStep(prev => Math.min(ACTIVITY_WIZARD_LAST_STEP, prev + 1));
+                                        }}
+                                        className="px-6 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition text-sm"
+                                    >
+                                        Siguiente
+                                    </button>
+                                ) : (
+                                    <button
+                                        type="submit"
+                                        disabled={isSubmitting || !canSubmitFinalStep}
+                                        className={cn(
+                                            "px-8 py-3 text-white rounded-xl font-bold shadow-lg transition-all text-sm",
+                                            (isSubmitting || !canSubmitFinalStep) ? "bg-slate-400 opacity-70 cursor-not-allowed" : (tipo === 'TAREA' ? "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200" : "bg-blue-600 hover:bg-blue-700 shadow-blue-200")
+                                        )}
+                                    >
+                                        {isSubmitting ? 'Creando...' : (tipo === 'TAREA' ? 'Crear Tarea' : 'Agendar Evento')}
+                                    </button>
+                                )}
+                            </>
+                        )}
                     </div>
                 </form>
             </div>

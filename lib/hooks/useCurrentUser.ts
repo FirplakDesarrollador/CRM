@@ -1,3 +1,4 @@
+import React from 'react';
 import { useUserStore, UserRole, CurrentUser } from '@/lib/stores/useUserStore';
 
 // Re-export types for backward compatibility
@@ -21,11 +22,14 @@ export function useCurrentUser() {
     // If viewMode is set, it overrides the real role
     const effectiveRole = viewMode || realUser?.role || null;
 
-    // Create a patched user object if viewMode is active, so consuming components
-    // that check user.role directly will see the simulated role.
-    const user = realUser ? { ...realUser, role: effectiveRole as UserRole } : null;
+    // PERF FIX: Memoize user object and return value to prevent downstream re-renders
+    // (specifically in Sidebar.tsx and visibleNavItems calculation)
+    const user = React.useMemo(() => {
+        if (!realUser) return null;
+        return { ...realUser, role: effectiveRole as UserRole };
+    }, [realUser, effectiveRole]);
 
-    return {
+    return React.useMemo(() => ({
         user,
         role: effectiveRole,
         // Expose the real role for the config page to allow toggling back
@@ -42,5 +46,5 @@ export function useCurrentUser() {
         hasCoordinatorAccess: effectiveRole === 'COORDINADOR' || effectiveRole === 'ADMIN',
         // Check if user is active
         isActive: user?.is_active || false,
-    };
+    }), [user, effectiveRole, realUser?.role, viewMode, setViewMode, isLoading, error]);
 }

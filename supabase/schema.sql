@@ -72,6 +72,8 @@ CREATE TABLE "CRM_Productos" (
     precio_base NUMERIC(15,2) DEFAULT 0,
     moneda_id VARCHAR DEFAULT 'COP',
     is_active BOOLEAN DEFAULT TRUE,
+    planta VARCHAR(100),
+    familia VARCHAR(255),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );

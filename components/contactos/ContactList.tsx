@@ -1,8 +1,10 @@
 "use client";
 
 import { useContacts } from "@/lib/hooks/useContacts";
-import { useState } from "react";
+import { useContactsServer } from "@/lib/hooks/useContactsServer";
+import { useState, useEffect } from "react";
 import { ContactForm } from "./ContactForm";
+import { CreateContactWizard } from "./CreateContactWizard";
 import { LocalContact } from "@/lib/db";
 import { Edit2, Trash2, Phone, Mail, User, Search } from "lucide-react";
 import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
@@ -12,7 +14,13 @@ interface ContactListProps {
 }
 
 export function ContactList({ accountId }: ContactListProps) {
-    const { contacts, deleteContact } = useContacts(accountId);
+    const { 
+        data: contacts, 
+        loading: isLoadingContacts, 
+        refresh 
+    } = useContactsServer({ accountId, pageSize: 100 });
+    
+    const { deleteContact } = useContacts(accountId);
     const [isEditing, setIsEditing] = useState(false);
     const [editingContact, setEditingContact] = useState<LocalContact | undefined>(undefined);
     const [searchTerm, setSearchTerm] = useState("");
@@ -35,6 +43,7 @@ export function ContactList({ accountId }: ContactListProps) {
     const handleSuccess = () => {
         setIsEditing(false);
         setEditingContact(undefined);
+        refresh(); // Force refresh to see new/updated data
     };
 
     const handleDeleteClick = (contact: LocalContact) => {
@@ -47,6 +56,7 @@ export function ContactList({ accountId }: ContactListProps) {
         setIsDeleting(true);
         try {
             await deleteContact(contactToDelete.id);
+            refresh(); // Refresh server list after local deletion
             setShowDeleteModal(false);
             setContactToDelete(null);
         } catch (error) {
@@ -70,14 +80,24 @@ export function ContactList({ accountId }: ContactListProps) {
     });
 
     if (isEditing) {
-        return (
-            <ContactForm
-                accountId={accountId}
-                existingContact={editingContact}
-                onSuccess={handleSuccess}
-                onCancel={() => setIsEditing(false)}
-            />
-        );
+        if (editingContact) {
+            return (
+                <ContactForm
+                    accountId={accountId}
+                    existingContact={editingContact}
+                    onSuccess={handleSuccess}
+                    onCancel={() => setIsEditing(false)}
+                />
+            );
+        } else {
+            return (
+                <CreateContactWizard
+                    accountId={accountId}
+                    onSuccess={handleSuccess}
+                    onCancel={() => setIsEditing(false)}
+                />
+            );
+        }
     }
 
     return (
@@ -88,7 +108,7 @@ export function ContactList({ accountId }: ContactListProps) {
                     <div className="relative w-full sm:w-64">
                         <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
                         <input
-                            className="w-full pl-9 pr-4 py-2 border rounded-lg text-sm bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700"
+                            className="w-full pl-9 pr-4 py-2 border rounded-lg text-sm bg-white border-slate-200"
                             placeholder="Buscar contactos..."
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
@@ -105,17 +125,21 @@ export function ContactList({ accountId }: ContactListProps) {
                 </div>
             </div>
 
-            {!filteredContacts || filteredContacts.length === 0 ? (
-                <div className="text-center py-8 text-gray-500 italic bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-dashed" data-testid="contacts-empty-state">
+            {isLoadingContacts && (!contacts || contacts.length === 0) ? (
+                <div className="flex justify-center py-12">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#254153]"></div>
+                </div>
+            ) : (!contacts || contacts.length === 0) ? (
+                <div className="text-center py-8 text-gray-500 italic bg-slate-50 rounded-lg border border-dashed" data-testid="contacts-empty-state">
                     {searchTerm ? "No se encontraron contactos que coincidan con tu búsqueda." : "No hay contactos registrados."}
                 </div>
             ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4" data-testid="contacts-grid">
-                    {filteredContacts.map(contact => (
+                    {filteredContacts?.map(contact => (
                         <div 
                             key={contact.id} 
                             data-testid={`contact-card-${contact.id}`}
-                            className="group p-5 border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-2xl shadow-sm relative hover:shadow-lg hover:border-[#254153]/20 transition-all duration-300 flex flex-col h-full"
+                            className="group p-5 border border-slate-200 bg-white rounded-2xl shadow-sm relative hover:shadow-lg hover:border-[#254153]/20 transition-all duration-300 flex flex-col h-full"
                         >
                             <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
                                 <button
@@ -139,7 +163,7 @@ export function ContactList({ accountId }: ContactListProps) {
                             <div className="flex flex-col gap-3 flex-1">
                                 <div className="space-y-1 pr-16">
                                     <div className="flex items-center gap-2 flex-wrap">
-                                        <span className="font-extrabold text-slate-900 dark:text-slate-100 truncate" title={contact.nombre}>
+                                        <span className="font-extrabold text-slate-900 truncate" title={contact.nombre}>
                                             {contact.nombre}
                                         </span>
                                         {contact.es_principal && (
@@ -148,16 +172,16 @@ export function ContactList({ accountId }: ContactListProps) {
                                             </span>
                                         )}
                                     </div>
-                                    <span className="text-xs font-bold text-slate-500 dark:text-slate-400 leading-tight uppercase tracking-tight">
+                                    <span className="text-xs font-bold text-slate-500 leading-tight uppercase tracking-tight">
                                         {contact.cargo || "Sin cargo registrado"}
                                     </span>
                                 </div>
 
-                                <div className="mt-auto space-y-2.5 pt-4 border-t border-slate-50 dark:border-slate-800">
+                                <div className="mt-auto space-y-2.5 pt-4 border-t border-slate-50">
                                     {contact.email && (
                                         <a
                                             href={`mailto:${contact.email}`}
-                                            className="flex items-center gap-2.5 text-slate-600 dark:text-slate-300 hover:text-[#254153] transition-colors group/link"
+                                            className="flex items-center gap-2.5 text-slate-600 hover:text-[#254153] transition-colors group/link"
                                         >
                                             <Mail size={13} className="text-slate-400 group-hover/link:text-blue-500 shrink-0" />
                                             <span className="text-sm font-medium truncate" title={contact.email}>{contact.email}</span>
@@ -166,7 +190,7 @@ export function ContactList({ accountId }: ContactListProps) {
                                     {contact.telefono && (
                                         <a
                                             href={`tel:${contact.telefono}`}
-                                            className="flex items-center gap-2.5 text-slate-600 dark:text-slate-300 hover:text-[#254153] transition-colors group/link"
+                                            className="flex items-center gap-2.5 text-slate-600 hover:text-[#254153] transition-colors group/link"
                                         >
                                             <Phone size={13} className="text-slate-400 group-hover/link:text-emerald-500 shrink-0" />
                                             <span className="text-sm font-medium">{contact.telefono}</span>
