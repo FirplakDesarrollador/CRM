@@ -4,6 +4,21 @@
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
 
+## 2026-07-14 - Lint e Ingest: Ajuste en Filtro de Colaboración
+
+Ejecución de verificación sobre el filtro de colaboración en oportunidades.
+- Causa: El filtro original de "Colaboración" excluía las oportunidades donde el usuario activo era el propietario pero contaba con colaboradores.
+- Cambio: Se modificó la lógica en `useOpportunitiesServer.ts` (tanto para DB online como para el motor offline Dexie) para incluir cualquier oportunidad compartida donde el usuario sea colaborador O sea el propietario y tenga colaboradores asignados.
+- Estructura y enlaces: No hay páginas huérfanas ni enlaces rotos tras el cambio.
+- Páginas actualizadas: `wiki/pages/oportunidades.md`.
+
+## 2026-07-14 - Ingest: Prevención de Duplicados en Oportunidades
+
+Implementación de un Trigger PL/pgSQL en base de datos para prevenir oportunidades clonadas.
+- Causa: Se detectó la creación de múltiples oportunidades idénticas en el mismo microsegundo, lo cual inflaba las métricas.
+- Cambio: Se creó la función `prevent_duplicate_oportunidades` y el trigger `trigger_prevent_duplicate_oportunidades` en `CRM_Oportunidades` que bloquea (lanza EXCEPTION) si se detecta una oportunidad con el mismo `account_id` y `nombre` creada hace menos de 10 segundos.
+- Páginas actualizadas: `wiki/pages/oportunidades.md`.
+
 ## 2026-07-10 - Lint: Confirmacion de cambios de checklist Planner
 
 Ejecucion solicitada del workflow `.agents/workflows/wiki-lint.md` sobre los cambios recientes.

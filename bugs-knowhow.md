@@ -599,3 +599,25 @@ Prevention Rule:
 
 Tags:
 [react] [security] [data-leak] [filtering] [rbac]
+
+---
+
+## [Bug ID: 20260714-01]
+
+Context:
+`app/cuentas/page.tsx`. Al seleccionar una cuenta en la tabla, el estado `editingAccount` se actualizaba inmediatamente pero el parámetro `id` de la URL se actualizaba mediante un useEffect con debounce de 500ms.
+
+Problem:
+Al seleccionar una cuenta diferente en la tabla, el panel se actualizaba temporalmente pero inmediatamente volvía a la cuenta anterior, impidiendo cambiar de selección.
+
+Root Cause:
+El `useEffect` de deep-linking se disparaba debido al cambio de `editingAccount?.id`. Al evaluar que el `id` en la URL era diferente del nuevo `editingAccount.id` (porque la URL aún no se había actualizado por el debounce de 500ms), el efecto asumía que la URL tenía la verdad y revertía `editingAccount` a la cuenta del ID viejo de la URL.
+
+Fix Applied:
+Se implementó un ref `lastProcessedUrlIdRef` para almacenar el último ID de la URL que fue procesado. Si el ID de la URL no ha cambiado con respecto al de la referencia, el efecto retorna inmediatamente, evitando revertir los cambios de selección local que aún no se han reflejado en la URL.
+
+Prevention Rule:
+**Debounced URL State Sync vs Deep Linking**: Al sincronizar un estado local con la URL de forma asíncrona o mediante un debounce, el efecto de "deep linking" (que sincroniza de la URL al estado) debe ignorar los cambios que provienen del estado local. Usa una referencia (`useRef`) para recordar el último parámetro de la URL procesado y evitar bucles o reversiones de estado indeseados mientras la URL se pone al día.
+
+Tags:
+[react] [deep-linking] [state-sync] [debounce] [accounts]

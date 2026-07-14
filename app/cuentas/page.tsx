@@ -3,7 +3,7 @@
 import { useAccountsServer, AccountServer } from "@/lib/hooks/useAccountsServer";
 import { AccountForm } from "@/components/cuentas/AccountForm";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Suspense, useEffect, useState, useCallback } from "react";
+import { Suspense, useEffect, useState, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { Plus, Search, Building, User, Pencil, Medal, Trash2, ArrowUpDown, ChevronUp, ChevronDown, MapPin, Briefcase, DollarSign } from "lucide-react";
 import { UserPickerFilter } from "@/components/cuentas/UserPickerFilter";
@@ -54,6 +54,7 @@ function AccountsContent() {
 
     const [showCreate, setShowCreate] = useState(false);
     const [editingAccount, setEditingAccount] = useState<any>(null);
+    const lastProcessedUrlIdRef = useRef<string | null>(null);
     const [accountToDelete, setAccountToDelete] = useState<any>(null);
     const [inputValue, setInputValue] = useState(() => {
         const fromUrl = searchParams.get('search');
@@ -129,7 +130,18 @@ function AccountsContent() {
     // Deep linking: Automatically fetch and open account by ID from URL
     useEffect(() => {
         const id = searchParams.get('id');
-        if (!id || editingAccount?.id === id) return;
+        
+        if (id === lastProcessedUrlIdRef.current) return;
+        lastProcessedUrlIdRef.current = id;
+
+        if (!id) {
+            if (editingAccount) {
+                setEditingAccount(null);
+            }
+            return;
+        }
+
+        if (editingAccount?.id === id) return;
 
         const findAndOpen = async () => {
             // 1. Check if already in current list
@@ -158,7 +170,8 @@ function AccountsContent() {
         };
 
         findAndOpen();
-    }, [searchParams, accounts, editingAccount?.id]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [searchParams, accounts]);
 
     // Sync to URL & SessionStorage
     useEffect(() => {
