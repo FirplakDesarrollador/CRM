@@ -26,6 +26,11 @@ Una oportunidad puede tener colaboradores además del propietario
 colaboradores participan en el reparto de [[comisiones]]
 (`20260211_update_commission_logic_collaborators.sql`). Soft-delete con `is_deleted`.
 
+**Filtro "Colaboración":** 
+En `/oportunidades`, el filtro o pestaña "Colaboración" incluye ahora **todas** las oportunidades que involucren un esquema compartido para el usuario activo:
+1. Oportunidades donde el usuario es colaborador.
+2. Oportunidades que el usuario creó (es propietario) y a las que agregó colaboradores.
+
 ## Transferencias
 
 Las oportunidades pueden transferirse entre vendedores (permiso `transfer_opportunity`,
@@ -53,6 +58,7 @@ agrupación por fase `20260304`) que agrupan oportunidades por fase. Ver
 ## Notas operativas
 
 - `CreateOpportunityWizard` usa `LAST_STEP_INDEX` y una ventana corta de habilitacion para impedir que un doble clic al avanzar cree la oportunidad antes de revisar el ultimo paso de Equipo.
+- **Prevención de Duplicados (Base de datos):** Se implementó un trigger (`trigger_prevent_duplicate_oportunidades`) que lanza una excepción bloqueando la inserción si se detecta otra oportunidad creada hace menos de 10 segundos con el mismo `account_id` y `nombre`. Esto previene la creación de "clones exactos" por errores de red, reintentos de API o clics múltiples.
 
 ## Fuentes
 
