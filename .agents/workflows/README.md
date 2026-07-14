@@ -12,6 +12,7 @@
 | :-- | :-- | :-- |
 | `test-responsive.md` | `/test-responsive` | Auditoría de diseño responsivo móvil en todos los módulos |
 | `update-version.md` | `/update-version` | Bump de versión del CRM en todos los archivos afectados |
+| `validacion-fusion.md` | `/validacion-fusion` | Validación de nuevas funcionalidades de la rama actual vs una rama base elegida antes de fusionar |
 
 ## Formato
 
