@@ -4,6 +4,14 @@
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
 
+## 2026-07-16 - Ingest: Saneamiento y Prevención de Actividades Duplicadas
+
+Saneamiento del historial de actividades y prevención de duplicados por doble clic en actividades.
+- Causa: Actividades duplicadas exactas o muy cercanas en tiempo en `CRM_Actividades`.
+- Saneamiento: Se ejecutó un script SQL en Supabase que eliminó 47 registros duplicados exactos o con diferencia menor a 15 minutos en el mismo día (conservando la primera de cada conjunto).
+- Prevención: Se implementó un mecanismo de de-duplicación en el hook cliente `useActivities.ts` usando una caché en memoria a corto plazo (5 segundos) para `createActivity`. Si se intenta crear una actividad con los mismos datos clave de forma consecutiva en menos de 5 segundos, la llamada se bloquea y retorna el ID existente.
+- Páginas actualizadas: `wiki/pages/actividades.md`.
+
 ## 2026-07-14 - Lint e Ingest: Ajuste en Filtro de Colaboración
 
 Ejecución de verificación sobre el filtro de colaboración en oportunidades.
