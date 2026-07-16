@@ -258,28 +258,26 @@ function AccountsContent() {
         { data: 'actualizado', title: 'Actualizado', type: 'text', readOnly: true }
     ];
 
-    if (isAdmin) {
-        hotColumns.unshift({
-            data: 'acciones',
-            title: 'Acciones',
-            renderer: function (instance: any, td: HTMLTableCellElement, row: number, col: number, prop: string, value: any, cellProperties: any) {
-                td.innerHTML = `
-                    <div style="text-align: center; white-space: nowrap;">
-                        <button class="edit-action-btn" title="Editar" style="cursor:pointer; color:#2563eb; background:none; border:none; padding:0 4px; margin:0; display:inline-block; vertical-align:middle;">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>
-                        </button>
-                        <button class="delete-action-btn" title="Eliminar" style="cursor:pointer; color:#dc2626; background:none; border:none; padding:0 4px; margin:0; display:inline-block; vertical-align:middle;">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
-                        </button>
-                    </div>
-                `;
-                td.className = "htCenter htMiddle";
-                return td;
-            },
-            readOnly: true,
-            width: 80
-        } as any);
-    }
+    hotColumns.unshift({
+        data: 'acciones',
+        title: 'Acciones',
+        renderer: function (instance: any, td: HTMLTableCellElement, row: number, col: number, prop: string, value: any, cellProperties: any) {
+            td.innerHTML = `
+                <div style="text-align: center; white-space: nowrap;">
+                    <button class="edit-action-btn" title="Editar" style="cursor:pointer; color:#2563eb; background:none; border:none; padding:0 4px; margin:0; display:inline-block; vertical-align:middle;">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>
+                    </button>
+                    ${isAdmin ? `<button class="delete-action-btn" title="Eliminar" style="cursor:pointer; color:#dc2626; background:none; border:none; padding:0 4px; margin:0; display:inline-block; vertical-align:middle;">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+                    </button>` : ''}
+                </div>
+            `;
+            td.className = "htCenter htMiddle";
+            return td;
+        },
+        readOnly: true,
+        width: 80
+    } as any);
 
     return (
         <div data-testid="accounts-page" className="space-y-4">
@@ -439,15 +437,15 @@ function AccountsContent() {
                                     </div>
                                 </div>
                                 
-                                {isAdmin && (
-                                    <div className="flex divide-x divide-slate-100 border-t border-slate-100 bg-white">
-                                        <button 
-                                            onClick={() => handleEdit(acc)}
-                                            className="flex-1 py-2.5 flex items-center justify-center gap-1.5 text-blue-600 hover:bg-blue-50 font-medium text-xs transition-colors"
-                                        >
-                                            <Pencil className="w-3.5 h-3.5" />
-                                            Editar
-                                        </button>
+                                <div className="flex divide-x divide-slate-100 border-t border-slate-100 bg-white">
+                                    <button 
+                                        onClick={() => handleEdit(acc)}
+                                        className="flex-1 py-2.5 flex items-center justify-center gap-1.5 text-blue-600 hover:bg-blue-50 font-medium text-xs transition-colors"
+                                    >
+                                        <Pencil className="w-3.5 h-3.5" />
+                                        Editar
+                                    </button>
+                                    {isAdmin && (
                                         <button 
                                             onClick={() => {
                                                 if (window.confirm(`¿Estás seguro de que deseas eliminar la cuenta "${acc.nombre}"?`)) {
@@ -459,8 +457,8 @@ function AccountsContent() {
                                             <Trash2 className="w-3.5 h-3.5" />
                                             Eliminar
                                         </button>
-                                    </div>
-                                )}
+                                    )}
+                                </div>
                             </div>
                         ))}
                     </div>
