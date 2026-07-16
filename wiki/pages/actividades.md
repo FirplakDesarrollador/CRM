@@ -32,6 +32,7 @@ visitas y eventos del equipo comercial. Pueden asociarse a [[oportunidades]] y a
 - El wizard de creacion de `CreateActivityModal` protege el submit final con `ACTIVITY_WIZARD_LAST_STEP`: solo crea desde el ultimo paso y el boton final queda deshabilitado brevemente al entrar a "Detalles".
 - La ruta dev-only `/e2e/activities-wizard` monta el modal sin login y precarga una clasificacion local para probar que un doble clic en "Siguiente" no cree la actividad antes del ultimo paso.
 - El checklist de Planner en tareas vive fuera de `react-hook-form`, por lo que tiene autosave propio: guarda `checklist` en `_sync_metadata`, lo encola para Supabase/Dexie mediante `useActivities.updateActivity` y manda PATCH a `/api/microsoft/planner/tasks/[taskId]`. Si el PATCH falla, marca `pending_planner_update` para reintento desde `SyncEngine`.
+- **Prevención de duplicados (Debounce por doble clic)**: El hook `useActivities.ts` implementa una caché en memoria a corto plazo (5 segundos) de la última actividad creada (`lastCreatedActivity`). Si se intenta crear una actividad con datos clave idénticos dentro de este intervalo, se intercepta la llamada, se advierte en consola y se retorna el ID anterior sin insertar un nuevo registro, evitando duplicados en Dexie y Supabase.
 
 ## Fuentes
 
