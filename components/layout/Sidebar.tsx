@@ -25,6 +25,7 @@ import {
     DollarSign,
     BarChart3,
     Store,
+    Tent,
 } from "lucide-react";
 import packageJson from "../../package.json";
 
@@ -40,6 +41,7 @@ const NAV_ITEMS = [
     { label: "Tiendas", href: "/tiendas", icon: Store },
     { label: "Informes", href: "/informes", icon: FileSpreadsheet, requiredRole: 'ADMIN' },
     { label: "Usuarios", href: "/usuarios", icon: UserCircle, requiredRole: 'ADMIN' },
+    { label: "Ferias", href: "/ferias", icon: Tent, requiredRole: 'ADMIN' },
     { label: "Configuración", href: "/configuracion", icon: Settings },
 ];
 
