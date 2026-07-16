@@ -31,6 +31,18 @@ function toISODateString(dateInput: string | Date | undefined | null): string {
 
 export { type LocalActivity };
 
+// Cache en memoria para prevenir duplicados por clics seguidos (doble clic)
+interface RecentActivityCreation {
+    userId: string;
+    asunto: string;
+    accountId?: string;
+    opportunityId?: string;
+    fechaInicio: string;
+    timestamp: number;
+    id: string;
+}
+let lastCreatedActivity: RecentActivityCreation | null = null;
+
 export function useActivities(filters?: { opportunity_id?: string, advisor_id?: string | null }) {
     const activities = useLiveQuery(
         () => {
@@ -81,12 +93,43 @@ export function useActivities(filters?: { opportunity_id?: string, advisor_id?: 
         }
 
         if (!userId) throw new Error("No authenticated user (even offline)");
+
+        // Debounce / Prevención de duplicación por clics rápidos
+        const now = Date.now();
+        const startIso = toISODateString(data.fecha_inicio);
+        const asuntoTrimmed = (data.asunto || 'Nueva Actividad').trim();
+
+        if (
+            lastCreatedActivity &&
+            lastCreatedActivity.userId === userId &&
+            lastCreatedActivity.asunto === asuntoTrimmed &&
+            lastCreatedActivity.accountId === data.account_id &&
+            lastCreatedActivity.opportunityId === data.opportunity_id &&
+            lastCreatedActivity.fechaInicio === startIso &&
+            (now - lastCreatedActivity.timestamp) < 5000 // 5 segundos
+        ) {
+            console.warn("[useActivities] Bloqueada creación de actividad duplicada (doble clic detectado):", lastCreatedActivity.id);
+            return lastCreatedActivity.id;
+        }
+
         const id = uuidv4();
+
+        // Registrar esta creación como la más reciente
+        lastCreatedActivity = {
+            userId,
+            asunto: asuntoTrimmed,
+            accountId: data.account_id,
+            opportunityId: data.opportunity_id,
+            fechaInicio: startIso,
+            timestamp: now,
+            id
+        };
+
         const newActivity: LocalActivity = {
             id,
             user_id: userId,
             tipo_actividad: data.tipo_actividad || 'EVENTO',
-            asunto: (data.asunto || 'Nueva Actividad').trim(),
+            asunto: asuntoTrimmed,
             descripcion: data.descripcion || undefined,
             fecha_inicio: toISODateString(data.fecha_inicio),
             fecha_fin: data.fecha_fin ? toISODateString(data.fecha_fin) : undefined,
