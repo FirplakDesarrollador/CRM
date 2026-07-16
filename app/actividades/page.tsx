@@ -28,7 +28,8 @@ import {
     Briefcase,
     User as UserIcon,
     X,
-    CheckCircle
+    CheckCircle,
+    AlertTriangle
 } from 'lucide-react';
 
 import { cn } from '@/components/ui/utils';
@@ -389,6 +390,25 @@ function ActivitiesContent() {
         });
     }, [activities, filterType, filterClassification, filterSubclassification, debouncedSearchQuery, canViewAll, user, collaborativeOppIds, filterUser, filterStatus, filterChannel, filterDateFrom, filterDateTo, opportunities, accounts]);
 
+    // Count overdue activities for badge (computed from role-filtered but ignoring current status filter)
+    const overdueCount = useMemo(() => {
+        if (!activities) return 0;
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        return activities.filter(act => {
+            if (!canViewAll && user) {
+                const isOwner = act.user_id === user.id;
+                const isCollaborator = act.opportunity_id ? collaborativeOppIds.has(act.opportunity_id) : false;
+                if (!isOwner && !isCollaborator) return false;
+            }
+            if (act.is_completed) return false;
+            if (act.is_deleted) return false;
+            const actDate = new Date(act.fecha_inicio);
+            actDate.setHours(0, 0, 0, 0);
+            return actDate < today;
+        }).length;
+    }, [activities, canViewAll, user, collaborativeOppIds]);
+
     // For agenda/all views: filter by selected date + sort
     const filteredActivities = useMemo(() => {
         let result = globallyFilteredActivities;
@@ -453,6 +473,32 @@ function ActivitiesContent() {
                                 onUserSelect={(id) => setFilterUser(id || "")} 
                             />
                         )}
+
+                        {/* Overdue Quick Filter */}
+                        <button
+                            data-testid="activities-overdue-filter"
+                            onClick={() => setFilterStatus(filterStatus === 'overdue' ? 'all' : 'overdue')}
+                            className={cn(
+                                "flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-bold border transition-all",
+                                filterStatus === 'overdue'
+                                    ? "bg-red-50 text-red-600 border-red-200 shadow-sm shadow-red-100"
+                                    : "bg-white text-slate-500 border-slate-200 hover:border-red-200 hover:text-red-500"
+                            )}
+                            title="Filtrar actividades atrasadas"
+                        >
+                            <AlertTriangle className="w-4 h-4" />
+                            <span className="hidden sm:inline">Atrasadas</span>
+                            {overdueCount > 0 && (
+                                <span className={cn(
+                                    "ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-black leading-none",
+                                    filterStatus === 'overdue'
+                                        ? "bg-red-500 text-white"
+                                        : "bg-red-100 text-red-600"
+                                )}>
+                                    {overdueCount}
+                                </span>
+                            )}
+                        </button>
 
                         {/* Clear Filters Button */}
                         {(searchQuery || filterType || filterClassification || filterSubclassification || filterUser || filterStatus !== "all" || filterChannel || filterDateFrom || filterDateTo) && (
