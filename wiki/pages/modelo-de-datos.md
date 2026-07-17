@@ -19,8 +19,8 @@ mantiene un espejo local en IndexedDB vía Dexie (`lib/db.ts`) con interfaces `L
 | `CRM_CotizacionItems` | Líneas de producto de una cotización, con descuentos |
 | `CRM_Pedidos` / `CRM_PedidoItems` | Pedidos logísticos derivados de cotizaciones ganadoras (campos `EXTRA_` de SAP) |
 | `CRM_Productos` | Catálogo de productos |
-| `CRM_ListaDePrecios` | Precios por columna/canal. Ver [[canales-de-venta]] |
-| `CRM_Canales` | Los 5 canales de venta inmutables. Ver [[canales-de-venta]] |
+| `CRM_ListaDePrecios` | Precios por columna/canal, incluido `precio_feria`. Ver [[canales-de-venta]] |
+| `CRM_Canales` | Canales de venta y columna de precio asociada, incluido `FERIA`. Ver [[canales-de-venta]] |
 | `CRM_SapIntegrationQueue` | Cola de integración hacia SAP. Ver [[integraciones]] |
 | `CRM_Files` | Archivos adjuntos |
 | `CRM_Parameters` | Parámetros de configuración |
@@ -41,6 +41,7 @@ mantiene un espejo local en IndexedDB vía Dexie (`lib/db.ts`) con interfaces `L
 - **Subclasificaciones** (`20260119`, `20260212`): subclasificación de cuentas por canal.
 - **Auditoría**: `CRM_Audit_Cuentas` registra cambios en cuentas.
 - **S&OP** (`20260708_add_sop_columns`): campos `planta` y `familia` en `CRM_ListaDePrecios` y `CRM_Productos` para el informe de planificación.
+- **Tiendas-Ferias e inventario** (`20260716_stores_fairs_catalog_inventory`): `CRM_OrigenesOportunidad`, `CRM_InventarioMovimientos`, `CRM_InventarioMovimientoAuditoria` y la vista calculada `CRM_InventarioDisponible`. Las reservas reducen la disponibilidad para futuras salidas sin reducir la existencia física.
 
 ## Convenciones
 

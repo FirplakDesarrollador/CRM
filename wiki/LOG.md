@@ -3,6 +3,13 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-07-16 - Tiendas-Ferias, Catálogo e Inventarios
+
+- Tiendas se renombró a Tiendas-Ferias y ahora permite canal, subclasificación automática, origen configurable y venta con precio de feria.
+- Se añadieron Catálogo (`/catalogo`) e Inventarios (`/inventarios`, solo ADMIN).
+- El inventario se deriva de entradas, salidas y reservas; el trigger evita salidas o reservas sin disponibilidad y audita ediciones.
+- Migración principal: `20260716_stores_fairs_catalog_inventory.sql`.
+
 
 ## 2026-07-16 - Ingest: Saneamiento y Prevención de Actividades Duplicadas
 
