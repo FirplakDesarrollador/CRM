@@ -77,6 +77,7 @@ node_modules/
 
 # SQL Dumps and temporary scripts
 *.sql
+!supabase/migrations/20260716_stores_fairs_catalog_inventory.sql
 temp_*.ts
 temp_*.tsx
 temp_*.txt
@@ -91,6 +92,9 @@ temp_*.txt
 /execution/
 /test-results/
 /tests/
+!/tests/
+/tests/*
+!/tests/salesChannels.test.ts
 
 
 # n8n-as-code AI helpers

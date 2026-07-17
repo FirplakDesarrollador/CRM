@@ -10,15 +10,18 @@ export interface PriceListProduct {
     lista_base_obras: number | null; // Nuevo
     distribuidor_pvp_iva: number | null;
     pvp_sin_iva: number | null;
+    precio_feria: number | null;
+    planta?: string | null;
+    familia?: string | null;
 }
 
-export function useProductSearch(searchTerm: string, categoriaPrefijo?: string) {
+export function useProductSearch(searchTerm: string, categoriaPrefijo?: string, loadInitial = false) {
     const [products, setProducts] = useState<PriceListProduct[]>([]);
     const [isLoading, setIsLoading] = useState(false);
 
     useEffect(() => {
         // If there's no prefix AND search term is too short, return empty
-        if (!categoriaPrefijo && (!searchTerm || searchTerm.length < 2)) {
+        if (!loadInitial && !categoriaPrefijo && (!searchTerm || searchTerm.length < 2)) {
             setProducts([]);
             return;
         }
@@ -30,7 +33,7 @@ export function useProductSearch(searchTerm: string, categoriaPrefijo?: string) 
                 // We use ilike for partial matches in both
                 let query = supabase
                     .from('CRM_ListaDePrecios')
-                    .select('id, numero_articulo, descripcion, lista_base_cop, lista_base_exportaciones, lista_base_obras, distribuidor_pvp_iva, pvp_sin_iva')
+                    .select('id, numero_articulo, descripcion, lista_base_cop, lista_base_exportaciones, lista_base_obras, distribuidor_pvp_iva, pvp_sin_iva, precio_feria, planta, familia')
                     .order('numero_articulo', { ascending: true })
                     .limit(50);
 
@@ -86,7 +89,7 @@ export function useProductSearch(searchTerm: string, categoriaPrefijo?: string) 
         // Debounce search
         const timeoutId = setTimeout(searchProducts, 300);
         return () => clearTimeout(timeoutId);
-    }, [searchTerm, categoriaPrefijo]);
+    }, [searchTerm, categoriaPrefijo, loadInitial]);
 
     return { products, isLoading };
 }
