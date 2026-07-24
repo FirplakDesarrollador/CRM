@@ -23,7 +23,6 @@ import {
     BookOpen,
     Warehouse
 } from "lucide-react";
-import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 
 const MOBILE_NAV = [
     { label: "Inicio", href: "/", icon: Home },
