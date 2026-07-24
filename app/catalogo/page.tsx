@@ -12,6 +12,7 @@ export default function CatalogPage() {
     const [family, setFamily] = useState("");
     const [plant, setPlant] = useState("");
     const [onlyAvailable, setOnlyAvailable] = useState(false);
+    const [onlyFeria, setOnlyFeria] = useState(false);
     
     const { plants, families } = useProductFilterOptions();
     const { products, isLoading } = useProductSearch(search, undefined, true, plant, family);
@@ -22,6 +23,7 @@ export default function CatalogPage() {
 
     const filtered = products.filter(product => {
         if (onlyAvailable && (inventory.get(product.id)?.disponible || 0) <= 0) return false;
+        if (onlyFeria && (!product.precio_feria || product.precio_feria <= 0)) return false;
         return true;
     });
 
@@ -40,10 +42,11 @@ export default function CatalogPage() {
                     <Search className="absolute left-3 top-3 w-5 h-5 text-slate-400" />
                     <input value={search} onChange={event => setSearch(event.target.value)} placeholder="Buscar por palabras sin importar el orden: 48x43 Lavamanos" className="w-full pl-11 pr-4 py-3 border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-cyan-500" />
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
                     <label className="space-y-1 text-xs font-bold text-slate-500"><span>FAMILIA</span><select value={family} onChange={event => setFamily(event.target.value)} className="w-full p-2.5 border rounded-lg bg-white text-sm text-slate-800"><option value="">Todas</option>{families.map(item => <option key={item}>{item}</option>)}</select></label>
                     <label className="space-y-1 text-xs font-bold text-slate-500"><span>PLANTA</span><select value={plant} onChange={event => setPlant(event.target.value)} className="w-full p-2.5 border rounded-lg bg-white text-sm text-slate-800"><option value="">Todas</option>{plants.map(item => <option key={item}>{item}</option>)}</select></label>
-                    <label className="flex items-center gap-2 mt-5 text-sm font-semibold text-slate-700"><input type="checkbox" checked={onlyAvailable} onChange={event => setOnlyAvailable(event.target.checked)} className="w-4 h-4" /> Solo disponibles</label>
+                    <label className="flex items-center gap-2 mt-5 text-sm font-semibold text-slate-700 cursor-pointer"><input type="checkbox" checked={onlyAvailable} onChange={event => setOnlyAvailable(event.target.checked)} className="w-4 h-4 rounded text-cyan-600 focus:ring-cyan-500" /> Solo disponibles</label>
+                    <label className="flex items-center gap-2 mt-5 text-sm font-semibold text-slate-700 cursor-pointer"><input type="checkbox" checked={onlyFeria} onChange={event => setOnlyFeria(event.target.checked)} className="w-4 h-4 rounded text-cyan-600 focus:ring-cyan-500" /> Productos de feria</label>
                     <div className="flex items-center gap-2 mt-5 text-sm text-slate-500"><Filter className="w-4 h-4" /> {filtered.length} productos</div>
                 </div>
             </section>
@@ -114,7 +117,7 @@ export default function CatalogPage() {
                             })}
                             {filtered.length === 0 && (
                                 <tr>
-                                    <td colSpan={9} className="py-12 text-center text-slate-400">
+                                    <td colSpan={10} className="py-12 text-center text-slate-400">
                                         No se encontraron productos que coincidan con la búsqueda.
                                     </td>
                                 </tr>
