@@ -31,7 +31,8 @@ const storeSaleSchema = z.object({
     amount: z.coerce.number().min(0, "Debe ser mayor a 0"),
     comentarios: z.string().min(1, "Comentario requerido"),
     origen_oportunidad: z.enum(["visita", "wp"], { required_error: "Origen requerido" }),
-    categoria_oportunidad: z.string().optional(),
+    categoria_oportunidad: z.string().min(1, "Categoría requerida"),
+    canal_id: z.string().min(1, "Canal requerido"),
     asesor_id: z.string().optional(),
     items: z.array(z.object({
         product_id: z.string(),
@@ -71,8 +72,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
     const citiesList = useLiveQuery(() => db.cities.toArray()) || [];
     const classifications = useLiveQuery(() => db.activityClassifications.toArray().then(arr => arr.filter(c => !c.is_deleted)), []) || [];
 
-    // Fases locales para autoseleccionar la inicial
-    const phasesList = useLiveQuery(() => db.phases.where('canal_id').equals('PROPIO').sortBy('orden')) || [];
+    // Fases locales (se inicializan después del form)
 
     const {
         register,
@@ -96,6 +96,8 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             fase_id: "",
             comentarios: "",
             origen_oportunidad: "visita",
+            categoria_oportunidad: "",
+            canal_id: "PROPIO",
             fecha_inicio: "",
             fecha_fin: "",
             clasificacion_id: "",
@@ -104,6 +106,10 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             items: []
         }
     });
+
+    // Fases locales para autoseleccionar la inicial
+    const selectedChannel = watch("canal_id");
+    const phasesList = useLiveQuery(() => db.phases.where('canal_id').equals(selectedChannel || 'PROPIO').sortBy('orden'), [selectedChannel]) || [];
 
     // Cargar datos por defecto
     useEffect(() => {
@@ -175,6 +181,23 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
 
             let accountId = "";
 
+            // Determinar Asesor / Owner Final
+            let finalOwnerId = user?.id;
+            if (data.asesor_id) {
+                finalOwnerId = data.asesor_id;
+            } else {
+                if (data.canal_id === 'PROPIO') {
+                    const assignedUser = users?.find(u => u.email === 'daniela.castro@firplak.com');
+                    if (assignedUser) finalOwnerId = assignedUser.id;
+                } else if (data.canal_id === 'OBRAS_NAC') {
+                    const assignedUser = users?.find(u => u.email === 'mayerly.marin@firplak.com');
+                    if (assignedUser) finalOwnerId = assignedUser.id;
+                } else if (['OBRAS_INT', 'DIST_INT', 'DIST_NAC'].includes(data.canal_id)) {
+                    const assignedUser = users?.find(u => u.email === 'juan.correa@firplak.com');
+                    if (assignedUser) finalOwnerId = assignedUser.id;
+                }
+            }
+
             if (duplicates.length > 0) {
                 // Usar el cliente existente
                 accountId = duplicates[0].id;
@@ -184,7 +207,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                 const accountData = {
                     nombre: data.nombre_cuenta,
                     nit_base: data.nit_base,
-                    canal_id: 'PROPIO', // Siempre PROPIO según requerimientos
+                    canal_id: data.canal_id, 
                     telefono: data.telefono,
                     email: data.email || null,
                     direccion: data.direccion || null,
@@ -193,7 +216,8 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                     ciudad_id: data.ciudad_id ? Number(data.ciudad_id) : null,
                     // Conservamos compatibilidad string con DB
                     ciudad: data.ciudad_id ? citiesList.find(c => String(c.id) === data.ciudad_id)?.nombre : null,
-                    es_premium: false
+                    es_premium: false,
+                    owner_user_id: finalOwnerId
                 };
 
                 const newId = await createAccount(accountData);
@@ -220,7 +244,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                 origen_oportunidad: data.origen_oportunidad,
                 comentarios: combinedComentarios,
                 items: data.items,
-                owner_user_id: data.asesor_id || user?.id,
+                owner_user_id: finalOwnerId,
             };
             const opportunityId = await createOpportunity(opportunityData);
 
@@ -238,7 +262,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                 fecha_inicio: data.fecha_inicio,
                 fecha_fin: data.fecha_fin,
                 prioridad: data.prioridad,
-                user_id: data.asesor_id || user?.id,
+                user_id: finalOwnerId,
             };
             await createActivity(activityData);
 
@@ -407,7 +431,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                 </div>
 
                                 <div>
-                                    <label className="text-sm font-medium text-slate-700">Categoría (Opcional)</label>
+                                    <label className="text-sm font-medium text-slate-700">Categoría *</label>
                                     <select 
                                         {...register("categoria_oportunidad")} 
                                         className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-green-500 outline-none"
@@ -418,6 +442,22 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         <option value="Cocinas">Cocinas</option>
                                         <option value="Hidromasajes">Hidromasajes</option>
                                     </select>
+                                    {errors.categoria_oportunidad && <p className="text-red-500 text-xs mt-1">{errors.categoria_oportunidad.message}</p>}
+                                </div>
+
+                                <div>
+                                    <label className="text-sm font-medium text-slate-700">Canal *</label>
+                                    <select 
+                                        {...register("canal_id")} 
+                                        className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-green-500 outline-none"
+                                    >
+                                        <option value="DIST_NAC">Distribución Nacional</option>
+                                        <option value="OBRAS_NAC">Obras Nacional</option>
+                                        <option value="DIST_INT">Distribución Internacional</option>
+                                        <option value="OBRAS_INT">Obras Internacional</option>
+                                        <option value="PROPIO">Canal Propio</option>
+                                    </select>
+                                    {errors.canal_id && <p className="text-red-500 text-xs mt-1">{errors.canal_id.message}</p>}
                                 </div>
 
                                 <div>
@@ -426,7 +466,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         {...register("asesor_id")} 
                                         className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-green-500 outline-none"
                                     >
-                                        <option value="">(Asignarme a mí)</option>
+                                        <option value="">(Asignación Automática)</option>
                                         {users?.filter(u => u.is_active).map(u => (
                                             <option key={u.id} value={u.id}>{u.nombre || u.email}</option>
                                         ))}
