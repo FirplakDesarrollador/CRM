@@ -512,16 +512,21 @@ export default function InformesPage() {
                     return { year: new Date().getFullYear(), monthName: 'Sin fecha', day: 1 };
                 };
 
+                const getJoinedSingle = (rel: any) => Array.isArray(rel) ? rel[0] : rel;
+
                 if (selectedTipoSop !== 'proyectado') {
                     validPeds.forEach(ped => {
                         const opp = opps.find(o => o.id === ped.opportunity_id);
                         if (!opp) return;
 
-                        const canalId = opp.cuenta?.canal_id;
-                        const subcanalId = opp.cuenta?.subclasificacion_id;
+                        const cuentaObj = getJoinedSingle(opp.cuenta);
+                        const estadoObj = getJoinedSingle(opp.estado_info);
+
+                        const canalId = cuentaObj?.canal_id;
+                        const subcanalId = cuentaObj?.subclasificacion_id;
 
                         if (selectedCanal && canalId !== selectedCanal) return;
-                        if (selectedEstado && opp.estado_info?.nombre !== selectedEstado) return;
+                        if (selectedEstado && estadoObj?.nombre !== selectedEstado) return;
 
                         const fechaFact = (ped as any)['EXTRA_Fecha de facturación'] || ped.closeDate || ped.expectedCloseDate;
                         const fechaEntr = (ped as any)['EXTRA_Fecha mínima requerida por comercial/cliente'] || ped.expectedCloseDate || ped.closeDate;
@@ -552,7 +557,7 @@ export default function InformesPage() {
                                 asesor: userMap.get(opp.owner_user_id) || '-',
                                 grupo_cliente: canalMap.get(canalId) || '-',
                                 subgrupo_cliente: subclasificacionMap.get(subcanalId) || '-',
-                                cliente: opp.cuenta?.nombre || '-',
+                                cliente: cuentaObj?.nombre || '-',
                                 codigo_articulo: prod.sku,
                                 descripcion_articulo: prod.descripcion,
                                 planta: prod.planta,
@@ -572,12 +577,15 @@ export default function InformesPage() {
                         const opp = opps.find(o => o.id === oppId);
                         if (!opp) return;
 
-                        const canalId = opp.cuenta?.canal_id;
-                        const subcanalId = opp.cuenta?.subclasificacion_id;
+                        const cuentaObj = getJoinedSingle(opp.cuenta);
+                        const estadoObj = getJoinedSingle(opp.estado_info);
+
+                        const canalId = cuentaObj?.canal_id;
+                        const subcanalId = cuentaObj?.subclasificacion_id;
                         const oppProb = Number(opp.probabilidad || opp.probability || 0);
 
                         if (selectedCanal && canalId !== selectedCanal) return;
-                        if (selectedEstado && opp.estado_info?.nombre !== selectedEstado) return;
+                        if (selectedEstado && estadoObj?.nombre !== selectedEstado) return;
                         if (minProbabilidad && oppProb < Number(minProbabilidad)) return;
 
                         const quote = quotesData.find(q => q.opportunity_id === oppId && q.status === 'WINNER')
@@ -607,11 +615,11 @@ export default function InformesPage() {
                                 anio_fact: anioFact,
                                 mes_planta: mesPlanta,
                                 mes_comercial: mesComercial,
-                                estado: opp.estado_info?.nombre || 'Proyectado',
+                                estado: estadoObj?.nombre || 'Proyectado',
                                 asesor: userMap.get(opp.owner_user_id) || '-',
                                 grupo_cliente: canalMap.get(canalId) || '-',
                                 subgrupo_cliente: subclasificacionMap.get(subcanalId) || '-',
-                                cliente: opp.cuenta?.nombre || '-',
+                                cliente: cuentaObj?.nombre || '-',
                                 codigo_articulo: prod.sku,
                                 descripcion_articulo: prod.descripcion,
                                 planta: prod.planta,
@@ -696,21 +704,26 @@ export default function InformesPage() {
                     { header: 'COMENTARIOS PÉRDIDA', key: 'comentarios_perdida', width: 40 },
                     { header: 'CREADO POR', key: 'creador_nombre', width: 25 }
                 ];
-                flattenFn = (item: any) => ({
-                    ...item,
-                    cuenta_nombre: item.cuenta?.nombre || '-',
-                    fase_nombre: item.fase?.nombre || '-',
-                    estado_nombre: item.estado_info?.nombre || '-',
-                    vendedor_nombre: userMap.get(item.owner_user_id) || '-',
-                    creador_nombre: userMap.get(item.created_by) || '-',
-                    segmento_nombre: segmentMap.get(item.segmento_id) || '-',
-                    canal_nombre: canalMap.get(item.fase?.canal_id || item.cuenta?.canal_id) || '-',
-                    departamento_nombre: deptMap.get(item.departamento_id) || '-',
-                    ciudad_nombre: cityMap.get(item.ciudad_id) || '-',
-                    probabilidad: item.probabilidad ?? item.probability ?? 0,
-                    probability: item.probabilidad ?? item.probability ?? 0,
-                    razon_perdida_label: item.razon_perdida_id ? (lossReasonMap.get(item.razon_perdida_id) || item.razon_perdida) : (item.razon_perdida || '-')
-                });
+                flattenFn = (item: any) => {
+                    const cuentaObj = getJoinedSingle(item.cuenta);
+                    const faseObj = getJoinedSingle(item.fase);
+                    const estadoObj = getJoinedSingle(item.estado_info);
+                    return {
+                        ...item,
+                        cuenta_nombre: cuentaObj?.nombre || '-',
+                        fase_nombre: faseObj?.nombre || '-',
+                        estado_nombre: estadoObj?.nombre || '-',
+                        vendedor_nombre: userMap.get(item.owner_user_id) || '-',
+                        creador_nombre: userMap.get(item.created_by) || '-',
+                        segmento_nombre: segmentMap.get(item.segmento_id) || '-',
+                        canal_nombre: canalMap.get(faseObj?.canal_id || cuentaObj?.canal_id) || '-',
+                        departamento_nombre: deptMap.get(item.departamento_id) || '-',
+                        ciudad_nombre: cityMap.get(item.ciudad_id) || '-',
+                        probabilidad: item.probabilidad ?? item.probability ?? 0,
+                        probability: item.probabilidad ?? item.probability ?? 0,
+                        razon_perdida_label: item.razon_perdida_id ? (lossReasonMap.get(item.razon_perdida_id) || item.razon_perdida) : (item.razon_perdida || '-')
+                    };
+                };
             } else if (selectedEntidad === 'cuentas') {
                 selectStr = '*';
                 columns = [
@@ -750,12 +763,15 @@ export default function InformesPage() {
                     { header: 'VENDEDOR', key: 'vendedor_nombre', width: 25 },
                     { header: 'CREADO EL', key: 'created_at' }
                 ];
-                flattenFn = (item: any) => ({
-                    ...item,
-                    nombre_completo: item.nombre || `${item.nombres || ''} ${item.apellidos || ''}`.trim() || '-',
-                    cuenta_nombre: item.cuenta?.nombre || '-',
-                    vendedor_nombre: userMap.get(item.user_id || item.created_by) || '-'
-                });
+                flattenFn = (item: any) => {
+                    const cuentaObj = getJoinedSingle(item.cuenta);
+                    return {
+                        ...item,
+                        nombre_completo: item.nombre || `${item.nombres || ''} ${item.apellidos || ''}`.trim() || '-',
+                        cuenta_nombre: cuentaObj?.nombre || '-',
+                        vendedor_nombre: userMap.get(item.user_id || item.created_by) || '-'
+                    };
+                };
             } else if (selectedEntidad === 'cotizaciones') {
                 selectStr = `
                     *,
@@ -771,16 +787,19 @@ export default function InformesPage() {
                     { header: 'VENDEDOR', key: 'vendedor_nombre', width: 25 },
                     { header: 'FECHA COTIZACIÓN', key: 'created_at' }
                 ];
-                flattenFn = (item: any) => ({
-                    ...item,
-                    codigo: item.numero_cotizacion || item.codigo || item.id,
-                    titulo: item.titulo || item.oportunidad?.nombre || '-',
-                    oportunidad_nombre: item.oportunidad?.nombre || '-',
-                    subtotal: item.subtotal || item.total_amount || 0,
-                    total_final: item.total_amount || item.total_final || 0,
-                    estado: item.status || item.estado || '-',
-                    vendedor_nombre: userMap.get(item.user_id || item.created_by) || '-'
-                });
+                flattenFn = (item: any) => {
+                    const oppObj = getJoinedSingle(item.oportunidad);
+                    return {
+                        ...item,
+                        codigo: item.numero_cotizacion || item.codigo || item.id,
+                        titulo: item.titulo || oppObj?.nombre || '-',
+                        oportunidad_nombre: oppObj?.nombre || '-',
+                        subtotal: item.subtotal || item.total_amount || 0,
+                        total_final: item.total_amount || item.total_final || 0,
+                        estado: item.status || item.estado || '-',
+                        vendedor_nombre: userMap.get(item.user_id || item.created_by) || '-'
+                    };
+                };
             } else if (selectedEntidad === 'actividades') {
                 selectStr = `
                     *,
@@ -805,19 +824,27 @@ export default function InformesPage() {
                     { header: 'TIPO', key: 'tipo_nombre', width: 20 },
                     { header: 'NOTAS', key: 'descripcion', width: 50 }
                 ];
-                flattenFn = (item: any) => ({
-                    ...item,
-                    asunto: item.asunto || '-',
-                    clasificacion_nombre: item.clasificacion?.nombre || clasificacionMap.get(item.clasificacion_id) || '-',
-                    subclasificacion_nombre: item.subclasificacion?.nombre || subclasificacionMap.get(item.subclasificacion_id) || '-',
-                    cuenta_nombre: item.cuenta?.nombre || '-',
-                    oportunidad_nombre: item.oportunidad?.nombre || '-',
-                    oportunidad_monto: item.oportunidad?.amount || 0,
-                    vendedor_nombre: item.usuario?.full_name || userMap.get(item.user_id) || '-',
-                    estado_nombre: item.is_completed ? 'Completado' : 'No completado',
-                    tipo_nombre: item.tipo_act_info?.nombre || tipoActividadMap.get(item.tipo_actividad_id) || item.tipo_actividad || '-',
-                    descripcion: item.descripcion || '-'
-                });
+                flattenFn = (item: any) => {
+                    const cuentaObj = getJoinedSingle(item.cuenta);
+                    const oppObj = getJoinedSingle(item.oportunidad);
+                    const usrObj = getJoinedSingle(item.usuario);
+                    const clasifObj = getJoinedSingle(item.clasificacion);
+                    const subclasifObj = getJoinedSingle(item.subclasificacion);
+                    const tipoActObj = getJoinedSingle(item.tipo_act_info);
+                    return {
+                        ...item,
+                        asunto: item.asunto || '-',
+                        clasificacion_nombre: clasifObj?.nombre || clasificacionMap.get(item.clasificacion_id) || '-',
+                        subclasificacion_nombre: subclasifObj?.nombre || subclasificacionMap.get(item.subclasificacion_id) || '-',
+                        cuenta_nombre: cuentaObj?.nombre || '-',
+                        oportunidad_nombre: oppObj?.nombre || '-',
+                        oportunidad_monto: oppObj?.amount || 0,
+                        vendedor_nombre: usrObj?.full_name || userMap.get(item.user_id) || '-',
+                        estado_nombre: item.is_completed ? 'Completado' : 'No completado',
+                        tipo_nombre: tipoActObj?.nombre || tipoActividadMap.get(item.tipo_actividad_id) || item.tipo_actividad || '-',
+                        descripcion: item.descripcion || '-'
+                    };
+                };
             }
 
             let query = supabase.from(entidadDef.table).select(selectStr);
