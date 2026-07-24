@@ -18,7 +18,10 @@
       "Bash(node scripts/diagnose-forcemanager.js:*)",
       "WebFetch(domain:apitracker.io)",
       "Bash(git stash:*)",
-      "Bash(git -C \"c:/Users/isaza/OneDrive/Documentos/CRM FIRPLAK/CRM\" ls-files .agents/workflows/ workflows/ directives/ execution/ docs/ .claude/)"
+      "Bash(git -C \"c:/Users/isaza/OneDrive/Documentos/CRM FIRPLAK/CRM\" ls-files .agents/workflows/ workflows/ directives/ execution/ docs/ .claude/)",
+      "WebFetch(domain:gist.github.com)",
+      "PowerShell(Get-ChildItem app -Recurse -Directory | Select-Object -ExpandProperty FullName | ForEach-Object { $_.Replace\\(\"$PWD\\\\\", \"\"\\) })",
+      "PowerShell(Get-ChildItem docs -Recurse -File | Select-Object -ExpandProperty FullName | ForEach-Object { $_.Replace\\(\"$PWD\\\\\", \"\"\\) }; Write-Output \"---DIRECTIVES---\"; Get-ChildItem directives -File | Select-Object Name; Write-Output \"---SUPABASE---\"; Get-ChildItem supabase -Recurse -File | Select-Object -First 40 -ExpandProperty FullName | ForEach-Object { $_.Replace\\(\"$PWD\\\\\", \"\"\\) })"
     ]
   }
 }

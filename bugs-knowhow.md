@@ -388,3 +388,264 @@ Prevention Rule:
 
 Tags:
 [navigation] [deep-linking] [ux] [consistency]
+
+---
+
+## [Bug ID: 20260709-01]
+
+Context:
+Búsqueda de cuentas al crear un contacto nuevo en `app/contactos/page.tsx` y `page-isazaale.tsx`.
+
+What I Did:
+Realicé una búsqueda de cuentas por término ingresado.
+
+Problem:
+La aplicación crasheó mostrando la pantalla roja con el error: `acc.nit?.toLowerCase is not a function`.
+
+Root Cause:
+Al crear una cuenta con un NIT numérico (como `999999999`), el motor almacena el NIT como tipo `number` (o se lee como tal desde IndexedDB/Supabase). Al filtrar las cuentas en la lista de contactos, el código ejecutaba `acc.nit?.toLowerCase()`, arrojando una excepción porque los números no poseen el método `toLowerCase`.
+
+Fix Applied:
+Se convirtió explícitamente el NIT a tipo String usando `String(acc.nit || '')` antes de llamar a `.toLowerCase().includes(term)`.
+
+Prevention Rule:
+**Defensive Type Casting on Search Filters**: Al filtrar u operar sobre campos alfanuméricos ingresados por el usuario o importados (como NITs, códigos postales, IDs o teléfonos), NUNCA asumas que su tipo de dato en JS/TS es siempre `string`. Si vas a aplicar métodos de cadena como `.toLowerCase()`, `.trim()` o `.includes()`, castea el valor explícitamente primero mediante `String(valor || '')`.
+
+Tags:
+[types] [typescript] [search] [accounts] [contacts] [crash]
+
+---
+
+## [Bug ID: 20260709-02]
+
+Context:
+Wizard de creación de cuentas (`CreateAccountWizard.tsx`). El usuario estaba en el Paso 1 (Información Base), seleccionó un canal de venta en un `<select>`, y presionó Enter.
+
+What I Did:
+Implementé un `onKeyDown` en el `<form>` que interceptaba Enter únicamente cuando `e.target instanceof HTMLInputElement`. Esto cubría inputs de texto pero no `<select>`, `<button type="button">`, ni otros elementos focusables.
+
+Problem:
+Al presionar Enter estando enfocado en un `<select>` (ej. Canal de Venta), el formulario se enviaba inmediatamente saltando los pasos 2 y 3 del wizard. El registro se creaba incompleto.
+
+Root Cause:
+La condición `e.target instanceof HTMLInputElement` solo es verdadera para `<input>`. Cuando el foco está en un `<select>`, `<button>`, o cualquier otro elemento HTML, la condición es falsa, el `preventDefault()` no se ejecuta, y el Enter dispara el submit nativo del `<form>`.
+
+Fix Applied:
+Se cambió la condición a verificar por `tagName` del target casteado como `HTMLElement`. Ahora se bloquea Enter en TODOS los elementos excepto `<textarea>` (donde Enter es un salto de línea válido) y botones `type="submit"` (donde Enter debe enviar el formulario). Aplicado en los 4 wizards: Cuentas, Contactos, Actividades, Pedidos.
+
+Prevention Rule:
+**Enter Key in Multi-Step Wizards**: Todo formulario que use un wizard multi-paso DEBE incluir un `onKeyDown` en el `<form>` que bloquee Enter globalmente excepto para `<textarea>` y `type="submit"`. NUNCA usar `instanceof HTMLInputElement` como condición—usar `target.tagName !== 'TEXTAREA'` para cubrir todos los tipos de elemento (input, select, button, div contentEditable, etc.).
+
+Tags:
+[wizard] [form-submit] [enter-key] [ux] [data-loss]
+
+---
+
+## [Bug ID: 20260709-03]
+
+Context:
+`npm run dev` con Next.js 16.1.1/Turbopack en Windows.
+
+Problem:
+El servidor arrancaba, pero al abrir rutas aparecian errores como:
+`Cannot find module 'next/dist/server/app-render/work-async-storage.external.js'`,
+`Cannot find module 'react/jsx-runtime'`, `build-manifest.json ENOENT` y
+`Persisting failed: Another write batch or compaction is already active`.
+
+Root Cause:
+Cache corrupta o bloqueada de Next/Turbopack mientras habia procesos `node`
+anteriores escribiendo en paralelo. Los modulos realmente existian en
+`node_modules`; el problema estaba en artefactos regenerables (`.next` y
+`C:\Users\isaza\.next-crm`).
+
+Fix Applied:
+1. Detener procesos `node` que estaban escuchando en los puertos de desarrollo.
+2. Borrar `.next` del proyecto.
+3. Borrar `C:\Users\isaza\.next-crm`.
+4. Levantar de nuevo `npm run dev`.
+
+Prevention Rule:
+**Next/Turbopack Cache Reset**: Si Next reporta modulos existentes como faltantes
+o aparecen errores SST/build-manifest durante `next dev`, primero verificar si
+hay varios procesos `node` activos y limpiar caches regenerables antes de
+reinstalar dependencias.
+
+Tags:
+[nextjs] [turbopack] [cache] [windows] [dev-server]
+
+---
+
+## [Bug ID: 20260709-04]
+
+Context:
+Wizard de creacion de cuentas en `app/cuentas/nueva/CreateAccountWizard.tsx`.
+
+Problem:
+Al terminar el paso 2, la cuenta podia crearse inmediatamente y redirigir a
+`/cuentas?id=...`, sin darle oportunidad al usuario de diligenciar el paso 3
+de clasificacion.
+
+Root Cause:
+El boton final `Crear Cuenta` aparece en la misma posicion que `Siguiente`.
+En transiciones rapidas, doble clics o activaciones repetidas podian disparar
+el submit del formulario justo despues de pasar al ultimo paso.
+
+Fix Applied:
+Se definio `LAST_STEP_INDEX`, se bloqueo cualquier submit que no ocurra desde
+el ultimo paso, y se agrego una ventana corta de habilitacion para el boton
+final. Al entrar al paso 3, `Crear Cuenta` inicia deshabilitado por 500 ms,
+evitando que un segundo clic heredado cree la cuenta antes de que el usuario
+interactue con la pantalla final.
+
+Prevention Rule:
+**Wizard Final Submit Guard**: En wizards multi-paso, el `onSubmit` debe validar
+explicitamente que el usuario esta en el ultimo paso. Si el boton final ocupa
+la misma posicion que el boton de avance, deshabilitar el submit brevemente al
+entrar al ultimo paso para evitar creaciones accidentales por doble clic.
+
+Tags:
+[wizard] [accounts] [form-submit] [double-click] [ux]
+
+---
+
+## [Bug ID: 20260710-01]
+
+Context:
+Wizards de creacion con boton de avance y boton final ubicados en la misma zona visual: actividades, contactos, pedidos y oportunidades.
+
+Problem:
+Al completar el penultimo paso, un doble clic o activacion repetida sobre "Siguiente" podia impactar el boton final recien renderizado y disparar la creacion del registro antes de que el usuario diligenciara o revisara el ultimo paso.
+
+Root Cause:
+React cambia de paso y reemplaza el boton "Siguiente" por el boton final en la misma posicion. Sin una guarda temporal, el segundo click del usuario puede caer sobre el boton de submit inmediatamente despues del render.
+
+Fix Applied:
+Cada wizard define un indice de ultimo paso, valida en `onSubmit` que el submit venga desde ese paso, y deshabilita el boton final durante 500 ms al entrar a la pantalla final. Se agrego cobertura E2E para actividades usando `/e2e/activities-wizard` y se mantuvo la prueba de cuentas.
+
+Prevention Rule:
+**Delayed Final Submit in Wizards**: Todo wizard de creacion cuyo boton final reemplace visualmente a "Siguiente" debe tener una guarda de ultimo paso y un delay corto antes de habilitar el submit final. La prueba E2E debe hacer doble clic en "Siguiente" desde el penultimo paso y verificar que no se cree ni se redirija.
+
+Tags:
+[wizard] [activities] [contacts] [orders] [opportunities] [form-submit] [double-click] [e2e]
+
+---
+
+## [Bug ID: 20260710-02]
+
+Context:
+Edicion de actividades tipo `TAREA` en `CreateActivityModal`, seccion "Actividades (Checklist Planner)".
+
+Problem:
+Los items agregados al checklist se veian en pantalla, pero no quedaban registrados en Dexie/Supabase ni se enviaban a Microsoft Planner.
+
+Root Cause:
+El checklist vive en estado React (`checklist`) y no en `react-hook-form`, asi que `useFormAutoSave` no detectaba cambios al agregar, editar, marcar o borrar items. Adicionalmente, `useActivities.updateActivity` filtraba `_sync_metadata` fuera de los cambios permitidos, por lo que el lugar natural para persistir `checklist` se descartaba antes de llegar a Dexie/outbox/Supabase.
+
+Fix Applied:
+Se agrego autosave debounced especifico para checklist en `CreateActivityModal`. Cada cambio guarda `checklist` dentro de `_sync_metadata`, intenta PATCH a `/api/microsoft/planner/tasks/[taskId]` y marca `pending_planner_update` cuando Planner no responde. `useActivities.updateActivity` ahora permite `_sync_metadata`, y `SyncEngine` procesa `pending_planner_update` para reintentar el PATCH.
+
+Prevention Rule:
+**Autosave External State**: Si un editor usa auto-save basado en `react-hook-form`, cualquier estado externo al formulario (checklists, adjuntos, asistentes, tags, ordenamientos) debe tener su propio autosave o debe sincronizarse explicitamente al form. Si el estado se guarda en metadata, la allowlist del hook de persistencia debe incluir esa columna.
+
+Tags:
+[activities] [planner] [checklist] [autosave] [dexie] [supabase] [sync]
+
+---
+
+## [Bug ID: 20260710-03]
+
+Context:
+Filtrado de actividades para roles restringidos, como VENDEDOR, en `app/actividades/page.tsx` durante el estado inicial de carga cuando `useCurrentUser` todavia no ha poblado `user`.
+
+What I Did:
+La logica original usaba una condicion equivalente a `if (!canViewAll && user) { ... return false; }`. Cuando `user` era `null` durante la carga, la condicion completa era falsa y se saltaba el filtro de rol.
+
+Problem:
+Un VENDEDOR podia ver momentanea o permanentemente todas las actividades al seleccionar "Todas las actividades", porque el filtro de seguridad no se aplicaba mientras `user` estaba vacio.
+
+Root Cause:
+Combinar la negacion de permiso (`!canViewAll`) con la presencia del usuario (`&& user`) crea un bypass fail-open. Si `user` aun no esta disponible, el bloque que debia ocultar registros no autorizados no corre.
+
+Fix Applied:
+Se separaron las condiciones: primero se verifica `if (!canViewAll)` y dentro se valida explicitamente `if (!user) return false`, denegando acceso mientras el usuario carga.
+
+Prevention Rule:
+**Fail-Secure Role Filters**: En filtros client-side donde la falta de permiso debe ocultar datos, nunca combines el check de permiso con el null-check del usuario usando `&&`. Si el usuario no esta cargado, el filtro debe negar por defecto.
+
+Tags:
+[react] [security] [data-leak] [filtering]
+
+---
+
+## [Bug ID: 20260710-04]
+
+Context:
+Filtrado por rol en hooks server-side (`useAccountsServer.ts`, `useOpportunitiesServer.ts`) al restringir visibilidad para VENDEDOR.
+
+What I Did:
+La logica incluia `const ids = [currentUserId, ...(user?.coordinadores || [])]` para determinar que registros podia ver un VENDEDOR.
+
+Problem:
+Los VENDEDORES podian ver cuentas y oportunidades propiedad de sus coordinadores. Si un coordinador tenia muchas cuentas, el vendedor heredaba visibilidad ascendente, saltandose la regla de "solo lo propio".
+
+Root Cause:
+Interpretacion incorrecta de `user.coordinadores`: ese arreglo contiene IDs de jefes del usuario, no subordinados. Un vendedor nunca debe ver datos de su jefe; solo un COORDINADOR debe ver hacia abajo usando `subordinateIds`.
+
+Fix Applied:
+Se elimino `user?.coordinadores` del conjunto de IDs permitidos para VENDEDOR. Para vendedores la lista queda estrictamente `[currentUserId]`; para coordinadores se usa `[currentUserId, ...subordinateIds]`.
+
+Prevention Rule:
+**No Upward Visibility**: Nunca concedas acceso a registros cuyo propietario este en `user.coordinadores`. Eso es visibilidad ascendente y es una fuga de seguridad. Usa `subordinateIds` solo para visibilidad descendente de managers y `currentUserId` para contribuidores individuales.
+
+Tags:
+[react] [security] [data-leak] [filtering] [rbac]
+
+---
+
+## [Bug ID: 20260714-01]
+
+Context:
+`app/cuentas/page.tsx`. Al seleccionar una cuenta en la tabla, el estado `editingAccount` se actualizaba inmediatamente pero el parámetro `id` de la URL se actualizaba mediante un useEffect con debounce de 500ms.
+
+Problem:
+Al seleccionar una cuenta diferente en la tabla, el panel se actualizaba temporalmente pero inmediatamente volvía a la cuenta anterior, impidiendo cambiar de selección.
+
+Root Cause:
+El `useEffect` de deep-linking se disparaba debido al cambio de `editingAccount?.id`. Al evaluar que el `id` en la URL era diferente del nuevo `editingAccount.id` (porque la URL aún no se había actualizado por el debounce de 500ms), el efecto asumía que la URL tenía la verdad y revertía `editingAccount` a la cuenta del ID viejo de la URL.
+
+Fix Applied:
+Se implementó un ref `lastProcessedUrlIdRef` para almacenar el último ID de la URL que fue procesado. Si el ID de la URL no ha cambiado con respecto al de la referencia, el efecto retorna inmediatamente, evitando revertir los cambios de selección local que aún no se han reflejado en la URL.
+
+Prevention Rule:
+**Debounced URL State Sync vs Deep Linking**: Al sincronizar un estado local con la URL de forma asíncrona o mediante un debounce, el efecto de "deep linking" (que sincroniza de la URL al estado) debe ignorar los cambios que provienen del estado local. Usa una referencia (`useRef`) para recordar el último parámetro de la URL procesado y evitar bucles o reversiones de estado indeseados mientras la URL se pone al día.
+
+Tags:
+[react] [deep-linking] [state-sync] [debounce] [accounts]
+
+---
+
+## [Bug ID: 20260724-01]
+
+Context:
+`app/informes/page.tsx` y exportación de informes / Proyección S&OP a Excel y CSV.
+
+Problem:
+La exportación de informes (especialmente la Proyección S&OP, Cotizaciones y Contactos) arrojaba error "column CRM_Pedidos.fecha_facturacion does not exist" o generaba archivos con columnas de nombres/importes en blanco.
+
+Root Cause:
+1. `CRM_Pedidos` no posee columnas `fecha_facturacion` ni `fecha_entrega`; las columnas reales en PostgreSQL provienen de campos SAP (`"EXTRA_Fecha de facturación"` y `"EXTRA_Fecha mínima requerida por comercial/cliente"`). Al consultar columnas inexistentes, Supabase devolvía error 42703.
+2. `CRM_Contactos` usa la columna `nombre` en lugar de `nombres` y `apellidos`.
+3. `CRM_Cotizaciones` usa `numero_cotizacion`, `total_amount` y `status` en lugar de `codigo`, `total_final` y `estado`.
+4. `CRM_Oportunidades` no vinculaba `probabilidad` con la clave `probability` usada en el encabezado del informe.
+
+Fix Applied:
+1. Se corrigió la consulta `.select()` de `CRM_Pedidos` especificando los nombres de columnas de Supabase entre comillas dobles y con valores de respaldo (`closeDate`, `expectedCloseDate`).
+2. Se mejoró `getYearAndMonth` para soportar formatos `DD/MM/YYYY`, `YYYY-MM-DD` e ISO.
+3. Se alinearon los mapeos de `flattenFn` para Contactos, Cotizaciones, Oportunidades y Cuentas con las columnas reales de las tablas `CRM_*`.
+
+Prevention Rule:
+**Strict Table Schema Mapping**: Al realizar consultas `.select()` o aplanar objetos para informes/exports, verificar siempre el esquema real de la base de datos PostgreSQL/Supabase en lugar de asumir nombres de propiedades.
+
+Tags:
+[informes] [sop] [exportar] [excel] [csv] [supabase] [schema]
+

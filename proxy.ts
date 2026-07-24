@@ -4,14 +4,20 @@ import { NextResponse, type NextRequest } from 'next/server'
 // Helper function to check if route is public
 function isPublicRoute(pathname: string): boolean {
     const publicRoutes = ['/login', '/auth/callback', '/update-password'];
+    if (process.env.NODE_ENV !== 'production' && pathname.startsWith('/e2e')) {
+        return true;
+    }
+
     return publicRoutes.some(route => pathname.startsWith(route));
 }
 
 // Helper function to check if error is network-related
-function isNetworkError(error: any): boolean {
-    return error.message?.includes('Failed to fetch') ||
-        error.message?.includes('NetworkError') ||
-        error.name === 'AuthRetryableFetchError';
+function isNetworkError(error: unknown): boolean {
+    const maybeError = error as { message?: string; name?: string };
+
+    return maybeError.message?.includes('Failed to fetch') ||
+        maybeError.message?.includes('NetworkError') ||
+        maybeError.name === 'AuthRetryableFetchError';
 }
 
 // Helper function to check for local session cookies

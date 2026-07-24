@@ -2,6 +2,8 @@ import { db, OutboxItem } from './db';
 import { supabase } from './supabase';
 import { v4 as uuidv4 } from 'uuid';
 import { useSyncStore } from './stores/useSyncStore';
+import { useUserStore } from './stores/useUserStore';
+import { useAuditLogStore } from './stores/useAuditLogStore';
 
 const TABLE_PRIORITY: Record<string, number> = {
     'CRM_Cuentas': 1,
@@ -63,6 +65,7 @@ export class SyncEngine {
         if (this.isSyncing || !navigator.onLine || isPaused) return;
 
         this.isSyncing = true;
+        db.isPulling = true;
         useSyncStore.getState().setSyncing(true);
         useSyncStore.getState().setError(null);
 
@@ -94,6 +97,7 @@ export class SyncEngine {
             console.error('[Sync] Failed:', err);
             useSyncStore.getState().setError(err.message);
         } finally {
+            db.isPulling = false;
             this.isSyncing = false;
             useSyncStore.getState().setSyncing(false);
             await this.updatePendingCount();
@@ -412,6 +416,44 @@ export class SyncEngine {
                         } catch (e) {
                             console.error(`[Sync] Exception updating Planner completion status:`, e);
                             // Do not throw, allow Supabase sync to proceed
+                        }
+                    }
+                }
+
+                const plannerMetadata = metadataChange?.value;
+                if (plannerMetadata?.pending_planner_update && plannerMetadata.checklist) {
+                    let msPlannerId = changes.find(c => c.field === 'ms_planner_id')?.value;
+                    if (!msPlannerId) {
+                        try {
+                            const localAct = await db.activities.get(actId);
+                            msPlannerId = localAct?.ms_planner_id;
+                        } catch (e) { }
+                    }
+
+                    if (msPlannerId && msPlannerId !== 'ERROR') {
+                        console.log(`[Sync] Found pending Planner checklist update for task ${msPlannerId}...`);
+                        try {
+                            const res = await fetch(`/api/microsoft/planner/tasks/${msPlannerId}`, {
+                                method: 'PATCH',
+                                headers: { 'Content-Type': 'application/json' },
+                                credentials: 'include',
+                                body: JSON.stringify({
+                                    checklist: plannerMetadata.checklist,
+                                    assigneeIds: plannerMetadata.assigneeIds || []
+                                })
+                            });
+
+                            if (!res.ok) {
+                                console.error(`[Sync] Failed to update Planner checklist:`, await res.text());
+                            } else {
+                                const newMeta = { ...plannerMetadata };
+                                delete newMeta.pending_planner_update;
+                                metadataChange.value = newMeta;
+                                await db.activities.update(actId, { _sync_metadata: newMeta });
+                                console.log(`[Sync] Successfully updated Planner checklist for ${msPlannerId}`);
+                            }
+                        } catch (e) {
+                            console.error(`[Sync] Exception updating Planner checklist:`, e);
                         }
                     }
                 }

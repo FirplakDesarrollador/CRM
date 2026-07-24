@@ -1,0 +1,1986 @@
+import { db, OutboxItem } from './db';
+import { supabase } from './supabase';
+import { v4 as uuidv4 } from 'uuid';
+import { useSyncStore } from './stores/useSyncStore';
+
+const TABLE_PRIORITY: Record<string, number> = {
+    'CRM_Cuentas': 1,
+    'CRM_Contactos': 2,
+    'CRM_Oportunidades': 3,
+    'CRM_Oportunidades_Colaboradores': 4,
+    'CRM_Cotizaciones': 5,
+    'CRM_CotizacionItems': 6,
+    'CRM_Actividades': 7,
+    'CRM_Pedidos': 8,
+    'CRM_PedidoItems': 9
+};
+
+const SAP_MAPPING: Record<string, string> = {
+    'tipo_facturacion': 'EXTRA_Tipo de facturación',
+    'incoterm': 'EXTRA_Incoterm/Incoterm',
+    'notas_sap': 'EXTRA_Notas',
+    'fecha_facturacion': 'EXTRA_Fecha de facturación',
+    'orden_compra': 'EXTRA_Orden de compra/Purchase Order',
+    'fecha_minima_requerida': 'EXTRA_Fecha mínima requerida por comercial/cliente',
+    'formas_pago': 'EXTRA_Formas de pago',
+    'terminos_pago': 'EXTRA_Terminos de pago/Pay Terms',
+    'facturacion_electronica': 'EXTRA_Facturación Electrónica',
+    'es_muestra': 'EXTRA_¿Es una muestra?',
+    'aplica_contrato': 'EXTRA_¿Aplica contrato?',
+    'multa_incumplimiento': 'EXTRA_¿Multa por incumplimiento?',
+    'puerto_embarque': 'EXTRA_Puerto embarque/Shipment Port',
+    'puerto_destino': 'EXTRA_Puerto destino/Destination Port',
+    'via_transporte': 'EXTRA_Via/Type of transport',
+    'flete': 'EXTRA_Flete/Freight',
+    'seguro': 'EXTRA_Seguro/Insurance',
+    'cierre_facturacion': 'EXTRA_Cierre Facturación',
+    'oc_cot': 'EXTRA_OC/COT'
+};
+
+const MAX_RETRIES = 5;
+
+function getBackoffDelay(retryCount: number): number {
+    return Math.min(1000 * Math.pow(2, retryCount), 30000);
+}
+
+export class SyncEngine {
+    private isSyncing = false;
+
+    constructor() {
+        // Listen for online status
+        if (typeof window !== 'undefined') {
+            window.addEventListener('online', () => this.triggerSync());
+            // Clear completed items from previous session
+            db.outbox.where('status').equals('COMPLETED').delete().catch(e => console.error('[Sync] Failed to clear history:', e));
+        }
+    }
+
+    /**
+     * Main Sync Loop
+     */
+    async triggerSync() {
+        const { isPaused } = useSyncStore.getState();
+        if (this.isSyncing || !navigator.onLine || isPaused) return;
+
+        this.isSyncing = true;
+        useSyncStore.getState().setSyncing(true);
+        useSyncStore.getState().setError(null);
+
+        try {
+            console.log('[Sync] Starting...');
+
+            // Authenticate once for the entire sync cycle
+            let user;
+            try {
+                const { data } = await supabase.auth.getUser();
+                user = data?.user;
+            } catch (e) {
+                console.warn("[Sync] Auth unreachable, skipping sync.");
+                return;
+            }
+            if (!user) {
+                console.warn("[Sync] No authenticated user, skipping sync.");
+                return;
+            }
+
+            await this.resetStuckItems(); // Unlock items stuck in 'SYNCING'
+            await this.yield();
+            await this.pushChanges(user); // Push local changes FIRST to preserve UX
+            await this.yield();
+            await this.pullChanges(user); // Then pull server data
+            useSyncStore.getState().setLastSyncTime(new Date().toISOString());
+            console.log('[Sync] Completed.');
+        } catch (err: any) {
+            console.error('[Sync] Failed:', err);
+            useSyncStore.getState().setError(err.message);
+        } finally {
+            this.isSyncing = false;
+            useSyncStore.getState().setSyncing(false);
+            await this.updatePendingCount();
+
+            // Clean up dead items (exceeded max retries)
+            try {
+                const deadItems = await db.outbox
+                    .where('status').equals('FAILED')
+                    .filter(i => (i.retry_count || 0) >= MAX_RETRIES)
+                    .toArray();
+
+                if (deadItems.length > 0) {
+                    console.warn(`[Sync] Removing ${deadItems.length} permanently failed items from outbox:`,
+                        deadItems.map(i => `${i.entity_type}.${i.field_name} (entity: ${i.entity_id})`));
+                    await db.outbox.bulkDelete(deadItems.map(i => i.id));
+                    await this.updatePendingCount();
+                }
+            } catch (cleanupErr) {
+                console.error('[Sync] Failed to clean up dead items:', cleanupErr);
+            }
+
+            // Check if more retryable items remain and schedule retry with backoff
+            try {
+                const remaining = await db.outbox
+                    .where('status').anyOf(['PENDING', 'FAILED'])
+                    .filter(i => (i.retry_count || 0) < MAX_RETRIES)
+                    .toArray();
+
+                if (remaining.length > 0 && navigator.onLine) {
+                    const maxRetry = Math.max(0, ...remaining.map(i => i.retry_count || 0));
+                    const delay = getBackoffDelay(maxRetry);
+                    console.log(`[Sync] ${remaining.length} items still pending (max retry: ${maxRetry}), scheduling retry in ${delay}ms...`);
+                    setTimeout(() => this.triggerSync(), delay);
+                }
+            } catch (retryErr) {
+                console.error('[Sync] Failed to check remaining items:', retryErr);
+            }
+        }
+    }
+
+    /**
+     * Yields control back to the browser to keep the UI responsive
+     */
+    private async yield() {
+        return new Promise(resolve => setTimeout(resolve, 0));
+    }
+
+    /**
+     * Resets items that were left in 'SYNCING' state (e.g. after a crash)
+     */
+    private async resetStuckItems() {
+        // Change status of items stuck in 'SYNCING' (e.g. if the app crashed) back to 'PENDING'
+        await db.outbox.where('status').equals('SYNCING').modify({ status: 'PENDING' });
+
+        // Self-heal: Remove stuck metadata updates for tables where RPC ignores them or if they are just empty `{}`
+        await db.outbox.where('field_name').equals('_sync_metadata')
+            .filter(item => {
+                if (item.entity_type === 'CRM_Oportunidades' || item.entity_type === 'CRM_Cuentas') return true;
+                if (item.entity_type === 'CRM_Actividades' && (!item.new_value || Object.keys(item.new_value).length === 0)) return true;
+                return false;
+            })
+            .delete();
+            
+        await this.updatePendingCount();
+    }
+
+    private async updatePendingCount() {
+        // Count everything that isn't successfully synced yet, but IGNORE technical metadata items
+        // to prevent "ghost" pending counts in the UI.
+        const count = await db.outbox
+            .where('status').anyOf(['PENDING', 'SYNCING', 'FAILED'])
+            .filter(item => item.field_name !== '_sync_metadata')
+            .count();
+            
+        useSyncStore.getState().setPendingCount(count);
+    }
+
+    /**
+     * PUSH: Send local mutations to Supabase via RPC
+     */
+    private async pushChanges(user: any) {
+        // 1. Get Pending Items (skip items that exceeded max retries)
+        const pending = await db.outbox
+            .orderBy('field_timestamp')
+            .filter(i => (i.status === 'PENDING' || i.status === 'FAILED') && (i.retry_count || 0) < MAX_RETRIES)
+            .limit(500)
+            .toArray();
+
+        if (pending.length === 0) return;
+
+        // 2. Group by Table
+        const batches: Record<string, any[]> = {};
+
+        for (const item of pending) {
+            if (!batches[item.entity_type]) batches[item.entity_type] = [];
+
+            batches[item.entity_type].push({
+                id: item.entity_id,
+                field: item.field_name,
+                value: item.new_value,
+                ts: item.field_timestamp
+            });
+        }
+
+        // Mark all as SYNCING in bulk (single DB transaction instead of N individual updates)
+        const pendingIds = pending.map(i => i.id);
+        await db.outbox.where('id').anyOf(pendingIds).modify({ status: 'SYNCING' });
+
+        // 3.1 Proactive Fix: Ensure ownership fields are included and valid for critical tables
+        // For each entity ID in the batch, if the owner field is missing or invalid (e.g. from mock data), we repair it.
+        const now = Date.now();
+        const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        const ownershipMap: Record<string, string> = {
+            'CRM_Oportunidades': 'owner_user_id',
+            'CRM_Actividades': 'user_id',
+            'CRM_Cuentas': 'created_by'
+        };
+
+        for (const [table, ownerField] of Object.entries(ownershipMap)) {
+            if (batches[table]) {
+                const idsInBatch = Array.from(new Set(batches[table].map(u => u.id)));
+
+                for (const id of idsInBatch) {
+                    // 1. Fix Ownership
+                    const ownerEntry = batches[table].find(u => u.id === id && u.field === ownerField);
+                    const currentVal = ownerEntry?.value;
+                    const isValid = typeof currentVal === 'string' && UUID_REGEX.test(currentVal);
+
+                    if (ownerEntry && !isValid) {
+                        ownerEntry.value = user.id;
+                    }
+                }
+            }
+        }
+
+        // 3.2 Proactive Fix: Repair invalid fase_id for Opportunities
+        // Maps invalid/legacy phase IDs (e.g. 1) to valid ones based on Channel
+        if (batches['CRM_Oportunidades']) {
+            const updates = batches['CRM_Oportunidades'];
+            const faseEntries = updates.filter(u => u.field === 'fase_id');
+
+            if (faseEntries.length > 0) {
+                // Fallback Map (derived from server data)
+                const PHASE_DEFAULTS: Record<string, number> = {
+                    'OBRAS_NAC': 56,
+                    'OBRAS_INT': 63,
+                    'DIST_NAC': 70,
+                    'DIST_INT': 76,
+                    'PROPIO': 82
+                };
+
+                // Fetch local phases if possible to check validity
+                let validPhaseIds = new Set<number>();
+                try {
+                    const localPhases = await db.phases.toArray();
+                    localPhases.forEach(p => validPhaseIds.add(p.id));
+                } catch (e) { console.warn("[Sync] Could not read local phases for validation", e); }
+
+                const isValidId = (id: number) => {
+                    if (validPhaseIds.size > 0) return validPhaseIds.has(id);
+                    return id >= 56;
+                };
+
+                for (const entry of faseEntries) {
+                    const currentId = Number(entry.value);
+                    if (isValidId(currentId)) continue;
+
+                    console.warn(`[Sync] Repairing invalid fase_id ${currentId} for opp ${entry.id}`);
+
+                    // Find channel
+                    let channel = 'DIST_NAC'; // default
+                    let accountId = updates.find(u => u.id === entry.id && u.field === 'account_id')?.value;
+
+                    if (!accountId) {
+                        try {
+                            const localOpp = await db.opportunities.get(entry.id);
+                            accountId = localOpp?.account_id;
+                        } catch (e) { /* ignore */ }
+                    }
+
+                    if (accountId) {
+                        try {
+                            const acc = await db.accounts.get(accountId);
+                            if (acc?.canal_id) channel = acc.canal_id;
+                        } catch (e) { /* ignore */ }
+                    }
+
+                    const fixedId = PHASE_DEFAULTS[channel] || 70; // Default to DIST_NAC (70)
+                    entry.value = fixedId;
+                    console.log(`[Sync] ...Repaired to ${fixedId} (Channel: ${channel})`);
+                }
+            }
+        }
+
+        // 3.0 OFFLINE PLANNER AUTO-SYNC FOR ACTIVITIES
+        if (batches['CRM_Actividades']) {
+            const actUpdates = batches['CRM_Actividades'];
+            // Group the updates by ID since one activity could have multiple field updates
+            const actGroups = new Map<string, any[]>();
+            actUpdates.forEach(u => {
+                if (!actGroups.has(u.id)) actGroups.set(u.id, []);
+                actGroups.get(u.id)!.push(u);
+            });
+
+            for (const [actId, changes] of Array.from(actGroups.entries())) {
+                const metadataChange = changes.find(c => c.field === '_sync_metadata');
+                if (metadataChange && metadataChange.value && metadataChange.value.pending_planner) {
+                    console.log(`[Sync] Found offline activity with pending Planner creation: ${actId}`);
+                    try {
+                        // Gather what we know from the batch or Dexie
+                        const localAct = await db.activities.get(actId);
+                        const titleField = changes.find(c => c.field === 'asunto');
+                        const title = titleField ? titleField.value : (localAct?.asunto || 'Nueva Tarea (CRM)');
+                        const dateField = changes.find(c => c.field === 'fecha_inicio');
+                        const dueDateTime = dateField ? dateField.value : localAct?.fecha_inicio;
+                        const notesField = changes.find(c => c.field === 'descripcion');
+                        const notes = notesField ? notesField.value : localAct?.descripcion;
+
+                        const meta = metadataChange.value;
+
+                        // Proceed to call our internal POST endpoint
+                        // We must send credentials to pass cookies (JWT token)
+                        const res = await fetch('/api/microsoft/planner/tasks', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'include',
+                            // Include cookies to pass the Next.js auth guard
+                            // Note: Sync usually runs in the same browser session so this should work
+                            body: JSON.stringify({
+                                planId: meta.planId,
+                                bucketId: meta.bucketId,
+                                title: title,
+                                dueDateTime: dueDateTime,
+                                notes: notes,
+                                checklist: meta.checklist,
+                                assigneeIds: meta.assigneeIds
+                            })
+                        });
+
+                        if (res.ok) {
+                            const taskResponse = await res.json();
+                            const newPlannerId = taskResponse.task?.id;
+                            console.log(`[Sync] Successfully late-created Planner task ${newPlannerId} for ${actId}`);
+
+                            // Remove pending_planner from metadata before sending to Supabase
+                            const newMeta = { ...meta };
+                            delete newMeta.pending_planner;
+
+                            if (Object.keys(newMeta).length === 0) {
+                                // If metadata is now empty, remove it from the sync payload entirely
+                                const metaIndex = changes.findIndex((c: any) => c.field === '_sync_metadata');
+                                if (metaIndex > -1) {
+                                    changes.splice(metaIndex, 1);
+                                }
+                            } else {
+                                // Otherwise, update the payload with the remaining metadata
+                                metadataChange.value = newMeta;
+                            }
+
+                            // Inject ms_planner_id update into the batch
+                            const plannerChange = changes.find((c: any) => c.field === 'ms_planner_id');
+                            if (plannerChange) {
+                                plannerChange.value = newPlannerId;
+                            } else {
+                                // Add it to the batch manually
+                                actUpdates.push({
+                                    id: actId,
+                                    field: 'ms_planner_id',
+                                    value: newPlannerId,
+                                    timestamp: new Date().toISOString()
+                                });
+                            }
+
+                            // Also update local copy
+                            await db.activities.update(actId, {
+                                ms_planner_id: newPlannerId,
+                                _sync_metadata: newMeta
+                            });
+                        } else {
+                            console.error(`[Sync] Failed to late-create Planner task error:`, await res.text());
+                            // We don't block the sync to Supabase, it will just not have planner ID
+                        }
+                    } catch (e) {
+                        console.error(`[Sync] Exception during late Planner creation:`, e);
+                    }
+                }
+
+                // NEW: Sync completion updates to Planner 
+                // This ensures if user checks/unchecks the task offline or online, 
+                // it queues the update and fires it against MS Microsoft Graph here.
+                const completedChange = changes.find(c => c.field === 'is_completed');
+                if (completedChange) {
+                    let msPlannerId = changes.find(c => c.field === 'ms_planner_id')?.value;
+                    if (!msPlannerId) {
+                        try {
+                            const localAct = await db.activities.get(actId);
+                            msPlannerId = localAct?.ms_planner_id;
+                        } catch (e) { }
+                    }
+
+                    if (msPlannerId && msPlannerId !== 'ERROR') {
+                        console.log(`[Sync] Found completion status change, syncing to Planner task ${msPlannerId}...`);
+                        try {
+                            const percentComplete = completedChange.value ? 100 : 0;
+                            const res = await fetch(`/api/microsoft/planner/tasks/${msPlannerId}`, {
+                                method: 'PATCH',
+                                headers: { 'Content-Type': 'application/json' },
+                                credentials: 'include',
+                                body: JSON.stringify({ percentComplete })
+                            });
+                            if (!res.ok) {
+                                console.error(`[Sync] Failed to update Planner completion status:`, await res.text());
+                            } else {
+                                console.log(`[Sync] Successfully updated Planner completion status for ${msPlannerId}`);
+                            }
+                        } catch (e) {
+                            console.error(`[Sync] Exception updating Planner completion status:`, e);
+                            // Do not throw, allow Supabase sync to proceed
+                        }
+                    }
+                }
+
+                if (metadataChange && metadataChange.value && metadataChange.value.pending_calendar) {
+                    console.log(`[Sync] Found offline activity with pending Calendar creation: ${actId}`);
+                    try {
+                        const localAct = await db.activities.get(actId);
+                        const titleField = changes.find(c => c.field === 'asunto');
+                        const title = titleField ? titleField.value : (localAct?.asunto || 'Nuevo Evento (CRM)');
+                        const descField = changes.find(c => c.field === 'descripcion');
+                        const desc = descField ? descField.value : localAct?.descripcion;
+                        const startField = changes.find(c => c.field === 'fecha_inicio');
+                        const start = startField ? startField.value : localAct?.fecha_inicio;
+                        const endField = changes.find(c => c.field === 'fecha_fin');
+                        const end = endField ? endField.value : localAct?.fecha_fin;
+
+                        const meta = metadataChange.value;
+
+                        // Proceed to call our internal POST endpoint
+                        const res = await fetch('/api/microsoft/calendar/create-event', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            credentials: 'include',
+                            body: JSON.stringify({
+                                subject: title,
+                                description: desc,
+                                start: start,
+                                end: end,
+                                attendees: meta.assigneeIds ? meta.assigneeIds.map((a: string) => ({ email: a, name: a })) : [],
+                                isOnlineMeeting: !!meta.isOnlineMeeting
+                            })
+                        });
+
+                        if (res.ok) {
+                            const eventResponse = await res.json();
+                            const newEventId = eventResponse.id;
+                            const teamsUrl = eventResponse.onlineMeeting?.joinUrl;
+                            console.log(`[Sync] Successfully late-created Calendar event ${newEventId} for ${actId}`);
+
+                            // Remove pending_calendar from metadata before sending to Supabase
+                            const newMeta = { ...meta };
+                            delete newMeta.pending_calendar;
+
+                            if (Object.keys(newMeta).length === 0) {
+                                // If metadata is now empty, remove it from the sync payload entirely
+                                const metaIndex = changes.findIndex((c: any) => c.field === '_sync_metadata');
+                                if (metaIndex > -1) {
+                                    changes.splice(metaIndex, 1);
+                                }
+                            } else {
+                                metadataChange.value = newMeta;
+                            }
+
+                            // Inject ms_event_id update into the batch
+                            const eventChange = changes.find((c: any) => c.field === 'ms_event_id');
+                            if (eventChange) {
+                                eventChange.value = newEventId;
+                            } else {
+                                actUpdates.push({
+                                    id: actId,
+                                    field: 'ms_event_id',
+                                    value: newEventId,
+                                    timestamp: new Date().toISOString()
+                                });
+                            }
+
+                            if (teamsUrl) {
+                                const teamsChange = changes.find((c: any) => c.field === 'teams_meeting_url');
+                                if (teamsChange) {
+                                    teamsChange.value = teamsUrl;
+                                } else {
+                                    actUpdates.push({
+                                        id: actId,
+                                        field: 'teams_meeting_url',
+                                        value: teamsUrl,
+                                        timestamp: new Date().toISOString()
+                                    });
+                                }
+                            }
+
+                            // Also update local copy
+                            await db.activities.update(actId, {
+                                ms_event_id: newEventId,
+                                teams_meeting_url: teamsUrl || localAct?.teams_meeting_url,
+                                _sync_metadata: newMeta
+                            });
+                        } else {
+                            console.error(`[Sync] Failed to late-create Calendar event error:`, await res.text());
+                        }
+                    } catch (e) {
+                        console.error(`[Sync] Exception during late Calendar creation:`, e);
+                    }
+                }
+            }
+        }
+
+        if (batches['CRM_Actividades']) {
+            // 3.3c SELF-HEALING: Validate opportunity_id FK for Activities
+            // If the referenced opportunity doesn't exist on the server, set opportunity_id to null
+            // to avoid "violates foreign key constraint fk_crmact_opp" errors.
+            const actUpdates = batches['CRM_Actividades'];
+            const oppIdsFromActivities = new Set<string>();
+            actUpdates.forEach(u => {
+                if (u.field === 'opportunity_id' && u.value && typeof u.value === 'string') {
+                    oppIdsFromActivities.add(u.value);
+                }
+            });
+
+            // Also check local DB for activities that have opportunity_id but it's not in the batch
+            const actEntityIds = Array.from(new Set(actUpdates.map(u => u.id)));
+            for (const actId of actEntityIds) {
+                const hasOppInBatch = actUpdates.some(u => u.id === actId && u.field === 'opportunity_id');
+                if (!hasOppInBatch) {
+                    try {
+                        const localAct = await db.activities.get(actId);
+                        if (localAct?.opportunity_id) oppIdsFromActivities.add(localAct.opportunity_id);
+                    } catch (e) { /* ignore */ }
+                }
+            }
+
+            if (oppIdsFromActivities.size > 0) {
+                try {
+                    const oppIdsToCheck = Array.from(oppIdsFromActivities);
+                    const { data: existingOpps, error: oppCheckErr } = await supabase
+                        .from('CRM_Oportunidades')
+                        .select('id')
+                        .in('id', oppIdsToCheck);
+
+                    if (!oppCheckErr && existingOpps) {
+                        const foundOppIds = new Set(existingOpps.map(o => o.id));
+                        const missingOppIds = oppIdsToCheck.filter(id => !foundOppIds.has(id));
+
+                        if (missingOppIds.length > 0) {
+                            // Check if these missing opportunities are currently in the outbox pending/syncing
+                            const pendingOpps = await db.outbox
+                                .where('entity_type').equals('CRM_Oportunidades')
+                                .and(i => i.status === 'PENDING' || i.status === 'SYNCING')
+                                .toArray();
+                            const pendingOppIds = new Set(pendingOpps.map(p => p.entity_id));
+
+                            const trulyMissingOppIds = missingOppIds.filter(id => !pendingOppIds.has(id));
+
+                            if (trulyMissingOppIds.length > 0) {
+                                console.warn(`[Sync] Self-healing: Found ${trulyMissingOppIds.length} truly missing opportunities referenced by activities:`, trulyMissingOppIds);
+
+                                // Nullify opportunity_id in the batch for activities referencing missing opportunities
+                                for (const update of actUpdates) {
+                                    if (update.field === 'opportunity_id' && trulyMissingOppIds.includes(update.value)) {
+                                        console.log(`[Sync] Nullifying opportunity_id for activity ${update.id} (truly missing opp: ${update.value})`);
+                                        update.value = null;
+                                    }
+                                }
+
+                                // Also update local Dexie to avoid re-queuing with bad FK
+                                for (const actId of actEntityIds) {
+                                    try {
+                                        const localAct = await db.activities.get(actId);
+                                        if (localAct?.opportunity_id && trulyMissingOppIds.includes(localAct.opportunity_id)) {
+                                            await db.activities.update(actId, { opportunity_id: null });
+                                            console.log(`[Sync] Updated local activity ${actId}: cleared opportunity_id (replaced with null)`);
+                                        }
+                                    } catch (e) { 
+                                        console.warn(`[Sync] Error updating local activity ${actId} during heal:`, e);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[Sync] Failed to validate opportunity FKs for activities:', e);
+                }
+            }
+        }
+
+        if (batches['CRM_Oportunidades']) {
+            const updates = batches['CRM_Oportunidades'];
+
+            // 3.4 SELF-HEALING: Check for missing accounts
+            const uniqueAccountIds = new Set<string>();
+
+            // Gather account IDs from updates (if present in payload)
+            updates.forEach(u => {
+                if (u.field === 'account_id' && typeof u.value === 'string') uniqueAccountIds.add(u.value);
+            });
+
+            // Also check items in the DB for these opportunities if account_id isn't in the update payload
+            const oppIds = Array.from(new Set(updates.map(u => u.id)));
+            if (oppIds.length > 0) {
+                try {
+                    const localOpps = await db.opportunities.where('id').anyOf(oppIds).toArray();
+                    localOpps.forEach(o => {
+                        if (o.account_id) uniqueAccountIds.add(o.account_id);
+                    });
+                } catch (e) { console.warn("[Sync] Failed to read local opps for account check", e); }
+            }
+
+            if (uniqueAccountIds.size > 0) {
+                const accountIdsToCheck = Array.from(uniqueAccountIds);
+                // Check server existence (blind check)
+                const { data: existingAccounts, error: accCheckErr } = await supabase
+                    .from('CRM_Cuentas')
+                    .select('id')
+                    .in('id', accountIdsToCheck);
+
+                if (!accCheckErr && existingAccounts) {
+                    const foundIds = new Set(existingAccounts.map(a => a.id));
+                    const missingAccountIds = accountIdsToCheck.filter(id => !foundIds.has(id));
+
+                    if (missingAccountIds.length > 0) {
+                        console.warn(`[Sync] Self-healing: Found ${missingAccountIds.length} missing accounts referenced by opportunities.`);
+
+                        const pendingAccounts = await db.outbox
+                            .where('entity_type').equals('CRM_Cuentas')
+                            .and(i => i.status === 'PENDING' || i.status === 'SYNCING')
+                            .toArray();
+                        const pendingAccountIds = new Set(pendingAccounts.map(p => p.entity_id));
+
+                        for (const missingId of missingAccountIds) {
+                            if (pendingAccountIds.has(missingId)) continue; // Already queueing
+
+                            // Check existence in local DB
+                            const localAccount = await db.accounts.get(missingId);
+                            if (localAccount) {
+                                console.log(`[Sync] Re-queueing missing local account: ${missingId}`);
+                                const fieldsToSync: (keyof typeof localAccount)[] =
+                                    ['nombre', 'nit', 'nit_base', 'canal_id', 'telefono', 'email', 'direccion', 'pais_id', 'departamento_id', 'ciudad_id', 'subclasificacion_id', 'owner_user_id', 'nivel_premium', 'es_premium', 'created_by', 'created_at', 'updated_at', 'comentarios'];
+
+                                const newOutboxItems: any[] = [];
+                                fieldsToSync.forEach(field => {
+                                    const val = localAccount[field];
+                                    if (val !== undefined && val !== null) {
+                                        newOutboxItems.push({
+                                            id: uuidv4(),
+                                            entity_type: 'CRM_Cuentas',
+                                            entity_id: missingId,
+                                            field_name: field as string,
+                                            old_value: null,
+                                            new_value: val,
+                                            field_timestamp: now,
+                                            status: 'PENDING',
+                                            retry_count: 0
+                                        });
+                                    }
+                                });
+
+                                await db.outbox.bulkPut(newOutboxItems);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+
+        // 4. Extract CRM_Oportunidades_Colaboradores to process AFTER main tables
+        let collabUpdatesPending: any[] | null = null;
+        if (batches['CRM_Oportunidades_Colaboradores']) {
+            console.log('[Sync] Extracting CRM_Oportunidades_Colaboradores to process after main tables...');
+            collabUpdatesPending = batches['CRM_Oportunidades_Colaboradores'];
+            delete batches['CRM_Oportunidades_Colaboradores']; // Remove from main RPC loop
+        }
+
+        const sortedTables = Object.entries(batches).sort(([tableA], [tableB]) => {
+            const priorityA = TABLE_PRIORITY[tableA] || 99;
+            const priorityB = TABLE_PRIORITY[tableB] || 99;
+            return priorityA - priorityB;
+        });
+
+        for (let [table, updates] of sortedTables) {
+            try {
+                // 3.5 AUTO-MAPPING: Resolve internal field names to Supabase/SAP column names
+                if (table === 'CRM_Pedidos' || table === 'CRM_Cotizaciones') {
+                    updates = updates.map(u => {
+                        if (SAP_MAPPING[u.field]) {
+                            return { ...u, field: SAP_MAPPING[u.field] };
+                        }
+                        return u;
+                    });
+                }
+
+                // 3.6 AUTO-FILTER: Remove generated columns that cannot be updated
+                if (table === 'CRM_CotizacionItems') {
+                    const originalCount = updates.length;
+                    updates = updates.filter(u => u.field !== 'subtotal');
+                    if (updates.length < originalCount) {
+                        console.log(`[Sync] Filtered out 'subtotal' generated column from CRM_CotizacionItems batch`);
+                    }
+                }
+
+                // If filtering removed all updates for this table, skip it
+                if (updates.length === 0) continue;
+
+                // Mark _sync_metadata as COMPLETED from outbox (to prevent loops)
+                // BUT keep them in the RPC payload so the server sees the timestamps
+                const metadataIdsToComplete = pending
+                    .filter(p => p.entity_type === table && p.field_name === '_sync_metadata')
+                    .map(p => p.id);
+                if (metadataIdsToComplete.length > 0) {
+                    await db.outbox.where('id').anyOf(metadataIdsToComplete).modify({ status: 'COMPLETED' });
+                }
+
+                if (table === 'CRM_Cuentas') {
+                    console.log(`[Sync] Batch for ${table}:`, JSON.stringify(updates, null, 2));
+                }
+
+                const { data, error } = await supabase.rpc('process_field_updates', {
+                    p_table_name: table,
+                    p_updates: updates,
+                    p_user_id: user.id
+                });
+
+                if (error) {
+                    console.error(`[Sync] RPC Fatal Error for ${table}:`, error.message);
+                    throw error; // This jumps to the catch block for the whole table
+                }
+
+                // Process individual results
+                const results = data as any[];
+                console.log(`[Sync] Processed ${updates.length} updates for ${table}. ${results.filter(r => r.success).length} success, ${results.filter(r => !r.success).length} failed.`);
+
+                for (const result of results) {
+                    if (result.success) {
+                        if (result.field === '_all') {
+                            // Successful INSERT (or consolidated update): mark ALL pending items for this ID as COMPLETED
+                            const idsToComplete = pending
+                                .filter(p => p.entity_id === result.id && p.entity_type === table)
+                                .map(p => p.id);
+                            await db.outbox.where('id').anyOf(idsToComplete).modify({ status: 'COMPLETED' });
+                        } else {
+                            // Successful single field update: mark ALL items for this field from outbox in this batch as COMPLETED
+                            const idsToComplete = pending
+                                .filter(p => p.entity_id === result.id && p.field_name === result.field && p.entity_type === table)
+                                .map(p => p.id);
+                            await db.outbox.where('id').anyOf(idsToComplete).modify({ status: 'COMPLETED' });
+                        }
+                    } else {
+                        // Failure: Mark ALL relevant items as FAILED
+                        const itemsToFail = result.field === '_all'
+                            ? pending.filter(p => p.entity_id === result.id && p.entity_type === table)
+                            : pending.filter(p => p.entity_id === result.id && p.field_name === result.field && p.entity_type === table);
+
+                        await db.transaction('rw', db.outbox, async () => {
+                            for (const item of itemsToFail) {
+                                console.warn(`[Sync] Push failed for ${table}.${item.field_name}: ${result.message}`);
+
+                                // SELF-HEALING: Duplicate Account NIT scenario
+                                if (table === 'CRM_Cuentas' && result.message.includes('idx_crmcuentas_nit_base_root')) {
+                                    console.warn(`[Sync] Intercepted duplicated account (NIT base). Triggering identity resolution for ID ${result.id}...`);
+                                    setTimeout(() => this.resolveDuplicateAccount(result.id), 100);
+                                }
+
+                                await db.outbox.update(item.id, {
+                                    status: 'FAILED',
+                                    error: result.message,
+                                    retry_count: (item.retry_count || 0) + 1
+                                });
+                            }
+                        });
+                    }
+                }
+
+            } catch (err: any) {
+                console.error(`[Sync] Table sweep failure for ${table}:`, err.message);
+                // Revert status to FAILED for remaining items in this table batch that were marked as SYNCING
+                const idsToFail = pending
+                    .filter(i => i.entity_type === table)
+                    .map(i => i.id);
+
+                await db.outbox.where('id').anyOf(idsToFail).modify(item => {
+                    item.status = 'FAILED';
+                    item.error = err.message;
+                    item.retry_count = (item.retry_count || 0) + 1;
+                });
+
+                // BREAK ON FATAL: Prevent processing child tables if parent has a fatal RPC error
+                console.warn(`[Sync] Breaking sync loop due to fatal failure in ${table}.`);
+                break;
+            }
+        }
+
+        // 5. SPECIAL HANDLING: Bypass RPC for CRM_Oportunidades_Colaboradores
+        // We process this AFTER the main table loops so that new parent opportunities
+        // have already been synced to Supabase, solving FK constraint errors.
+        if (collabUpdatesPending) {
+            console.log('[Sync] Bypassing RPC for CRM_Oportunidades_Colaboradores (running after main tables)...');
+            const collabUpdates = collabUpdatesPending;
+
+            // Group by ID to form rows
+            const rowsMap = new Map<string, any>();
+            collabUpdates.forEach(u => {
+                if (!rowsMap.has(u.id)) rowsMap.set(u.id, {});
+                const row = rowsMap.get(u.id);
+                // Skip invalid fields here explicitly
+                if (!['created_at', 'updated_at'].includes(u.field)) {
+                    row[u.field] = u.value;
+                }
+                row.id = u.id;
+            });
+
+            const rows = Array.from(rowsMap.values());
+
+            // Enrichment: Ensure all required fields exist for new/missing server rows
+            if (rows.length > 0) {
+                const isValidUUID = (id: any) => typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
+                for (let i = rows.length - 1; i >= 0; i--) {
+                    const row = rows[i];
+                    try {
+                        const localItem = await db.opportunityCollaborators.get(row.id);
+                        if (localItem) {
+                            if (!row.oportunidad_id) row.oportunidad_id = localItem.oportunidad_id;
+                            if (!row.usuario_id) row.usuario_id = localItem.usuario_id;
+                            if (row.porcentaje === undefined) row.porcentaje = localItem.porcentaje;
+                            if (!row.rol) row.rol = localItem.rol;
+
+                            // Proactive Fix: Some items might have percentage 0 or null causing constraint violations
+                            if (row.porcentaje === null || row.porcentaje === undefined || row.porcentaje <= 0) {
+                                console.warn(`[Sync] Repairing invalid percentage ${row.porcentaje} for collab ${row.id}`);
+                                row.porcentaje = 0.01; // Minimum valid percentage
+                            }
+                        }
+
+                        // CRITICAL: Validate UUIDs to prevent infinite 400 loops
+                        if (!isValidUUID(row.usuario_id) || !isValidUUID(row.oportunidad_id)) {
+                            console.error(`[Sync] Invalid UUIDs for collaborator sync. User: ${row.usuario_id}, Opp: ${row.oportunidad_id}. Row:`, row);
+
+                            // Remove this row from the batch to prevent failure
+                            rows.splice(i, 1);
+
+                            // Delete the Bad Item from Outbox to stop the loop
+                            const badItems = pending.filter(p => p.entity_id === row.id && p.entity_type === 'CRM_Oportunidades_Colaboradores');
+                            if (badItems.length > 0) {
+                                console.warn(`[Sync] Deleting ${badItems.length} malformed collaborator items from outbox to break loop.`);
+                                await db.outbox.bulkDelete(badItems.map(b => b.id));
+                            }
+                        }
+
+                    } catch (e) {
+                        console.error("[Sync] Error preparing collaborator row:", e);
+                    }
+                }
+            }
+
+            if (rows.length > 0) {
+                // Self-healing: Ensure parent opportunity exists on server
+                const oppIdsToCheck = Array.from(new Set(rows.map(r => r.oportunidad_id))).filter(Boolean);
+                if (oppIdsToCheck.length > 0) {
+                    const { data: existingOpps, error: oppCheckError } = await supabase
+                        .from('CRM_Oportunidades')
+                        .select('id')
+                        .in('id', oppIdsToCheck);
+
+                    if (!oppCheckError && existingOpps) {
+                        const validOppIds = new Set(existingOpps.map(o => o.id));
+                        for (let i = rows.length - 1; i >= 0; i--) {
+                            if (!validOppIds.has(rows[i].oportunidad_id)) {
+                                console.warn(`[Sync-Heal] Deleting orphaned collaborator for non-existent Opportunity: ${rows[i].oportunidad_id}`);
+                                const badItems = pending.filter(p => p.entity_id === rows[i].id && p.entity_type === 'CRM_Oportunidades_Colaboradores');
+                                if (badItems.length > 0) {
+                                    await db.outbox.bulkDelete(badItems.map(b => b.id));
+                                }
+                                rows.splice(i, 1);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (rows.length > 0) {
+                console.log('[Sync] Bypass Rows Preview:', JSON.stringify(rows, null, 2));
+                try {
+                    const { error } = await supabase.from('CRM_Oportunidades_Colaboradores').upsert(rows);
+
+                    if (!error) {
+                        const rowIds = rows.map(r => r.id);
+                        const idsToComplete = pending
+                            .filter(p => p.entity_type === 'CRM_Oportunidades_Colaboradores' && rowIds.includes(p.entity_id))
+                            .map(p => p.id);
+
+                        if (idsToComplete.length > 0) {
+                            await db.outbox.where('id').anyOf(idsToComplete).modify({ status: 'COMPLETED' });
+                        }
+                        console.log(`[Sync] Bypassed RPC for Collaborators. Synced ${rows.length} rows.`);
+                    } else {
+                        console.error('[Sync] Collaborator bypass failed:', error);
+                        // Mark as failed in outbox
+                        const idsToFail = collabUpdates.map(u => pending.find(p => p.entity_id === u.id && p.field_name === u.field && p.entity_type === 'CRM_Oportunidades_Colaboradores')?.id).filter(Boolean) as string[];
+                        if (idsToFail.length > 0) {
+                            await db.outbox.where('id').anyOf(idsToFail).modify(item => {
+                                item.status = 'FAILED';
+                                item.error = error.message;
+                                item.retry_count = (item.retry_count || 0) + 1;
+                            });
+                        }
+                    }
+                } catch (e: any) {
+                    console.error('[Sync] Collaborator bypass exception:', e);
+                }
+            }
+        }
+    }
+
+    /**
+     * SELF-HEALING: Resolves issues where an account is created locally but already exists on Supabase.
+     */
+    private async resolveDuplicateAccount(badAccountId: string) {
+        try {
+            console.log(`[Sync-Heal] Starting resolution for duplicated account: ${badAccountId}`);
+            // 1. Get the local account to find the NIT
+            const localAcc = await db.accounts.get(badAccountId);
+            if (!localAcc || !localAcc.nit_base) return;
+
+            // 2. Fetch the REAL account ID from Supabase
+            const { data: realAccounts, error } = await supabase
+                .from('CRM_Cuentas')
+                .select('id')
+                .eq('nit_base', localAcc.nit_base)
+                .is('id_cuenta_principal', null)
+                .limit(1);
+
+            if (error || !realAccounts || realAccounts.length === 0) {
+                console.warn(`[Sync-Heal] Could not find real account on server with nit_base ${localAcc.nit_base}`);
+                return;
+            }
+
+            const realAccountId = realAccounts[0].id;
+            console.log(`[Sync-Heal] Found matching real account ID on server: ${realAccountId}. Repairing local references...`);
+
+            // 3. Repair Outbox Items
+            // Delete all outbox items related to the BAD account itself
+            const badAccountOutboxItems = await db.outbox.where('entity_id').equals(badAccountId).and(i => i.entity_type === 'CRM_Cuentas').toArray();
+            await db.outbox.bulkDelete(badAccountOutboxItems.map(i => i.id));
+
+            // -- NEW: Repair Contacts references --
+            console.log(`[Sync-Heal] Repairing contact references for bad account ${badAccountId} -> ${realAccountId}`);
+            const contactsToFix = await db.contacts.where('account_id').equals(badAccountId).toArray();
+            for (const contact of contactsToFix) {
+                await db.contacts.update(contact.id, { account_id: realAccountId });
+            }
+
+            // Find all opportunities in Dexie that point to the BAD account and update them
+            const opportunitiesToFix = await db.opportunities.where('account_id').equals(badAccountId).toArray();
+            for (const opp of opportunitiesToFix) {
+                await db.opportunities.update(opp.id, { account_id: realAccountId });
+            }
+
+            // Find outbox items referencing the bad account ID as a value and update them to the real ID
+            const outboxValueFixes = await db.outbox
+                .where('field_name').equals('account_id')
+                .and(i => i.new_value === badAccountId)
+                .toArray();
+
+            for (const item of outboxValueFixes) {
+                await db.outbox.update(item.id, { new_value: realAccountId, status: 'PENDING', error: undefined, retry_count: 0 });
+            }
+
+            // Reset related dependent items that failed due to cascaded FK errors, so they try again
+            const failedOutboxItems = await db.outbox
+                .where('status').equals('FAILED')
+                .toArray();
+
+            for (const item of failedOutboxItems) {
+                if (['CRM_Contactos', 'CRM_Oportunidades', 'CRM_Cotizaciones', 'CRM_CotizacionItems', 'CRM_Oportunidades_Colaboradores'].includes(item.entity_type)) {
+                    await db.outbox.update(item.id, { status: 'PENDING', retry_count: 0, error: undefined });
+                }
+            }
+
+            // Delete the bad account from local DEXIE to prevent UI rendering it
+            await db.accounts.delete(badAccountId);
+
+            console.log(`[Sync-Heal] Repaired duplicate account (Contacts, Opps & Outbox). Triggering sync again.`);
+            this.triggerSync();
+        } catch (e) {
+            console.error(`[Sync-Heal] Error resolving duplicate account:`, e);
+        }
+    }
+
+    /**
+     * SELF-HEALING: Resolves issues where a contact is created locally but already exists on Supabase.
+     */
+    private async resolveDuplicateContact(badContactId: string, realContactId: string) {
+        try {
+            console.log(`[Sync-Heal] Starting resolution for duplicated contact: ${badContactId} -> ${realContactId}`);
+            
+            // 1. Repair Outbox Items
+            // Delete all outbox items related to the BAD contact
+            const badOutboxItems = await db.outbox.where('entity_id').equals(badContactId).and(i => i.entity_type === 'CRM_Contactos').toArray();
+            if (badOutboxItems.length > 0) {
+                console.log(`[Sync-Heal] Cleaning up ${badOutboxItems.length} outbox items for bad contact.`);
+                try {
+                    await db.outbox.bulkDelete(badOutboxItems.map(i => i.id));
+                } catch (dbErr) {
+                    console.error(`[Sync-Heal] Dexie failed to bulkDelete from outbox:`, dbErr);
+                }
+            }
+
+            // 2. Clear from local Dexie
+            await db.contacts.delete(badContactId);
+
+            console.log(`[Sync-Heal] Repaired duplicate contact. Removed bad local entry and cleaned its outbox.`);
+        } catch (e) {
+            console.error(`[Sync-Heal] Error resolving duplicate contact:`, e);
+        }
+    }
+    /**
+     * PULL: Download server data to local IndexedDB
+     * Called on app initialization to ensure all browsers have the same data
+     */
+    private async pullChanges(_user: any) {
+        console.log('[Sync] Pulling data from server...');
+        useSyncStore.getState().setIsLoadingData(true);
+        const lastSync = useSyncStore.getState().lastSyncTime;
+
+        try {
+            // Pull Accounts (CRM_Cuentas)
+            // PERF OPTIMIZATION: Incremental sync based on lastSyncTime
+            let accountsQuery = supabase
+                .from('CRM_Cuentas')
+                .select('*')
+                .eq('is_deleted', false);
+
+            if (lastSync) {
+                accountsQuery = accountsQuery.gte('updated_at', lastSync);
+            } else {
+                // Initial Load limit to 3000 most recent for caching
+                accountsQuery = accountsQuery.order('updated_at', { ascending: false }).limit(3000);
+            }
+
+            const { data: accounts, error: accountsError } = await accountsQuery;
+
+            if (accountsError) throw accountsError;
+
+            if (accounts && accounts.length > 0) {
+                const pendingAccountIds = new Set(
+                    (await db.outbox
+                        .where('entity_type').equals('CRM_Cuentas')
+                        .and(item => item.status === 'PENDING' || item.status === 'SYNCING')
+                        .toArray()
+                    ).map(item => item.entity_id)
+                );
+
+                let mergedCount = 0;
+                let skippedCount = 0;
+                const accountsToPut = [];
+                for (const a of accounts) {
+                    if (pendingAccountIds.has(a.id)) {
+                        skippedCount++;
+                        continue;
+                    }
+
+                    accountsToPut.push({
+                        id: a.id,
+                        nombre: a.nombre,
+                        nit: a.nit,
+                        nit_base: a.nit_base,
+                        id_cuenta_principal: a.id_cuenta_principal,
+                        canal_id: a.canal_id || 'DIST_NAC',
+                        es_premium: a.es_premium ?? false,
+                        nivel_premium: a.nivel_premium,
+                        telefono: a.telefono,
+                        email: a.email,
+                        direccion: a.direccion,
+                        pais_id: a.pais_id,
+                        departamento_id: a.departamento_id,
+                        ciudad_id: a.ciudad_id,
+                        ciudad: a.ciudad,
+                        subclasificacion_id: a.subclasificacion_id,
+                        comentarios: a.comentarios,
+                        ignorar_limites_descuento: a.ignorar_limites_descuento ?? false,
+                        owner_user_id: a.owner_user_id,
+                        created_by: a.created_by,
+                        updated_by: a.updated_by,
+                        updated_at: a.updated_at
+                    });
+                    mergedCount++;
+                }
+
+                if (accountsToPut.length > 0) {
+                    await db.accounts.bulkPut(accountsToPut);
+                }
+
+                console.log(`[Sync] Merged ${mergedCount} accounts (${skippedCount} with pending changes skipped).`);
+            }
+
+            // CLEANUP: Remove locally-cached accounts that were deleted on the server
+            try {
+                let deletedQuery = supabase
+                    .from('CRM_Cuentas')
+                    .select('id')
+                    .eq('is_deleted', true)
+                    .limit(10000);
+
+                if (lastSync) deletedQuery = deletedQuery.gte('updated_at', lastSync);
+
+                const { data: deletedAccounts, error: delError } = await deletedQuery;
+
+                if (!delError && deletedAccounts && deletedAccounts.length > 0) {
+                    const deletedIds = deletedAccounts.map(a => a.id);
+                    await db.accounts.bulkDelete(deletedIds);
+                    console.log(`[Sync] Cleaned up ${deletedIds.length} deleted accounts from local cache.`);
+                }
+            } catch (cleanErr) {
+                console.warn('[Sync] Failed to clean up deleted accounts:', cleanErr);
+            }
+
+            await this.yield();
+            
+            // SPECIAL PULL: Accounts where user is a collaborator
+            // This ensures shared accounts are synced even if not in the top 3000
+            try {
+                const { data: collabRels } = await supabase
+                    .from('CRM_Oportunidades_Colaboradores')
+                    .select('oportunidad_id')
+                    .eq('usuario_id', _user.id);
+                
+                if (collabRels && collabRels.length > 0) {
+                    const oppIds = collabRels.map(r => r.oportunidad_id);
+                    const { data: collabOpps } = await supabase
+                        .from('CRM_Oportunidades')
+                        .select('account_id')
+                        .in('id', oppIds);
+                    
+                    if (collabOpps && collabOpps.length > 0) {
+                        const accIds = [...new Set(collabOpps.map(o => o.account_id).filter(Boolean))];
+                        const { data: collabAccs } = await supabase
+                            .from('CRM_Cuentas')
+                            .select('*')
+                            .in('id', accIds as string[]);
+                        
+                        if (collabAccs && collabAccs.length > 0) {
+                            await db.accounts.bulkPut(collabAccs);
+                            console.log(`[Sync] Pulled ${collabAccs.length} accounts via collaboration links.`);
+                        }
+                    }
+                }
+            } catch (collabErr) {
+                console.warn('[Sync] Failed to pull collaborator accounts:', collabErr);
+            }
+
+            await this.yield();
+
+            // Pull Phases (CRM_FasesOportunidad)
+            try {
+                const { data: phases, error: phasesError } = await supabase
+                    .from('CRM_FasesOportunidad')
+                    .select('*')
+                    .eq('is_active', true);
+
+                if (phasesError) throw phasesError;
+
+                if (phases && phases.length > 0) {
+                    const mapped = phases.map((f: any) => ({
+                        id: f.id,
+                        nombre: f.nombre,
+                        orden: f.orden,
+                        is_active: f.is_active,
+                        canal_id: f.canal_id,
+                        probability: f.probability ?? 0
+                    }));
+                    await db.transaction('rw', db.phases, async () => {
+                        await db.phases.clear();
+                        await db.phases.bulkPut(mapped);
+                    });
+                    console.log(`[Sync] Pulled ${phases.length} phases.`);
+                }
+            } catch (pErr: any) {
+                console.error('[Sync] Failed to pull phases:', pErr.message);
+            }
+            await this.yield();
+
+            // Pull Subclassifications (CRM_Subclasificacion)
+            try {
+                const { data: subs, error: subsError } = await supabase
+                    .from('CRM_Subclasificacion')
+                    .select('*');
+
+                if (subsError) throw subsError;
+
+                if (subs && subs.length > 0) {
+                    const mapped = subs.map((s: any) => ({
+                        id: s.id,
+                        nombre: s.nombre,
+                        canal_id: s.canal_id
+                    }));
+                    await db.transaction('rw', db.subclasificaciones, async () => {
+                        await db.subclasificaciones.clear();
+                        await db.subclasificaciones.bulkPut(mapped);
+                    });
+                    console.log(`[Sync] Pulled ${subs.length} subclassifications.`);
+                }
+            } catch (sErr: any) {
+                console.error('[Sync] Failed to pull subclassifications:', sErr.message);
+            }
+            await this.yield();
+
+            // Pull Activity Classifications
+            try {
+                const { data: actCls, error: actClsError } = await supabase
+                    .from('CRM_Activity_Clasificacion')
+                    .select('*')
+                    .eq('is_deleted', false);
+
+                if (actClsError) throw actClsError;
+
+                if (actCls && actCls.length > 0) {
+                    const mapped = actCls.map((c: any) => ({
+                        id: c.id,
+                        nombre: c.nombre,
+                        tipo_actividad: c.tipo_actividad,
+                        is_deleted: c.is_deleted
+                    }));
+                    await db.transaction('rw', db.activityClassifications, async () => {
+                        await db.activityClassifications.clear();
+                        await db.activityClassifications.bulkPut(mapped);
+                    });
+                    console.log(`[Sync] Pulled ${actCls.length} activity classifications.`);
+                }
+
+                // Cleanup deleted ones
+                const { data: delCls } = await supabase
+                    .from('CRM_Activity_Clasificacion')
+                    .select('id')
+                    .eq('is_deleted', true);
+                if (delCls && delCls.length > 0) {
+                    await db.activityClassifications.bulkDelete(delCls.map(c => c.id));
+                }
+            } catch (acErr: any) {
+                console.error('[Sync] Failed to pull activity classifications:', acErr.message);
+            }
+
+            // Pull Activity Subclassifications
+            try {
+                const { data: actSubs, error: actSubsError } = await supabase
+                    .from('CRM_Activity_Subclasificacion')
+                    .select('*')
+                    .eq('is_deleted', false);
+
+                if (actSubsError) throw actSubsError;
+
+                if (actSubs && actSubs.length > 0) {
+                    const mapped = actSubs.map((s: any) => ({
+                        id: s.id,
+                        nombre: s.nombre,
+                        clasificacion_id: s.clasificacion_id,
+                        is_deleted: s.is_deleted
+                    }));
+                    await db.transaction('rw', db.activitySubclassifications, async () => {
+                        await db.activitySubclassifications.clear();
+                        await db.activitySubclassifications.bulkPut(mapped);
+                    });
+                    console.log(`[Sync] Pulled ${actSubs.length} activity subclassifications.`);
+                }
+
+                // Cleanup deleted ones
+                const { data: delSubs } = await supabase
+                    .from('CRM_Activity_Subclasificacion')
+                    .select('id')
+                    .eq('is_deleted', true);
+                if (delSubs && delSubs.length > 0) {
+                    await db.activitySubclassifications.bulkDelete(delSubs.map(s => s.id));
+                }
+            } catch (asErr: any) {
+                console.error('[Sync] Failed to pull activity subclassifications:', asErr.message);
+            }
+
+            // Pull Segments (CRM_Segmentos)
+            try {
+                const { data: segments, error: segmentsError } = await supabase
+                    .from('CRM_Segmentos')
+                    .select('*');
+
+                if (segmentsError) throw segmentsError;
+
+                if (segments && segments.length > 0) {
+                    const mapped = segments.map((s: any) => ({
+                        id: s.id,
+                        nombre: s.nombre,
+                        subclasificacion_id: s.subclasificacion_id
+                    }));
+                    await db.transaction('rw', db.segments, async () => {
+                        await db.segments.clear();
+                        await db.segments.bulkPut(mapped);
+                    });
+                    console.log(`[Sync] Pulled ${segments.length} segments.`);
+                }
+            } catch (segErr: any) {
+                console.error('[Sync] Failed to pull segments:', segErr.message);
+            }
+
+            // Pull Departments (CRM_Departamentos)
+            try {
+                const { data: deps, error: depsError } = await supabase
+                    .from('CRM_Departamentos')
+                    .select('*');
+
+                if (depsError) throw depsError;
+
+                if (deps && deps.length > 0) {
+                    const mapped = deps.map((d: any) => ({
+                        id: d.id,
+                        pais_id: d.pais_id,
+                        nombre: d.nombre
+                    }));
+                    await db.transaction('rw', db.departments, async () => {
+                        await db.departments.clear();
+                        await db.departments.bulkPut(mapped);
+                    });
+                    console.log(`[Sync] Pulled ${deps.length} departments.`);
+                }
+            } catch (depErr: any) {
+                console.error('[Sync] Failed to pull departments:', depErr.message);
+            }
+
+            // Pull Countries (CRM_Paises)
+            try {
+                const { data: countries, error: countriesError } = await supabase
+                    .from('CRM_Paises')
+                    .select('*');
+
+                if (countriesError) throw countriesError;
+
+                if (countries && countries.length > 0) {
+                    const mapped = countries.map((c: any) => ({
+                        id: c.id,
+                        nombre: c.nombre
+                    }));
+                    await db.transaction('rw', db.countries, async () => {
+                        await db.countries.clear();
+                        await db.countries.bulkPut(mapped);
+                    });
+                    console.log(`[Sync] Pulled ${countries.length} countries.`);
+                }
+            } catch (countryErr: any) {
+                console.error('[Sync] Failed to pull countries:', countryErr.message);
+            }
+            await this.yield();
+
+            // Pull Cities (CRM_Ciudades)
+            try {
+                const { data: cities, error: citiesError } = await supabase
+                    .from('CRM_Ciudades')
+                    .select('*');
+
+                if (citiesError) throw citiesError;
+
+                if (cities && cities.length > 0) {
+                    const mapped = cities.map((c: any) => ({
+                        id: c.id,
+                        departamento_id: c.departamento_id,
+                        nombre: c.nombre
+                    }));
+                    await db.transaction('rw', db.cities, async () => {
+                        await db.cities.clear();
+                        await db.cities.bulkPut(mapped);
+                    });
+                    console.log(`[Sync] Pulled ${cities.length} cities.`);
+                }
+            } catch (cityErr: any) {
+                console.error('[Sync] Failed to pull cities:', cityErr.message);
+            }
+
+            // Pull Contacts (CRM_Contactos) - SMART MERGE
+            // PERF OPTIMIZATION: Incremental sync enabled
+            let contactsQuery = supabase
+                .from('CRM_Contactos')
+                .select('*')
+                .eq('is_deleted', false);
+
+            if (lastSync) {
+                contactsQuery = contactsQuery.gte('updated_at', lastSync);
+            } else {
+                // Initial Load limit to 3000 most recent for caching
+                contactsQuery = contactsQuery.order('updated_at', { ascending: false }).limit(3000);
+            }
+
+            const { data: contacts, error: contactsError } = await contactsQuery;
+
+            if (contactsError) throw contactsError;
+
+            if (contacts && contacts.length > 0) {
+                const pendingContactIds = new Set(
+                    (await db.outbox
+                        .where('entity_type').equals('CRM_Contactos')
+                        .and(item => item.status === 'PENDING' || item.status === 'SYNCING')
+                        .toArray()
+                    ).map(item => item.entity_id)
+                );
+
+                let mergedCount = 0;
+                let skippedCount = 0;
+                let healedCount = 0;
+                const contactsToPut = [];
+
+                for (const c of contacts) {
+                    if (pendingContactIds.has(c.id)) {
+                        skippedCount++;
+                        continue;
+                    }
+
+                    // SELF-HEALING: Detect logical duplicates (Same Email + Account, but different ID)
+                    // This happens if a user creates a contact offline that already existed on server.
+                    if (c.email && c.account_id) {
+                        try {
+                            const localDup = await db.contacts
+                                .where('email').equals(c.email)
+                                .and(item => item.account_id === c.account_id && item.id !== c.id)
+                                .first();
+
+                            if (localDup) {
+                                console.warn(`[Sync-Heal] Found logical duplicate contact for ${c.email} in account ${c.account_id}. Resolving...`);
+                                await this.resolveDuplicateContact(localDup.id, c.id);
+                                healedCount++;
+                            }
+                        } catch (err) {
+                            console.warn("[Sync-Heal] Error during contact deduplication check:", err);
+                        }
+                    }
+
+                    contactsToPut.push({
+                        id: c.id,
+                        account_id: c.account_id,
+                        nombre: c.nombre,
+                        cargo: c.cargo,
+                        email: c.email,
+                        telefono: c.telefono,
+                        es_principal: c.es_principal,
+                        created_by: c.created_by,
+                        updated_by: c.updated_by,
+                        updated_at: c.updated_at
+                    });
+                    mergedCount++;
+                }
+
+                if (contactsToPut.length > 0) {
+                    await db.contacts.bulkPut(contactsToPut);
+                }
+
+                console.log(`[Sync] Merged ${mergedCount} contacts (${skippedCount} skipped, ${healedCount} healed).`);
+            }
+
+            // Pull Opportunity Collaborators
+            try {
+                let collabQuery = supabase
+                    .from('CRM_Oportunidades_Colaboradores')
+                    .select('*');
+                
+                if (lastSync) {
+                    collabQuery = collabQuery.gte('updated_at', lastSync);
+                } else {
+                    collabQuery = collabQuery.eq('usuario_id', _user.id);
+                }
+
+                const { data: collabs, error: collabsError } = await collabQuery;
+                if (!collabsError && collabs) {
+                    await db.opportunityCollaborators.bulkPut(collabs);
+                    console.log(`[Sync] Pulled ${collabs.length} opportunity collaborators.`);
+                }
+            } catch (cErr) {
+                console.error('[Sync] Failed to pull collaborators:', cErr);
+            }
+
+            // Pull Opportunities (CRM_Oportunidades) - SMART MERGE
+            // PERF OPTIMIZATION: Incremental sync enabled
+            console.log('[Sync] Starting Opportunity Pull...');
+            let oppsQuery = supabase
+                .from('CRM_Oportunidades')
+                .select('*')
+                .eq('is_deleted', false);
+
+            if (lastSync) {
+                oppsQuery = oppsQuery.gte('updated_at', lastSync);
+            } else {
+                // Initial Load limit to 3000 most recent for caching
+                oppsQuery = oppsQuery.order('updated_at', { ascending: false }).limit(3000);
+            }
+
+            const { data: opportunities, error: oppsError } = await oppsQuery;
+
+            if (oppsError) {
+                console.error('[Sync] Error pulling opportunities:', oppsError);
+                throw oppsError;
+            }
+
+            console.log(`[Sync] Pulled ${opportunities?.length || 0} opportunities from server.`);
+
+            if (opportunities && opportunities.length > 0) {
+                const pendingOppIds = new Set(
+                    (await db.outbox
+                        .where('entity_type').equals('CRM_Oportunidades')
+                        .and(item => item.status === 'PENDING' || item.status === 'SYNCING')
+                        .toArray()
+                    ).map(item => item.entity_id)
+                );
+
+                let mergedCount = 0;
+                let skippedCount = 0;
+                const oppsToPut = [];
+                for (const opp of opportunities) {
+                    if (pendingOppIds.has(opp.id)) {
+                        skippedCount++;
+                        continue;
+                    }
+                    oppsToPut.push({
+                        ...opp,
+                        pais_id: opp.pais_id // Explicit mapping to be safe
+                    });
+                    mergedCount++;
+                }
+
+                if (oppsToPut.length > 0) {
+                    await db.opportunities.bulkPut(oppsToPut);
+                }
+
+                console.log(`[Sync] Merged ${mergedCount} opportunities (${skippedCount} with pending changes skipped).`);
+            } else {
+                console.warn('[Sync] No opportunities returned from server (Length is 0 or undefined). Check RLS policies?');
+            }
+
+            // CLEANUP: Remove locally cached opportunities that were deleted on server
+            try {
+                let deletedQuery = supabase
+                    .from('CRM_Oportunidades')
+                    .select('id')
+                    .eq('is_deleted', true)
+                    .limit(10000);
+
+                if (lastSync) deletedQuery = deletedQuery.gte('updated_at', lastSync);
+
+                const { data: deletedOpps, error: delError } = await deletedQuery;
+
+                if (!delError && deletedOpps && deletedOpps.length > 0) {
+                    const deletedIds = deletedOpps.map(o => o.id);
+                    await db.opportunities.bulkDelete(deletedIds);
+                    
+                    // Cleanup children locally
+                    await db.activities.where('opportunity_id').anyOf(deletedIds).delete();
+                    
+                    // Cleanup Quotes and their items
+                    const relatedQuotes = await db.quotes.where('opportunity_id').anyOf(deletedIds).toArray();
+                    const quoteIds = relatedQuotes.map(q => q.id);
+                    await db.quotes.where('opportunity_id').anyOf(deletedIds).delete();
+                    if (quoteIds.length > 0) {
+                        await db.quoteItems.where('cotizacion_id').anyOf(quoteIds).delete();
+                    }
+
+                    // Cleanup Pedidos and their items
+                    const relatedPedidos = await db.pedidos.where('opportunity_id').anyOf(deletedIds).toArray();
+                    const pedidoUuids = relatedPedidos.map(p => p.uuid_generado);
+                    await db.pedidos.where('opportunity_id').anyOf(deletedIds).delete();
+                    if (pedidoUuids.length > 0) {
+                        await db.pedidoItems.where('pedido_uuid').anyOf(pedidoUuids).delete();
+                    }
+
+                    console.log(`[Sync] Cleaned up ${deletedIds.length} deleted opportunities and all their related records (quotes, orders, activities) from local cache.`);
+                }
+            } catch (cleanErr) {
+                console.warn('[Sync] Failed to clean up deleted opportunities:', cleanErr);
+            }
+
+            // Pull Quotes (CRM_Cotizaciones) - SMART MERGE
+            try {
+                let quotesQuery = supabase
+                    .from('CRM_Cotizaciones')
+                    .select('*')
+                    .eq('is_deleted', false);
+        
+                if (lastSync) {
+                    quotesQuery = quotesQuery.gte('updated_at', lastSync);
+                } else {
+                    quotesQuery = quotesQuery.order('updated_at', { ascending: false }).limit(3000);
+                }
+
+                const { data: quotes, error: quotesError } = await quotesQuery;
+        
+                if (quotesError) throw quotesError;
+        
+                if (quotes && quotes.length > 0) {
+                    const pendingQuoteIds = new Set(
+                        (await db.outbox
+                            .where('entity_type').equals('CRM_Cotizaciones')
+                            .and(item => item.status === 'PENDING' || item.status === 'SYNCING')
+                            .toArray()
+                        ).map(item => item.entity_id)
+                    );
+        
+                    let mergedCount = 0;
+                    let skippedCount = 0;
+                    const quotesToPut = [];
+        
+                    for (const q of quotes) {
+                        if (pendingQuoteIds.has(q.id)) {
+                            skippedCount++;
+                            continue;
+                        }
+        
+                        quotesToPut.push({
+                            id: q.id,
+                            opportunity_id: q.opportunity_id,
+                            numero_cotizacion: q.numero_cotizacion,
+                            total_amount: q.total_amount,
+                            currency_id: q.currency_id,
+                            status: q.status,
+                            is_winner: q.is_winner,
+                            es_pedido: q.es_pedido,
+                            fecha_minima_requerida: q.fecha_minima_requerida,
+                            fecha_facturacion: q.fecha_facturacion,
+                            tipo_facturacion: q.tipo_facturacion,
+                            notas_sap: q.notas_sap,
+                            formas_pago: q.formas_pago,
+                            facturacion_electronica: q.facturacion_electronica,
+                            orden_compra: q.orden_compra,
+                            incoterm: q.incoterm,
+                            segmento_id: q.segmento_id,
+                            created_by: q.created_by,
+                            updated_by: q.updated_by,
+                            updated_at: q.updated_at
+                        });
+                        mergedCount++;
+                    }
+                    if (quotesToPut.length > 0) await db.quotes.bulkPut(quotesToPut);
+                    console.log(`[Sync] Merged ${mergedCount} quotes (${skippedCount} with pending changes skipped).`);
+                }
+            } catch (qErr: any) {
+                console.error('[Sync] Failed to pull quotes:', qErr.message);
+            }
+
+            // Pull Quote Items (CRM_CotizacionItems)
+            try {
+                let itemsQuery = supabase
+                    .from('CRM_CotizacionItems')
+                    .select('*')
+                    .eq('is_deleted', false);
+        
+                if (lastSync) {
+                    itemsQuery = itemsQuery.gte('updated_at', lastSync);
+                } else {
+                    itemsQuery = itemsQuery.order('updated_at', { ascending: false }).limit(5000);
+                }
+
+                const { data: quoteItems, error: itemsError } = await itemsQuery;
+        
+                if (itemsError) throw itemsError;
+        
+                if (quoteItems && quoteItems.length > 0) {
+                    const pendingItemIds = new Set(
+                        (await db.outbox
+                            .where('entity_type').equals('CRM_CotizacionItems')
+                            .and(item => item.status === 'PENDING' || item.status === 'SYNCING')
+                            .toArray()
+                        ).map(item => item.entity_id)
+                    );
+        
+                    let mergedCount = 0;
+                    let skippedCount = 0;
+                    const itemsToPut = [];
+        
+                    for (const i of quoteItems) {
+                        if (pendingItemIds.has(i.id)) {
+                            skippedCount++;
+                            continue;
+                        }
+        
+                        itemsToPut.push({
+                            id: i.id,
+                            cotizacion_id: i.cotizacion_id,
+                            producto_id: i.producto_id,
+                            cantidad: i.cantidad,
+                            precio_unitario: i.precio_unitario,
+                            discount_pct: i.discount_pct,
+                            max_discount_pct: i.max_discount_pct,
+                            final_unit_price: i.final_unit_price,
+                            subtotal: i.subtotal,
+                            descripcion_linea: i.descripcion_linea,
+                            created_by: i.created_by,
+                            updated_by: i.updated_by,
+                            updated_at: i.updated_at
+                        });
+                        mergedCount++;
+                    }
+                    if (itemsToPut.length > 0) await db.quoteItems.bulkPut(itemsToPut);
+                console.log(`[Sync] Merged ${mergedCount} quote items (${skippedCount} with pending changes skipped).`);
+            }
+        } catch (qiErr: any) {
+            console.error('[Sync] Failed to pull quote items:', qiErr.message);
+        }
+
+        // Pull Pedidos (CRM_Pedidos)
+        try {
+            let pedidosQuery = supabase
+                .from('CRM_Pedidos')
+                .select('*')
+                .eq('is_deleted', false);
+    
+            if (lastSync) {
+                pedidosQuery = pedidosQuery.gte('updated_at', lastSync);
+            } else {
+                pedidosQuery = pedidosQuery.order('updated_at', { ascending: false }).limit(3000);
+            }
+
+            const { data: pedidos, error: pedidosError } = await pedidosQuery;
+    
+            if (pedidosError) throw pedidosError;
+    
+            if (pedidos && pedidos.length > 0) {
+                const pendingPedidoIds = new Set(
+                    (await db.outbox
+                        .where('entity_type').equals('CRM_Pedidos')
+                        .and(item => item.status === 'PENDING' || item.status === 'SYNCING')
+                        .toArray()
+                    ).map(item => item.entity_id)
+                );
+    
+                let mergedCount = 0;
+                let skippedCount = 0;
+                const pedidosToPut = [];
+    
+                for (const p of pedidos) {
+                    if (pendingPedidoIds.has(p.uuid_generado)) {
+                        skippedCount++;
+                        continue;
+                    }
+
+                    // Map SAP fields back to local friendly names
+                    const mapped = {
+                        ...p,
+                        fecha_minima_requerida: p['EXTRA_Fecha mínima requerida por comercial/cliente'],
+                        fecha_facturacion: p['EXTRA_Fecha de facturación'],
+                        tipo_facturacion: p['EXTRA_Tipo de facturación'],
+                        notas_sap: p['EXTRA_Notas'],
+                        formas_pago: p['EXTRA_Formas de pago'],
+                        facturacion_electronica: p['EXTRA_Facturación Electrónica'] === 'Si' || p['EXTRA_Facturación Electrónica'] === 'true' || p['EXTRA_Facturación Electrónica'] === true,
+                        oc_cot: p['EXTRA_OC/COT'],
+                        cierre_facturacion: p['EXTRA_Cierre Facturación'],
+                        es_muestra: p['EXTRA_¿Es una muestra?'] === 'Si' || p['EXTRA_¿Es una muestra?'] === 'true' || p['EXTRA_¿Es una muestra?'] === true,
+                        aplica_contrato: p['EXTRA_¿Aplica contrato?'] === 'Si' || p['EXTRA_¿Aplica contrato?'] === 'true' || p['EXTRA_¿Aplica contrato?'] === true,
+                        multa_incumplimiento: p['EXTRA_¿Multa por incumplimiento?'] === 'Si' || p['EXTRA_¿Multa por incumplimiento?'] === 'true' || p['EXTRA_¿Multa por incumplimiento?'] === true,
+                        orden_compra: p['EXTRA_Orden de compra/Purchase Order'],
+                        puerto_embarque: p['EXTRA_Puerto embarque/Shipment Port'],
+                        terminos_pago: p['EXTRA_Terminos de pago/Pay Terms'],
+                        puerto_destino: p['EXTRA_Puerto destino/Destination Port'],
+                        via_transporte: p['EXTRA_Via/Type of transport'],
+                        flete: p['EXTRA_Flete/Freight'],
+                        incoterm: p['EXTRA_Incoterm/Incoterm'],
+                        seguro: p['EXTRA_Seguro/Insurance']
+                    };
+
+                    pedidosToPut.push(mapped);
+                    mergedCount++;
+                }
+                if (pedidosToPut.length > 0) await db.pedidos.bulkPut(pedidosToPut);
+                console.log(`[Sync] Merged ${mergedCount} pedidos (${skippedCount} skipped).`);
+            }
+        } catch (pErr: any) {
+            console.error('[Sync] Failed to pull pedidos:', pErr.message);
+        }
+
+        // Pull Pedido Items (CRM_PedidoItems)
+        try {
+            let pItemsQuery = supabase
+                .from('CRM_PedidoItems')
+                .select('*');
+    
+            if (lastSync) {
+                pItemsQuery = pItemsQuery.gte('created_at', lastSync);
+            } else {
+                pItemsQuery = pItemsQuery.order('created_at', { ascending: false }).limit(5000);
+            }
+
+            const { data: pItems, error: pItemsError } = await pItemsQuery;
+    
+            if (pItemsError) throw pItemsError;
+    
+            if (pItems && pItems.length > 0) {
+                const pendingPItemIds = new Set(
+                    (await db.outbox
+                        .where('entity_type').equals('CRM_PedidoItems')
+                        .and(item => item.status === 'PENDING' || item.status === 'SYNCING')
+                        .toArray()
+                    ).map(item => item.entity_id)
+                );
+    
+                let mergedCount = 0;
+                let skippedCount = 0;
+                const pItemsToPut = [];
+    
+                for (const pi of pItems) {
+                    if (pendingPItemIds.has(pi.id)) {
+                        skippedCount++;
+                        continue;
+                    }
+                    pItemsToPut.push(pi);
+                    mergedCount++;
+                }
+                if (pItemsToPut.length > 0) await db.pedidoItems.bulkPut(pItemsToPut);
+                console.log(`[Sync] Merged ${mergedCount} pedido items (${skippedCount} skipped).`);
+            }
+        } catch (piErr: any) {
+            console.error('[Sync] Failed to pull pedido items:', piErr.message);
+        }
+
+        // Pull Activities (CRM_Actividades) - SMART MERGE with incremental sync
+            // Re-enabled to ensure activities persist across browser sessions
+            try {
+                let query = supabase
+                    .from('CRM_Actividades')
+                    .select('*')
+                    .eq('is_deleted', false);
+
+                // Incremental: only pull activities updated since last sync
+                if (lastSync) {
+                    query = query.gte('updated_at', lastSync);
+                } else {
+                    // Initial Load limit to 3000 most recent for caching
+                    query = query.order('updated_at', { ascending: false }).limit(3000);
+                }
+
+                const { data: activities, error: activitiesError } = await query;
+
+                if (activitiesError) throw activitiesError;
+
+                if (activities && activities.length > 0) {
+                    // Smart merge: Apply Last-Write-Wins (LWW) locally
+                    // Don't just skip records with pending changes; merge them!
+                    const activitiesToPut = [];
+
+                    for (const serverAct of activities) {
+                        try {
+                            const localAct = await db.activities.get(serverAct.id);
+
+                            if (!localAct) {
+                                // No local copy, safe to insert
+                                activitiesToPut.push(serverAct);
+                            } else {
+                                // Merge field by field based on _sync_metadata
+                                const mergedAct = { ...localAct };
+                                const serverMeta = serverAct._sync_metadata || {};
+                                const localMeta = localAct._sync_metadata || {};
+                                let hasChanges = false;
+
+                                for (const field of Object.keys(serverAct)) {
+                                    if (field === '_sync_metadata') continue;
+
+                                    const serverTs = serverMeta[field] || new Date(serverAct.updated_at || serverAct.created_at || 0).getTime();
+                                    const localTs = localMeta[field] || new Date(localAct.updated_at || localAct.created_at || 0).getTime();
+
+                                    // If server is strictly newer, take server value
+                                    if (serverTs > localTs) {
+                                        mergedAct[field] = serverAct[field];
+                                        if (!mergedAct._sync_metadata) mergedAct._sync_metadata = {};
+                                        mergedAct._sync_metadata[field] = serverTs;
+                                        hasChanges = true;
+                                    }
+                                }
+
+                                // HEALING: If server version is missing opportunity_id but local version has it,
+                                // the previous sync bug might have nullified it. Restore it!
+                                if (!serverAct.opportunity_id && localAct.opportunity_id) {
+                                    console.warn(`[Sync-Heal] Found orphaned activity ${serverAct.id}. Restoring link to opportunity ${localAct.opportunity_id}...`);
+                                    mergedAct.opportunity_id = localAct.opportunity_id;
+                                    hasChanges = true;
+                                    // Queue a push to fix the server state
+                                    await this.queueMutation('CRM_Actividades', serverAct.id, { opportunity_id: localAct.opportunity_id });
+                                }
+
+                                if (hasChanges) {
+                                    activitiesToPut.push(mergedAct);
+                                }
+                            }
+                        } catch (e) {
+                            console.warn(`[Sync] Failed to smart-merge activity ${serverAct.id}:`, e);
+                        }
+                    }
+
+                    if (activitiesToPut.length > 0) {
+                        await db.activities.bulkPut(activitiesToPut);
+                    }
+
+                    console.log(`[Sync] Merged ${activitiesToPut.length} activities (LWW field-level merge).`);
+                }
+            } catch (actErr: any) {
+                console.error('[Sync] Failed to pull activities:', actErr.message);
+            }
+
+            console.log('[Sync] Pull completed successfully.');
+        } catch (err: any) {
+            console.error('[Sync] Pull failed:', err.message);
+            // Don't throw - allow push to continue even if pull fails
+        } finally {
+            useSyncStore.getState().setIsLoadingData(false);
+        }
+    }
+
+    /**
+     * QUEUE MUTATION: App calls this to save data
+     */
+    async queueMutation(
+        entityTable: string,
+        entityId: string,
+        changes: Record<string, any>,
+        options: { isSnapshot?: boolean } = {}
+    ) {
+        try {
+            const now = Date.now();
+            const items: OutboxItem[] = [];
+
+            if (options.isSnapshot) {
+                // Modo Snapshot: Enviar todo el objeto como una sola mutación atómica
+                items.push({
+                    id: uuidv4(),
+                    entity_type: entityTable,
+                    entity_id: entityId,
+                    field_name: '_complete_snapshot_',
+                    old_value: null,
+                    new_value: changes,
+                    field_timestamp: now,
+                    status: 'PENDING',
+                    retry_count: 0
+                });
+            } else {
+                // Modo Normal: Desglosar por campos para LWW granular
+                for (const [field, value] of Object.entries(changes)) {
+                    if (value === undefined) continue;
+                    if (field === 'id') continue;
+                    if (field === '_sync_metadata') continue;
+
+                    items.push({
+                        id: uuidv4(),
+                        entity_type: entityTable,
+                        entity_id: entityId,
+                        field_name: field,
+                        old_value: null,
+                        new_value: value,
+                        field_timestamp: now,
+                        status: 'PENDING',
+                        retry_count: 0
+                    });
+                }
+            }
+
+            if (items.length > 0) {
+                await db.outbox.bulkAdd(items);
+                this.updatePendingCount();
+            }
+
+            // Despachar evento global para Optimistic UI
+            if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('crm-optimistic-update', {
+                    detail: { entityType: entityTable, entityId, updates: changes }
+                }));
+            }
+
+            // Trigger Sync in background
+            this.triggerSync().catch(err => {
+                console.warn('[Sync] Background sync triggered from mutation failed:', err);
+            });
+        } catch (err) {
+            console.error('[Sync] Failed to queue mutation:', err);
+        }
+    }
+    async getCurrentUser() {
+        // Try local session first (crucial for offline mode)
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+            return { data: { user: session.user }, error: null };
+        }
+        // Fallback to server if needed
+        return await supabase.auth.getUser();
+    }
+}
+
+export const syncEngine = new SyncEngine();

@@ -28,12 +28,14 @@ import {
     Briefcase,
     User as UserIcon,
     X,
-    CheckCircle
+    CheckCircle,
+    AlertTriangle
 } from 'lucide-react';
 
 import { cn } from '@/components/ui/utils';
 import { CreateActivityModal } from '@/components/activities/CreateActivityModal';
 import { SearchableSelect } from '@/components/ui/SearchableSelect';
+import { UserPickerFilter } from '@/components/cuentas/UserPickerFilter';
 
 function ActivitiesContent() {
     const searchParams = useSearchParams();
@@ -128,7 +130,7 @@ function ActivitiesContent() {
         }
         return "";
     });
-    const [filterStatus, setFilterStatus] = useState<"all" | "completed" | "pending">(() => {
+    const [filterStatus, setFilterStatus] = useState<"all" | "completed" | "pending" | "overdue">(() => {
         const fromUrl = searchParams.get('status');
         if (fromUrl) return (fromUrl as any);
         if (typeof window !== 'undefined') {
@@ -143,6 +145,25 @@ function ActivitiesContent() {
         if (typeof window !== 'undefined') {
             const saved = sessionStorage.getItem('crm_actividades_state');
             if (saved) return new URLSearchParams(saved).get('channel') || "";
+        }
+        return "";
+    });
+
+    const [filterDateFrom, setFilterDateFrom] = useState<string>(() => {
+        const fromUrl = searchParams.get('dateFrom');
+        if (fromUrl) return fromUrl;
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_actividades_state');
+            if (saved) return new URLSearchParams(saved).get('dateFrom') || "";
+        }
+        return "";
+    });
+    const [filterDateTo, setFilterDateTo] = useState<string>(() => {
+        const fromUrl = searchParams.get('dateTo');
+        if (fromUrl) return fromUrl;
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_actividades_state');
+            if (saved) return new URLSearchParams(saved).get('dateTo') || "";
         }
         return "";
     });
@@ -185,6 +206,12 @@ function ActivitiesContent() {
             
             if (filterChannel) params.set('channel', filterChannel);
             else params.delete('channel');
+            
+            if (filterDateFrom) params.set('dateFrom', filterDateFrom);
+            else params.delete('dateFrom');
+            
+            if (filterDateTo) params.set('dateTo', filterDateTo);
+            else params.delete('dateTo');
 
             const queryString = params.toString();
             
@@ -217,13 +244,7 @@ function ActivitiesContent() {
     const accounts = useLiveQuery(() => db.accounts.toArray()) || [];
     const opportunities = useLiveQuery(() => db.opportunities.toArray()) || [];
 
-    const availableUsersForFilter = useMemo(() => {
-        if (role === 'ADMIN') return users;
-        if (role === 'COORDINADOR' && user?.id) {
-            return users.filter(u => u.id === user.id || u.coordinadores?.includes(user.id));
-        }
-        return [];
-    }, [users, role, user]);
+
 
     // Deep linking: detect id in URL and open edit modal
     useEffect(() => {
@@ -297,7 +318,9 @@ function ActivitiesContent() {
 
         return activities.filter(act => {
             // Apply role-based filtering: VENDEDOR and similar roles only see their own activities or those of opportunities they collaborate on
-            if (!canViewAll && user) {
+            if (!canViewAll) {
+                if (!user) return false; // Prevent leak while loading
+                
                 const isOwner = act.user_id === user.id;
                 const isCollaborator = act.opportunity_id ? collaborativeOppIds.has(act.opportunity_id) : false;
                 if (!isOwner && !isCollaborator) {
@@ -330,6 +353,14 @@ function ActivitiesContent() {
             // 4. NEW: Estado
             if (filterStatus === "completed" && !act.is_completed) return false;
             if (filterStatus === "pending" && act.is_completed) return false;
+            if (filterStatus === "overdue") {
+                if (act.is_completed) return false;
+                const actDate = new Date(act.fecha_inicio);
+                actDate.setHours(0, 0, 0, 0);
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                if (actDate >= today) return false;
+            }
 
             // 7. NEW: Canal
             if (filterChannel) {
@@ -347,9 +378,36 @@ function ActivitiesContent() {
                 if (actChannel !== filterChannel) return false;
             }
 
+            // 8. NEW: Date Range
+            if (filterDateFrom) {
+                if (new Date(act.fecha_inicio) < new Date(filterDateFrom + "T00:00:00")) return false;
+            }
+            if (filterDateTo) {
+                if (new Date(act.fecha_inicio) > new Date(filterDateTo + "T23:59:59")) return false;
+            }
+
             return true;
         });
-    }, [activities, filterType, filterClassification, filterSubclassification, debouncedSearchQuery, canViewAll, user, collaborativeOppIds, filterUser, filterStatus, filterChannel, opportunities, accounts]);
+    }, [activities, filterType, filterClassification, filterSubclassification, debouncedSearchQuery, canViewAll, user, collaborativeOppIds, filterUser, filterStatus, filterChannel, filterDateFrom, filterDateTo, opportunities, accounts]);
+
+    // Count overdue activities for badge (computed from role-filtered but ignoring current status filter)
+    const overdueCount = useMemo(() => {
+        if (!activities) return 0;
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        return activities.filter(act => {
+            if (!canViewAll && user) {
+                const isOwner = act.user_id === user.id;
+                const isCollaborator = act.opportunity_id ? collaborativeOppIds.has(act.opportunity_id) : false;
+                if (!isOwner && !isCollaborator) return false;
+            }
+            if (act.is_completed) return false;
+            if (act.is_deleted) return false;
+            const actDate = new Date(act.fecha_inicio);
+            actDate.setHours(0, 0, 0, 0);
+            return actDate < today;
+        }).length;
+    }, [activities, canViewAll, user, collaborativeOppIds]);
 
     // For agenda/all views: filter by selected date + sort
     const filteredActivities = useMemo(() => {
@@ -393,41 +451,91 @@ function ActivitiesContent() {
                     </div>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2">
-                    {/* Search Input */}
-                    <div className="relative">
-                        <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                        <input
-                            type="text"
-                            data-testid="activities-search"
-                            placeholder="Buscar por cliente, oportunidad o asunto..."
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            className="bg-white border text-slate-600 border-slate-200 font-semibold text-sm rounded-xl pl-9 pr-4 py-2 w-full sm:w-64 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                        />
+                <div className="flex flex-col items-end gap-3 w-full md:w-auto mt-4 md:mt-0">
+                    {/* Primary Row */}
+                    <div className="flex flex-wrap items-center gap-2 w-full justify-end">
+                        {/* Search Input */}
+                        <div className="relative">
+                            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                            <input
+                                type="text"
+                                data-testid="activities-search"
+                                placeholder="Buscar por cliente..."
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                className="bg-white border text-slate-600 border-slate-200 font-semibold text-sm rounded-xl pl-9 pr-4 py-2.5 w-full sm:w-64 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                            />
+                        </div>
+
+                        {canViewAll && (
+                            <UserPickerFilter 
+                                selectedUserId={filterUser} 
+                                onUserSelect={(id) => setFilterUser(id || "")} 
+                            />
+                        )}
+
+                        {/* Overdue Quick Filter */}
+                        <button
+                            data-testid="activities-overdue-filter"
+                            onClick={() => setFilterStatus(filterStatus === 'overdue' ? 'all' : 'overdue')}
+                            className={cn(
+                                "flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-bold border transition-all",
+                                filterStatus === 'overdue'
+                                    ? "bg-red-50 text-red-600 border-red-200 shadow-sm shadow-red-100"
+                                    : "bg-white text-slate-500 border-slate-200 hover:border-red-200 hover:text-red-500"
+                            )}
+                            title="Filtrar actividades atrasadas"
+                        >
+                            <AlertTriangle className="w-4 h-4" />
+                            <span className="hidden sm:inline">Atrasadas</span>
+                            {overdueCount > 0 && (
+                                <span className={cn(
+                                    "ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-black leading-none",
+                                    filterStatus === 'overdue'
+                                        ? "bg-red-500 text-white"
+                                        : "bg-red-100 text-red-600"
+                                )}>
+                                    {overdueCount}
+                                </span>
+                            )}
+                        </button>
+
+                        {/* Clear Filters Button */}
+                        {(searchQuery || filterType || filterClassification || filterSubclassification || filterUser || filterStatus !== "all" || filterChannel || filterDateFrom || filterDateTo) && (
+                            <button
+                                onClick={() => {
+                                    setSearchQuery("");
+                                    setFilterType("");
+                                    setFilterClassification("");
+                                    setFilterSubclassification("");
+                                    setFilterUser("");
+                                    setFilterStatus("all");
+                                    setFilterChannel("");
+                                    setFilterDateFrom("");
+                                    setFilterDateTo("");
+                                }}
+                                className="p-2 text-slate-400 hover:text-red-500 transition-colors bg-white rounded-xl border border-slate-200 shadow-sm flex items-center justify-center h-10 w-10"
+                                title="Limpiar filtros"
+                            >
+                                <X size={18} />
+                            </button>
+                        )}
+
+                        <button
+                            data-testid="activities-create-button"
+                            onClick={() => setIsModalOpen(true)}
+                            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-blue-200 transition-all hover:scale-105 active:scale-95"
+                        >
+                            <Plus className="w-5 h-5" />
+                            <span className="hidden lg:inline">Nueva Actividad</span>
+                        </button>
                     </div>
 
                     {/* Advanced Filters: Only visible in "All" view */}
                     {view === 'all' && (
-                        <>
-                            {/* Vendedor (Admin/Coordinador only) */}
-                            {(role === 'ADMIN' || role === 'COORDINADOR') && (
-                                <div className="flex bg-slate-50 p-1 rounded-xl border border-slate-100 items-center">
-                                    <div className="px-2 text-slate-400">
-                                        <UserIcon className="w-4 h-4" />
-                                    </div>
-                                    <SearchableSelect
-                                        options={availableUsersForFilter.map(u => ({ label: u.full_name || '', value: u.id }))}
-                                        value={filterUser}
-                                        onChange={(val) => setFilterUser(val)}
-                                        placeholder="Vendedor..."
-                                        triggerClassName="w-full sm:w-40"
-                                    />
-                                </div>
-                            )}
-
+                        <div className="flex flex-wrap items-center gap-2 w-full justify-end">
                             {/* Channel Selector */}
-                            <div className="flex bg-slate-50 p-1 rounded-xl border border-slate-100 items-center">
+                            <div className="flex bg-slate-50 p-1 rounded-xl border border-slate-100 items-center shadow-sm">
                                 <div className="px-2 text-slate-400">
                                     <Zap className="w-4 h-4" />
                                 </div>
@@ -446,7 +554,7 @@ function ActivitiesContent() {
                             </div>
 
                             {/* Status Toggle */}
-                            <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
+                            <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200 shadow-sm">
                                 <button
                                     onClick={() => setFilterStatus("all")}
                                     className={cn(
@@ -466,6 +574,15 @@ function ActivitiesContent() {
                                     Pendientes
                                 </button>
                                 <button
+                                    onClick={() => setFilterStatus("overdue")}
+                                    className={cn(
+                                        "px-3 py-1.5 rounded-lg text-[10px] uppercase font-black transition-all",
+                                        filterStatus === "overdue" ? "bg-white text-red-600 shadow-sm" : "text-slate-400 hover:text-slate-600"
+                                    )}
+                                >
+                                    Vencidas
+                                </button>
+                                <button
                                     onClick={() => setFilterStatus("completed")}
                                     className={cn(
                                         "px-3 py-1.5 rounded-lg text-[10px] uppercase font-black transition-all",
@@ -477,7 +594,7 @@ function ActivitiesContent() {
                             </div>
 
                             {/* Type/Clasif Pill */}
-                            <div className="flex bg-slate-50 p-1 rounded-xl border border-slate-100 items-center">
+                            <div className="flex bg-slate-50 p-1 rounded-xl border border-slate-100 items-center shadow-sm">
                                 <div className="px-2 text-slate-400">
                                     {classifications.length === 0 ? <Loader2 className="w-4 h-4 animate-spin" /> : <Filter className="w-4 h-4" />}
                                 </div>
@@ -524,36 +641,30 @@ function ActivitiesContent() {
                                     </>
                                 )}
                             </div>
-                        </>
-                    )}
 
-                    {/* Clear Filters Button */}
-                    {(searchQuery || filterType || filterClassification || filterSubclassification || filterUser || filterStatus !== "all" || filterChannel) && (
-                        <button
-                            onClick={() => {
-                                setSearchQuery("");
-                                setFilterType("");
-                                setFilterClassification("");
-                                setFilterSubclassification("");
-                                setFilterUser("");
-                                setFilterStatus("all");
-                                setFilterChannel("");
-                            }}
-                            className="p-2 text-slate-400 hover:text-red-500 transition-colors"
-                            title="Limpiar filtros"
-                        >
-                            <X size={20} />
-                        </button>
+                            {/* Date Range Selectors */}
+                            <div className="flex bg-slate-50 p-1 rounded-xl border border-slate-100 items-center shadow-sm text-sm">
+                                <div className="px-2 text-slate-400">
+                                    <CalendarIcon className="w-4 h-4" />
+                                </div>
+                                <input
+                                    type="date"
+                                    value={filterDateFrom}
+                                    onChange={(e) => setFilterDateFrom(e.target.value)}
+                                    className="bg-transparent text-slate-600 font-semibold focus:outline-none p-1 w-[115px]"
+                                    title="Fecha Desde"
+                                />
+                                <span className="text-slate-300 mx-1">-</span>
+                                <input
+                                    type="date"
+                                    value={filterDateTo}
+                                    onChange={(e) => setFilterDateTo(e.target.value)}
+                                    className="bg-transparent text-slate-600 font-semibold focus:outline-none p-1 w-[115px]"
+                                    title="Fecha Hasta"
+                                />
+                            </div>
+                        </div>
                     )}
-
-                    <button
-                        data-testid="activities-create-button"
-                        onClick={() => setIsModalOpen(true)}
-                        className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-blue-200 transition-all hover:scale-105 active:scale-95 ml-auto md:ml-0"
-                    >
-                        <Plus className="w-5 h-5" />
-                        <span className="hidden lg:inline">Nueva Actividad</span>
-                    </button>
                 </div>
             </header>
 
@@ -581,12 +692,41 @@ function ActivitiesContent() {
                                     >
                                         <ChevronLeft className="w-5 h-5" />
                                     </button>
-                                    <span className="text-base font-bold text-slate-900 capitalize min-w-[140px] text-center">
-                                        {view === 'agenda'
-                                            ? selectedDate.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })
-                                            : selectedDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })
-                                        }
-                                    </span>
+                                    <div className="relative group flex items-center justify-center min-w-[140px] px-2 py-1 rounded hover:bg-white transition-colors cursor-pointer">
+                                        <span className="text-base font-bold text-slate-900 capitalize text-center group-hover:text-blue-600 transition-colors mr-2">
+                                            {view === 'agenda'
+                                                ? selectedDate.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })
+                                                : selectedDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })
+                                            }
+                                        </span>
+                                        <CalendarIcon className="w-4 h-4 text-slate-400 group-hover:text-blue-500 transition-colors" />
+                                        <input
+                                            type={view === 'agenda' ? 'date' : 'month'}
+                                            className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                                            onClick={(e) => {
+                                                try {
+                                                    if ('showPicker' in e.target) {
+                                                        (e.target as HTMLInputElement).showPicker();
+                                                    }
+                                                } catch (err) {}
+                                            }}
+                                            value={
+                                                view === 'agenda'
+                                                    ? `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`
+                                                    : `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}`
+                                            }
+                                            onChange={(e) => {
+                                                if (e.target.value) {
+                                                    const parts = e.target.value.split('-');
+                                                    if (parts.length === 3) {
+                                                        setSelectedDate(new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2])));
+                                                    } else if (parts.length === 2) {
+                                                        setSelectedDate(new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, 1));
+                                                    }
+                                                }
+                                            }}
+                                        />
+                                    </div>
                                     <button
                                         data-testid="activities-page-next"
                                         onClick={handleNext}
@@ -629,6 +769,13 @@ function ActivitiesContent() {
                     </div>
 
                     <div className="flex-1 p-6 bg-slate-50/50">
+                        {(view === 'agenda' || view === 'all') && (
+                            <div className="flex items-center justify-end mb-3 px-1 z-10">
+                                <span className="text-sm font-medium text-slate-500 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm flex items-center gap-2">
+                                    Total de registros: <strong className="text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md">{filteredActivities?.length || 0}</strong>
+                                </span>
+                            </div>
+                        )}
                         {view === 'agenda' || view === 'all' ? (
                             filteredActivities && filteredActivities.length > 0 ? (
                                 <div data-testid="activities-list" className="space-y-4">

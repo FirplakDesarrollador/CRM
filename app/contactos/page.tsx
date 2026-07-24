@@ -11,6 +11,7 @@ import { Edit2, Trash2, Phone, Mail, User, Building, Search, Plus, CloudUpload, 
 import { useContacts } from "@/lib/hooks/useContacts";
 import { useContactsServer } from "@/lib/hooks/useContactsServer";
 import { useAccounts } from "@/lib/hooks/useAccounts";
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { supabase } from "@/lib/supabase";
 import dynamic from 'next/dynamic';
 
@@ -21,13 +22,15 @@ function ContactsContent() {
     const router = useRouter();
     const {
         data: contacts,
+        count,
         loading,
         hasMore,
         loadMore,
         setSearchTerm,
         refresh
-    } = useContactsServer({ pageSize: 10000 });
+    } = useContactsServer({ pageSize: 50 });
 
+    const { isAdmin } = useCurrentUser();
     const { accounts } = useAccounts();
     const { deleteContact } = useContacts();
 
@@ -97,7 +100,14 @@ function ContactsContent() {
         if (typeof window !== 'undefined' && searchParams.toString() === '') {
             const savedState = sessionStorage.getItem('crm_contactos_state');
             if (savedState) {
-                router.replace(`/contactos?${savedState}`, { scroll: false });
+                const savedParams = new URLSearchParams(savedState);
+                savedParams.delete('id'); // Nunca restaurar el ID (para no abrir el modal directamente sin querer al navegar)
+                const restoredState = savedParams.toString();
+                if (restoredState !== '') {
+                    router.replace(`/contactos?${restoredState}`, { scroll: false });
+                } else {
+                    sessionStorage.removeItem('crm_contactos_state');
+                }
             }
         }
     }, [searchParams, router]);
@@ -138,6 +148,14 @@ function ContactsContent() {
             else params.delete('search');
             
             const queryString = params.toString();
+            
+            // Evitar bucles infinitos
+            const paramsForCompare = new URLSearchParams(queryString);
+            paramsForCompare.sort();
+            const currentParamsForCompare = new URLSearchParams(searchParams.toString());
+            currentParamsForCompare.sort();
+            
+            if (paramsForCompare.toString() === currentParamsForCompare.toString()) return;
             
             // Save to sessionStorage for cross-module persistence
             if (queryString) {
@@ -192,7 +210,7 @@ function ContactsContent() {
         const term = accountSearchTerm.toLowerCase();
         return accounts.filter((acc: any) => 
             acc.nombre?.toLowerCase().includes(term) || 
-            acc.nit?.toLowerCase().includes(term)
+            String(acc.nit || '').toLowerCase().includes(term)
         );
     }, [accounts, accountSearchTerm]);
 
@@ -328,6 +346,29 @@ function ContactsContent() {
         { data: 'telefono', title: 'Teléfono', type: 'text', readOnly: true }
     ];
 
+    if (isAdmin) {
+        hotColumns.unshift({
+            data: 'acciones',
+            title: 'Acciones',
+            renderer: function (instance: any, td: HTMLTableCellElement, row: number, col: number, prop: string, value: any, cellProperties: any) {
+                td.innerHTML = `
+                    <div style="text-align: center; white-space: nowrap;">
+                        <button class="edit-action-btn" title="Editar" style="cursor:pointer; color:#2563eb; background:none; border:none; padding:0 4px; margin:0; display:inline-block; vertical-align:middle;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>
+                        </button>
+                        <button class="delete-action-btn" title="Eliminar" style="cursor:pointer; color:#dc2626; background:none; border:none; padding:0 4px; margin:0; display:inline-block; vertical-align:middle;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+                        </button>
+                    </div>
+                `;
+                td.className = "htCenter htMiddle";
+                return td;
+            },
+            readOnly: true,
+            width: 80
+        } as any);
+    }
+
     // --- VIEW: Global List ---
     return (
         <div data-testid="contacts-page" className="p-6 max-w-7xl mx-auto space-y-5">
@@ -340,8 +381,8 @@ function ContactsContent() {
                         <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
                             Contactos
                         </h1>
-                        <p className="text-sm text-slate-500 font-medium">
-                            {loading ? "Cargando contactos..." : `${contacts.length} contactos en tu red`}
+                        <p className="text-sm text-slate-500 font-medium hidden sm:block">
+                            Directorio y gestión de contactos
                         </p>
                     </div>
                 </div>
@@ -368,6 +409,13 @@ function ContactsContent() {
             </div>
 
             {/* List */}
+            {(!loading || contacts.length > 0) && (
+                <div className="flex items-center justify-end mb-3 px-1 z-10">
+                    <span className="text-sm font-medium text-slate-500 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm flex items-center gap-2">
+                        Total de registros: <strong className="text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md">{count !== undefined && count !== null ? count : contacts.length}</strong>
+                    </span>
+                </div>
+            )}
             {(loading && contacts.length === 0) ? (
                 <div data-testid="contacts-loading" className="space-y-2">
                     {[1, 2, 3, 4, 5, 6].map((i) => (
@@ -399,11 +447,24 @@ function ContactsContent() {
                                 height="calc(100vh - 280px)"
                                 autoColumnSize={false}
                                 autoRowSize={false}
+                                rowHeights={38}
                                 renderAllRows={false}
                                 licenseKey="non-commercial-and-evaluation"
                                 afterOnCellMouseDown={(event, coords, td) => {
                                     if (coords.row >= 0) {
                                         const contact = hotData[coords.row]._original;
+                                        const target = event.target as HTMLElement;
+                                        
+                                        if (target.closest('.delete-action-btn')) {
+                                            setContactToDelete(contact);
+                                            return;
+                                        }
+                                        
+                                        if (target.closest('.edit-action-btn')) {
+                                            handleEdit(contact);
+                                            return;
+                                        }
+                                        
                                         handleEdit(contact);
                                     }
                                 }}

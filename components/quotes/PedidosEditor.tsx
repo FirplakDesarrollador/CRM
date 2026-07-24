@@ -3,10 +3,14 @@
 import { usePedidos } from "@/lib/hooks/usePedidos";
 import { LocalQuote, db } from "@/lib/db";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Plus, Edit2, AlertCircle, Trash2, Info, Receipt, Calendar, Truck, Send } from "lucide-react";
+import { Plus, Edit2, AlertCircle, Trash2, Receipt, Calendar, Truck, Send } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { cn } from "@/components/ui/utils";
+import { useFormAutoSave } from "@/lib/hooks/useFormAutoSave";
+import { AutoSaveIndicator } from "@/components/ui/AutoSaveIndicator";
+
+const PEDIDO_WIZARD_LAST_STEP = 2;
 
 export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, onEditStateChange?: (isEditing: boolean) => void }) {
     const { pedidosCollection, deletePedido, updatePedido } = usePedidos(quote.id);
@@ -203,7 +207,10 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
     }, [pedidoUuid]);
 
 
-    const { register, handleSubmit, watch, setValue } = useForm({
+    const [wizardStep, setWizardStep] = useState(0);
+    const [canSubmitFinalStep, setCanSubmitFinalStep] = useState(false);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const form = useForm({
         defaultValues: {
             fecha_facturacion: ped?.fecha_facturacion || "",
             tipo_facturacion: ped?.tipo_facturacion || "",
@@ -229,6 +236,87 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
             selected_quantities: {} as Record<string, number>
         }
     });
+
+    const { register, handleSubmit, setValue, getValues } = form;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const onAutoSave = async (data: any) => {
+        if (!pedidoUuid) return;
+        // Build items to save
+        const itemsToSave = [];
+        for (const qItem of quoteItems || []) {
+            const qty = Number(data.selected_quantities?.[qItem.producto_id] || 0);
+            if (qty > 0) {
+                itemsToSave.push({
+                    producto_id: qItem.producto_id,
+                    cantidad: qty,
+                    precio_unitario: qItem.precio_unitario,
+                    descuento: qItem.discount_pct || 0
+                });
+            }
+        }
+        const pedData = {
+            fecha_facturacion: data.fecha_facturacion,
+            tipo_facturacion: data.tipo_facturacion,
+            orden_compra: data.orden_compra,
+            incoterm: data.incoterm,
+            notas_sap: data.notas_sap,
+            cliente_final: data.cliente_final,
+            email_contacto: data.email_contacto,
+            contacto_ventas: data.contacto_ventas,
+            contacto_logistico: data.contacto_logistico,
+            contacto_tesoreria: data.contacto_tesoreria,
+            dir_envio_factura_tipo: data.dir_envio_factura_tipo,
+            servicio_subida_hidromasaje: data.servicio_subida_hidromasaje,
+            piso_entrega: data.piso_entrega ? Number(data.piso_entrega) : null,
+            tiene_escaleras: data.tiene_escaleras,
+            planos_hidromasaje: data.planos_hidromasaje,
+            fecha_entrega: data.fecha_entrega || null,
+            nit_cliente_final: data.nit_cliente_final,
+            entrega_en_obra: data.entrega_en_obra,
+            bodega_externa: data.bodega_externa,
+            bodega_firplak: data.bodega_firplak,
+        };
+        await updatePedido(pedidoUuid, pedData);
+        await updatePedidoItems(pedidoUuid, itemsToSave);
+        await db.quotes.update(quote.id, {
+            cliente_final: pedData.cliente_final,
+            email_contacto: pedData.email_contacto,
+            contacto_ventas: pedData.contacto_ventas,
+            contacto_logistico: pedData.contacto_logistico,
+            contacto_tesoreria: pedData.contacto_tesoreria,
+            dir_envio_factura_tipo: pedData.dir_envio_factura_tipo,
+            servicio_subida_hidromasaje: pedData.servicio_subida_hidromasaje,
+            piso_entrega: pedData.piso_entrega,
+            tiene_escaleras: pedData.tiene_escaleras,
+            planos_hidromasaje: pedData.planos_hidromasaje,
+            fecha_entrega: pedData.fecha_entrega,
+            nit_cliente_final: pedData.nit_cliente_final,
+            entrega_en_obra: pedData.entrega_en_obra,
+            bodega_externa: pedData.bodega_externa,
+            bodega_firplak: pedData.bodega_firplak
+        });
+    };
+
+    const { status: autoSaveStatus } = useFormAutoSave({
+        form,
+        onSave: onAutoSave,
+        isEnabled: !!pedidoUuid
+    });
+
+    useEffect(() => {
+        if (pedidoUuid || wizardStep !== PEDIDO_WIZARD_LAST_STEP) {
+            setCanSubmitFinalStep(false);
+            return;
+        }
+
+        setCanSubmitFinalStep(false);
+        const timer = window.setTimeout(() => {
+            setCanSubmitFinalStep(true);
+        }, 500);
+
+        return () => window.clearTimeout(timer);
+    }, [pedidoUuid, wizardStep]);
 
     // Populate logistic fields when 'ped' is loaded from local DB
     useEffect(() => {
@@ -263,11 +351,20 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
         }
     }, [itemsEnPedido, setValue]);
 
-    const quantities = watch('selected_quantities');
-
     if (!quoteItems || !consumosGlobales) return <div>Cargando...</div>;
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const onSubmit = async (data: any) => {
+        if (!pedidoUuid && (wizardStep !== PEDIDO_WIZARD_LAST_STEP || !canSubmitFinalStep)) {
+            return;
+        }
+
+        if (isSubmitting) {
+            return;
+        }
+
+        setIsSubmitting(true);
+        try {
         // Build items to save
         const itemsToSave = [];
         for (const qItem of quoteItems) {
@@ -339,11 +436,55 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
         });
 
         onClose();
+        } finally {
+            setIsSubmitting(false);
+        }
     };
 
     return (
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-            <div className="bg-white p-5 rounded-xl border border-blue-200">
+        <form
+            onSubmit={handleSubmit(onSubmit)}
+            onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                    const target = e.target as HTMLElement;
+                    if (target.tagName !== 'TEXTAREA' && target.getAttribute('type') !== 'submit') {
+                        e.preventDefault();
+                    }
+                }
+            }}
+            className="space-y-6"
+        >
+            {/* PROGRESS BAR WIZARD */}
+            {!pedidoUuid && (
+                <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-100 relative">
+                    <div className="absolute top-1/2 left-0 right-0 h-0.5 bg-slate-100 -translate-y-1/2 z-0" />
+                    {["Cantidades", "Datos SAP", "Datos Adicionales"].map((label, idx) => {
+                        const isCompleted = wizardStep > idx;
+                        const isActive = wizardStep === idx;
+                        return (
+                            <div key={label} className="flex flex-col items-center relative z-10">
+                                <div className={cn(
+                                    "w-8 h-8 rounded-full flex items-center justify-center border font-bold text-sm transition-all duration-300",
+                                    isCompleted ? "bg-blue-600 border-blue-600 text-white" :
+                                    isActive ? "bg-white border-blue-600 text-blue-600 ring-4 ring-blue-50" :
+                                    "bg-white border-slate-200 text-slate-400"
+                                )}>
+                                    {isCompleted ? "✓" : idx + 1}
+                                </div>
+                                <span className={cn(
+                                    "mt-2 text-xs font-bold uppercase tracking-wider text-center hidden sm:block",
+                                    isActive ? "text-blue-600" : "text-slate-400"
+                                )}>
+                                    {label}
+                                </span>
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+
+            {(!!pedidoUuid || wizardStep === 0) && (
+                <div className="bg-white p-5 rounded-xl border border-blue-200">
                 <h4 className="font-bold mb-4 text-blue-900 border-b pb-2 cursor-pointer flex justify-between">
                     <span>1. Cantidades a Pedir</span>
                     <button type="button" onClick={onClose} className="text-sm text-slate-500 hover:text-slate-800">Cancelar</button>
@@ -376,9 +517,11 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
                     })}
                 </div>
             </div>
+            )}
 
-            <div className="bg-white p-6 rounded-xl border shadow-sm space-y-4">
-                <h4 className="font-bold border-b pb-2">2. Datos logísticos SAP</h4>
+            {(!!pedidoUuid || wizardStep === 1) && (
+                <div className="bg-white p-6 rounded-xl border shadow-sm space-y-4">
+                    <h4 className="font-bold border-b pb-2">2. Datos logísticos SAP</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                         <label className="text-sm font-medium flex items-center gap-2 mb-1">
@@ -408,9 +551,13 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
                         <textarea {...register("notas_sap")} className="w-full mt-1 p-2 border rounded-lg" rows={3} />
                     </div>
                 </div>
+            </div>
+            )}
 
-                <h4 className="font-bold border-b pb-2 pt-4">3. Datos Adicionales (F-V-29 / Contactos)</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {(!!pedidoUuid || wizardStep === 2) && (
+                <div className="bg-white p-6 rounded-xl border shadow-sm space-y-4">
+                    <h4 className="font-bold border-b pb-2 pt-4">3. Datos Adicionales (F-V-29 / Contactos)</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                         <label className="text-sm font-medium">Cliente Final (Nombre)</label>
                         <input {...register("cliente_final")} className="w-full mt-1 p-2 border rounded-lg" placeholder="Nombre del cliente final" />
@@ -493,14 +640,74 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
                     </div>
                 </div>
 
-                <div className="flex justify-end pt-4 border-t">
-                    <button 
-                        type="submit"
-                        className="bg-blue-600 text-white font-medium px-6 py-2 rounded-lg hover:bg-blue-700 transition"
-                    >
-                        Guardar Borrador del Pedido
-                    </button>
-                </div>
+            </div>
+            )}
+
+            {/* GLOBAL FOOTER */}
+            <div className="flex justify-end items-center gap-3 pt-6 border-t border-slate-100 bg-white sticky bottom-0 p-4 rounded-xl shadow-sm z-10">
+                {pedidoUuid ? (
+                    <>
+                        <AutoSaveIndicator status={autoSaveStatus} />
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="px-6 py-2 border border-slate-200 rounded-lg font-bold text-slate-600 hover:bg-slate-50 transition text-sm"
+                        >
+                            Cerrar
+                        </button>
+                    </>
+                ) : (
+                    <>
+                        {wizardStep > 0 ? (
+                            <button
+                                type="button"
+                                onClick={() => setWizardStep(prev => prev - 1)}
+                                className="px-6 py-2 border border-slate-200 rounded-lg font-bold text-slate-600 hover:bg-slate-50 transition text-sm"
+                            >
+                                Atrás
+                            </button>
+                        ) : (
+                            <button
+                                type="button"
+                                onClick={onClose}
+                                className="px-6 py-2 border border-slate-200 rounded-lg font-bold text-slate-600 hover:bg-slate-50 transition text-sm"
+                            >
+                                Cancelar
+                            </button>
+                        )}
+
+                        {wizardStep < PEDIDO_WIZARD_LAST_STEP ? (
+                            <button
+                                type="button"
+                                onClick={async () => {
+                                    if (wizardStep === 0) {
+                                        const values = getValues('selected_quantities');
+                                        const hasQty = Object.values(values || {}).some(val => Number(val) > 0);
+                                        if (!hasQty) {
+                                            alert("Debes ingresar una cantidad mayor a 0 en al menos un producto.");
+                                            return;
+                                        }
+                                    } else if (wizardStep === 1) {
+                                        const isValid = await form.trigger(["fecha_facturacion", "tipo_facturacion"] as ("fecha_facturacion" | "tipo_facturacion")[]);
+                                        if (!isValid) return;
+                                    }
+                                    setWizardStep(prev => Math.min(PEDIDO_WIZARD_LAST_STEP, prev + 1));
+                                }}
+                                className="px-6 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition text-sm"
+                            >
+                                Siguiente
+                            </button>
+                        ) : (
+                            <button
+                                type="submit"
+                                disabled={isSubmitting || !canSubmitFinalStep}
+                                className="px-8 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 shadow-md transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {isSubmitting ? "Creando..." : "Crear Pedido Parcial"}
+                            </button>
+                        )}
+                    </>
+                )}
             </div>
         </form>
     );

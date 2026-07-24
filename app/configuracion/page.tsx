@@ -16,7 +16,13 @@ import {
     LogOut,
     Target,
     DollarSign,
-    Bell
+    Bell,
+    History,
+    FileText,
+    Briefcase,
+    User2,
+    FileCheck,
+    Calendar
 } from 'lucide-react';
 import { useState, useEffect, Dispatch, SetStateAction, Suspense } from 'react';
 import dynamic from 'next/dynamic';
@@ -25,12 +31,18 @@ import { cn } from '@/components/ui/utils';
 import { supabase } from '@/lib/supabase';
 import { useConfig } from '@/lib/hooks/useConfig';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
+import { useAuditLogStore } from '@/lib/stores/useAuditLogStore';
 const PriceListUploader = dynamic(() => import('@/components/config/PriceListUploader').then(mod => mod.PriceListUploader), {
     loading: () => <div className="animate-pulse bg-slate-100 h-20 rounded-2xl" />,
     ssr: false
 });
 
 const ActivityClassificationManager = dynamic(() => import('@/components/config/ActivityClassificationManager').then(mod => mod.ActivityClassificationManager), {
+    loading: () => <div className="animate-pulse bg-slate-100 h-20 rounded-2xl" />,
+    ssr: false
+});
+
+const OpportunityOriginsManager = dynamic(() => import('@/components/config/OpportunityOriginsManager').then(mod => mod.OpportunityOriginsManager), {
     loading: () => <div className="animate-pulse bg-slate-100 h-20 rounded-2xl" />,
     ssr: false
 });
@@ -77,6 +89,7 @@ function ConfigPageContent() {
     const router = useRouter();
     const { isSyncing, pendingCount, lastSyncTime, error, isPaused, setPaused } = useSyncStore();
     const { user, role, realRole, viewMode, setViewMode } = useCurrentUser();
+    const { logs, clearLogs } = useAuditLogStore();
     const searchParams = useSearchParams();
     const [outboxItems, setOutboxItems] = useState<OutboxItem[]>([]);
     const [msConnected, setMsConnected] = useState<boolean | null>(null);
@@ -757,6 +770,7 @@ function ConfigPageContent() {
             {role === 'ADMIN' && (
                 <>
                     <PriceListUploader />
+                    <OpportunityOriginsManager />
                     <ActivityClassificationManager />
                     <BulkAccountUploader />
                 </>
@@ -807,6 +821,103 @@ function ConfigPageContent() {
                     </button>
                 </div>
             )}
+
+            {/* Registro de Auditoría Local (Últimos Movimientos) */}
+            <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+                    <div className="flex items-center gap-4">
+                        <div className="bg-slate-100 p-3 rounded-2xl text-slate-600">
+                            <History className="w-6 h-6 animate-pulse" style={{ animationDuration: '3s' }} />
+                        </div>
+                        <div>
+                            <h3 className="font-bold text-slate-900 text-lg">Historial de Modificaciones</h3>
+                            <p className="text-sm text-slate-500">Últimos movimientos realizados localmente en este dispositivo</p>
+                        </div>
+                    </div>
+                    {logs.length > 0 && (
+                        <button
+                            onClick={clearLogs}
+                            className="text-xs font-bold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 px-3 py-2 rounded-xl transition-all flex items-center gap-1.5 self-start sm:self-center border border-red-100/50"
+                        >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            Limpiar Historial
+                        </button>
+                    )}
+                </div>
+
+                {logs.length === 0 ? (
+                    <div className="text-center py-10 space-y-3 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+                        <History className="w-10 h-10 text-slate-300 mx-auto" />
+                        <div className="text-sm text-slate-500 font-medium">No se han registrado modificaciones locales aún</div>
+                        <p className="text-xs text-slate-400 max-w-xs mx-auto">Los cambios que realices en cuentas, oportunidades, contactos u otros módulos aparecerán aquí.</p>
+                    </div>
+                ) : (
+                    <div className="overflow-hidden border border-slate-100 rounded-2xl">
+                        <div className="max-h-[350px] overflow-y-auto divide-y divide-slate-100">
+                            {logs.map((log) => {
+                                // Resolver icono y color por tipo de entidad
+                                let Icon = FileText;
+                                let iconColor = 'bg-slate-100 text-slate-600';
+                                if (log.entity_type === 'CRM_Cuentas') {
+                                    Icon = User2;
+                                    iconColor = 'bg-emerald-50 text-emerald-600 border border-emerald-100';
+                                } else if (log.entity_type === 'CRM_Oportunidades') {
+                                    Icon = Briefcase;
+                                    iconColor = 'bg-blue-50 text-blue-600 border border-blue-100';
+                                } else if (log.entity_type === 'CRM_Contactos') {
+                                    Icon = User2;
+                                    iconColor = 'bg-amber-50 text-amber-600 border border-amber-100';
+                                } else if (log.entity_type === 'CRM_Cotizaciones') {
+                                    Icon = FileCheck;
+                                    iconColor = 'bg-violet-50 text-violet-600 border border-violet-100';
+                                } else if (log.entity_type === 'CRM_Pedidos') {
+                                    Icon = FileText;
+                                    iconColor = 'bg-indigo-50 text-indigo-600 border border-indigo-100';
+                                } else if (log.entity_type === 'CRM_Actividades') {
+                                    Icon = Calendar;
+                                    iconColor = 'bg-rose-50 text-rose-600 border border-rose-100';
+                                }
+
+                                const entityLabel = log.entity_type.replace('CRM_', '');
+
+                                return (
+                                    <div key={log.id} className="p-4 hover:bg-slate-50/50 transition-colors flex items-start gap-4">
+                                        <div className={cn("p-2.5 rounded-xl shrink-0", iconColor)}>
+                                            <Icon className="w-5 h-5" />
+                                        </div>
+                                        <div className="flex-1 min-w-0 space-y-1">
+                                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="font-bold text-slate-800 text-sm truncate max-w-[200px] sm:max-w-xs" title={log.entity_name}>
+                                                        {log.entity_name}
+                                                    </span>
+                                                    <span className="text-[10px] bg-slate-100 text-slate-600 font-bold px-1.5 py-0.5 rounded uppercase tracking-wider">
+                                                        {entityLabel}
+                                                    </span>
+                                                </div>
+                                                <span className="text-[10px] text-slate-400 font-medium sm:text-right shrink-0">
+                                                    {new Date(log.timestamp).toLocaleString()}
+                                                </span>
+                                            </div>
+                                            <p className="text-xs text-slate-500 font-semibold">{log.details}</p>
+                                            <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
+                                                <span className="font-bold text-slate-500">{log.user_email}</span>
+                                                <span>•</span>
+                                                <span className={cn(
+                                                    "font-bold uppercase tracking-wide px-1 rounded-[4px]",
+                                                    log.action_type === 'CREATE' ? "bg-emerald-50 text-emerald-600" : "bg-blue-50 text-blue-600"
+                                                )}>
+                                                    {log.action_type === 'CREATE' ? 'Creación' : 'Modificación'}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+            </div>
 
             {/* Logout Tile */}
             <div className="bg-red-50/30 rounded-3xl border border-red-100 p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">

@@ -3,13 +3,14 @@
 import { useOpportunitiesServer } from "@/lib/hooks/useOpportunitiesServer";
 import { useState, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Plus, Search, Filter, Briefcase, User, ArrowUpDown, ChevronUp, ChevronDown } from "lucide-react";
+import { Plus, Search, Filter, Briefcase, Trash2, ArrowUpDown, ChevronUp, ChevronDown, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/components/ui/utils";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { UserPickerFilter } from "@/components/cuentas/UserPickerFilter";
 import { OpportunityFilters } from "@/components/oportunidades/OpportunityFilters";
 import { formatColombiaDate, isDateOverdue } from "@/lib/date-utils";
+import { supabase } from "@/lib/supabase";
 import dynamic from 'next/dynamic';
 import 'handsontable/styles/handsontable.min.css';
 import 'handsontable/styles/ht-theme-main.min.css';
@@ -30,7 +31,7 @@ function OpportunitiesContent() {
         loadMore,
         setSearchTerm,
         setUserFilter,
-        setAccountOwnerId,
+        setAccountOwnerIds,
         refresh,
         setChannelFilter,
         setSubclassificationFilter,
@@ -45,7 +46,7 @@ function OpportunitiesContent() {
         setSortAsc,
         sortField,
         sortAsc
-    } = useOpportunitiesServer({ pageSize: 10000 });
+    } = useOpportunitiesServer({ pageSize: 50 });
 
     const [inputValue, setInputValue] = useState(() => {
         const fromUrl = searchParams.get('search');
@@ -56,14 +57,17 @@ function OpportunitiesContent() {
         }
         return "";
     });
-    const [selectedAccountOwnerId, setSelectedAccountOwnerId] = useState<string | null>(() => {
+    const [selectedAccountOwnerIds, setSelectedAccountOwnerIds] = useState<string[]>(() => {
         const fromUrl = searchParams.get('owner');
-        if (fromUrl) return fromUrl;
+        if (fromUrl) return fromUrl.split(',').filter(Boolean);
         if (typeof window !== 'undefined') {
             const saved = sessionStorage.getItem('crm_oportunidades_state');
-            if (saved) return new URLSearchParams(saved).get('owner') || null;
+            if (saved) {
+                const ownerParam = new URLSearchParams(saved).get('owner');
+                return ownerParam ? ownerParam.split(',').filter(Boolean) : [];
+            }
         }
-        return null;
+        return [];
     });
 
     const handleSort = (field: string) => {
@@ -188,7 +192,7 @@ function OpportunitiesContent() {
 
         // Apply tab, search, owner and restored hierarchical filters to hook
         if (initialSearch) setSearchTerm(initialSearch);
-        if (initialOwner) setAccountOwnerId(initialOwner);
+        if (initialOwner) setAccountOwnerIds(initialOwner.split(',').filter(Boolean));
         if (initialChannel) setChannelFilter(initialChannel);
         if (initialSubclass) setSubclassificationFilter(Number(initialSubclass));
         if (initialSegment) setSegmentFilter(Number(initialSegment));
@@ -218,7 +222,12 @@ function OpportunitiesContent() {
                 savedParams.delete('id');
                 savedParams.delete('tab');
                 const restoredState = savedParams.toString();
-                router.replace(restoredState ? `/oportunidades?${restoredState}` : '/oportunidades', { scroll: false });
+                if (restoredState !== '') {
+                    router.replace(`/oportunidades?${restoredState}`, { scroll: false });
+                } else {
+                    // Ya está vacío, limpiamos la sesión para no entrar en bucle infinito
+                    sessionStorage.removeItem('crm_oportunidades_state');
+                }
             }
         }
     }, [searchParams, router]);
@@ -241,7 +250,7 @@ function OpportunitiesContent() {
         if (tab && tab !== 'all') params.set('tab', tab);
         else params.delete('tab');
         
-        if (selectedAccountOwnerId) params.set('owner', selectedAccountOwnerId);
+        if (selectedAccountOwnerIds.length > 0) params.set('owner', selectedAccountOwnerIds.join(','));
         else params.delete('owner');
 
         if (selectedChannel) params.set('channel', selectedChannel);
@@ -272,7 +281,14 @@ function OpportunitiesContent() {
         else params.delete('endClose');
         
         const queryString = params.toString();
-        if (queryString === searchParams.toString()) return;
+        
+        // Evitamos bucles infinitos por orden de parámetros comparándolos ordenados
+        const paramsForCompare = new URLSearchParams(params.toString());
+        paramsForCompare.sort();
+        const currentParamsForCompare = new URLSearchParams(searchParams.toString());
+        currentParamsForCompare.sort();
+        
+        if (paramsForCompare.toString() === currentParamsForCompare.toString()) return;
         
         // Save to sessionStorage for cross-module persistence
         if (queryString) {
@@ -283,7 +299,7 @@ function OpportunitiesContent() {
         
         const query = queryString ? `?${queryString}` : window.location.pathname;
         router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
-    }, [tab, selectedAccountOwnerId, selectedChannel, selectedSubclass, selectedSegment, selectedPhase, statusFilter, startDate, endDate, startClosingDate, endClosingDate, searchParams, router]); // Notice inputValue is NOT in deps here to avoid URL churn during typing
+    }, [tab, selectedAccountOwnerIds, selectedChannel, selectedSubclass, selectedSegment, selectedPhase, statusFilter, startDate, endDate, startClosingDate, endClosingDate, searchParams, router]); // Notice inputValue is NOT in deps here to avoid URL churn during typing
 
 
     const handleFilterChange = useCallback(({ 
@@ -311,16 +327,49 @@ function OpportunitiesContent() {
         setEndClosingDate(eCD);
     }, [setChannelFilter, setSubclassificationFilter, setSegmentFilter, setPhaseFilter, setStatusFilter, setStartDate, setEndDate, setStartClosingDate, setEndClosingDate]);
 
+    const handleDeleteOpportunity = async (oppId: string) => {
+        try {
+            // Eliminar registros relacionados manualmente para evitar errores de llave foránea (FK constraint)
+            await supabase.from('CRM_Actividades').delete().eq('oportunidad_id', oppId);
+            await supabase.from('CRM_Pagos').delete().eq('oportunidad_id', oppId);
+            await supabase.from('CRM_Comisiones_Movimientos').delete().eq('oportunidad_id', oppId);
+            // CRM_Oportunidades_Colaboradores tiene ON DELETE CASCADE pero lo aseguramos
+            await supabase.from('CRM_Oportunidades_Colaboradores').delete().eq('oportunidad_id', oppId);
+            
+            // También eliminamos las cotizaciones y sus items vinculados
+            const { data: quotes } = await supabase.from('CRM_Cotizaciones').select('id').eq('opportunity_id', oppId);
+            if (quotes && quotes.length > 0) {
+                const quoteIds = quotes.map(q => q.id);
+                await supabase.from('CRM_CotizacionItems').delete().in('cotizacion_id', quoteIds);
+            }
+            
+            const { error: quoteError } = await supabase.from('CRM_Cotizaciones').delete().eq('opportunity_id', oppId);
+            if (quoteError) throw quoteError;
+            
+            const { error } = await supabase.from('CRM_Oportunidades').delete().eq('id', oppId);
+            if (error) throw error;
+            
+            refresh();
+        } catch (error: any) {
+            console.error("Error eliminando la oportunidad:", error);
+            if (error.message?.includes('CRM_ComisionLedger is immutable')) {
+                alert("No se puede eliminar la oportunidad porque ya tiene comisiones generadas en el Ledger Financiero. Por políticas de auditoría, estos registros son inmutables. \n\nPara solucionarlo, debes cambiar el estado de la oportunidad a 'Perdida' o 'Anulada' en lugar de eliminarla de la base de datos.");
+            } else {
+                alert("Error eliminando la oportunidad: " + error.message);
+            }
+        }
+    };
+
     // PERF FIX: Stable callback references
     const handleTabChange = useCallback((newTab: 'mine' | 'collab' | 'all' | 'team' | 'web') => {
         setTab(newTab);
         setUserFilter(newTab);
     }, [setUserFilter]);
 
-    const handleUserSelect = useCallback((userId: string | null) => {
-        setSelectedAccountOwnerId(userId);
-        setAccountOwnerId(userId);
-    }, [setAccountOwnerId]);
+    const handleUsersSelect = useCallback((userIds: string[]) => {
+        setSelectedAccountOwnerIds(userIds);
+        setAccountOwnerIds(userIds);
+    }, [setAccountOwnerIds]);
 
     const hotData = opportunities.map(opp => ({
         id: opp.id,
@@ -335,6 +384,24 @@ function OpportunitiesContent() {
     }));
 
     const hotColumns = [
+        ...(userRole === 'ADMIN' ? [{
+            data: 'acciones',
+            title: 'Acciones',
+            readOnly: true,
+            renderer: function(instance: any, td: HTMLTableCellElement, row: number, col: number, prop: string, value: any, cellProperties: any) {
+                td.innerHTML = `
+                    <div style="display: flex; gap: 12px; justify-content: center; align-items: center; height: 100%; width: 100%;">
+                        <button class="edit-action-btn" title="Editar" style="cursor:pointer; color:#2563eb; background:none; border:none; padding:0; display:flex; align-items:center;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>
+                        </button>
+                        <button class="delete-action-btn" title="Eliminar" style="cursor:pointer; color:#dc2626; background:none; border:none; padding:0; display:flex; align-items:center;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+                        </button>
+                    </div>
+                `;
+                return td;
+            }
+        }] : []),
         { data: 'cuenta', title: 'Cuenta', readOnly: true },
         { data: 'nombre', title: 'Nombre', readOnly: true },
         { data: 'fase', title: 'Fase', readOnly: true },
@@ -345,112 +412,120 @@ function OpportunitiesContent() {
         { data: 'vendedor', title: 'Vendedor', readOnly: true }
     ];
 
-    return (
-        <div data-testid="opportunities-page" className="space-y-4">
-            {/* Header */}
-            <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
-                <div className="flex items-center gap-3">
-                    <h1 className="text-2xl font-bold text-slate-900">
-                        Oportunidades
-                        {count !== undefined && count !== null && !loading && (
-                            <span className="ml-2 text-sm font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full align-middle">
-                                {count}
-                            </span>
-                        )}
-                    </h1>
+    const getPhaseBadge = (fase: string) => {
+        const lowerFase = fase.toLowerCase();
+        let colorClass = 'bg-slate-100 text-slate-700 border-slate-200';
+        if (lowerFase.includes('ganada')) colorClass = 'bg-emerald-100 text-emerald-700 border-emerald-200';
+        else if (lowerFase.includes('perdida')) colorClass = 'bg-rose-100 text-rose-700 border-rose-200';
+        else if (lowerFase.includes('propuesta') || lowerFase.includes('acuerdo')) colorClass = 'bg-blue-100 text-blue-700 border-blue-200';
+        else if (lowerFase.includes('prospección') || lowerFase.includes('pros.')) colorClass = 'bg-amber-100 text-amber-700 border-amber-200';
+        
+        return <span className={cn("px-2.5 py-1 rounded-full text-[11px] font-bold border whitespace-nowrap", colorClass)}>{fase}</span>;
+    };
 
+    const formatCurrency = (value: number) => {
+        return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(value);
+    };
+
+    const getInitials = (name: string) => name ? name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : '??';
+
+    const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+
+    return (
+        <div data-testid="opportunities-page" className="space-y-4 md:space-y-6 max-w-[1600px] mx-auto pb-12 animate-in fade-in duration-300">
+            {/* Header Rediseñado */}
+            <div className="flex flex-col sm:flex-row justify-between sm:items-end gap-4 bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-64 h-64 bg-blue-50/80 rounded-full blur-3xl -mr-20 -mt-20 opacity-60 pointer-events-none"></div>
+                <div className="absolute bottom-0 left-0 w-40 h-40 bg-indigo-50/50 rounded-full blur-2xl -ml-10 -mb-10 opacity-60 pointer-events-none"></div>
+                <div className="flex flex-col gap-1.5 z-10">
+                    <div className="flex items-center gap-3">
+                        <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
+                            Oportunidades
+                        </h1>
+                    </div>
+                    <p className="text-slate-500 text-sm hidden sm:block">Gestiona y haz seguimiento a todas las oportunidades comerciales.</p>
                 </div>
-                <Link
-                    href="/oportunidades/nueva"
-                    data-testid="opportunities-create-button"
-                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 w-full md:w-auto justify-center"
-                >
-                    <Plus className="w-4 h-4" />
-                    Nueva Oportunidad
-                </Link>
+                <div className="z-10 w-full sm:w-auto mt-2 sm:mt-0">
+                    <Link
+                        href="/oportunidades/nueva"
+                        data-testid="opportunities-create-button"
+                        className="group bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-5 py-3 sm:py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 shadow-md shadow-blue-200 hover:shadow-lg hover:shadow-blue-300 transition-all active:scale-[0.98] w-full"
+                    >
+                        <Plus className="w-4 h-4 group-hover:rotate-90 transition-transform duration-300" />
+                        Nueva Oportunidad
+                    </Link>
+                </div>
             </div>
 
-            {/* Tabs & Filters */}
-            <div className="flex flex-col gap-4 border-b border-slate-200 pb-2">
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                    <div className="flex space-x-4 overflow-x-auto w-full md:w-auto pb-2 md:pb-0">
+            {/* Controles Principales */}
+            <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-sm flex flex-col xl:flex-row justify-between gap-4 relative z-20">
+                {/* Segmented Control para Tabs */}
+                <div className="flex p-1 bg-slate-100/80 rounded-xl overflow-x-auto hide-scrollbar ring-1 ring-slate-200/50 inset-ring w-full xl:w-auto touch-pan-x">
+                    {[
+                        { id: 'all', label: 'Todas' },
+                        { id: 'mine', label: 'Mis Oportunidades' },
+                        { id: 'collab', label: 'Colaboración' },
+                        ...(userRole === 'ADMIN' ? [{ id: 'team', label: 'Equipo' }] : []),
+                        { id: 'web', label: 'Web' }
+                    ].map(t => (
                         <button
-                            data-testid="opportunities-tab-all"
-                            onClick={() => handleTabChange('all')}
+                            key={t.id}
+                            onClick={() => handleTabChange(t.id as any)}
                             className={cn(
-                                "pb-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
-                                tab === 'all' ? "border-blue-600 text-blue-600" : "border-transparent text-slate-500 hover:text-slate-800"
+                                "px-4 py-2.5 sm:py-2 text-sm font-semibold rounded-lg transition-all duration-300 whitespace-nowrap flex-shrink-0 relative",
+                                tab === t.id 
+                                    ? "text-blue-700 bg-white shadow-sm ring-1 ring-slate-200/50" 
+                                    : "text-slate-500 hover:text-slate-800 hover:bg-slate-200/50"
                             )}
                         >
-                            Todas
-                        </button>
-                        <button
-                            data-testid="opportunities-tab-mine"
-                            onClick={() => handleTabChange('mine')}
-                            className={cn(
-                                "pb-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
-                                tab === 'mine' ? "border-blue-600 text-blue-600" : "border-transparent text-slate-500 hover:text-slate-800"
+                            {t.label}
+                            {t.id === 'web' && tab === 'web' && !loading && (
+                                <span className="ml-2 inline-flex items-center justify-center text-[10px] bg-blue-100 text-blue-700 py-0.5 px-2 rounded-full font-bold">{count}</span>
                             )}
-                        >
-                            Mis Oportunidades
                         </button>
-                        <button
-                            data-testid="opportunities-tab-collab"
-                            onClick={() => handleTabChange('collab')}
-                            className={cn(
-                                "pb-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
-                                tab === 'collab' ? "border-blue-600 text-blue-600" : "border-transparent text-slate-500 hover:text-slate-800"
-                            )}
-                        >
-                            En las que colaboro
-                        </button>
-                        {userRole === 'ADMIN' && (
-                            <button
-                                data-testid="opportunities-tab-team"
-                                onClick={() => handleTabChange('team')}
-                                className={cn(
-                                    "pb-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
-                                    tab === 'team' ? "border-blue-600 text-blue-600" : "border-transparent text-slate-500 hover:text-slate-800"
-                                )}
-                            >
-                                Todas (Equipo)
-                            </button>
-                        )}
-                        <button
-                            data-testid="opportunities-tab-web"
-                            onClick={() => handleTabChange('web')}
-                            className={cn(
-                                "pb-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
-                                tab === 'web' ? "border-blue-600 text-blue-600" : "border-transparent text-slate-500 hover:text-slate-800"
-                            )}
-                        >
-                            Oportunidades desde página {tab === 'web' && !loading && `(${count})`}
-                        </button>
-                    </div>
-
-                    {/* Search and User Picker */}
-                    <div className="flex gap-2 w-full md:w-auto items-center">
-                        <UserPickerFilter
-                            selectedUserId={selectedAccountOwnerId}
-                            onUserSelect={handleUserSelect}
-                        />
-
-                        <div className="relative flex-1 max-w-md w-full">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                            <input
-                                type="text"
-                                data-testid="opportunities-search"
-                                placeholder="Buscar por nombre..."
-                                className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                                value={inputValue}
-                                onChange={(e) => setInputValue(e.target.value)}
-                            />
-                        </div>
-                    </div>
+                    ))}
                 </div>
 
-                {/* Advanced Hierarchical Filters */}
-                <div className="pb-2">
+                <div className="flex gap-2 items-center w-full xl:w-auto">
+                    <div className="hidden sm:block">
+                        <UserPickerFilter
+                            multiple={true}
+                            selectedUserIds={selectedAccountOwnerIds}
+                            onUsersSelect={handleUsersSelect}
+                        />
+                    </div>
+                    <div className="relative flex-1">
+                        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                        <input
+                            type="text"
+                            placeholder="Buscar..."
+                            className="w-full pl-10 pr-4 py-3 sm:py-2.5 bg-slate-50 hover:bg-slate-100 focus:bg-white border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400 placeholder:font-normal"
+                            value={inputValue}
+                            onChange={(e) => setInputValue(e.target.value)}
+                        />
+                    </div>
+                    <button 
+                        onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                        className={cn(
+                            "p-3 sm:p-2.5 rounded-xl border transition-all duration-300 flex items-center justify-center shrink-0",
+                            showAdvancedFilters 
+                                ? "bg-blue-50 border-blue-200 text-blue-700 shadow-inner" 
+                                : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-800 hover:border-slate-300 shadow-sm"
+                        )}
+                        title="Filtros Avanzados"
+                    >
+                        <Filter className={cn("w-5 h-5 sm:w-4 sm:h-4 transition-transform duration-300", showAdvancedFilters && "fill-blue-100")} />
+                    </button>
+                </div>
+            </div>
+
+            {/* Filtros Avanzados (Colapsables) */}
+            {showAdvancedFilters && (
+                <div className="bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 shadow-sm animate-in slide-in-from-top-4 fade-in duration-300 relative z-10">
+                    <h3 className="text-sm font-bold text-slate-800 mb-5 flex items-center gap-2">
+                        <Filter className="w-4 h-4 text-blue-600" />
+                        Filtros Avanzados
+                    </h3>
                     <OpportunityFilters
                         onFilterChange={handleFilterChange}
                         initialChannelId={selectedChannel}
@@ -466,67 +541,167 @@ function OpportunitiesContent() {
                         }}
                     />
                 </div>
-            </div>
-
-            {/* List */}
-            {loading && opportunities.length === 0 ? (
-                <div data-testid="opportunities-loading" className="space-y-3">
-                    {[1, 2, 3].map((i) => (
-                        <div key={i} className="h-24 bg-slate-100 rounded-xl animate-pulse border border-slate-200" />
-                    ))}
-                </div>
-            ) : opportunities.length === 0 ? (
-                <div data-testid="opportunities-empty-state" className="p-12 text-center border-2 border-dashed border-slate-200 rounded-xl bg-slate-50">
-                    <Briefcase className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                    <h3 className="text-lg font-medium text-slate-900">No hay oportunidades aquí</h3>
-                    <p className="text-slate-500 mb-4">Crea una nueva oportunidad o ajusta los filtros.</p>
-                </div>
-            ) : (
-                <div data-testid="opportunities-list" className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-                    <div className="w-full relative z-0" style={{ minHeight: '400px' }}>
-                        <HotTable
-                            data={hotData}
-                            columns={hotColumns}
-                            rowHeaders={true}
-                            colHeaders={true}
-                            filters={true}
-                            dropdownMenu={true}
-                            width="100%"
-                            height="calc(100vh - 280px)"
-                            autoColumnSize={false}
-                            autoRowSize={false}
-                            renderAllRows={false}
-                            licenseKey="non-commercial-and-evaluation"
-                            afterOnCellMouseDown={(event, coords, td) => {
-                                if (coords.row >= 0) {
-                                    const opp = hotData[coords.row];
-                                    if (opp && opp.id) {
-                                        const params = new URLSearchParams(Array.from(searchParams.entries()));
-                                        params.set('id', opp.id);
-                                        sessionStorage.setItem('crm_oportunidades_state', params.toString());
-                                        router.push(`/oportunidades/${opp.id}`);
-                                    }
-                                }
-                            }}
-                            stretchH="all"
-                            className="text-sm font-sans"
-                        />
-                    </div>
-
-                    {hasMore && (
-                        <div className="p-4 border-t border-slate-100 flex justify-center bg-slate-50/50">
-                            <button
-                                data-testid="opportunities-load-more"
-                                onClick={() => loadMore()}
-                                disabled={loading}
-                                className="px-6 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-50 hover:text-blue-600 transition-all shadow-sm disabled:opacity-50"
-                            >
-                                {loading ? 'Cargando...' : 'Cargar más resultados'}
-                            </button>
-                        </div>
-                    )}
-                </div>
             )}
+
+            {/* Listado (Tarjetas en Móvil, Tabla en Desktop) */}
+            <div className="flex flex-col relative min-h-[450px] transition-all duration-300">
+                {(!loading || opportunities.length > 0) && (
+                    <div className="flex items-center justify-end mb-3 px-1 z-10">
+                        <span className="text-sm font-medium text-slate-500 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm flex items-center gap-2">
+                            Total de registros: <strong className="text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md">{count !== undefined && count !== null ? count : opportunities.length}</strong>
+                        </span>
+                    </div>
+                )}
+                {loading && opportunities.length === 0 ? (
+                    <div className="space-y-4 bg-white border border-slate-200 rounded-2xl shadow-sm p-4 sm:p-6">
+                        {[1, 2, 3, 4].map((i) => (
+                            <div key={i} className="h-20 sm:h-16 bg-slate-50 rounded-xl animate-pulse border border-slate-100" />
+                        ))}
+                    </div>
+                ) : opportunities.length === 0 ? (
+                    <div className="bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col items-center justify-center p-10 sm:p-16 text-center h-full my-auto animate-in fade-in zoom-in-95 duration-500">
+                        <div className="w-20 h-20 sm:w-24 sm:h-24 bg-slate-50 rounded-full flex items-center justify-center mb-5 border border-slate-100 shadow-inner">
+                            <Briefcase className="w-10 h-10 text-slate-300" />
+                        </div>
+                        <h3 className="text-lg sm:text-xl font-bold text-slate-900 mb-2">No hay oportunidades</h3>
+                        <p className="text-slate-500 max-w-sm text-sm leading-relaxed">Prueba ajustando los filtros de búsqueda o crea una nueva oportunidad comercial para verla aquí.</p>
+                    </div>
+                ) : (
+                    <>
+                        {/* VISTA MÓVIL: Tarjetas */}
+                        <div className="grid grid-cols-1 gap-3 md:hidden">
+                            {opportunities.map((opp) => (
+                                <div key={opp.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col hover:border-blue-300 active:scale-[0.99] transition-all relative">
+                                    <div className="p-4 border-b border-slate-100 flex justify-between items-start gap-3">
+                                        <div className="flex-1 min-w-0">
+                                            <div className="font-bold text-slate-900 text-sm mb-0.5 truncate">
+                                                {opp.account?.nombre || "Sin cuenta"}
+                                            </div>
+                                            <div className="text-slate-500 text-xs truncate">
+                                                {opp.nombre || "Sin nombre"}
+                                            </div>
+                                        </div>
+                                        <div className="shrink-0 flex items-start">
+                                            {getPhaseBadge(opp.fase_data?.nombre || 'Pros.')}
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="p-4 bg-slate-50/50 grid grid-cols-2 gap-y-3 gap-x-2 text-xs">
+                                        <div>
+                                            <span className="block text-slate-400 mb-1">Estado</span>
+                                            <div className="flex items-center gap-1.5 font-medium text-slate-700">
+                                                <span className={cn("w-2 h-2 rounded-full", opp.estado_data?.nombre?.toLowerCase() === 'abierta' ? 'bg-blue-500' : 'bg-slate-300')}></span>
+                                                {opp.estado_data?.nombre || 'Abierta'}
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <span className="block text-slate-400 mb-1">Valor</span>
+                                            <span className="font-bold text-slate-800">{formatCurrency(opp.amount || 0)}</span>
+                                        </div>
+                                        <div>
+                                            <span className="block text-slate-400 mb-1">Cierre Est.</span>
+                                            <span className="font-medium text-slate-700">{opp.fecha_cierre_estimada ? new Date(opp.fecha_cierre_estimada).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: '2-digit' }) : "-"}</span>
+                                        </div>
+                                        <div>
+                                            <span className="block text-slate-400 mb-1">Vendedor</span>
+                                            <div className="flex items-center gap-1.5 font-medium text-slate-700 truncate">
+                                                <div className="w-5 h-5 shrink-0 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-[9px] font-bold">
+                                                    {getInitials(opp.vendedor?.full_name || "Sin")}
+                                                </div>
+                                                <span className="truncate">{opp.vendedor?.full_name || "Sin asignar"}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    
+                                    <div className="flex divide-x divide-slate-100 border-t border-slate-100 bg-white">
+                                        <button 
+                                            onClick={() => {
+                                                const params = new URLSearchParams(Array.from(searchParams.entries()));
+                                                params.set('id', opp.id);
+                                                sessionStorage.setItem('crm_oportunidades_state', params.toString());
+                                                router.push(`/oportunidades/${opp.id}`);
+                                            }}
+                                            className="flex-1 py-3 text-sm font-semibold text-blue-600 flex items-center justify-center gap-2 hover:bg-blue-50 active:bg-blue-100 transition-colors"
+                                        >
+                                            <Search className="w-4 h-4" /> Ver / Editar
+                                        </button>
+                                        {userRole === 'ADMIN' && (
+                                            <button 
+                                                onClick={() => {
+                                                    if (window.confirm(`¿Estás seguro de que deseas eliminar la oportunidad "${opp.nombre || 'Sin nombre'}"?`)) {
+                                                        handleDeleteOpportunity(opp.id);
+                                                    }
+                                                }}
+                                                className="px-5 py-3 text-sm font-semibold text-rose-500 flex items-center justify-center hover:bg-rose-50 active:bg-rose-100 transition-colors"
+                                            >
+                                                <Trash2 className="w-4 h-4" />
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* VISTA DESKTOP: Tabla Moderna (Handsontable con filtros) */}
+                        <div className="hidden md:block bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex-1 animate-in fade-in duration-500">
+                            <div className="w-full relative z-0" style={{ minHeight: '400px' }}>
+                                <HotTable
+                                    data={hotData}
+                                    columns={hotColumns}
+                                    rowHeaders={true}
+                                    colHeaders={true}
+                                    filters={true}
+                                    dropdownMenu={true}
+                                    width="100%"
+                                    height="calc(100vh - 280px)"
+                                    autoColumnSize={false}
+                                    autoRowSize={false}
+                                    renderAllRows={false}
+                                    licenseKey="non-commercial-and-evaluation"
+                                    afterOnCellMouseDown={(event, coords, td) => {
+                                        if (coords.row >= 0) {
+                                            const opp = hotData[coords.row];
+                                            if (opp && opp.id) {
+                                                const target = event.target as HTMLElement;
+                                                if (target.closest('.edit-action-btn')) {
+                                                    router.push(`/oportunidades/${opp.id}`);
+                                                    return;
+                                                }
+                                                if (target.closest('.delete-action-btn')) {
+                                                    if (window.confirm(`¿Estás seguro de que deseas eliminar la oportunidad "${opp.nombre}"?`)) {
+                                                        handleDeleteOpportunity(opp.id);
+                                                    }
+                                                    return;
+                                                }
+                                                
+                                                const params = new URLSearchParams(Array.from(searchParams.entries()));
+                                                params.set('id', opp.id);
+                                                sessionStorage.setItem('crm_oportunidades_state', params.toString());
+                                                router.push(`/oportunidades/${opp.id}`);
+                                            }
+                                        }
+                                    }}
+                                    stretchH="all"
+                                    className="text-sm font-sans"
+                                />
+                            </div>
+                        </div>
+                    </>
+                )}
+                
+                {hasMore && opportunities.length > 0 && (
+                    <div className="p-4 flex justify-center mt-4">
+                        <button
+                            onClick={() => loadMore()}
+                            disabled={loading}
+                            className="w-full md:w-auto px-6 py-3.5 md:py-2.5 bg-white border border-slate-200 text-slate-700 rounded-xl text-sm font-bold hover:bg-slate-50 hover:border-slate-300 hover:shadow-md hover:-translate-y-0.5 active:scale-[0.98] transition-all disabled:opacity-50 flex justify-center items-center gap-2 shadow-sm"
+                        >
+                            {loading && <div className="w-4 h-4 rounded-full border-2 border-slate-300 border-t-slate-600 animate-spin"></div>}
+                            {loading ? 'Cargando...' : 'Cargar más resultados'}
+                        </button>
+                    </div>
+                )}
+            </div>
         </div>
     );
 }

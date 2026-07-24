@@ -60,7 +60,7 @@ export function AccountAssignedTab({ accountId, currentOwnerId }: AccountAssigne
         try {
             // Accounts now use 'owner_user_id' as the owner field
             await updateAccount(accountId, { owner_user_id: selectedUserId });
-            setSuccessMessage("Cuenta reasignada correctamente.");
+            setSuccessMessage("Cuenta y oportunidades reasignadas. El responsable anterior queda como colaborador al 50%.");
             setTimeout(() => setSuccessMessage(null), 3000);
         } catch (error) {
             console.error("Error assigning account:", error);
@@ -88,7 +88,7 @@ export function AccountAssignedTab({ accountId, currentOwnerId }: AccountAssigne
                     </div>
                     <div>
                         <h3 className="font-bold text-slate-900 text-lg">Reasignar Cuenta</h3>
-                        <p className="text-xs text-slate-500">Cambiar el propietario de esta cuenta</p>
+                        <p className="text-xs text-slate-500">El cambio se aplicará también a todas sus oportunidades vinculadas</p>
                     </div>
                 </div>
 

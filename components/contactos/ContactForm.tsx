@@ -3,10 +3,13 @@ import { db, LocalContact } from "@/lib/db";
 import { useForm } from "react-hook-form";
 import { useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
+import { useFormDraft } from "@/lib/hooks/useFormDraft";
 import { ContactImportButton } from "./ContactImportButton";
 import { ParsedContact } from "@/lib/vcard";
 import { AccountSelector } from "./AccountSelector";
 import { Building } from "lucide-react";
+import { useFormAutoSave } from "@/lib/hooks/useFormAutoSave";
+import { AutoSaveIndicator } from "@/components/ui/AutoSaveIndicator";
 
 interface ContactFormProps {
     accountId: string;
@@ -28,12 +31,39 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel }:
         comentarios: existingContact?.comentarios || "",
     };
 
-    const { register, handleSubmit, reset, setValue, watch, formState: { errors, isSubmitting } } = useForm<LocalContact>({
+    const form = useForm<LocalContact>({
         defaultValues: defaultValues as any
     });
 
+    const { register, handleSubmit, reset, setValue, watch, formState: { errors, isSubmitting } } = form;
+
+    const { clearDraft } = useFormDraft(form, 'crm_draft_contact', !existingContact);
+
+    const onAutoSave = async (data: LocalContact) => {
+        if (!existingContact?.id) return;
+        const payload: any = {
+            nombre: data.nombre,
+            cargo: data.cargo || null,
+            email: data.email || null,
+            telefono: data.telefono || null,
+            es_principal: data.es_principal,
+            comentarios: data.comentarios || null,
+            account_id: selectedAccountId || data.account_id
+        };
+        await updateContact(existingContact.id, payload);
+    };
+
+    const { status: autoSaveStatus } = useFormAutoSave({
+        form,
+        onSave: onAutoSave,
+        isEnabled: !!existingContact?.id
+    });
+
     useEffect(() => {
-        reset(defaultValues as any);
+        // En modo creación, useFormDraft ya maneja el estado inicial. No sobreescribir aquí.
+        if (existingContact) {
+            reset(defaultValues as any);
+        }
     }, [existingContact?.id, accountId, reset]);
 
     const selectedAccountId = watch("account_id");
@@ -150,6 +180,7 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel }:
                 await updateContact(existingContact.id, data);
             } else {
                 await createContact(data);
+                clearDraft(); // Limpiar borrador si es creación exitosa
             }
             onSuccess();
         } catch (error) {
@@ -245,21 +276,36 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel }:
                 </label>
             </div>
 
-            <div className="flex justify-end gap-3 pt-6 border-t border-slate-100">
-                <button
-                    type="button"
-                    onClick={onCancel}
-                    className="px-6 py-3 text-sm font-bold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all active:scale-95"
-                >
-                    Cancelar
-                </button>
-                <button
-                    type="submit"
-                    disabled={isSubmitting}
-                    className="px-8 py-3 text-sm font-extrabold text-white bg-[#254153] border border-transparent rounded-xl hover:bg-[#1a2f3d] shadow-lg shadow-[#254153]/20 disabled:opacity-50 transition-all hover:scale-[1.02] active:scale-[0.98]"
-                >
-                    {isSubmitting ? 'Guardando...' : 'Guardar Contacto'}
-                </button>
+            <div className="flex justify-end items-center gap-3 pt-6 border-t border-slate-100">
+                {existingContact ? (
+                    <>
+                        <AutoSaveIndicator status={autoSaveStatus} />
+                        <button
+                            type="button"
+                            onClick={onCancel}
+                            className="px-6 py-3 text-sm font-bold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all active:scale-95"
+                        >
+                            Cerrar
+                        </button>
+                    </>
+                ) : (
+                    <>
+                        <button
+                            type="button"
+                            onClick={onCancel}
+                            className="px-6 py-3 text-sm font-bold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all active:scale-95"
+                        >
+                            Cancelar
+                        </button>
+                        <button
+                            type="submit"
+                            disabled={isSubmitting}
+                            className="px-8 py-3 text-sm font-extrabold text-white bg-[#254153] border border-transparent rounded-xl hover:bg-[#1a2f3d] shadow-lg shadow-[#254153]/20 disabled:opacity-50 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                        >
+                            {isSubmitting ? 'Guardando...' : 'Guardar Contacto'}
+                        </button>
+                    </>
+                )}
             </div>
         </form>
     );

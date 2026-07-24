@@ -1,0 +1,190 @@
+"use client";
+
+import React from "react";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { cn } from "@/components/ui/utils";
+import { FirplakLogo, FirplakIsotipo } from "./FirplakLogo";
+import { SyncStatus } from "./SyncStatus";
+import { useSyncStore } from "@/lib/stores/useSyncStore";
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { shallow } from "zustand/shallow";
+import {
+    Home,
+    Briefcase,
+    Building2,
+    Calendar,
+    FileSpreadsheet,
+    Settings,
+    Users,
+    Truck,
+    ChevronLeft,
+    ChevronRight,
+    UserCircle,
+    DollarSign,
+    BarChart3,
+    Store,
+} from "lucide-react";
+import packageJson from "../../package.json";
+
+const NAV_ITEMS = [
+    { label: "Inicio", href: "/", icon: Home },
+    { label: "Oportunidades", href: "/oportunidades", icon: Briefcase },
+    { label: "Cuentas", href: "/cuentas", icon: Building2 },
+    { label: "Contactos", href: "/contactos", icon: Users },
+    { label: "Actividades", href: "/actividades", icon: Calendar },
+    { label: "Pedidos", href: "/pedidos", icon: Truck },
+    { label: "Comisiones", href: "/comisiones", icon: DollarSign },
+    { label: "Indicadores", href: "/indicadores", icon: BarChart3 },
+    { label: "Tiendas", href: "/tiendas", icon: Store },
+    { label: "Informes", href: "/informes", icon: FileSpreadsheet, requiredRole: 'ADMIN' },
+    { label: "Usuarios", href: "/usuarios", icon: UserCircle, requiredRole: 'ADMIN' },
+    { label: "Configuración", href: "/configuracion", icon: Settings },
+];
+
+export interface SidebarProps {
+    isCollapsed: boolean;
+    toggleSidebar: () => void;
+}
+
+interface NavItemProps {
+    item: typeof NAV_ITEMS[0];
+    isActive: boolean;
+    isCollapsed: boolean;
+}
+
+const NavItem = React.memo(function NavItem({ item, isActive, isCollapsed }: NavItemProps) {
+    return (
+        <Link
+            href={item.href}
+            prefetch={true}
+            data-testid={`nav-${item.href.replace('/', '') || 'home'}`}
+            title={isCollapsed ? item.label : undefined}
+            className={cn(
+                "flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-semibold group/item relative",
+                "transition-[background-color,color,box-shadow,transform] duration-200",
+                isActive
+                    ? "bg-linear-to-r from-[#254153] to-[#1a2f3d] text-white shadow-lg shadow-[#254153]/20"
+                    : "text-slate-600 hover:bg-slate-100 hover:text-[#254153]",
+                isCollapsed && "justify-center px-0 w-14 mx-auto"
+            )}
+        >
+            <item.icon className={cn(
+                "w-5 h-5 shrink-0 transition-transform pointer-events-none",
+                !isActive && "group-hover/item:scale-110"
+            )} />
+            {!isCollapsed && (
+                <span className="whitespace-nowrap pointer-events-none">{item.label}</span>
+            )}
+            {isActive && !isCollapsed && (
+                <div className="absolute right-3 w-1.5 h-1.5 bg-white rounded-full"></div>
+            )}
+        </Link>
+    );
+});
+
+export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar }: SidebarProps) {
+    const pathname = usePathname();
+    const setUserRole = useSyncStore((state) => state.setUserRole);
+    const { user, role, isLoading } = useCurrentUser();
+
+    // Memoized Logo to prevent expensive re-renders on navigation
+    const LogoSection = React.useMemo(() => (
+        <div className="w-full flex justify-center mb-2">
+            {isCollapsed ? (
+                <div className="w-12 h-12 bg-linear-to-br from-[#254153] to-[#1a2f3d] rounded-2xl flex items-center justify-center shadow-lg transition-all p-2.5 text-white">
+                    <FirplakIsotipo className="w-full h-full" />
+                </div>
+            ) : (
+                <div className="flex items-center justify-center py-2 h-12">
+                    <FirplakLogo className="h-full w-auto text-[#254153]" />
+                </div>
+            )}
+        </div>
+    ), [isCollapsed]);
+
+    // Sync DB Role to UI Store
+    React.useEffect(() => {
+        if (!isLoading && role) {
+            const normalizedRole = role === 'ADMIN' ? 'ADMIN' : role === 'COORDINADOR' ? 'COORDINATOR' : 'SALES';
+            setUserRole(normalizedRole);
+        }
+    }, [role, isLoading, setUserRole]);
+
+    // Filter nav items using effective role
+    const visibleNavItems = React.useMemo(() => {
+        const allowedModules = user?.allowed_modules || [];
+        return NAV_ITEMS.filter(item => {
+            if (item.href === '/usuarios' && role !== 'ADMIN') return false;
+            if (role === 'ADMIN') return true;
+            if (allowedModules.length > 0) {
+                return allowedModules.includes(item.href);
+            }
+            if (item.requiredRole && item.requiredRole !== role) return false;
+            return true;
+        });
+    }, [role, user?.allowed_modules]);
+
+
+    return (
+        <aside
+            data-testid="sidebar"
+            className={cn(
+                "hidden md:flex flex-col bg-linear-to-b from-white to-slate-50/50 text-slate-900 h-screen border-r border-slate-200/60 shadow-lg transition-all duration-300 z-40 shrink-0 group",
+                isCollapsed ? "w-20" : "w-72"
+            )}
+        >
+            {/* Header Section */}
+            <div className={cn(
+                "border-b border-slate-200/60 bg-white flex flex-col items-center justify-center transition-all relative",
+                isCollapsed ? "p-4" : "p-6"
+            )}>
+                {/* Logo */}
+                {LogoSection}
+
+                {!isCollapsed && (
+                    <div className="w-full mt-3 pt-3 border-t border-slate-200/60">
+                        <p className="text-xs text-slate-400 text-center font-semibold uppercase tracking-wider">
+                            Versión {packageJson.version}
+                        </p>
+                    </div>
+                )}
+
+                {/* Collapse/Expand Button */}
+                <button
+                    data-testid="sidebar-toggle"
+                    onClick={toggleSidebar}
+                    className={cn(
+                        "absolute -right-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-white border-2 border-slate-200 text-slate-400 hover:border-[#254153] hover:text-[#254153] hover:bg-slate-50 transition-all shadow-md flex items-center justify-center"
+                    )}
+                    title={isCollapsed ? "Expandir" : "Colapsar"}
+                >
+                    {isCollapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronLeft className="w-3 h-3" />}
+                </button>
+            </div>
+
+            {/* Navigation Section */}
+            <nav className="flex-1 p-4 space-y-1.5 overflow-y-auto overflow-x-hidden">
+                {visibleNavItems.map((item) => (
+                    <NavItem 
+                        key={item.href}
+                        item={item}
+                        isActive={pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href))}
+                        isCollapsed={isCollapsed}
+                    />
+                ))}
+            </nav>
+
+            {/* Sync Status Section */}
+            <div className={cn(
+                "border-t border-slate-200/60 bg-white/50",
+                isCollapsed ? "p-2" : "px-4 py-3"
+            )}>
+                <SyncStatus isCollapsed={isCollapsed} />
+            </div>
+
+        </aside>
+    );
+});
+

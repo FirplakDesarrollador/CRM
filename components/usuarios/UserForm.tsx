@@ -32,6 +32,9 @@ const AVAILABLE_MODULES = [
     { value: '/contactos', label: 'Contactos' },
     { value: '/actividades', label: 'Actividades' },
     { value: '/pedidos', label: 'Pedidos' },
+    { value: '/tiendas', label: 'Tiendas-Ferias' },
+    { value: '/catalogo', label: 'Catálogo' },
+    { value: '/inventarios', label: 'Inventarios' },
     { value: '/informes', label: 'Informes' },
     { value: '/configuracion', label: 'Configuración' },
 ];
