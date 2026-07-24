@@ -35,11 +35,6 @@ const storeSaleSchema = z.object({
     fase_id: z.string().min(1, "Fase requerida"),
     amount: z.number().min(0, "Debe ser mayor a 0"),
     comentarios: z.string().min(1, "Comentario requerido"),
-<<<<<<< HEAD
-    origen_oportunidad: z.enum(["visita", "wp"], { required_error: "Origen requerido" }),
-    categoria_oportunidad: z.string().min(1, "Categoría requerida"),
-    canal_id: z.string().min(1, "Canal requerido"),
-=======
     origen_oportunidad: z.string().min(1, "Origen requerido"),
     venta_feria: z.boolean(),
     categoria_oportunidad: z.string().optional(),
@@ -99,10 +94,6 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
     const subclassificationsQuery = useLiveQuery(() => db.subclasificaciones.toArray());
     const subclassifications = useMemo(() => subclassificationsQuery || [], [subclassificationsQuery]);
     const classifications = useLiveQuery(() => db.activityClassifications.toArray().then(arr => arr.filter(c => !c.is_deleted)), []) || [];
-<<<<<<< HEAD
-
-    // Fases locales (se inicializan después del form)
-=======
     const eventClassifications = classifications.filter(c => c.tipo_actividad === "EVENTO");
 
     const {
@@ -141,14 +132,6 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         }
     });
 
-<<<<<<< HEAD
-    // Fases locales para autoseleccionar la inicial
-    const selectedChannel = watch("canal_id");
-    const phasesList = useLiveQuery(() => db.phases.where('canal_id').equals(selectedChannel || 'PROPIO').sortBy('orden'), [selectedChannel]) || [];
-
-    // Cargar datos por defecto
-    useEffect(() => {
-=======
     const selectedChannel = watch("canal_id") || "PROPIO";
     const isFairSale = watch("venta_feria") || false;
     const phasesQuery = useLiveQuery(
@@ -326,9 +309,6 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                 const accountData = {
                     nombre: data.nombre_cuenta,
                     nit_base: data.nit_base,
-<<<<<<< HEAD
-                    canal_id: data.canal_id, 
-=======
                     canal_id: data.canal_id,
                     subclasificacion_id: Number(data.subclasificacion_id),
                     telefono: data.telefono,
@@ -338,12 +318,8 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                     departamento_id: data.departamento_id ? Number(data.departamento_id) : null,
                     ciudad_id: data.ciudad_id ? Number(data.ciudad_id) : null,
                     // Conservamos compatibilidad string con DB
-<<<<<<< HEAD
-                    ciudad: data.ciudad_id ? citiesList.find(c => String(c.id) === data.ciudad_id)?.nombre : null,
-                    es_premium: false,
-                    owner_user_id: finalOwnerId
-=======
                     ciudad: data.ciudad_id ? citiesList.find(c => String(c.id) === data.ciudad_id)?.nombre : undefined,
+                    owner_user_id: finalOwnerId,
                     es_premium: false
                 };
 
@@ -393,11 +369,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                 fecha_inicio: data.fecha_inicio,
                 fecha_fin: data.fecha_fin,
                 prioridad: data.prioridad,
-<<<<<<< HEAD
                 user_id: finalOwnerId,
-            };
-=======
-                user_id: data.asesor_id || user?.id,
             } satisfies Partial<LocalActivity>;
             await createActivity(activityData);
 
