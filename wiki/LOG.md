@@ -3,6 +3,18 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-07-24 - Informes: Filtros Avanzados Dinámicos por Entidad
+
+- Se implementó un conjunto completo de filtros avanzados por entidad en el módulo de informes (`app/informes/page.tsx`).
+- Oportunidades: Fase, Segmento, Origen, Rango de valor ($ min/max), Departamento y Ciudad.
+- Cuentas: Nivel Premium (VIP vs Estándar), Departamento y Ciudad.
+- Contactos: Cargo / Rol de decisión.
+- Cotizaciones: Estado (DRAFT, SENT, WINNER, REJECTED, EXPIRED) y Rango de valor ($ min/max).
+- Actividades: Rango de fechas de vencimiento (`fecha_fin`), Estado de cumplimiento (completadas vs pendientes), Tipo de actividad, Clasificación y Subclasificación.
+- Proyección S&OP: Planta (PC, ALM, FVH), Familia de producto, Probabilidad mínima (%), Quincena y Tipo de registro (pedidos vs proyectado).
+- Se añadió el botón de acción "Limpiar Filtros".
+- Páginas actualizadas: `wiki/pages/dashboard-e-indicadores.md`.
+
 ## 2026-07-24 - Catálogo: Visualización Completa de Listas de Precios y Solución RLS
 
 - Se actualizó el módulo de Catálogo (`app/catalogo/page.tsx`) para mostrar en una lista tabular todas las columnas de precio simultáneamente (PVP Propio, Base COP, Obras Nacional, Exportaciones, PVP Sin IVA y Precio Feria).

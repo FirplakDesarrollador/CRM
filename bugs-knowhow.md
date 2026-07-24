@@ -621,3 +621,31 @@ Prevention Rule:
 
 Tags:
 [react] [deep-linking] [state-sync] [debounce] [accounts]
+
+---
+
+## [Bug ID: 20260724-01]
+
+Context:
+`app/informes/page.tsx` y exportación de informes / Proyección S&OP a Excel y CSV.
+
+Problem:
+La exportación de informes (especialmente la Proyección S&OP, Cotizaciones y Contactos) arrojaba error "column CRM_Pedidos.fecha_facturacion does not exist" o generaba archivos con columnas de nombres/importes en blanco.
+
+Root Cause:
+1. `CRM_Pedidos` no posee columnas `fecha_facturacion` ni `fecha_entrega`; las columnas reales en PostgreSQL provienen de campos SAP (`"EXTRA_Fecha de facturación"` y `"EXTRA_Fecha mínima requerida por comercial/cliente"`). Al consultar columnas inexistentes, Supabase devolvía error 42703.
+2. `CRM_Contactos` usa la columna `nombre` en lugar de `nombres` y `apellidos`.
+3. `CRM_Cotizaciones` usa `numero_cotizacion`, `total_amount` y `status` en lugar de `codigo`, `total_final` y `estado`.
+4. `CRM_Oportunidades` no vinculaba `probabilidad` con la clave `probability` usada en el encabezado del informe.
+
+Fix Applied:
+1. Se corrigió la consulta `.select()` de `CRM_Pedidos` especificando los nombres de columnas de Supabase entre comillas dobles y con valores de respaldo (`closeDate`, `expectedCloseDate`).
+2. Se mejoró `getYearAndMonth` para soportar formatos `DD/MM/YYYY`, `YYYY-MM-DD` e ISO.
+3. Se alinearon los mapeos de `flattenFn` para Contactos, Cotizaciones, Oportunidades y Cuentas con las columnas reales de las tablas `CRM_*`.
+
+Prevention Rule:
+**Strict Table Schema Mapping**: Al realizar consultas `.select()` o aplanar objetos para informes/exports, verificar siempre el esquema real de la base de datos PostgreSQL/Supabase en lugar de asumir nombres de propiedades.
+
+Tags:
+[informes] [sop] [exportar] [excel] [csv] [supabase] [schema]
+
