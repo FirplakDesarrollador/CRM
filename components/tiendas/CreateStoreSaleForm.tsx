@@ -187,14 +187,17 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                 finalOwnerId = data.asesor_id;
             } else {
                 if (data.canal_id === 'PROPIO') {
-                    const assignedUser = users?.find(u => u.email === 'daniela.castro@firplak.com');
+                    const assignedUser = users?.find(u => u.email.toLowerCase().includes('daniela.castro'));
                     if (assignedUser) finalOwnerId = assignedUser.id;
+                    else console.warn("No se encontró a daniela.castro");
                 } else if (data.canal_id === 'OBRAS_NAC') {
-                    const assignedUser = users?.find(u => u.email === 'mayerly.marin@firplak.com');
+                    const assignedUser = users?.find(u => u.email.toLowerCase().includes('mayerly.marin'));
                     if (assignedUser) finalOwnerId = assignedUser.id;
+                    else console.warn("No se encontró a mayerly.marin");
                 } else if (['OBRAS_INT', 'DIST_INT', 'DIST_NAC'].includes(data.canal_id)) {
-                    const assignedUser = users?.find(u => u.email === 'juan.correa@firplak.com');
+                    const assignedUser = users?.find(u => u.email.toLowerCase().includes('juan.correa'));
                     if (assignedUser) finalOwnerId = assignedUser.id;
+                    else console.warn("No se encontró a juan.correa");
                 }
             }
 
