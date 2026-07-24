@@ -350,6 +350,8 @@ export default function InformesPage() {
               supabase.from('CRM_TiposActividad').select('id, nombre')
             ]);
 
+            const getJoinedSingle = (rel: any) => Array.isArray(rel) ? rel[0] : rel;
+
             const userMap = new Map<string, string>();
             users?.forEach(u => userMap.set(u.id, u.full_name || u.email || '-'));
 
@@ -510,10 +512,6 @@ export default function InformesPage() {
                         return { year: date.getFullYear(), monthName: MESES_ES[date.getMonth()] || 'Sin fecha', day: date.getDate() };
                     }
                     return { year: new Date().getFullYear(), monthName: 'Sin fecha', day: 1 };
-                };
-
-                const getJoinedSingle = (rel: any) => Array.isArray(rel) ? rel[0] : rel;
-
                 if (selectedTipoSop !== 'proyectado') {
                     validPeds.forEach(ped => {
                         const opp = opps.find(o => o.id === ped.opportunity_id);

@@ -3,6 +3,11 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-07-24 - Catálogo: Toggle "Productos de feria"
+
+- Se agregó un filtro tipo casilla / toggle "Productos de feria" en la vista de Catálogo (`app/catalogo/page.tsx`).
+- Al activarse, filtra la lista para mostrar únicamente aquellos productos cuyo valor en la columna `precio_feria` sea mayor a cero (`precio_feria > 0`).
+
 ## 2026-07-24 - Informes: Filtros Avanzados Dinámicos por Entidad
 
 - Se implementó un conjunto completo de filtros avanzados por entidad en el módulo de informes (`app/informes/page.tsx`).
