@@ -512,6 +512,8 @@ export default function InformesPage() {
                         return { year: date.getFullYear(), monthName: MESES_ES[date.getMonth()] || 'Sin fecha', day: date.getDate() };
                     }
                     return { year: new Date().getFullYear(), monthName: 'Sin fecha', day: 1 };
+                };
+
                 if (selectedTipoSop !== 'proyectado') {
                     validPeds.forEach(ped => {
                         const opp = opps.find(o => o.id === ped.opportunity_id);
