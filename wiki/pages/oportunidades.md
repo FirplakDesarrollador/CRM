@@ -8,6 +8,7 @@ oportunidad pertenece a una [[cuentas|cuenta]], tiene un vendedor propietario, a
 ## Ciclo de vida
 
 - **Creación:** wizard en `/oportunidades/nueva` (`CreateOpportunityWizard`).
+- **Origen configurable:** `CRM_OrigenesOportunidad` define las opciones administrables desde Configuración; Tiendas-Ferias y el detalle de oportunidad consumen ese catálogo.
 - **Fases por canal:** cada canal tiene su propio conjunto de fases
   (migraciones `obras_nac_phases`, `obras_int_phases`, `dist_nac_phases`,
   `dist_int_phases`, `propio_phases`). Las fases viven en `CRM_FasesOportunidad`.

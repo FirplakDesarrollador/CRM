@@ -42,7 +42,9 @@ trabajar sin conexión y sincronizar después.
 | Pedidos | `/pedidos` | [[cotizaciones-y-pedidos]] |
 | Comisiones | `/comisiones` | [[comisiones]] |
 | Indicadores | `/indicadores` | [[dashboard-e-indicadores]] |
-| Tiendas | `/tiendas` | en construcción (modal de ventas/actividades de tienda ya existe) |
+| Tiendas-Ferias | `/tiendas` | formulario integrado de cuenta, oportunidad, actividad y reservas de feria |
+| Catálogo | `/catalogo` | lista de precios por canal con búsqueda flexible e inventario |
+| Inventarios | `/inventarios` (solo ADMIN) | movimientos de entrada, salida y reserva |
 | Informes | `/informes` (solo ADMIN) | [[dashboard-e-indicadores]] |
 | Usuarios | `/usuarios` (solo ADMIN) | [[roles-y-permisos]] |
 | Configuración | `/configuracion` | metas, notificaciones, comisiones, cargas masivas |

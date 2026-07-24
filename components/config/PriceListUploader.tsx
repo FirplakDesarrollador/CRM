@@ -84,6 +84,7 @@ export function PriceListUploader() {
                         lista_base_obras: parseNumber(normalizedRow['lista_base_obras'] || normalizedRow['Obras nacional']),
                         distribuidor_pvp_iva: parseNumber(normalizedRow['distribuidor_pvp_iva'] || normalizedRow['Distribuidor PVP+IVA']),
                         pvp_sin_iva: parseNumber(normalizedRow['pvp_sin_iva'] || normalizedRow['PVP sin IVA']),
+                        precio_feria: parseNumber(normalizedRow['precio_feria'] || normalizedRow['Precio feria'] || normalizedRow['Feria']),
                         descuentos_volumen: discounts,
                         planta: normalizedRow['planta'] || normalizedRow['Planta'] || null,
                         familia: normalizedRow['familia'] || normalizedRow['Familia'] || null
@@ -315,7 +316,7 @@ export function PriceListUploader() {
                 </p>
                 <p className="text-xs text-blue-700 leading-relaxed">
                     El archivo debe contener obligatoriamente la columna <strong>numero_articulo</strong> (o 'Número de artículo').
-                    Las columnas de precios opcionales son: <em>lista_base_cop, lista_base_exportaciones, lista_base_obras, distribuidor_pvp_iva, pvp_sin_iva</em>.
+                    Las columnas de precios opcionales son: <em>lista_base_cop, lista_base_exportaciones, lista_base_obras, distribuidor_pvp_iva, pvp_sin_iva, precio_feria</em>.
                     <br />
                     Las columnas de S&OP opcionales son: <strong>planta</strong> y <strong>familia</strong>.
                     <br />

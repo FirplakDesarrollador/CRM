@@ -42,6 +42,11 @@ const ActivityClassificationManager = dynamic(() => import('@/components/config/
     ssr: false
 });
 
+const OpportunityOriginsManager = dynamic(() => import('@/components/config/OpportunityOriginsManager').then(mod => mod.OpportunityOriginsManager), {
+    loading: () => <div className="animate-pulse bg-slate-100 h-20 rounded-2xl" />,
+    ssr: false
+});
+
 const BulkAccountUploader = dynamic(() => import('@/components/config/BulkAccountUploader').then(mod => mod.BulkAccountUploader), {
     loading: () => <div className="animate-pulse bg-slate-100 h-20 rounded-2xl" />,
     ssr: false
@@ -765,6 +770,7 @@ function ConfigPageContent() {
             {role === 'ADMIN' && (
                 <>
                     <PriceListUploader />
+                    <OpportunityOriginsManager />
                     <ActivityClassificationManager />
                     <BulkAccountUploader />
                 </>

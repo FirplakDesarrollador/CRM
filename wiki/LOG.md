@@ -3,6 +3,36 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-07-24 - Catálogo: Toggle "Productos de feria"
+
+- Se agregó un filtro tipo casilla / toggle "Productos de feria" en la vista de Catálogo (`app/catalogo/page.tsx`).
+- Al activarse, filtra la lista para mostrar únicamente aquellos productos cuyo valor en la columna `precio_feria` sea mayor a cero (`precio_feria > 0`).
+
+## 2026-07-24 - Informes: Filtros Avanzados Dinámicos por Entidad
+
+- Se implementó un conjunto completo de filtros avanzados por entidad en el módulo de informes (`app/informes/page.tsx`).
+- Oportunidades: Fase, Segmento, Origen, Rango de valor ($ min/max), Departamento y Ciudad.
+- Cuentas: Nivel Premium (VIP vs Estándar), Departamento y Ciudad.
+- Contactos: Cargo / Rol de decisión.
+- Cotizaciones: Estado (DRAFT, SENT, WINNER, REJECTED, EXPIRED) y Rango de valor ($ min/max).
+- Actividades: Rango de fechas de vencimiento (`fecha_fin`), Estado de cumplimiento (completadas vs pendientes), Tipo de actividad, Clasificación y Subclasificación.
+- Proyección S&OP: Planta (PC, ALM, FVH), Familia de producto, Probabilidad mínima (%), Quincena y Tipo de registro (pedidos vs proyectado).
+- Se añadió el botón de acción "Limpiar Filtros".
+- Páginas actualizadas: `wiki/pages/dashboard-e-indicadores.md`.
+
+## 2026-07-24 - Catálogo: Visualización Completa de Listas de Precios y Solución RLS
+
+- Se actualizó el módulo de Catálogo (`app/catalogo/page.tsx`) para mostrar en una lista tabular todas las columnas de precio simultáneamente (PVP Propio, Base COP, Obras Nacional, Exportaciones, PVP Sin IVA y Precio Feria).
+- Se incluyó la columna `precio_feria` en la plantilla de carga masiva CSV (`public/plantilla_precios.csv`) y en el hook `useProducts.ts`.
+- Se creó la migración `supabase/migrations/20260724_fix_price_list_rls.sql` para corregir las políticas RLS y permitir la carga masiva mediante `admin_upsert_price_list`.
+
+## 2026-07-16 - Tiendas-Ferias, Catálogo e Inventarios
+
+- Tiendas se renombró a Tiendas-Ferias y ahora permite canal, subclasificación automática, origen configurable y venta con precio de feria.
+- Se añadieron Catálogo (`/catalogo`) e Inventarios (`/inventarios`, solo ADMIN).
+- El inventario se deriva de entradas, salidas y reservas; el trigger evita salidas o reservas sin disponibilidad y audita ediciones.
+- Migración principal: `20260716_stores_fairs_catalog_inventory.sql`.
+
 
 ## 2026-07-16 - Ingest: Saneamiento y Prevención de Actividades Duplicadas
 

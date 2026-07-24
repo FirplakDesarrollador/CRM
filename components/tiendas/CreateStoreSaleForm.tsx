@@ -1,18 +1,21 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { X, Loader2, Store, DollarSign, CalendarPlus, Search, Trash2 } from "lucide-react";
+import { Loader2, Store, DollarSign, CalendarPlus, Search, Trash2, TicketCheck } from "lucide-react";
 import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useOpportunities } from "@/lib/hooks/useOpportunities";
 import { useActivities } from "@/lib/hooks/useActivities";
 import { useProductSearch, PriceListProduct } from "@/lib/hooks/useProducts";
 import { useLiveQuery } from "dexie-react-hooks";
-import { db } from "@/lib/db";
+import { db, type LocalActivity } from "@/lib/db";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { useUsers } from "@/lib/hooks/useUsers";
+import { useOpportunityOrigins } from "@/lib/hooks/useOpportunityOrigins";
+import { reserveFairInventory, useInventorySummary } from "@/lib/hooks/useInventory";
+import { getProductPrice, SALES_CHANNELS } from "@/lib/salesChannels";
 
 // Eschema de validación combinado
 const storeSaleSchema = z.object({
@@ -25,54 +28,82 @@ const storeSaleSchema = z.object({
     ciudad_id: z.string().optional().nullable(),
     direccion: z.string().optional().nullable(),
     email: z.string().email("Email inválido").optional().nullable().or(z.literal("")),
+    canal_id: z.string().min(1, "Canal de venta requerido"),
+    subclasificacion_id: z.string().min(1, "Subclasificación requerida"),
     
     // Oportunidad
     fase_id: z.string().min(1, "Fase requerida"),
-    amount: z.coerce.number().min(0, "Debe ser mayor a 0"),
+    amount: z.number().min(0, "Debe ser mayor a 0"),
     comentarios: z.string().min(1, "Comentario requerido"),
+<<<<<<< HEAD
     origen_oportunidad: z.enum(["visita", "wp"], { required_error: "Origen requerido" }),
     categoria_oportunidad: z.string().min(1, "Categoría requerida"),
     canal_id: z.string().min(1, "Canal requerido"),
+=======
+    origen_oportunidad: z.string().min(1, "Origen requerido"),
+    venta_feria: z.boolean(),
+    categoria_oportunidad: z.string().optional(),
     asesor_id: z.string().optional(),
     items: z.array(z.object({
         product_id: z.string(),
         cantidad: z.number().min(1),
         precio: z.number(),
-        nombre: z.string()
-    })).default([]),
+        nombre: z.string(),
+        numero_articulo: z.string(),
+        lista_base_cop: z.number().nullable(),
+        lista_base_exportaciones: z.number().nullable(),
+        lista_base_obras: z.number().nullable(),
+        distribuidor_pvp_iva: z.number().nullable(),
+        pvp_sin_iva: z.number().nullable(),
+        precio_feria: z.number().nullable(),
+        inventario_disponible: z.number().optional(),
+    })),
 
     // Actividad
     fecha_inicio: z.string().min(1, "Fecha de inicio requerida"),
     fecha_fin: z.string().min(1, "Fecha de fin requerida"),
     clasificacion_id: z.string().min(1, "Clasificación requerida"),
-    prioridad: z.enum(["Baja", "Media", "Alta"]).default("Media"),
+    prioridad: z.enum(["Baja", "Media", "Alta"]),
     actividad_descripcion: z.string().optional()
 });
 
 type StoreSaleFormData = z.infer<typeof storeSaleSchema>;
+type StoreSaleItem = StoreSaleFormData["items"][number];
 
 interface CreateStoreSaleFormProps {
     onSuccess?: () => void;
 }
 
 export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
-    const { createAccount } = useAccounts();
+    const { createAccount, updateAccount } = useAccounts();
     const { createOpportunity } = useOpportunities();
     const { createActivity } = useActivities();
     const { user } = useCurrentUser();
     const { users } = useUsers();
+    const { origins, isLoading: isLoadingOrigins } = useOpportunityOrigins();
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
     
     const { products: searchResults, isLoading: isSearching } = useProductSearch(searchTerm);
+    const searchProductIds = useMemo(() => searchResults.map(product => product.id), [searchResults]);
+    const { summary: inventorySummary } = useInventorySummary(searchProductIds);
+    const inventoryByProduct = useMemo(
+        () => new Map(inventorySummary.map(item => [item.producto_id, item])),
+        [inventorySummary],
+    );
 
     // Listas locales (Dexie)
     const countriesList = useLiveQuery(() => db.countries.toArray()) || [];
     const departmentsList = useLiveQuery(() => db.departments.toArray()) || [];
     const citiesList = useLiveQuery(() => db.cities.toArray()) || [];
+    const subclassificationsQuery = useLiveQuery(() => db.subclasificaciones.toArray());
+    const subclassifications = useMemo(() => subclassificationsQuery || [], [subclassificationsQuery]);
     const classifications = useLiveQuery(() => db.activityClassifications.toArray().then(arr => arr.filter(c => !c.is_deleted)), []) || [];
+<<<<<<< HEAD
 
     // Fases locales (se inicializan después del form)
+=======
+    const eventClassifications = classifications.filter(c => c.tipo_actividad === "EVENTO");
 
     const {
         register,
@@ -92,12 +123,15 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             ciudad_id: "",
             direccion: "",
             email: "",
+            canal_id: "PROPIO",
+            subclasificacion_id: "",
             amount: 0,
             fase_id: "",
             comentarios: "",
             origen_oportunidad: "visita",
             categoria_oportunidad: "",
             canal_id: "PROPIO",
+            venta_feria: false,
             fecha_inicio: "",
             fecha_fin: "",
             clasificacion_id: "",
@@ -107,65 +141,131 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         }
     });
 
+<<<<<<< HEAD
     // Fases locales para autoseleccionar la inicial
     const selectedChannel = watch("canal_id");
     const phasesList = useLiveQuery(() => db.phases.where('canal_id').equals(selectedChannel || 'PROPIO').sortBy('orden'), [selectedChannel]) || [];
 
     // Cargar datos por defecto
     useEffect(() => {
+=======
+    const selectedChannel = watch("canal_id") || "PROPIO";
+    const isFairSale = watch("venta_feria") || false;
+    const phasesQuery = useLiveQuery(
+        () => db.phases.where("canal_id").equals(selectedChannel).sortBy("orden"),
+        [selectedChannel],
+    );
+    const phasesList = useMemo(() => phasesQuery || [], [phasesQuery]);
+    const channelSubclassifications = useMemo(
+        () => subclassifications.filter(item => item.canal_id === selectedChannel),
+        [subclassifications, selectedChannel],
+    );
+
+    const resetStoreForm = useCallback(() => {
         reset();
         setValue("pais_id", "1");
-            setValue("origen_oportunidad", "visita");
-            if (phasesList && phasesList.length > 0) {
-                setValue("fase_id", String(phasesList[0].id));
-            }
+        setValue("origen_oportunidad", "visita");
 
-            // Fechas por defecto para la actividad (Ahora y en 1 hora)
-            const now = new Date();
-            now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
-            const startISO = now.toISOString().slice(0, 16);
-            
-            const later = new Date(now.getTime() + 60 * 60 * 1000);
-            const endISO = later.toISOString().slice(0, 16);
-
-            setValue("fecha_inicio", startISO);
-            setValue("fecha_fin", endISO);
+        const now = new Date();
+        now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+        const later = new Date(now.getTime() + 60 * 60 * 1000);
+        setValue("fecha_inicio", now.toISOString().slice(0, 16));
+        setValue("fecha_fin", later.toISOString().slice(0, 16));
     }, [reset, setValue]);
 
-    const items: any[] = watch("items") || [];
+    // Cargar fechas por defecto al abrir el formulario.
+    useEffect(() => {
+        resetStoreForm();
+    }, [resetStoreForm]);
+
+    const watchedItems = watch("items");
+    const items = useMemo(() => watchedItems || [], [watchedItems]);
+
+    // Cada canal inicia con su primera fase y subclasificacion disponibles.
+    useEffect(() => {
+        const currentPhase = watch("fase_id");
+        if (phasesList.length > 0 && !phasesList.some(phase => String(phase.id) === currentPhase)) {
+            setValue("fase_id", String(phasesList[0].id));
+        }
+    }, [phasesList, setValue, watch]);
+
+    useEffect(() => {
+        const currentSubclass = watch("subclasificacion_id");
+        if (channelSubclassifications.length > 0 && !channelSubclassifications.some(item => String(item.id) === currentSubclass)) {
+            setValue("subclasificacion_id", String(channelSubclassifications[0].id));
+        }
+    }, [channelSubclassifications, setValue, watch]);
+
+    useEffect(() => {
+        const currentOrigin = watch("origen_oportunidad");
+        if (origins.length > 0 && !origins.some(origin => origin.codigo === currentOrigin)) {
+            setValue("origen_oportunidad", origins[0].codigo);
+        }
+    }, [origins, setValue, watch]);
+
+    // Recalcular los productos ya elegidos al cambiar canal o venta de feria.
+    useEffect(() => {
+        const repriced = items.map(item => ({ ...item, precio: getProductPrice(item, selectedChannel, isFairSale) }));
+        if (repriced.some((item, index) => item.precio !== items[index].precio)) {
+            setValue("items", repriced);
+        }
+    }, [selectedChannel, isFairSale, items, setValue]);
 
     const addProduct = (product: PriceListProduct) => {
-        // En tiendas el canal es PROPIO, el precio es distribuidor_pvp_iva
-        let price = Number(product.distribuidor_pvp_iva) || 0;
-        if (price === 0) price = Number(product.lista_base_cop) || Number(product.pvp_sin_iva) || 0;
+        const price = getProductPrice(product, selectedChannel, isFairSale);
+        const available = inventoryByProduct.get(product.id)?.disponible || 0;
+        if ((isFairSale || selectedChannel === "FERIA") && price <= 0) {
+            alert("Este producto no tiene precio de feria configurado.");
+            return;
+        }
+        if (isFairSale && available < 1) {
+            alert("Este producto no tiene inventario disponible para reservar.");
+            return;
+        }
 
-        const existing = items.find((i: any) => i.product_id === product.id);
+        const existing = items.find(item => item.product_id === product.id);
         if (existing) {
-            const newItems = items.map((i: any) => i.product_id === product.id ? { ...i, cantidad: i.cantidad + 1 } : i);
+            if (isFairSale && existing.cantidad + 1 > available) {
+                alert(`Solo hay ${available} unidades disponibles para feria.`);
+                return;
+            }
+            const newItems = items.map(item => item.product_id === product.id ? { ...item, cantidad: item.cantidad + 1 } : item);
             setValue("items", newItems);
         } else {
             setValue("items", [...items, {
                 product_id: product.id,
                 nombre: product.descripcion,
+                numero_articulo: product.numero_articulo,
                 cantidad: 1,
-                precio: price
+                precio: price,
+                lista_base_cop: product.lista_base_cop,
+                lista_base_exportaciones: product.lista_base_exportaciones,
+                lista_base_obras: product.lista_base_obras,
+                distribuidor_pvp_iva: product.distribuidor_pvp_iva,
+                pvp_sin_iva: product.pvp_sin_iva,
+                precio_feria: product.precio_feria,
+                inventario_disponible: available,
             }]);
         }
         setSearchTerm("");
     };
 
     const updateQuantity = (productId: string, qty: number) => {
-        const validQty = isNaN(qty) ? 1 : Math.max(1, qty);
-        setValue("items", items.map((i: any) => i.product_id === productId ? { ...i, cantidad: validQty } : i));
+        const item = items.find(current => current.product_id === productId);
+        let validQty = isNaN(qty) ? 1 : Math.max(1, qty);
+        if (isFairSale && item?.inventario_disponible !== undefined) {
+            validQty = Math.min(validQty, item.inventario_disponible);
+        }
+        setValue("items", items.map(current => current.product_id === productId ? { ...current, cantidad: validQty } : current));
     };
 
     const removeProduct = (productId: string) => {
-        setValue("items", items.filter((i: any) => i.product_id !== productId));
+        setValue("items", items.filter(item => item.product_id !== productId));
     };
 
     // Calculate total from items
     useEffect(() => {
-        const total = (items || []).reduce((acc: number, curr: any) => 
+        const total = items.reduce((acc, curr) =>
             acc + ((Number(curr.precio) || 0) * (Number(curr.cantidad) || 0)), 0
         );
         setValue("amount", total);
@@ -174,6 +274,17 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
     const onSubmit = async (data: StoreSaleFormData) => {
         setIsSubmitting(true);
         try {
+            if (data.venta_feria) {
+                const unavailableItem = data.items.find(item => item.cantidad > (item.inventario_disponible || 0));
+                if (unavailableItem) {
+                    throw new Error(`Inventario insuficiente para ${unavailableItem.nombre}. Disponible: ${unavailableItem.inventario_disponible || 0}.`);
+                }
+                const withoutFairPrice = data.items.find(item => item.precio_feria === null || Number(item.precio_feria) <= 0);
+                if (withoutFairPrice) {
+                    throw new Error(`${withoutFairPrice.nombre} no tiene precio de feria configurado.`);
+                }
+            }
+
             // VALIDACIÓN DE DUPLICADOS LOCALES
             const duplicates = await db.accounts.filter(a => 
                 a.nit_base === data.nit_base || (!!a.telefono && a.telefono === data.telefono)
@@ -204,23 +315,36 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             if (duplicates.length > 0) {
                 // Usar el cliente existente
                 accountId = duplicates[0].id;
+                await updateAccount(accountId, {
+                    ...duplicates[0],
+                    canal_id: data.canal_id,
+                    subclasificacion_id: Number(data.subclasificacion_id),
+                });
                 console.log("Cliente ya existe, usando ID existente:", accountId);
             } else {
                 // 1. Crear Cuenta si no existe
                 const accountData = {
                     nombre: data.nombre_cuenta,
                     nit_base: data.nit_base,
+<<<<<<< HEAD
                     canal_id: data.canal_id, 
+=======
+                    canal_id: data.canal_id,
+                    subclasificacion_id: Number(data.subclasificacion_id),
                     telefono: data.telefono,
-                    email: data.email || null,
-                    direccion: data.direccion || null,
+                    email: data.email || undefined,
+                    direccion: data.direccion || undefined,
                     pais_id: data.pais_id ? Number(data.pais_id) : null,
                     departamento_id: data.departamento_id ? Number(data.departamento_id) : null,
                     ciudad_id: data.ciudad_id ? Number(data.ciudad_id) : null,
                     // Conservamos compatibilidad string con DB
+<<<<<<< HEAD
                     ciudad: data.ciudad_id ? citiesList.find(c => String(c.id) === data.ciudad_id)?.nombre : null,
                     es_premium: false,
                     owner_user_id: finalOwnerId
+=======
+                    ciudad: data.ciudad_id ? citiesList.find(c => String(c.id) === data.ciudad_id)?.nombre : undefined,
+                    es_premium: false
                 };
 
                 const newId = await createAccount(accountData);
@@ -252,29 +376,37 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             const opportunityId = await createOpportunity(opportunityData);
 
             if (!opportunityId) {
-                console.warn("No se obtuvo ID de oportunidad. La actividad podría no quedar bien vinculada.");
+                throw new Error("No se pudo obtener el ID de la oportunidad.");
+            }
+
+            if (data.venta_feria && data.items.length > 0) {
+                await reserveFairInventory(data.items, opportunityId);
             }
 
             // 3. Crear Actividad
             const activityData = {
                 opportunity_id: opportunityId,
                 account_id: accountId,
-                classification_id: Number(data.clasificacion_id),
-                tipo_actividad: "REUNION",
+                clasificacion_id: Number(data.clasificacion_id),
+                tipo_actividad: "EVENTO",
                 descripcion: data.actividad_descripcion || "Seguimiento de venta en tienda",
                 fecha_inicio: data.fecha_inicio,
                 fecha_fin: data.fecha_fin,
                 prioridad: data.prioridad,
+<<<<<<< HEAD
                 user_id: finalOwnerId,
             };
+=======
+                user_id: data.asesor_id || user?.id,
+            } satisfies Partial<LocalActivity>;
             await createActivity(activityData);
 
             if (onSuccess) onSuccess();
-            reset();
+            resetStoreForm();
             setSearchTerm("");
         } catch (error) {
             console.error("Error creando venta de tienda:", error);
-            alert("Ocurrió un error al intentar crear el registro.");
+            alert(error instanceof Error ? error.message : "Ocurrió un error al intentar crear el registro.");
         } finally {
             setIsSubmitting(false);
         }
@@ -316,6 +448,25 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                     <label className="text-sm font-medium text-slate-700">Email (Opcional)</label>
                                     <input {...register("email")} type="email" className="w-full mt-1 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="correo@ejemplo.com" />
                                     {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email.message}</p>}
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 rounded-xl border border-blue-100 bg-blue-50/50">
+                                <div>
+                                    <label className="text-sm font-medium text-slate-700">Canal de Venta *</label>
+                                    <select {...register("canal_id")} className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none">
+                                        {SALES_CHANNELS.map(channel => <option key={channel.id} value={channel.id}>{channel.nombre}</option>)}
+                                    </select>
+                                    <p className="text-[11px] text-slate-500 mt-1">El canal o tipo de cuenta define la lista de precios aplicada.</p>
+                                    {errors.canal_id && <p className="text-red-500 text-xs mt-1">{errors.canal_id.message}</p>}
+                                </div>
+                                <div>
+                                    <label className="text-sm font-medium text-slate-700">Subclasificación *</label>
+                                    <select {...register("subclasificacion_id")} disabled={!selectedChannel || channelSubclassifications.length === 0} className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 disabled:bg-slate-100 focus:ring-2 focus:ring-blue-500 outline-none">
+                                        {channelSubclassifications.length === 0 && <option value="">Sin opciones sincronizadas</option>}
+                                        {channelSubclassifications.map(item => <option key={item.id} value={String(item.id)}>{item.nombre}</option>)}
+                                    </select>
+                                    {errors.subclasificacion_id && <p className="text-red-500 text-xs mt-1">{errors.subclasificacion_id.message}</p>}
                                 </div>
                             </div>
 
@@ -407,7 +558,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                             <span className="text-slate-500 sm:text-sm">$</span>
                                         </div>
                                         <input 
-                                            {...register("amount")} 
+                                            {...register("amount", { valueAsNumber: true })}
                                             type="number" 
                                             readOnly={items.length > 0}
                                             className={`w-full pl-7 pr-12 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-green-500 outline-none ${items.length > 0 ? "bg-slate-100" : ""}`} 
@@ -427,8 +578,14 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         {...register("origen_oportunidad")} 
                                         className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-green-500 outline-none"
                                     >
-                                        <option value="visita">Visita</option>
-                                        <option value="wp">WhatsApp (WP)</option>
+                                        {isLoadingOrigins && <option value="">Cargando...</option>}
+                                        {!isLoadingOrigins && origins.length === 0 && (
+                                            <>
+                                                <option value="visita">Visita</option>
+                                                <option value="wp">WhatsApp</option>
+                                            </>
+                                        )}
+                                        {origins.map(origin => <option key={origin.id} value={origin.codigo}>{origin.nombre}</option>)}
                                     </select>
                                     {errors.origen_oportunidad && <p className="text-red-500 text-xs mt-1">{errors.origen_oportunidad.message}</p>}
                                 </div>
@@ -471,11 +628,20 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                     >
                                         <option value="">(Asignación Automática)</option>
                                         {users?.filter(u => u.is_active).map(u => (
-                                            <option key={u.id} value={u.id}>{u.nombre || u.email}</option>
+                                            <option key={u.id} value={u.id}>{u.full_name || u.email}</option>
                                         ))}
                                     </select>
                                 </div>
                             </div>
+
+                            <label className="flex items-start gap-3 p-4 rounded-xl border-2 border-amber-200 bg-amber-50 cursor-pointer">
+                                <input type="checkbox" {...register("venta_feria")} className="mt-1 w-5 h-5 rounded border-amber-400 text-amber-600" />
+                                <TicketCheck className="w-5 h-5 text-amber-700 mt-0.5" />
+                                <span>
+                                    <span className="block font-bold text-amber-900">Venta de feria</span>
+                                    <span className="block text-xs text-amber-700">Usa el precio de feria y reserva el inventario seleccionado al crear la oportunidad.</span>
+                                </span>
+                            </label>
 
                             {/* BUSCADOR DE PRODUCTOS */}
                             <div className="pt-2">
@@ -501,19 +667,21 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                                 <div className="p-4 text-center text-slate-500 text-sm">No se encontraron productos</div>
                                             ) : (
                                                 searchResults.map((product: PriceListProduct) => {
-                                                    let displayPrice = Number(product.distribuidor_pvp_iva) || 0;
-                                                    if (displayPrice === 0) displayPrice = Number(product.lista_base_cop) || Number(product.pvp_sin_iva) || 0;
+                                                    const displayPrice = getProductPrice(product, selectedChannel, isFairSale);
+                                                    const inventory = inventoryByProduct.get(product.id);
+                                                    const unavailable = isFairSale && (!inventory || inventory.disponible < 1);
 
                                                     return (
                                                         <button
                                                             key={product.id}
                                                             type="button"
                                                             onClick={() => addProduct(product)}
-                                                            className="w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center justify-between border-b last:border-0"
+                                                            disabled={unavailable}
+                                                            className="w-full text-left px-4 py-2 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-between border-b last:border-0"
                                                         >
                                                             <div>
                                                                 <div className="font-medium text-slate-900">{product.descripcion}</div>
-                                                                <div className="text-xs text-slate-500">{product.numero_articulo}</div>
+                                                                <div className="text-xs text-slate-500">{product.numero_articulo} · Disponible: {inventory?.disponible || 0}</div>
                                                             </div>
                                                             <div className="text-sm font-bold text-blue-600">
                                                                 COP $ {new Intl.NumberFormat().format(displayPrice)}
@@ -533,11 +701,11 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                             <div className="text-slate-400 text-sm">No has agregado productos todavía.</div>
                                         </div>
                                     ) : (
-                                        items.map((item: any) => (
+                                        items.map((item: StoreSaleItem) => (
                                             <div key={item.product_id} className="flex items-center gap-4 p-2 bg-white border border-slate-200 rounded-lg shadow-sm">
                                                 <div className="flex-1">
                                                     <div className="font-medium text-sm text-slate-800">{item.nombre}</div>
-                                                    <div className="text-xs text-slate-500">COP $ {new Intl.NumberFormat().format(item.precio || 0)} c/u</div>
+                                                    <div className="text-xs text-slate-500">COP $ {new Intl.NumberFormat().format(item.precio || 0)} c/u{isFairSale ? ` · ${item.inventario_disponible || 0} disponibles` : ""}</div>
                                                 </div>
                                                 <div className="flex items-center gap-2">
                                                     <input
@@ -586,7 +754,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-orange-500 outline-none"
                                     >
                                         <option value="">Seleccione...</option>
-                                        {classifications.map(c => (
+                                        {eventClassifications.map(c => (
                                             <option key={c.id} value={String(c.id)}>{c.nombre}</option>
                                         ))}
                                     </select>
@@ -644,7 +812,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                 <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
                     <button 
                         type="button" 
-                        onClick={() => { reset(); setSearchTerm(""); }} 
+                        onClick={() => { resetStoreForm(); setSearchTerm(""); }}
                         className="px-4 py-2 text-slate-600 font-medium hover:bg-slate-200 rounded-lg transition-colors"
                         disabled={isSubmitting}
                     >
