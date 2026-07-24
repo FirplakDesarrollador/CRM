@@ -78,6 +78,7 @@ node_modules/
 # SQL Dumps and temporary scripts
 *.sql
 !supabase/migrations/20260716_stores_fairs_catalog_inventory.sql
+!supabase/migrations/20260722143000_propagate_account_owner_to_opportunities.sql
 temp_*.ts
 temp_*.tsx
 temp_*.txt
@@ -95,6 +96,7 @@ temp_*.txt
 !/tests/
 /tests/*
 !/tests/salesChannels.test.ts
+!/tests/opportunityCollaboratorPermissions.test.ts
 
 
 # n8n-as-code AI helpers

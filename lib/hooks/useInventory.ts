@@ -43,22 +43,30 @@ export interface InventoryMovementInput {
 
 export async function fetchInventorySummary(productIds?: string[]) {
     if (productIds && productIds.length === 0) return [];
-    let query = supabase
-        .from("CRM_InventarioDisponible")
-        .select("producto_id, numero_articulo, descripcion, entradas, salidas, reservas, existencia_fisica, disponible")
-        .order("numero_articulo");
+    try {
+        let query = supabase
+            .from("CRM_InventarioDisponible")
+            .select("producto_id, numero_articulo, descripcion, entradas, salidas, reservas, existencia_fisica, disponible")
+            .order("numero_articulo");
 
-    if (productIds?.length) query = query.in("producto_id", productIds);
-    const { data, error } = await query;
-    if (error) throw error;
-    return (data || []).map(row => ({
-        ...row,
-        entradas: Number(row.entradas) || 0,
-        salidas: Number(row.salidas) || 0,
-        reservas: Number(row.reservas) || 0,
-        existencia_fisica: Number(row.existencia_fisica) || 0,
-        disponible: Number(row.disponible) || 0,
-    })) as InventorySummary[];
+        if (productIds?.length) query = query.in("producto_id", productIds);
+        const { data, error } = await query;
+        if (error) {
+            console.warn("Error consultando CRM_InventarioDisponible:", error.message);
+            return [];
+        }
+        return (data || []).map(row => ({
+            ...row,
+            entradas: Number(row.entradas) || 0,
+            salidas: Number(row.salidas) || 0,
+            reservas: Number(row.reservas) || 0,
+            existencia_fisica: Number(row.existencia_fisica) || 0,
+            disponible: Number(row.disponible) || 0,
+        })) as InventorySummary[];
+    } catch (err) {
+        console.warn("Exception al consultar inventario:", err);
+        return [];
+    }
 }
 
 export async function createInventoryMovement(input: InventoryMovementInput) {

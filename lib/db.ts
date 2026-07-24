@@ -340,6 +340,9 @@ export interface LocalOpportunityCollaborator {
     porcentaje: number;
     rol: string;
     created_at?: string;
+    updated_at?: string;
+    updated_by?: string;
+    _sync_metadata?: Record<string, number>;
     synced_at?: string;
     is_deleted?: boolean;
 }
