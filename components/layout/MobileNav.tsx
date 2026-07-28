@@ -38,7 +38,6 @@ const MOBILE_NAV = [
     { label: "Inventarios", href: "/inventarios", icon: Warehouse, requiredRole: "ADMIN" },
     { label: "Informes", href: "/informes", icon: FileSpreadsheet, requiredRole: "ADMIN" },
     { label: "Usuarios", href: "/usuarios", icon: UserCircle },
-    { label: "Ferias", href: "/ferias", icon: Tent, requiredRole: "ADMIN" },
     { label: "Configuración", href: "/configuracion", icon: Settings },
 ];
 
