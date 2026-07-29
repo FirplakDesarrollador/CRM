@@ -3,6 +3,14 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-07-29 - Ingest: Campos Obligatorios para Guardar Pedidos en Cotizaciones
+
+- Se definieron e implementaron las validaciones obligatorias de los 9 campos solicitados para guardar pedidos (totales o parciales) dentro de `PedidosEditor.tsx`.
+- Campos incluidos: `cierre_facturacion`, `fecha_facturacion`, `es_muestra`, `servicio_subida_hidromasaje`, `piso_entrega` (default 1), `medio_acceso` (Ascensor vs Escalera / `tiene_escaleras`), `verificacion_previa_firplak`, `direccion_envio_factura` y `dir_envio_factura_tipo` (Oficina / Tienda).
+- Se ejecutó la migración SQL `supabase/migrations/20260729_required_order_fields.sql` mediante el MCP de Supabase para incorporar `verificacion_previa_firplak`, `direccion_envio_factura`, `cierre_facturacion` y `es_muestra` a las tablas `CRM_Cotizaciones` y `CRM_Pedidos`.
+- Se actualizaron las interfaces de Dexie `LocalQuote` y `LocalPedido` en `lib/db.ts`.
+- Páginas actualizadas: `wiki/pages/cotizaciones-y-pedidos.md`, `wiki/LOG.md`.
+
 ## 2026-07-24 - Catálogo: Toggle "Productos de feria"
 
 - Se agregó un filtro tipo casilla / toggle "Productos de feria" en la vista de Catálogo (`app/catalogo/page.tsx`).
