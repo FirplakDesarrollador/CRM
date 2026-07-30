@@ -3,6 +3,12 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-07-30 - Ingest: Precarga de campos por defecto en pedidos desde la Cuenta
+
+- Se implementó la precarga automática de campos para la creación de nuevos pedidos parciales (`!pedidoUuid`) en el formulario `PedidoEditorForm` de `PedidosEditor.tsx`.
+- Campos autocompletados desde `LocalCuenta` y `LocalContact` (vía Dexie y `useLiveQuery`): `cliente_final`, `nit_cliente_final`, `direccion_envio_factura`, `email_contacto`, `contacto_ventas`, `contacto_logistico`, `contacto_tesoreria` y `dir_envio_factura_tipo` (default "OFICINA").
+- Páginas actualizadas: `wiki/pages/cotizaciones-y-pedidos.md`, `wiki/LOG.md`.
+
 ## 2026-07-29 - Ingest: Campos Obligatorios para Guardar Pedidos en Cotizaciones
 
 - Se definieron e implementaron las validaciones obligatorias de los 9 campos solicitados para guardar pedidos (totales o parciales) dentro de `PedidosEditor.tsx`.

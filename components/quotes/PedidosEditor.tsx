@@ -206,6 +206,16 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
         return mapa;
     }, [pedidoUuid]);
 
+    const opp = useLiveQuery(() => db.opportunities.get(quote.opportunity_id), [quote.opportunity_id]);
+    const account = useLiveQuery(async () => {
+        if (!opp?.account_id) return null;
+        return db.accounts.get(opp.account_id);
+    }, [opp?.account_id]);
+    const contacts = useLiveQuery(async () => {
+        if (!opp?.account_id) return [];
+        return db.contacts.where('account_id').equals(opp.account_id).toArray();
+    }, [opp?.account_id]);
+
 
     const [wizardStep, setWizardStep] = useState(0);
     const [canSubmitFinalStep, setCanSubmitFinalStep] = useState(false);
@@ -369,6 +379,29 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
             setValue('selected_quantities', itemsEnPedido);
         }
     }, [itemsEnPedido, setValue]);
+
+    // Populate default fields from Account and its Contacts on creation
+    useEffect(() => {
+        if (!pedidoUuid && account) {
+            const mainContact = contacts?.find(c => c.es_principal);
+            const emailVal = mainContact?.email || account.email || "";
+            const contactName = mainContact?.nombre || "";
+
+            // Find specific contacts by role or name if possible, fallback to main contact
+            const logContact = contacts?.find(c => c.cargo?.toLowerCase().includes("logistica") || c.nombre.toLowerCase().includes("logistica"))?.nombre || contactName;
+            const tesContact = contacts?.find(c => c.cargo?.toLowerCase().includes("tesoreria") || c.nombre.toLowerCase().includes("tesoreria") || c.cargo?.toLowerCase().includes("finan"))?.nombre || contactName;
+            const salesContact = contacts?.find(c => c.cargo?.toLowerCase().includes("venta") || c.cargo?.toLowerCase().includes("comercial"))?.nombre || contactName;
+
+            if (!getValues('cliente_final')) setValue('cliente_final', account.nombre || "");
+            if (!getValues('nit_cliente_final')) setValue('nit_cliente_final', account.nit || "");
+            if (!getValues('direccion_envio_factura')) setValue('direccion_envio_factura', account.direccion || "");
+            if (!getValues('email_contacto')) setValue('email_contacto', emailVal);
+            if (!getValues('contacto_ventas')) setValue('contacto_ventas', salesContact);
+            if (!getValues('contacto_logistico')) setValue('contacto_logistico', logContact);
+            if (!getValues('contacto_tesoreria')) setValue('contacto_tesoreria', tesContact);
+            if (!getValues('dir_envio_factura_tipo')) setValue('dir_envio_factura_tipo', "OFICINA");
+        }
+    }, [pedidoUuid, account, contacts, setValue, getValues]);
 
     if (!quoteItems || !consumosGlobales) return <div>Cargando...</div>;
 
