@@ -259,13 +259,26 @@ export default function OpportunityDetailPage() {
 }
 
 const LOSS_REASONS = [
-    "Precio elevado",
-    "Compra en la competencia por precio",
-    "No contesta",
-    "Lo pospone",
-    "No va a comprar",
-    "Tiempos de entrega",
-    "No hay medida o color",
+    "N - No responde 1mer contacto",
+    "N- Sin información de contacto",
+    "N- Inadecuada Segmentación",
+    "N- No va a comprar",
+    "RED- Firplak Home",
+    "RED- Ser. Tecnico",
+    "RED- Distribución",
+    "RED- Obras",
+    "RED- MAC",
+    "INT - Abandona Conversación",
+    "INT - Precio Elevado",
+    "INT - Sin cobertura",
+    "INT - Tiempos de entrega",
+    "INT - No se fabrica",
+    "INT- No se tiene medida / Color",
+    "INT- Competencia diferente a precio",
+    "INT- Compro FIRPLAK",
+    "INT- Pago contraentrega",
+    "INT - Lo pospone",
+    "INT - Compra en Homcenter"
 ];
 
 function SummaryTab({ opportunity }: { opportunity: any }) {

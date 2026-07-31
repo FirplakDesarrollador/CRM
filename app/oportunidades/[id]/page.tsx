@@ -259,13 +259,26 @@ export default function OpportunityDetailPage() {
 }
 
 const LOSS_REASONS = [
-    "Precio elevado",
-    "Compra en la competencia por precio",
-    "No contesta",
-    "Lo pospone",
-    "No va a comprar",
-    "Tiempos de entrega",
-    "No hay medida o color",
+    "N - No responde 1mer contacto",
+    "N- Sin información de contacto",
+    "N- Inadecuada Segmentación",
+    "N- No va a comprar",
+    "RED- Firplak Home",
+    "RED- Ser. Tecnico",
+    "RED- Distribución",
+    "RED- Obras",
+    "RED- MAC",
+    "INT - Abandona Conversación",
+    "INT - Precio Elevado",
+    "INT - Sin cobertura",
+    "INT - Tiempos de entrega",
+    "INT - No se fabrica",
+    "INT- No se tiene medida / Color",
+    "INT- Competencia diferente a precio",
+    "INT- Compro FIRPLAK",
+    "INT- Pago contraentrega",
+    "INT - Lo pospone",
+    "INT - Compra en Homcenter"
 ];
 
 function SummaryTab({ opportunity }: { opportunity: any }) {
@@ -500,7 +513,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
         );
     }
 
-    const currentPhaseIndex = phases?.findIndex(p => p.id === opportunity.fase_id) ?? -1;
+    const currentPhaseIndex = phases?.findIndex(p => Number(p.id) === Number(opportunity.fase_id)) ?? -1;
 
     return (
         <div className="space-y-6 animate-in fade-in duration-500">
@@ -587,7 +600,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                         return normalized.includes('cerrada') || normalized.includes('ganada') || normalized.includes('perdida');
                                     }).map((phase) => {
                                         const isWon = phase.nombre.toLowerCase().includes('ganada');
-                                        const isActive = opportunity.fase_id === phase.id;
+                                        const isActive = Number(opportunity.fase_id) === Number(phase.id);
 
                                         const isLostPhase = phase.nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes('perdida');
                                         const isBlocked = isLostPhase && !lossFieldsComplete;
@@ -613,7 +626,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                             >
                                                 <div className={cn(
                                                     "w-2 h-2 rounded-full",
-                                                    isBlocked ? "bg-slate-300" : isWon ? "bg-green-500" : "bg-red-500"
+                                                    isBlocked ? "bg-slate-300" : isActive ? (isWon ? "bg-green-500" : "bg-red-500") : "bg-slate-300"
                                                 )} />
                                                 {phase.nombre}
                                                 {isBlocked && <span className="ml-0.5 text-[8px] opacity-70">🔒</span>}
