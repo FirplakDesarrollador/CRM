@@ -428,7 +428,8 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             onSuccess();
         } catch (error) {
             console.error(error);
-            alert("Error guardando cuenta");
+            const msg = error instanceof Error ? error.message : String(error);
+            alert(`Error guardando cuenta: ${msg}`);
         } finally {
             setIsSubmitting(false);
         }
