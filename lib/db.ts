@@ -307,10 +307,10 @@ export class CRMFirplakDB extends Dexie {
 
     constructor() {
         super('CRMFirplakDB');
-        this.version(11).stores({
+        this.version(12).stores({
             outbox: 'id, entity_type, status, field_timestamp, field_name',
             fileQueue: 'id, status',
-            accounts: 'id, nit, nombre, owner_user_id',
+            accounts: 'id, nit, nit_base, nombre, owner_user_id',
             opportunities: 'id, account_id, owner_user_id', // Simplified index
             contacts: 'id, account_id, email',
             quotes: 'id, opportunity_id, status, es_pedido',
