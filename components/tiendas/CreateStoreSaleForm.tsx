@@ -10,7 +10,8 @@ import { useOpportunities } from "@/lib/hooks/useOpportunities";
 import { useActivities } from "@/lib/hooks/useActivities";
 import { useProductSearch, PriceListProduct } from "@/lib/hooks/useProducts";
 import { useLiveQuery } from "dexie-react-hooks";
-import { db, type LocalActivity } from "@/lib/db";
+import { db, type LocalActivity, type LocalPais, type LocalDepartamento, type LocalCiudad } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { useUsers } from "@/lib/hooks/useUsers";
 import { useOpportunityOrigins } from "@/lib/hooks/useOpportunityOrigins";
@@ -38,7 +39,7 @@ const storeSaleSchema = z.object({
     origen_oportunidad: z.string().min(1, "Origen requerido"),
     venta_feria: z.boolean(),
     categoria_oportunidad: z.string().optional(),
-    asesor_id: z.string().optional(),
+    asesor_id: z.string().min(1, "El asesor es obligatorio"),
     items: z.array(z.object({
         product_id: z.string(),
         cantidad: z.number().min(1),
@@ -87,10 +88,37 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         [inventorySummary],
     );
 
-    // Listas locales (Dexie)
+    // Listas locales (Dexie) con Fallback de Supabase
     const countriesList = useLiveQuery(() => db.countries.toArray()) || [];
     const departmentsList = useLiveQuery(() => db.departments.toArray()) || [];
     const citiesList = useLiveQuery(() => db.cities.toArray()) || [];
+
+    const [fallbackCountries, setFallbackCountries] = useState<LocalPais[]>([]);
+    const [fallbackDepartments, setFallbackDepartments] = useState<LocalDepartamento[]>([]);
+    const [fallbackCities, setFallbackCities] = useState<LocalCiudad[]>([]);
+
+    useEffect(() => {
+        if (countriesList.length === 0) {
+            supabase.from('CRM_Paises').select('*').order('id').then(({ data }) => {
+                if (data) setFallbackCountries(data);
+            });
+        }
+        if (departmentsList.length === 0) {
+            supabase.from('CRM_Departamentos').select('*').order('nombre').then(({ data }) => {
+                if (data) setFallbackDepartments(data);
+            });
+        }
+        if (citiesList.length === 0) {
+            supabase.from('CRM_Ciudades').select('*').order('nombre').then(({ data }) => {
+                if (data) setFallbackCities(data);
+            });
+        }
+    }, [countriesList.length, departmentsList.length, citiesList.length]);
+
+    const displayCountries = countriesList.length > 0 ? countriesList : fallbackCountries;
+    const displayDepartments = departmentsList.length > 0 ? departmentsList : fallbackDepartments;
+    const displayCities = citiesList.length > 0 ? citiesList : fallbackCities;
+
     const subclassificationsQuery = useLiveQuery(() => db.subclasificaciones.toArray());
     const subclassifications = useMemo(() => subclassificationsQuery || [], [subclassificationsQuery]);
     const classifications = useLiveQuery(() => db.activityClassifications.toArray().then(arr => arr.filter(c => !c.is_deleted)), []) || [];
@@ -142,17 +170,91 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         [subclassifications, selectedChannel],
     );
 
+    // Filtrado estricto de asesores: Si el vendedor no tiene país o departamento asignado, NO aparece en el desplegable.
+    const selectedPais = watch("pais_id");
+    const selectedDept = watch("departamento_id");
+
+    const filteredAdvisors = useMemo(() => {
+        const activeUsers = users?.filter(u => u.is_active) || [];
+        
+        return activeUsers.filter(u => {
+            // 1. Verificar País: El vendedor debe tener al menos un país asignado y debe incluir el país del cliente.
+            const userPaises = u.paises && u.paises.length > 0 ? u.paises : (u.pais ? [u.pais] : []);
+            if (userPaises.length === 0) return false;
+
+            const matchesCountry = selectedPais && userPaises.includes(String(selectedPais));
+            if (!matchesCountry) return false;
+
+            // 2. Verificar Departamento (si se seleccionó departamento en el cliente):
+            // El vendedor debe tener asignado al menos un departamento y debe incluir el departamento del cliente.
+            if (selectedDept) {
+                const userDepts = u.departamentos && u.departamentos.length > 0 ? u.departamentos : (u.departamento ? [u.departamento] : []);
+                if (userDepts.length === 0) return false;
+
+                const matchesDept = userDepts.includes(String(selectedDept));
+                if (!matchesDept) return false;
+            }
+
+            return true;
+        });
+    }, [users, selectedPais, selectedDept]);
+
+    // Garantizar que Colombia quede seleccionado automáticamente cuando los países terminen de cargar
+    useEffect(() => {
+        if (displayCountries.length > 0) {
+            const colombia = displayCountries.find(c => c.nombre.toLowerCase().includes("colombia")) || displayCountries.find(c => String(c.id) === "1");
+            const targetId = colombia ? String(colombia.id) : "1";
+            const currentPais = watch("pais_id");
+            if (!currentPais || currentPais === "") {
+                setValue("pais_id", targetId);
+            }
+        }
+    }, [displayCountries, setValue, watch]);
+
+    // Seleccionar automáticamente un asesor si el actual no pertenece al filtro o está vacío
+    useEffect(() => {
+        const currentAdvisor = watch("asesor_id");
+        if (filteredAdvisors.length > 0) {
+            if (!currentAdvisor || !filteredAdvisors.some(u => u.id === currentAdvisor)) {
+                setValue("asesor_id", filteredAdvisors[0].id);
+            }
+        } else {
+            setValue("asesor_id", "");
+        }
+    }, [filteredAdvisors, setValue, watch]);
+
     const resetStoreForm = useCallback(() => {
-        reset();
-        setValue("pais_id", "1");
-        setValue("origen_oportunidad", "visita");
+        const colombia = displayCountries.find(c => c.nombre.toLowerCase().includes("colombia")) || displayCountries.find(c => String(c.id) === "1");
+        const defaultPaisId = colombia ? String(colombia.id) : "1";
+
+        reset({
+            nombre_cuenta: "",
+            nit_base: "",
+            telefono: "",
+            pais_id: defaultPaisId,
+            departamento_id: "",
+            ciudad_id: "",
+            direccion: "",
+            email: "",
+            canal_id: "PROPIO",
+            subclasificacion_id: "",
+            amount: 0,
+            fase_id: "",
+            comentarios: "",
+            origen_oportunidad: "visita",
+            venta_feria: false,
+            clasificacion_id: "",
+            prioridad: "Media",
+            actividad_descripcion: "",
+            items: []
+        });
 
         const now = new Date();
         now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
         const later = new Date(now.getTime() + 60 * 60 * 1000);
         setValue("fecha_inicio", now.toISOString().slice(0, 16));
         setValue("fecha_fin", later.toISOString().slice(0, 16));
-    }, [reset, setValue]);
+    }, [reset, setValue, displayCountries]);
 
     // Cargar fechas por defecto al abrir el formulario.
     useEffect(() => {
@@ -432,7 +534,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         }}
                                     >
                                         <option value="">Seleccione...</option>
-                                        {countriesList.map(p => (
+                                        {displayCountries.map(p => (
                                             <option key={p.id} value={String(p.id)}>{p.nombre}</option>
                                         ))}
                                     </select>
@@ -449,7 +551,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         }}
                                     >
                                         <option value="">Seleccione...</option>
-                                        {departmentsList
+                                        {displayDepartments
                                             .filter(dep => String(dep.pais_id) === watch("pais_id"))
                                             .map(dep => (
                                                 <option key={dep.id} value={String(dep.id)}>{dep.nombre}</option>
@@ -464,7 +566,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         disabled={!watch("departamento_id")}
                                     >
                                         <option value="">Seleccione...</option>
-                                        {citiesList
+                                        {displayCities
                                             .filter(c => String(c.departamento_id) === watch("departamento_id"))
                                             .map(city => (
                                                 <option key={city.id} value={String(city.id)}>{city.nombre}</option>
@@ -473,9 +575,29 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                 </div>
                             </div>
                             
-                            <div>
-                                <label className="text-sm font-medium text-slate-700">Dirección (Opcional)</label>
-                                <input {...register("direccion")} className="w-full mt-1 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Calle/Carrera" />
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-slate-100">
+                                <div>
+                                    <label className="text-sm font-semibold text-blue-900">Asesor Encargado del Cliente *</label>
+                                    <select 
+                                        {...register("asesor_id")} 
+                                        className="w-full mt-1 border p-2 rounded-lg bg-white border-blue-300 focus:ring-2 focus:ring-blue-500 outline-none font-medium text-slate-800"
+                                    >
+                                        <option value="">Seleccione un asesor...</option>
+                                        {filteredAdvisors.map(u => (
+                                            <option key={u.id} value={u.id}>
+                                                {u.full_name || u.email}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <p className="text-[11px] text-slate-500 mt-1">El cliente queda anclado primariamente a este asesor desde su creación.</p>
+                                    {errors.asesor_id && (
+                                        <p className="text-red-500 text-xs mt-1">{errors.asesor_id.message}</p>
+                                    )}
+                                </div>
+                                <div>
+                                    <label className="text-sm font-medium text-slate-700">Dirección (Opcional)</label>
+                                    <input {...register("direccion")} className="w-full mt-1 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Calle/Carrera" />
+                                </div>
                             </div>
                         </section>
 
@@ -485,7 +607,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                 <DollarSign className="w-5 h-5" /> Datos del Negocio (Oportunidad)
                             </h3>
                             
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
                                     <label className="text-sm font-medium text-slate-700">Fase de Oportunidad *</label>
                                     <select 
@@ -550,19 +672,6 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         <option value="Zona de Labores">Zona de Labores</option>
                                         <option value="Cocinas">Cocinas</option>
                                         <option value="Hidromasajes">Hidromasajes</option>
-                                    </select>
-                                </div>
-
-                                <div>
-                                    <label className="text-sm font-medium text-slate-700">Asesor Encargado (Opcional)</label>
-                                    <select 
-                                        {...register("asesor_id")} 
-                                        className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-green-500 outline-none"
-                                    >
-                                        <option value="">(Asignarme a mí)</option>
-                                        {users?.filter(u => u.is_active).map(u => (
-                                            <option key={u.id} value={u.id}>{u.full_name || u.email}</option>
-                                        ))}
                                     </select>
                                 </div>
                             </div>

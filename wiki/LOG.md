@@ -3,6 +3,15 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-08-10 - Ingest: Filtrado de Asesor por País y Departamento en Formulario /tiendas
+
+- Se agregaron las columnas `paises` y `departamentos` (arreglos `TEXT[]`) a la tabla `CRM_Usuarios` en Supabase (`20260810_add_user_country_department.sql`).
+- Se incorporaron selectores `MultiSelect` en `UserForm.tsx` para permitir asignar múltiples países y departamentos a un vendedor.
+- Se hizo obligatorio el campo `asesor_id` en el esquema del formulario del módulo `/tiendas` (`CreateStoreSaleForm.tsx`), trasladándolo a **Datos del Cliente**.
+- Se implementaron los fallbacks asíncronos de catálogos geográficos (`displayCountries`) y un efecto reactivo que garantiza que Colombia (`'1'`) se seleccione por defecto automáticamente al cargar las opciones.
+- Se actualizó el filtro de asesores en `CreateStoreSaleForm.tsx` con la regla estricta: un vendedor DEBE tener asignados explícitamente el país y el departamento para aparecer disponible en el desplegable. Si no tiene asignación, se excluye automáticamente.
+- Páginas actualizadas: `wiki/pages/modelo-de-datos.md`, `wiki/LOG.md`.
+
 ## 2026-07-30 - Ingest: Precarga de campos por defecto en pedidos desde la Cuenta
 
 - Se implementó la precarga automática de campos para la creación de nuevos pedidos parciales (`!pedidoUuid`) en el formulario `PedidoEditorForm` de `PedidosEditor.tsx`.
