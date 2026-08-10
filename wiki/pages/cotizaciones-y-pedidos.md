@@ -11,8 +11,9 @@ es una cotización con `es_pedido = true` (migración `20260109_add_es_pedido`);
 - **Ganadora:** `is_winner` marca la cotización que gana la oportunidad; dispara el
   trigger de [[comisiones]] (`20260210_commission_trigger_quotes` + hotfix `is_winner`).
 - **Aprobación:** permiso `approve_quote` (COORDINADOR/ADMIN).
-- **Envío:** `SendQuoteModal` envía la cotización por correo (vía Microsoft Graph,
-  ver [[integraciones]]).
+- **Envío formal:** `SendQuoteModal` se abre únicamente desde un pedido guardado y
+  completo; envía por correo el PDF construido con los datos e ítems de ese pedido
+  (vía Microsoft Graph, ver [[integraciones]]).
 - **Segmentos:** cotizaciones/pedidos se etiquetan con `segmento_id`
   (`20260121_quote_segments`).
 
@@ -42,6 +43,13 @@ incumplimiento, etc. La integración se encola en `CRM_SapIntegrationQueue`
 cliente final y su NIT, contactos (ventas/logístico/tesorería), condiciones de entrega
 (piso, escaleras, servicio de subida de hidromasaje, entrega en obra, bodega externa/Firplak),
 planos de hidromasaje, fecha de entrega.
+
+La descarga del PDF y el envío por correo viven en las acciones de cada pedido dentro
+del submódulo **Pedido**. No están disponibles desde el encabezado general de la
+cotización. Antes de habilitarlas, `getMissingPedidoFormalizationFields` verifica los
+nueve datos obligatorios y que el pedido tenga productos con cantidades válidas. El
+documento usa las cantidades parciales, descuentos, total y datos logísticos del pedido
+seleccionado.
 
 ## Campos Obligatorios para Guardar Pedido (Total o Parcial)
 

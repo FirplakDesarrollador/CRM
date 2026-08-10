@@ -90,7 +90,7 @@ export async function generateQuotePdf(quote: any, items: any[], account: any, o
     y += 15;
 
     // ROW 4: DIREC. FACTURA
-    doc.text(`DIREC. FACTURA: ${account?.direccion || ''}`, col1, y);
+    doc.text(`DIREC. FACTURA: ${quote.direccion_envio_factura || account?.direccion || ''}`, col1, y);
     doc.text(`CIUDAD FACT.: ${account?.ciudad || ''}`, col3 - 60, y);
     doc.text(`TEL: ${account?.telefono || ''}`, pageWidth - 140, y);
     y += 20;
@@ -122,8 +122,8 @@ export async function generateQuotePdf(quote: any, items: any[], account: any, o
 
     // INVOICE SECTION
     doc.setFont('helvetica', 'bold');
-    doc.text(`CIERRE FACTURACION? ${quote.cierre_facturacion || 'NO'}`, col1, y);
-    doc.text(`SI indique DD/MM/AA`, col1 + 150, y);
+    doc.text(`CIERRE FACTURACION? ${quote.cierre_facturacion ? 'SI' : 'NO'}`, col1, y);
+    doc.text(`FECHA FACTURACION: ${quote.fecha_facturacion || ''}`, col1 + 150, y);
     doc.text(`SUBGRUPO CLIENT: ${account?.canal_id || ''}`, col3, y);
     y += 15;
 
@@ -139,14 +139,14 @@ export async function generateQuotePdf(quote: any, items: any[], account: any, o
     doc.text(`SERVICIO DE SUBIDA DE HIDROMASAJE (marque con una X): SI ( ${quote.servicio_subida_hidromasaje ? 'X' : ' '} ) NO ( ${!quote.servicio_subida_hidromasaje ? 'X' : ' '} )`, col1, y);
     y += 15;
 
-    const tieneAscensor = !quote.tiene_escaleras && quote.piso_entrega > 1;
+    const tieneAscensor = quote.tiene_escaleras === false;
     doc.text(`PISO ( ${quote.piso_entrega || '  '} ) MEDIO (marque con una X) ASCENSOR ( ${tieneAscensor ? 'X' : ' '} ) ESCALERAS ( ${quote.tiene_escaleras ? 'X' : ' '} )`, col1, y);
     y += 15;
 
     doc.text(`ENTREGA EN OBRA ( ${quote.entrega_en_obra ? 'X' : ' '} )  BODEGA EXTERNA ( ${quote.bodega_externa ? 'X' : ' '} )  BODEGA FIRPLAK ( ${quote.bodega_firplak ? 'X' : ' '} )`, col1, y);
     y += 15;
 
-    doc.text(`VERIFICACIÓN PREVIA POR PARTE DE PERSONAL FIRPLAK (marque con una X) SI ( ) NO ( X )`, col1, y);
+    doc.text(`VERIFICACIÓN PREVIA POR PARTE DE PERSONAL FIRPLAK (marque con una X) SI ( ${quote.verificacion_previa_firplak ? 'X' : ' '} ) NO ( ${quote.verificacion_previa_firplak ? ' ' : 'X'} )`, col1, y);
     y += 20;
 
     // TABLE
