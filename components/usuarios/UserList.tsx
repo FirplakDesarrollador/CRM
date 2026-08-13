@@ -7,6 +7,7 @@ import { UserForm } from '@/components/usuarios/UserForm';
 import { ConfirmationModal } from '@/components/ui/ConfirmationModal';
 import { Search, UserPlus, Edit, Power, Shield, Users as UsersIcon } from 'lucide-react';
 import { cn } from '@/components/ui/utils';
+import { includesNormalized } from '@/lib/utils';
 
 const ROLE_LABELS: Record<UserRole, string> = {
     ADMIN: 'Administrador',
@@ -35,8 +36,8 @@ export function UserList() {
     // Filter users
     const filteredUsers = users.filter(user => {
         const matchesSearch =
-            user.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            user.full_name?.toLowerCase().includes(searchTerm.toLowerCase());
+            includesNormalized(user.email, searchTerm) ||
+            includesNormalized(user.full_name, searchTerm);
 
         const matchesRole = roleFilter === 'ALL' || user.role === roleFilter;
 

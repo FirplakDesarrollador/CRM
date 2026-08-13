@@ -3,6 +3,39 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-08-12 - Ingest: Valores por Defecto y Sección Colapsable en Actividad Programada de /tiendas
+
+- Se actualizó el formulario `CreateStoreSaleForm.tsx` del módulo `/tiendas` (Tiendas-Ferias).
+- Se simplificó el campo de fecha reduciéndolo únicamente a **Fecha y Hora de Vencimiento** (eliminando `fecha_inicio`).
+- Se configuró el valor por defecto de la fecha de vencimiento a 7 días posteriores a las 10:00 AM local.
+- Se configuró la **Clasificación por defecto** seleccionando automáticamente "Llamada telefónica" al cargar las opciones.
+- Se mantuvo la **Prioridad por defecto** en "Media".
+- Se transformó la sección "Actividad Programada" en un acordeón colapsable (cerrado por defecto) que muestra un resumen visual y permite desplegar y editar la información según el usuario lo requiera.
+- Páginas actualizadas: `wiki/LOG.md`.
+
+## 2026-08-10 - Ingest: Filtrado de Asesor por País y Departamento en Formulario /tiendas
+
+- Se agregaron las columnas `paises` y `departamentos` (arreglos `TEXT[]`) a la tabla `CRM_Usuarios` en Supabase (`20260810_add_user_country_department.sql`).
+- Se incorporaron selectores `MultiSelect` en `UserForm.tsx` para permitir asignar múltiples países y departamentos a un vendedor.
+- Se hizo obligatorio el campo `asesor_id` en el esquema del formulario del módulo `/tiendas` (`CreateStoreSaleForm.tsx`), trasladándolo a **Datos del Cliente**.
+- Se implementaron los fallbacks asíncronos de catálogos geográficos (`displayCountries`) y un efecto reactivo que garantiza que Colombia (`'1'`) se seleccione por defecto automáticamente al cargar las opciones.
+- Se actualizó el filtro de asesores en `CreateStoreSaleForm.tsx` con la regla estricta: un vendedor DEBE tener asignados explícitamente el país y el departamento para aparecer disponible en el desplegable. Si no tiene asignación, se excluye automáticamente.
+- Páginas actualizadas: `wiki/pages/modelo-de-datos.md`, `wiki/LOG.md`.
+
+## 2026-07-30 - Ingest: Precarga de campos por defecto en pedidos desde la Cuenta
+
+- Se implementó la precarga automática de campos para la creación de nuevos pedidos parciales (`!pedidoUuid`) en el formulario `PedidoEditorForm` de `PedidosEditor.tsx`.
+- Campos autocompletados desde `LocalCuenta` y `LocalContact` (vía Dexie y `useLiveQuery`): `cliente_final`, `nit_cliente_final`, `direccion_envio_factura`, `email_contacto`, `contacto_ventas`, `contacto_logistico`, `contacto_tesoreria` y `dir_envio_factura_tipo` (default "OFICINA").
+- Páginas actualizadas: `wiki/pages/cotizaciones-y-pedidos.md`, `wiki/LOG.md`.
+
+## 2026-07-29 - Ingest: Campos Obligatorios para Guardar Pedidos en Cotizaciones
+
+- Se definieron e implementaron las validaciones obligatorias de los 9 campos solicitados para guardar pedidos (totales o parciales) dentro de `PedidosEditor.tsx`.
+- Campos incluidos: `cierre_facturacion`, `fecha_facturacion`, `es_muestra`, `servicio_subida_hidromasaje`, `piso_entrega` (default 1), `medio_acceso` (Ascensor vs Escalera / `tiene_escaleras`), `verificacion_previa_firplak`, `direccion_envio_factura` y `dir_envio_factura_tipo` (Oficina / Tienda).
+- Se ejecutó la migración SQL `supabase/migrations/20260729_required_order_fields.sql` mediante el MCP de Supabase para incorporar `verificacion_previa_firplak`, `direccion_envio_factura`, `cierre_facturacion` y `es_muestra` a las tablas `CRM_Cotizaciones` y `CRM_Pedidos`.
+- Se actualizaron las interfaces de Dexie `LocalQuote` y `LocalPedido` en `lib/db.ts`.
+- Páginas actualizadas: `wiki/pages/cotizaciones-y-pedidos.md`, `wiki/LOG.md`.
+
 ## 2026-07-24 - Catálogo: Toggle "Productos de feria"
 
 - Se agregó un filtro tipo casilla / toggle "Productos de feria" en la vista de Catálogo (`app/catalogo/page.tsx`).

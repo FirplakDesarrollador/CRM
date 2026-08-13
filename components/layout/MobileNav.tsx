@@ -19,7 +19,6 @@ import {
     FileSpreadsheet,
     UserCircle,
     Store,
-    Tent,
     BookOpen,
     Warehouse
 } from "lucide-react";

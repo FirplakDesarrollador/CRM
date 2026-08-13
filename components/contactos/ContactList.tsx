@@ -8,6 +8,7 @@ import { CreateContactWizard } from "./CreateContactWizard";
 import { LocalContact } from "@/lib/db";
 import { Edit2, Trash2, Phone, Mail, User, Search } from "lucide-react";
 import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
+import { includesNormalized } from "@/lib/utils";
 
 interface ContactListProps {
     accountId: string;
@@ -70,12 +71,11 @@ export function ContactList({ accountId }: ContactListProps) {
     // Filter contacts based on search term
     const filteredContacts = contacts?.filter(contact => {
         if (!searchTerm) return true;
-        const lowerTerm = searchTerm.toLowerCase();
         return (
-            contact.nombre.toLowerCase().includes(lowerTerm) ||
-            (contact.cargo && contact.cargo.toLowerCase().includes(lowerTerm)) ||
-            (contact.email && contact.email.toLowerCase().includes(lowerTerm)) ||
-            (contact.telefono && contact.telefono.toLowerCase().includes(lowerTerm))
+            includesNormalized(contact.nombre, searchTerm) ||
+            includesNormalized(contact.cargo, searchTerm) ||
+            includesNormalized(contact.email, searchTerm) ||
+            includesNormalized(contact.telefono, searchTerm)
         );
     });
 

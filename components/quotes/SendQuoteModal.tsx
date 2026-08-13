@@ -6,17 +6,19 @@ import { useContacts } from "@/lib/hooks/useContacts";
 import { useActivities } from "@/lib/hooks/useActivities";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { LocalCuenta, LocalOportunidad, LocalQuote, LocalQuoteItem } from "@/lib/db";
 
 interface SendQuoteModalProps {
     isOpen: boolean;
     onClose: () => void;
-    quote: any;
-    account: any;
-    opportunity: any;
-    quoteItems: any[];
+    quote: LocalQuote;
+    account?: LocalCuenta;
+    opportunity?: LocalOportunidad;
+    quoteItems: LocalQuoteItem[];
+    advisorName?: string;
 }
 
-export function SendQuoteModal({ isOpen, onClose, quote, account, opportunity, quoteItems }: SendQuoteModalProps) {
+export function SendQuoteModal({ isOpen, onClose, quote, account, opportunity, quoteItems, advisorName }: SendQuoteModalProps) {
     const { contacts } = useContacts(account?.id);
     const { createActivity } = useActivities();
     
@@ -62,7 +64,7 @@ export function SendQuoteModal({ isOpen, onClose, quote, account, opportunity, q
         try {
             // 1. Generate PDF in base64
             const { generateQuotePdf } = await import("@/lib/pdfGenerator");
-            const base64Pdf = await generateQuotePdf(quote, quoteItems, account, opportunity, false);
+            const base64Pdf = await generateQuotePdf(quote, quoteItems, account, opportunity, false, advisorName);
 
             if (!base64Pdf) {
                 throw new Error("No se pudo generar el PDF de la cotización.");
@@ -107,9 +109,9 @@ export function SendQuoteModal({ isOpen, onClose, quote, account, opportunity, q
             // Could add a toast notification here
             alert("Cotización enviada exitosamente vía Outlook.");
             
-        } catch (err: any) {
+        } catch (err: unknown) {
             console.error("Error sending quote:", err);
-            setError(err.message || "Ocurrió un error inesperado al enviar la cotización.");
+            setError(err instanceof Error ? err.message : "Ocurrió un error inesperado al enviar la cotización.");
         } finally {
             setIsSending(false);
         }

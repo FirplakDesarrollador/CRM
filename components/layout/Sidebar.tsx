@@ -25,7 +25,6 @@ import {
     DollarSign,
     BarChart3,
     Store,
-    Tent,
     BookOpen,
     Warehouse,
 } from "lucide-react";

@@ -84,7 +84,7 @@ export interface LocalQuote {
     formas_pago?: string;
     facturacion_electronica?: boolean;
     oc_cot?: string;
-    cierre_facturacion?: string;
+    cierre_facturacion?: boolean | string;
     es_muestra?: boolean;
     aplica_contrato?: boolean;
     multa_incumplimiento?: boolean;
@@ -103,10 +103,12 @@ export interface LocalQuote {
     contacto_ventas?: string;
     contacto_logistico?: string;
     contacto_tesoreria?: string;
+    direccion_envio_factura?: string;
     dir_envio_factura_tipo?: string;
     servicio_subida_hidromasaje?: boolean;
     piso_entrega?: number;
     tiene_escaleras?: boolean;
+    verificacion_previa_firplak?: boolean;
     planos_hidromasaje?: string;
     fecha_entrega?: string;
     nit_cliente_final?: string;
@@ -158,7 +160,7 @@ export interface LocalPedido {
     formas_pago?: string;
     facturacion_electronica?: boolean;
     oc_cot?: string;
-    cierre_facturacion?: string;
+    cierre_facturacion?: boolean | string;
     es_muestra?: boolean;
     aplica_contrato?: boolean;
     multa_incumplimiento?: boolean;
@@ -181,10 +183,12 @@ export interface LocalPedido {
     contacto_ventas?: string;
     contacto_logistico?: string;
     contacto_tesoreria?: string;
+    direccion_envio_factura?: string;
     dir_envio_factura_tipo?: string;
     servicio_subida_hidromasaje?: boolean;
     piso_entrega?: number;
     tiene_escaleras?: boolean;
+    verificacion_previa_firplak?: boolean;
     planos_hidromasaje?: string;
     fecha_entrega?: string;
     nit_cliente_final?: string;

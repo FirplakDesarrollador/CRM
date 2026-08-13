@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { includesNormalized } from '@/lib/utils';
 
 export interface PriceListProduct {
     id: string;
@@ -57,7 +58,9 @@ export function useProductSearch(
                     keywords.forEach(keyword => {
                         const safeKeyword = keyword.replace(/"/g, '');
                         if (safeKeyword.length > 0) {
-                            query = query.or(`numero_articulo.ilike.%${safeKeyword}%,descripcion.ilike.%${safeKeyword}%`);
+                            // Reemplazar vocales/tildes/ñ por '_' para que SQL ilike coincida sin importar tildes
+                            const wildcardPattern = safeKeyword.replace(/[aáeéiíoóuúnñ]/gi, '_');
+                            query = query.or(`numero_articulo.ilike.%${safeKeyword}%,descripcion.ilike.%${safeKeyword}%,descripcion.ilike.%${wildcardPattern}%`);
                         }
                     });
                     query = query.limit(300);
@@ -74,12 +77,11 @@ export function useProductSearch(
                 
                 let finalData = data || [];
                 
-                if (keywords.length > 0 && prefix) {
+                if (keywords.length > 0) {
                     finalData = finalData.filter(p => {
                         return keywords.every(k => {
-                            const lowerK = k.toLowerCase();
-                            return (p.numero_articulo?.toLowerCase().includes(lowerK)) || 
-                                   (p.descripcion?.toLowerCase().includes(lowerK));
+                            return includesNormalized(p.numero_articulo, k) || 
+                                   includesNormalized(p.descripcion, k);
                         });
                     });
                 }

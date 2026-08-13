@@ -4,18 +4,20 @@ import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { Loader2, Store, DollarSign, CalendarPlus, Search, Trash2, TicketCheck } from "lucide-react";
+import { Loader2, Store, DollarSign, CalendarPlus, Search, Trash2, TicketCheck, ChevronDown, ChevronUp } from "lucide-react";
 import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useOpportunities } from "@/lib/hooks/useOpportunities";
 import { useActivities } from "@/lib/hooks/useActivities";
 import { useProductSearch, PriceListProduct } from "@/lib/hooks/useProducts";
 import { useLiveQuery } from "dexie-react-hooks";
-import { db, type LocalActivity } from "@/lib/db";
+import { db, type LocalActivity, type LocalPais, type LocalDepartamento, type LocalCiudad } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { useUsers } from "@/lib/hooks/useUsers";
 import { useOpportunityOrigins } from "@/lib/hooks/useOpportunityOrigins";
 import { reserveFairInventory, useInventorySummary } from "@/lib/hooks/useInventory";
 import { getProductPrice, SALES_CHANNELS } from "@/lib/salesChannels";
+import { includesNormalized } from "@/lib/utils";
 
 // Eschema de validación combinado
 const storeSaleSchema = z.object({
@@ -33,12 +35,12 @@ const storeSaleSchema = z.object({
     
     // Oportunidad
     fase_id: z.string().min(1, "Fase requerida"),
-    amount: z.number().min(0, "Debe ser mayor a 0"),
+    amount: z.number().optional().default(0),
     comentarios: z.string().min(1, "Comentario requerido"),
     origen_oportunidad: z.string().min(1, "Origen requerido"),
     venta_feria: z.boolean(),
     categoria_oportunidad: z.string().optional(),
-    asesor_id: z.string().optional(),
+    asesor_id: z.string().min(1, "El asesor es obligatorio"),
     items: z.array(z.object({
         product_id: z.string(),
         cantidad: z.number().min(1),
@@ -55,8 +57,7 @@ const storeSaleSchema = z.object({
     })),
 
     // Actividad
-    fecha_inicio: z.string().min(1, "Fecha de inicio requerida"),
-    fecha_fin: z.string().min(1, "Fecha de fin requerida"),
+    fecha_fin: z.string().min(1, "Fecha de vencimiento requerida"),
     clasificacion_id: z.string().min(1, "Clasificación requerida"),
     prioridad: z.enum(["Baja", "Media", "Alta"]),
     actividad_descripcion: z.string().optional()
@@ -69,6 +70,20 @@ interface CreateStoreSaleFormProps {
     onSuccess?: () => void;
 }
 
+// Helper para calcular la fecha de vencimiento por defecto: 7 días después a las 10:00 am
+const getDefaultDueDate = () => {
+    const defaultDueDate = new Date();
+    defaultDueDate.setDate(defaultDueDate.getDate() + 7);
+    defaultDueDate.setHours(10, 0, 0, 0);
+
+    const year = defaultDueDate.getFullYear();
+    const month = String(defaultDueDate.getMonth() + 1).padStart(2, '0');
+    const day = String(defaultDueDate.getDate()).padStart(2, '0');
+    const hours = String(defaultDueDate.getHours()).padStart(2, '0');
+    const minutes = String(defaultDueDate.getMinutes()).padStart(2, '0');
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+};
+
 export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
     const { createAccount, updateAccount } = useAccounts();
     const { createOpportunity } = useOpportunities();
@@ -78,6 +93,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
     const { origins, isLoading: isLoadingOrigins } = useOpportunityOrigins();
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
+    const [isActivityExpanded, setIsActivityExpanded] = useState(false);
     
     const { products: searchResults, isLoading: isSearching } = useProductSearch(searchTerm);
     const searchProductIds = useMemo(() => searchResults.map(product => product.id), [searchResults]);
@@ -87,10 +103,37 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         [inventorySummary],
     );
 
-    // Listas locales (Dexie)
+    // Listas locales (Dexie) con Fallback de Supabase
     const countriesList = useLiveQuery(() => db.countries.toArray()) || [];
     const departmentsList = useLiveQuery(() => db.departments.toArray()) || [];
     const citiesList = useLiveQuery(() => db.cities.toArray()) || [];
+
+    const [fallbackCountries, setFallbackCountries] = useState<LocalPais[]>([]);
+    const [fallbackDepartments, setFallbackDepartments] = useState<LocalDepartamento[]>([]);
+    const [fallbackCities, setFallbackCities] = useState<LocalCiudad[]>([]);
+
+    useEffect(() => {
+        if (countriesList.length === 0) {
+            supabase.from('CRM_Paises').select('*').order('id').then(({ data }) => {
+                if (data) setFallbackCountries(data);
+            });
+        }
+        if (departmentsList.length === 0) {
+            supabase.from('CRM_Departamentos').select('*').order('nombre').then(({ data }) => {
+                if (data) setFallbackDepartments(data);
+            });
+        }
+        if (citiesList.length === 0) {
+            supabase.from('CRM_Ciudades').select('*').order('nombre').then(({ data }) => {
+                if (data) setFallbackCities(data);
+            });
+        }
+    }, [countriesList.length, departmentsList.length, citiesList.length]);
+
+    const displayCountries = countriesList.length > 0 ? countriesList : fallbackCountries;
+    const displayDepartments = departmentsList.length > 0 ? departmentsList : fallbackDepartments;
+    const displayCities = citiesList.length > 0 ? citiesList : fallbackCities;
+
     const subclassificationsQuery = useLiveQuery(() => db.subclasificaciones.toArray());
     const subclassifications = useMemo(() => subclassificationsQuery || [], [subclassificationsQuery]);
     const classifications = useLiveQuery(() => db.activityClassifications.toArray().then(arr => arr.filter(c => !c.is_deleted)), []) || [];
@@ -120,11 +163,8 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             fase_id: "",
             comentarios: "",
             origen_oportunidad: "visita",
-            categoria_oportunidad: "",
-            canal_id: "PROPIO",
             venta_feria: false,
-            fecha_inicio: "",
-            fecha_fin: "",
+            fecha_fin: getDefaultDueDate(),
             clasificacion_id: "",
             prioridad: "Media",
             actividad_descripcion: "",
@@ -144,31 +184,132 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         [subclassifications, selectedChannel],
     );
 
-    const resetStoreForm = useCallback(() => {
-        reset();
-        setValue("pais_id", "1");
-        setValue("origen_oportunidad", "visita");
+    // Filtrado estricto de asesores: Si el vendedor no tiene país o departamento asignado, NO aparece en el desplegable.
+    const selectedPais = watch("pais_id");
+    const selectedDept = watch("departamento_id");
+    const selectedAdvisorId = watch("asesor_id");
 
-        const now = new Date();
-        now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
-        const later = new Date(now.getTime() + 60 * 60 * 1000);
-        setValue("fecha_inicio", now.toISOString().slice(0, 16));
-        setValue("fecha_fin", later.toISOString().slice(0, 16));
-    }, [reset, setValue]);
+    const filteredAdvisors = useMemo(() => {
+        const activeUsers = users?.filter(u => u.is_active) || [];
+        
+        return activeUsers.filter(u => {
+            // 1. Verificar País: El vendedor debe tener al menos un país asignado y debe incluir el país del cliente.
+            const userPaises = u.paises && u.paises.length > 0 ? u.paises : (u.pais ? [u.pais] : []);
+            if (userPaises.length === 0) return false;
 
-    // Cargar fechas por defecto al abrir el formulario.
+            const matchesCountry = selectedPais && userPaises.includes(String(selectedPais));
+            if (!matchesCountry) return false;
+
+            // 2. Verificar Departamento (si se seleccionó departamento en el cliente):
+            // El vendedor debe tener asignado al menos un departamento y debe incluir el departamento del cliente.
+            if (selectedDept) {
+                const userDepts = u.departamentos && u.departamentos.length > 0 ? u.departamentos : (u.departamento ? [u.departamento] : []);
+                if (userDepts.length === 0) return false;
+
+                const matchesDept = userDepts.includes(String(selectedDept));
+                if (!matchesDept) return false;
+            }
+
+            return true;
+        });
+    }, [users, selectedPais, selectedDept]);
+
+    // Garantizar que Colombia quede seleccionado automáticamente cuando los países terminen de cargar
     useEffect(() => {
-        resetStoreForm();
-    }, [resetStoreForm]);
+        if (displayCountries.length > 0) {
+            const colombia = displayCountries.find(c => includesNormalized(c.nombre, "colombia")) || displayCountries.find(c => String(c.id) === "1");
+            const targetId = colombia ? String(colombia.id) : "1";
+            const currentPais = watch("pais_id");
+            if (!currentPais || currentPais === "") {
+                setValue("pais_id", targetId);
+            }
+        }
+    }, [displayCountries, setValue, watch]);
+
+    // Seleccionar automáticamente un asesor (priorizando a Juan Correa si está disponible) si el actual no pertenece al filtro o está vacío
+    useEffect(() => {
+        if (filteredAdvisors.length > 0) {
+            if (!selectedAdvisorId || !filteredAdvisors.some(u => u.id === selectedAdvisorId)) {
+                const juanCorrea = filteredAdvisors.find(u => includesNormalized(u.full_name || "", "juan correa"));
+                setValue("asesor_id", juanCorrea ? juanCorrea.id : filteredAdvisors[0].id);
+            }
+        } else {
+            setValue("asesor_id", "");
+        }
+    }, [filteredAdvisors, selectedAdvisorId, setValue]);
+
+    // Selección bidireccional: Al seleccionar un asesor, se toma por defecto su país y departamento (el primero de su lista asignada si la selección actual no le pertenece)
+    useEffect(() => {
+        if (!selectedAdvisorId || !users || users.length === 0) return;
+
+        const advisor = users.find(u => u.id === selectedAdvisorId);
+        if (!advisor) return;
+
+        const advPaises = (
+            advisor.paises && advisor.paises.length > 0
+                ? advisor.paises
+                : (advisor.pais ? [advisor.pais] : [])
+        ).map(p => String(p));
+
+        const advDepts = (
+            advisor.departamentos && advisor.departamentos.length > 0
+                ? advisor.departamentos
+                : (advisor.departamento ? [advisor.departamento] : [])
+        ).map(d => String(d));
+
+        if (advPaises.length > 0 && (!selectedPais || !advPaises.includes(String(selectedPais)))) {
+            setValue("pais_id", advPaises[0]);
+        }
+
+        if (advDepts.length > 0 && (!selectedDept || !advDepts.includes(String(selectedDept)))) {
+            setValue("departamento_id", advDepts[0]);
+            setValue("ciudad_id", "");
+        }
+    }, [selectedAdvisorId, selectedPais, selectedDept, users, setValue]);
+
+    const resetStoreForm = useCallback(() => {
+        const colombia = displayCountries.find(c => includesNormalized(c.nombre, "colombia")) || displayCountries.find(c => String(c.id) === "1");
+        const defaultPaisId = colombia ? String(colombia.id) : "1";
+        const primerContactoPhase = phasesList.find(p => includesNormalized(p.nombre, "primer contacto"));
+        const defaultPhaseId = primerContactoPhase ? String(primerContactoPhase.id) : (phasesList[0] ? String(phasesList[0].id) : "");
+
+        reset({
+            nombre_cuenta: "",
+            nit_base: "",
+            telefono: "",
+            pais_id: defaultPaisId,
+            departamento_id: "",
+            ciudad_id: "",
+            direccion: "",
+            email: "",
+            canal_id: "PROPIO",
+            subclasificacion_id: "",
+            amount: 0,
+            fase_id: defaultPhaseId,
+            comentarios: "",
+            origen_oportunidad: "visita",
+            venta_feria: false,
+            fecha_fin: getDefaultDueDate(),
+            clasificacion_id: "",
+            prioridad: "Media",
+            actividad_descripcion: "",
+            items: []
+        });
+    }, [reset, displayCountries, phasesList]);
 
     const watchedItems = watch("items");
     const items = useMemo(() => watchedItems || [], [watchedItems]);
 
-    // Cada canal inicia con su primera fase y subclasificacion disponibles.
+    // Cada canal inicia con la fase "Primer Contacto" por defecto (o su primera fase disponible).
     useEffect(() => {
         const currentPhase = watch("fase_id");
-        if (phasesList.length > 0 && !phasesList.some(phase => String(phase.id) === currentPhase)) {
-            setValue("fase_id", String(phasesList[0].id));
+        if (phasesList.length > 0) {
+            const primerContactoPhase = phasesList.find(p => includesNormalized(p.nombre, "primer contacto"));
+            const defaultPhaseId = primerContactoPhase ? String(primerContactoPhase.id) : String(phasesList[0].id);
+
+            if (!currentPhase || !phasesList.some(phase => String(phase.id) === currentPhase)) {
+                setValue("fase_id", defaultPhaseId);
+            }
         }
     }, [phasesList, setValue, watch]);
 
@@ -185,6 +326,22 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             setValue("origen_oportunidad", origins[0].codigo);
         }
     }, [origins, setValue, watch]);
+
+    // Seleccionar automáticamente la clasificación "Llamada telefónica" por defecto
+    useEffect(() => {
+        if (classifications.length > 0) {
+            const currentClasif = watch("clasificacion_id");
+            if (!currentClasif) {
+                const callClasif = classifications.find(c => 
+                    includesNormalized(c.nombre, "llamada")
+                ) || eventClassifications[0] || classifications[0];
+                
+                if (callClasif) {
+                    setValue("clasificacion_id", String(callClasif.id));
+                }
+            }
+        }
+    }, [classifications, eventClassifications, setValue, watch]);
 
     // Recalcular los productos ya elegidos al cambiar canal o venta de feria.
     useEffect(() => {
@@ -275,26 +432,6 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
 
             let accountId = "";
 
-            // Determinar Asesor / Owner Final
-            let finalOwnerId = user?.id;
-            if (data.asesor_id) {
-                finalOwnerId = data.asesor_id;
-            } else {
-                if (data.canal_id === 'PROPIO') {
-                    const assignedUser = users?.find(u => u.email.toLowerCase().includes('daniela.castro'));
-                    if (assignedUser) finalOwnerId = assignedUser.id;
-                    else console.warn("No se encontró a daniela.castro");
-                } else if (data.canal_id === 'OBRAS_NAC') {
-                    const assignedUser = users?.find(u => u.email.toLowerCase().includes('mayerly.marin'));
-                    if (assignedUser) finalOwnerId = assignedUser.id;
-                    else console.warn("No se encontró a mayerly.marin");
-                } else if (['OBRAS_INT', 'DIST_INT', 'DIST_NAC'].includes(data.canal_id)) {
-                    const assignedUser = users?.find(u => u.email.toLowerCase().includes('juan.correa'));
-                    if (assignedUser) finalOwnerId = assignedUser.id;
-                    else console.warn("No se encontró a juan.correa");
-                }
-            }
-
             if (duplicates.length > 0) {
                 // Usar el cliente existente
                 accountId = duplicates[0].id;
@@ -319,7 +456,6 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                     ciudad_id: data.ciudad_id ? Number(data.ciudad_id) : null,
                     // Conservamos compatibilidad string con DB
                     ciudad: data.ciudad_id ? citiesList.find(c => String(c.id) === data.ciudad_id)?.nombre : undefined,
-                    owner_user_id: finalOwnerId,
                     es_premium: false
                 };
 
@@ -347,7 +483,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                 origen_oportunidad: data.origen_oportunidad,
                 comentarios: combinedComentarios,
                 items: data.items,
-                owner_user_id: finalOwnerId,
+                owner_user_id: data.asesor_id || user?.id,
             };
             const opportunityId = await createOpportunity(opportunityData);
 
@@ -366,10 +502,10 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                 clasificacion_id: Number(data.clasificacion_id),
                 tipo_actividad: "EVENTO",
                 descripcion: data.actividad_descripcion || "Seguimiento de venta en tienda",
-                fecha_inicio: data.fecha_inicio,
+                fecha_inicio: data.fecha_fin,
                 fecha_fin: data.fecha_fin,
                 prioridad: data.prioridad,
-                user_id: finalOwnerId,
+                user_id: data.asesor_id || user?.id,
             } satisfies Partial<LocalActivity>;
             await createActivity(activityData);
 
@@ -455,7 +591,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         }}
                                     >
                                         <option value="">Seleccione...</option>
-                                        {countriesList.map(p => (
+                                        {displayCountries.map(p => (
                                             <option key={p.id} value={String(p.id)}>{p.nombre}</option>
                                         ))}
                                     </select>
@@ -472,7 +608,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         }}
                                     >
                                         <option value="">Seleccione...</option>
-                                        {departmentsList
+                                        {displayDepartments
                                             .filter(dep => String(dep.pais_id) === watch("pais_id"))
                                             .map(dep => (
                                                 <option key={dep.id} value={String(dep.id)}>{dep.nombre}</option>
@@ -487,7 +623,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         disabled={!watch("departamento_id")}
                                     >
                                         <option value="">Seleccione...</option>
-                                        {citiesList
+                                        {displayCities
                                             .filter(c => String(c.departamento_id) === watch("departamento_id"))
                                             .map(city => (
                                                 <option key={city.id} value={String(city.id)}>{city.nombre}</option>
@@ -496,9 +632,29 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                 </div>
                             </div>
                             
-                            <div>
-                                <label className="text-sm font-medium text-slate-700">Dirección (Opcional)</label>
-                                <input {...register("direccion")} className="w-full mt-1 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Calle/Carrera" />
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-slate-100">
+                                <div>
+                                    <label className="text-sm font-semibold text-blue-900">Asesor Encargado del Cliente *</label>
+                                    <select 
+                                        {...register("asesor_id")} 
+                                        className="w-full mt-1 border p-2 rounded-lg bg-white border-blue-300 focus:ring-2 focus:ring-blue-500 outline-none font-medium text-slate-800"
+                                    >
+                                        <option value="">Seleccione un asesor...</option>
+                                        {filteredAdvisors.map(u => (
+                                            <option key={u.id} value={u.id}>
+                                                {u.full_name || u.email}
+                                            </option>
+                                        ))}
+                                    </select>
+                                    <p className="text-[11px] text-slate-500 mt-1">El cliente queda anclado primariamente a este asesor desde su creación.</p>
+                                    {errors.asesor_id && (
+                                        <p className="text-red-500 text-xs mt-1">{errors.asesor_id.message}</p>
+                                    )}
+                                </div>
+                                <div>
+                                    <label className="text-sm font-medium text-slate-700">Dirección (Opcional)</label>
+                                    <input {...register("direccion")} className="w-full mt-1 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Calle/Carrera" />
+                                </div>
                             </div>
                         </section>
 
@@ -508,7 +664,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                 <DollarSign className="w-5 h-5" /> Datos del Negocio (Oportunidad)
                             </h3>
                             
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
                                     <label className="text-sm font-medium text-slate-700">Fase de Oportunidad *</label>
                                     <select 
@@ -521,27 +677,6 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         ))}
                                     </select>
                                     {errors.fase_id && <p className="text-red-500 text-xs mt-1">{errors.fase_id.message}</p>}
-                                </div>
-                                
-                                <div>
-                                    <label className="text-sm font-medium text-slate-700">Valor Estimado *</label>
-                                    <div className="relative mt-1">
-                                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                            <span className="text-slate-500 sm:text-sm">$</span>
-                                        </div>
-                                        <input 
-                                            {...register("amount", { valueAsNumber: true })}
-                                            type="number" 
-                                            readOnly={items.length > 0}
-                                            className={`w-full pl-7 pr-12 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-green-500 outline-none ${items.length > 0 ? "bg-slate-100" : ""}`} 
-                                            placeholder="0.00" 
-                                        />
-                                        <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                                            <span className="text-slate-500 sm:text-sm">COP</span>
-                                        </div>
-                                    </div>
-                                    {items.length > 0 && <p className="text-[10px] text-blue-600 mt-1">Calculado automáticamente por productos</p>}
-                                    {errors.amount && <p className="text-red-500 text-xs mt-1">{errors.amount.message}</p>}
                                 </div>
                                 
                                 <div>
@@ -563,7 +698,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                 </div>
 
                                 <div>
-                                    <label className="text-sm font-medium text-slate-700">Categoría *</label>
+                                    <label className="text-sm font-medium text-slate-700">Categoría (Opcional)</label>
                                     <select 
                                         {...register("categoria_oportunidad")} 
                                         className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-green-500 outline-none"
@@ -573,35 +708,6 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         <option value="Zona de Labores">Zona de Labores</option>
                                         <option value="Cocinas">Cocinas</option>
                                         <option value="Hidromasajes">Hidromasajes</option>
-                                    </select>
-                                    {errors.categoria_oportunidad && <p className="text-red-500 text-xs mt-1">{errors.categoria_oportunidad.message}</p>}
-                                </div>
-
-                                <div>
-                                    <label className="text-sm font-medium text-slate-700">Canal *</label>
-                                    <select 
-                                        {...register("canal_id")} 
-                                        className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-green-500 outline-none"
-                                    >
-                                        <option value="DIST_NAC">Distribución Nacional</option>
-                                        <option value="OBRAS_NAC">Obras Nacional</option>
-                                        <option value="DIST_INT">Distribución Internacional</option>
-                                        <option value="OBRAS_INT">Obras Internacional</option>
-                                        <option value="PROPIO">Canal Propio</option>
-                                    </select>
-                                    {errors.canal_id && <p className="text-red-500 text-xs mt-1">{errors.canal_id.message}</p>}
-                                </div>
-
-                                <div>
-                                    <label className="text-sm font-medium text-slate-700">Asesor Encargado (Opcional)</label>
-                                    <select 
-                                        {...register("asesor_id")} 
-                                        className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-green-500 outline-none"
-                                    >
-                                        <option value="">(Asignación Automática)</option>
-                                        {users?.filter(u => u.is_active).map(u => (
-                                            <option key={u.id} value={u.id}>{u.full_name || u.email}</option>
-                                        ))}
                                     </select>
                                 </div>
                             </div>
@@ -713,69 +819,80 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                         </section>
 
                         {/* SECCIÓN ACTIVIDAD */}
-                        <section className="space-y-4">
-                            <h3 className="text-lg font-semibold flex items-center gap-2 text-orange-600 border-b pb-2">
-                                <CalendarPlus className="w-5 h-5" /> Actividad Programada
-                            </h3>
-                            
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                    <label className="text-sm font-medium text-slate-700">Clasificación *</label>
-                                    <select 
-                                        {...register("clasificacion_id")} 
-                                        className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-orange-500 outline-none"
+                        <section className="space-y-4 rounded-xl border border-slate-200 bg-slate-50/50 p-4 transition-all">
+                            <div 
+                                onClick={() => setIsActivityExpanded(!isActivityExpanded)}
+                                className="flex items-center justify-between cursor-pointer select-none"
+                            >
+                                <h3 className="text-lg font-semibold flex items-center gap-2 text-orange-600">
+                                    <CalendarPlus className="w-5 h-5" /> Actividad Programada
+                                </h3>
+                                <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
+                                    {!isActivityExpanded && (
+                                        <span className="hidden sm:inline-block bg-orange-100/80 text-orange-800 px-2.5 py-1 rounded-full border border-orange-200/70 font-semibold text-[11px]">
+                                            Llamada Telefónica · Prioridad Media (Vence en 7 días)
+                                        </span>
+                                    )}
+                                    <button
+                                        type="button"
+                                        className="p-1 hover:bg-slate-200/60 rounded-lg text-slate-600 transition-colors"
+                                        aria-label="Expandir o colapsar sección de actividad"
                                     >
-                                        <option value="">Seleccione...</option>
-                                        {eventClassifications.map(c => (
-                                            <option key={c.id} value={String(c.id)}>{c.nombre}</option>
-                                        ))}
-                                    </select>
-                                    {errors.clasificacion_id && <p className="text-red-500 text-xs mt-1">{errors.clasificacion_id.message}</p>}
-                                </div>
-                                
-                                <div>
-                                    <label className="text-sm font-medium text-slate-700">Prioridad *</label>
-                                    <select 
-                                        {...register("prioridad")} 
-                                        className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-orange-500 outline-none"
-                                    >
-                                        <option value="Alta">Alta</option>
-                                        <option value="Media">Media</option>
-                                        <option value="Baja">Baja</option>
-                                    </select>
-                                    {errors.prioridad && <p className="text-red-500 text-xs mt-1">{errors.prioridad.message}</p>}
-                                </div>
-                                
-                                <div>
-                                    <label className="text-sm font-medium text-slate-700">Fecha y Hora Inicial *</label>
-                                    <input 
-                                        {...register("fecha_inicio")} 
-                                        type="datetime-local" 
-                                        className="w-full mt-1 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-orange-500 outline-none" 
-                                    />
-                                    {errors.fecha_inicio && <p className="text-red-500 text-xs mt-1">{errors.fecha_inicio.message}</p>}
-                                </div>
-                                
-                                <div>
-                                    <label className="text-sm font-medium text-slate-700">Fecha y Hora Final *</label>
-                                    <input 
-                                        {...register("fecha_fin")} 
-                                        type="datetime-local" 
-                                        className="w-full mt-1 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-orange-500 outline-none" 
-                                    />
-                                    {errors.fecha_fin && <p className="text-red-500 text-xs mt-1">{errors.fecha_fin.message}</p>}
-                                </div>
-                                
-                                <div className="md:col-span-2">
-                                    <label className="text-sm font-medium text-slate-700">Comentarios de la Actividad (Opcional)</label>
-                                    <textarea 
-                                        {...register("actividad_descripcion")} 
-                                        rows={3}
-                                        className="w-full mt-1 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-orange-500 outline-none resize-none" 
-                                        placeholder="Detalles sobre lo que se realizará en la actividad..." 
-                                    />
+                                        {isActivityExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                                    </button>
                                 </div>
                             </div>
+                            
+                            {isActivityExpanded && (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3 border-t border-slate-200/60">
+                                    <div>
+                                        <label className="text-sm font-medium text-slate-700">Clasificación *</label>
+                                        <select 
+                                            {...register("clasificacion_id")} 
+                                            className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-orange-500 outline-none"
+                                        >
+                                            <option value="">Seleccione...</option>
+                                            {(eventClassifications.length > 0 ? eventClassifications : classifications).map(c => (
+                                                <option key={c.id} value={String(c.id)}>{c.nombre}</option>
+                                            ))}
+                                        </select>
+                                        {errors.clasificacion_id && <p className="text-red-500 text-xs mt-1">{errors.clasificacion_id.message}</p>}
+                                    </div>
+                                    
+                                    <div>
+                                        <label className="text-sm font-medium text-slate-700">Prioridad *</label>
+                                        <select 
+                                            {...register("prioridad")} 
+                                            className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-orange-500 outline-none"
+                                        >
+                                            <option value="Alta">Alta</option>
+                                            <option value="Media">Media</option>
+                                            <option value="Baja">Baja</option>
+                                        </select>
+                                        {errors.prioridad && <p className="text-red-500 text-xs mt-1">{errors.prioridad.message}</p>}
+                                    </div>
+                                    
+                                    <div className="md:col-span-2">
+                                        <label className="text-sm font-medium text-slate-700">Fecha y Hora de Vencimiento *</label>
+                                        <input 
+                                            {...register("fecha_fin")} 
+                                            type="datetime-local" 
+                                            className="w-full mt-1 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-orange-500 outline-none" 
+                                        />
+                                        {errors.fecha_fin && <p className="text-red-500 text-xs mt-1">{errors.fecha_fin.message}</p>}
+                                    </div>
+                                    
+                                    <div className="md:col-span-2">
+                                        <label className="text-sm font-medium text-slate-700">Comentarios de la Actividad (Opcional)</label>
+                                        <textarea 
+                                            {...register("actividad_descripcion")} 
+                                            rows={3}
+                                            className="w-full mt-1 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-orange-500 outline-none resize-none" 
+                                            placeholder="Detalles sobre lo que se realizará en la actividad..." 
+                                        />
+                                    </div>
+                                </div>
+                            )}
                         </section>
 
                     </form>

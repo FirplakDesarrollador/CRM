@@ -1,21 +1,39 @@
 "use client";
 
 import { usePedidos } from "@/lib/hooks/usePedidos";
-import { LocalQuote, db } from "@/lib/db";
+import { LocalCuenta, LocalOportunidad, LocalQuote, db } from "@/lib/db";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Plus, Edit2, AlertCircle, Trash2, Receipt, Calendar, Truck, Send } from "lucide-react";
+import { Plus, Edit2, AlertCircle, Trash2, Receipt, Calendar, Truck, Send, Download, Mail, Loader2 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { cn } from "@/components/ui/utils";
 import { useFormAutoSave } from "@/lib/hooks/useFormAutoSave";
 import { AutoSaveIndicator } from "@/components/ui/AutoSaveIndicator";
+import { SendQuoteModal } from "@/components/quotes/SendQuoteModal";
+import { generateQuotePdf } from "@/lib/pdfGenerator";
+import {
+    buildPedidoDocumentData,
+    getMissingPedidoFormalizationFields,
+    PedidoDocumentItem,
+    PedidoWithItems,
+} from "@/lib/pedidoFormalization";
 
 const PEDIDO_WIZARD_LAST_STEP = 2;
+
+interface PedidoFormalizationContext {
+    quote: LocalQuote;
+    quoteItems: PedidoDocumentItem[];
+    account?: LocalCuenta;
+    opportunity?: LocalOportunidad;
+    advisorName: string;
+}
 
 export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, onEditStateChange?: (isEditing: boolean) => void }) {
     const { pedidosCollection, deletePedido, updatePedido } = usePedidos(quote.id);
     const [isCreating, setIsCreating] = useState(false);
     const [editingUuid, setEditingUuid] = useState<string | null>(null);
+    const [preparingPedidoUuid, setPreparingPedidoUuid] = useState<string | null>(null);
+    const [sendContext, setSendContext] = useState<PedidoFormalizationContext | null>(null);
 
     const quoteItems = useLiveQuery(() => db.quoteItems.where('cotizacion_id').equals(quote.id).toArray(), [quote.id]);
     const opp = useLiveQuery(() => db.opportunities.get(quote.opportunity_id), [quote.opportunity_id]);
@@ -29,6 +47,80 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
     if (!pedidosCollection || !quoteItems) return <div>Cargando pedidos...</div>;
 
     const isWinner = opp?.status === 'WINNER' || quote.status === 'WINNER';
+
+    const prepareFormalizationContext = async (pedido: PedidoWithItems) => {
+        const missingFields = getMissingPedidoFormalizationFields(pedido);
+        if (missingFields.length > 0) {
+            alert(`No es posible generar o enviar la cotización formal hasta completar el pedido:\n\n• ${missingFields.join('\n• ')}`);
+            return null;
+        }
+
+        setPreparingPedidoUuid(pedido.uuid_generado);
+        try {
+            const opportunity = opp || await db.opportunities.get(quote.opportunity_id);
+            const account = opportunity ? await db.accounts.get(opportunity.account_id) : undefined;
+            let advisorName = "";
+            let productCodes: Record<string, string> = {};
+
+            try {
+                const { supabase } = await import('@/lib/supabase');
+
+                if (opportunity?.owner_user_id) {
+                    const { data: userData } = await supabase
+                        .from('CRM_Usuarios')
+                        .select('full_name')
+                        .eq('id', opportunity.owner_user_id)
+                        .maybeSingle();
+                    advisorName = userData?.full_name || "";
+                }
+
+                const productIds = (pedido.items || []).map(item => item.producto_id).filter(Boolean);
+                if (productIds.length > 0) {
+                    const { data: productData } = await supabase
+                        .from('CRM_ListaDePrecios')
+                        .select('id, numero_articulo')
+                        .in('id', productIds);
+
+                    productCodes = Object.fromEntries((productData || []).map(product => [
+                        String(product.id),
+                        product.numero_articulo || String(product.id),
+                    ]));
+                }
+            } catch (error) {
+                console.error("No fue posible enriquecer los datos del documento formal", error);
+            }
+
+            const documentData = buildPedidoDocumentData(quote, pedido, quoteItems, productCodes);
+            return {
+                quote: documentData.quote,
+                quoteItems: documentData.items,
+                account,
+                opportunity,
+                advisorName,
+            } satisfies PedidoFormalizationContext;
+        } finally {
+            setPreparingPedidoUuid(null);
+        }
+    };
+
+    const handleDownloadPdf = async (pedido: PedidoWithItems) => {
+        const context = await prepareFormalizationContext(pedido);
+        if (!context) return;
+
+        await generateQuotePdf(
+            context.quote,
+            context.quoteItems,
+            context.account,
+            context.opportunity,
+            true,
+            context.advisorName,
+        );
+    };
+
+    const handleSendQuote = async (pedido: PedidoWithItems) => {
+        const context = await prepareFormalizationContext(pedido);
+        if (context) setSendContext(context);
+    };
 
     if (isCreating || editingUuid) {
         return (
@@ -75,7 +167,12 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
                 </div>
             ) : (
                 <div className="grid gap-4">
-                    {pedidosCollection.map(ped => (
+                    {pedidosCollection.map(ped => {
+                        const missingFormalizationFields = getMissingPedidoFormalizationFields(ped);
+                        const canFormalize = missingFormalizationFields.length === 0;
+                        const isPreparing = preparingPedidoUuid === ped.uuid_generado;
+
+                        return (
                         <div key={ped.uuid_generado} className="bg-white p-5 rounded-xl border shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
                             <div>
                                 <div className="flex items-center gap-2 mb-1">
@@ -90,6 +187,11 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
                                 <div className="text-sm text-slate-500 font-medium">
                                     {ped.items?.length || 0} ítems vinculados
                                 </div>
+                                {!canFormalize && (
+                                    <p className="mt-2 max-w-[220px] text-xs font-medium text-amber-700">
+                                        Completa el pedido para habilitar el PDF y el envío formal.
+                                    </p>
+                                )}
                             </div>
 
                             {/* Detalle solicitado por el usuario */}
@@ -125,8 +227,29 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
                                     </p>
                                 </div>
                             </div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex flex-wrap items-center gap-2">
                                 <button
+                                    type="button"
+                                    onClick={() => handleDownloadPdf(ped)}
+                                    className="flex items-center gap-2 p-2 border rounded border-blue-200 text-blue-700 hover:bg-blue-50 transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+                                    title={canFormalize ? "Descargar cotización formal en PDF" : `Faltan: ${missingFormalizationFields.join(', ')}`}
+                                    disabled={!canFormalize || isPreparing}
+                                >
+                                    {isPreparing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                                    <span className="text-sm font-medium">PDF</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => handleSendQuote(ped)}
+                                    className="flex items-center gap-2 p-2 border rounded border-blue-200 text-blue-700 hover:bg-blue-50 transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+                                    title={canFormalize ? "Enviar cotización formal por correo" : `Faltan: ${missingFormalizationFields.join(', ')}`}
+                                    disabled={!canFormalize || isPreparing}
+                                >
+                                    <Mail className="w-4 h-4" />
+                                    <span className="text-sm font-medium">Enviar</span>
+                                </button>
+                                <button
+                                    type="button"
                                     onClick={() => setEditingUuid(ped.uuid_generado!)}
                                     className="p-2 border rounded hover:bg-slate-50 text-slate-700 tooltip"
                                     title="Editar Pedido"
@@ -136,6 +259,7 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
                                 </button>
                                 {isWinner && ped.estado_pedido === 'PLANEADO' && (
                                     <button
+                                        type="button"
                                         onClick={async () => {
                                             if (confirm("¿Confirmar envío de este pedido a SAP?")) {
                                                 await updatePedido(ped.uuid_generado!, { estado_pedido: 'ENVIADO_SAP' });
@@ -150,6 +274,7 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
                                     </button>
                                 )}
                                 <button
+                                    type="button"
                                     onClick={() => {
                                         if (confirm("¿Seguro que deseas eliminar este pedido parcial?")) {
                                             deletePedido(ped.uuid_generado!);
@@ -163,8 +288,21 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
                                 </button>
                             </div>
                         </div>
-                    ))}
+                        );
+                    })}
                 </div>
+            )}
+
+            {sendContext && (
+                <SendQuoteModal
+                    isOpen
+                    onClose={() => setSendContext(null)}
+                    quote={sendContext.quote}
+                    account={sendContext.account}
+                    opportunity={sendContext.opportunity}
+                    quoteItems={sendContext.quoteItems}
+                    advisorName={sendContext.advisorName}
+                />
             )}
         </div>
     );
@@ -206,6 +344,16 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
         return mapa;
     }, [pedidoUuid]);
 
+    const opp = useLiveQuery(() => db.opportunities.get(quote.opportunity_id), [quote.opportunity_id]);
+    const account = useLiveQuery(async () => {
+        if (!opp?.account_id) return null;
+        return db.accounts.get(opp.account_id);
+    }, [opp?.account_id]);
+    const contacts = useLiveQuery(async () => {
+        if (!opp?.account_id) return [];
+        return db.contacts.where('account_id').equals(opp.account_id).toArray();
+    }, [opp?.account_id]);
+
 
     const [wizardStep, setWizardStep] = useState(0);
     const [canSubmitFinalStep, setCanSubmitFinalStep] = useState(false);
@@ -214,6 +362,8 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
         defaultValues: {
             fecha_facturacion: ped?.fecha_facturacion || "",
             tipo_facturacion: ped?.tipo_facturacion || "",
+            cierre_facturacion: ped?.cierre_facturacion ?? false,
+            es_muestra: ped?.es_muestra ?? false,
             orden_compra: ped?.orden_compra || "",
             incoterm: ped?.incoterm || "",
             notas_sap: ped?.notas_sap || "",
@@ -222,10 +372,13 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
             contacto_ventas: ped?.contacto_ventas || "",
             contacto_logistico: ped?.contacto_logistico || "",
             contacto_tesoreria: ped?.contacto_tesoreria || "",
+            direccion_envio_factura: ped?.direccion_envio_factura || "",
             dir_envio_factura_tipo: ped?.dir_envio_factura_tipo || "",
-            servicio_subida_hidromasaje: ped?.servicio_subida_hidromasaje || false,
-            piso_entrega: ped?.piso_entrega || "",
-            tiene_escaleras: ped?.tiene_escaleras || false,
+            servicio_subida_hidromasaje: ped?.servicio_subida_hidromasaje ?? false,
+            piso_entrega: ped?.piso_entrega ?? 1,
+            medio_acceso: ped?.tiene_escaleras ? "ESCALERA" : "ASCENSOR",
+            tiene_escaleras: ped?.tiene_escaleras ?? false,
+            verificacion_previa_firplak: ped?.verificacion_previa_firplak ?? false,
             planos_hidromasaje: ped?.planos_hidromasaje || "",
             fecha_entrega: ped?.fecha_entrega || "",
             nit_cliente_final: ped?.nit_cliente_final || "",
@@ -245,6 +398,7 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
         // Build items to save
         const itemsToSave = [];
         for (const qItem of quoteItems || []) {
+            if (!qItem.producto_id) continue;
             const qty = Number(data.selected_quantities?.[qItem.producto_id] || 0);
             if (qty > 0) {
                 itemsToSave.push({
@@ -258,6 +412,8 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
         const pedData = {
             fecha_facturacion: data.fecha_facturacion,
             tipo_facturacion: data.tipo_facturacion,
+            cierre_facturacion: Boolean(data.cierre_facturacion),
+            es_muestra: Boolean(data.es_muestra),
             orden_compra: data.orden_compra,
             incoterm: data.incoterm,
             notas_sap: data.notas_sap,
@@ -266,10 +422,12 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
             contacto_ventas: data.contacto_ventas,
             contacto_logistico: data.contacto_logistico,
             contacto_tesoreria: data.contacto_tesoreria,
+            direccion_envio_factura: data.direccion_envio_factura,
             dir_envio_factura_tipo: data.dir_envio_factura_tipo,
-            servicio_subida_hidromasaje: data.servicio_subida_hidromasaje,
-            piso_entrega: data.piso_entrega ? Number(data.piso_entrega) : null,
-            tiene_escaleras: data.tiene_escaleras,
+            servicio_subida_hidromasaje: Boolean(data.servicio_subida_hidromasaje),
+            piso_entrega: data.piso_entrega ? Number(data.piso_entrega) : 1,
+            tiene_escaleras: data.medio_acceso === "ESCALERA",
+            verificacion_previa_firplak: Boolean(data.verificacion_previa_firplak),
             planos_hidromasaje: data.planos_hidromasaje,
             fecha_entrega: data.fecha_entrega || null,
             nit_cliente_final: data.nit_cliente_final,
@@ -280,15 +438,19 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
         await updatePedido(pedidoUuid, pedData);
         await updatePedidoItems(pedidoUuid, itemsToSave);
         await db.quotes.update(quote.id, {
+            cierre_facturacion: pedData.cierre_facturacion,
+            es_muestra: pedData.es_muestra,
             cliente_final: pedData.cliente_final,
             email_contacto: pedData.email_contacto,
             contacto_ventas: pedData.contacto_ventas,
             contacto_logistico: pedData.contacto_logistico,
             contacto_tesoreria: pedData.contacto_tesoreria,
+            direccion_envio_factura: pedData.direccion_envio_factura,
             dir_envio_factura_tipo: pedData.dir_envio_factura_tipo,
             servicio_subida_hidromasaje: pedData.servicio_subida_hidromasaje,
             piso_entrega: pedData.piso_entrega,
             tiene_escaleras: pedData.tiene_escaleras,
+            verificacion_previa_firplak: pedData.verificacion_previa_firplak,
             planos_hidromasaje: pedData.planos_hidromasaje,
             fecha_entrega: pedData.fecha_entrega,
             nit_cliente_final: pedData.nit_cliente_final,
@@ -323,6 +485,8 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
         if (ped) {
             setValue('fecha_facturacion', ped.fecha_facturacion || "");
             setValue('tipo_facturacion', ped.tipo_facturacion || "");
+            setValue('cierre_facturacion', ped.cierre_facturacion ?? false);
+            setValue('es_muestra', ped.es_muestra ?? false);
             setValue('orden_compra', ped.orden_compra || "");
             setValue('incoterm', ped.incoterm || "");
             setValue('notas_sap', ped.notas_sap || "");
@@ -331,10 +495,13 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
             setValue('contacto_ventas', ped.contacto_ventas || "");
             setValue('contacto_logistico', ped.contacto_logistico || "");
             setValue('contacto_tesoreria', ped.contacto_tesoreria || "");
+            setValue('direccion_envio_factura', ped.direccion_envio_factura || "");
             setValue('dir_envio_factura_tipo', ped.dir_envio_factura_tipo || "");
-            setValue('servicio_subida_hidromasaje', ped.servicio_subida_hidromasaje || false);
-            setValue('piso_entrega', ped.piso_entrega || "");
-            setValue('tiene_escaleras', ped.tiene_escaleras || false);
+            setValue('servicio_subida_hidromasaje', ped.servicio_subida_hidromasaje ?? false);
+            setValue('piso_entrega', ped.piso_entrega ?? 1);
+            setValue('medio_acceso', ped.tiene_escaleras ? "ESCALERA" : "ASCENSOR");
+            setValue('tiene_escaleras', ped.tiene_escaleras ?? false);
+            setValue('verificacion_previa_firplak', ped.verificacion_previa_firplak ?? false);
             setValue('planos_hidromasaje', ped.planos_hidromasaje || "");
             setValue('fecha_entrega', ped.fecha_entrega || "");
             setValue('nit_cliente_final', ped.nit_cliente_final || "");
@@ -351,6 +518,29 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
         }
     }, [itemsEnPedido, setValue]);
 
+    // Populate default fields from Account and its Contacts on creation
+    useEffect(() => {
+        if (!pedidoUuid && account) {
+            const mainContact = contacts?.find(c => c.es_principal);
+            const emailVal = mainContact?.email || account.email || "";
+            const contactName = mainContact?.nombre || "";
+
+            // Find specific contacts by role or name if possible, fallback to main contact
+            const logContact = contacts?.find(c => c.cargo?.toLowerCase().includes("logistica") || c.nombre.toLowerCase().includes("logistica"))?.nombre || contactName;
+            const tesContact = contacts?.find(c => c.cargo?.toLowerCase().includes("tesoreria") || c.nombre.toLowerCase().includes("tesoreria") || c.cargo?.toLowerCase().includes("finan"))?.nombre || contactName;
+            const salesContact = contacts?.find(c => c.cargo?.toLowerCase().includes("venta") || c.cargo?.toLowerCase().includes("comercial"))?.nombre || contactName;
+
+            if (!getValues('cliente_final')) setValue('cliente_final', account.nombre || "");
+            if (!getValues('nit_cliente_final')) setValue('nit_cliente_final', account.nit || "");
+            if (!getValues('direccion_envio_factura')) setValue('direccion_envio_factura', account.direccion || "");
+            if (!getValues('email_contacto')) setValue('email_contacto', emailVal);
+            if (!getValues('contacto_ventas')) setValue('contacto_ventas', salesContact);
+            if (!getValues('contacto_logistico')) setValue('contacto_logistico', logContact);
+            if (!getValues('contacto_tesoreria')) setValue('contacto_tesoreria', tesContact);
+            if (!getValues('dir_envio_factura_tipo')) setValue('dir_envio_factura_tipo', "OFICINA");
+        }
+    }, [pedidoUuid, account, contacts, setValue, getValues]);
+
     if (!quoteItems || !consumosGlobales) return <div>Cargando...</div>;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -363,12 +553,26 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
             return;
         }
 
+        // Validaciones obligatorias de los 9 campos obligatorios para guardar pedido (total o parcial)
+        const missingFields: string[] = [];
+        if (!data.fecha_facturacion) missingFields.push("Fecha de Facturación");
+        if (!data.piso_entrega || Number(data.piso_entrega) < 1) missingFields.push("Piso de Entrega (mínimo 1)");
+        if (!data.medio_acceso) missingFields.push("Opción de Ascensor o Escalera");
+        if (!data.direccion_envio_factura || !data.direccion_envio_factura.trim()) missingFields.push("Dirección Envío Factura");
+        if (!data.dir_envio_factura_tipo) missingFields.push("Tipo Dirección Factura (Oficina / Tienda)");
+
+        if (missingFields.length > 0) {
+            alert(`No es posible guardar el pedido (total o parcial) sin diligenciar los campos obligatorios:\n\n• ${missingFields.join('\n• ')}`);
+            return;
+        }
+
         setIsSubmitting(true);
         try {
         // Build items to save
         const itemsToSave = [];
         for (const qItem of quoteItems) {
-            const qty = Number(data.selected_quantities[qItem.producto_id] || 0);
+            if (!qItem.producto_id) continue;
+            const qty = Number(data.selected_quantities?.[qItem.producto_id] || 0);
             if (qty > 0) {
                 itemsToSave.push({
                     producto_id: qItem.producto_id,
@@ -387,6 +591,8 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
         const pedData = {
             fecha_facturacion: data.fecha_facturacion,
             tipo_facturacion: data.tipo_facturacion,
+            cierre_facturacion: Boolean(data.cierre_facturacion),
+            es_muestra: Boolean(data.es_muestra),
             orden_compra: data.orden_compra,
             incoterm: data.incoterm,
             notas_sap: data.notas_sap,
@@ -395,10 +601,12 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
             contacto_ventas: data.contacto_ventas,
             contacto_logistico: data.contacto_logistico,
             contacto_tesoreria: data.contacto_tesoreria,
+            direccion_envio_factura: data.direccion_envio_factura,
             dir_envio_factura_tipo: data.dir_envio_factura_tipo,
-            servicio_subida_hidromasaje: data.servicio_subida_hidromasaje,
-            piso_entrega: data.piso_entrega ? Number(data.piso_entrega) : null,
-            tiene_escaleras: data.tiene_escaleras,
+            servicio_subida_hidromasaje: Boolean(data.servicio_subida_hidromasaje),
+            piso_entrega: data.piso_entrega ? Number(data.piso_entrega) : 1,
+            tiene_escaleras: data.medio_acceso === "ESCALERA",
+            verificacion_previa_firplak: Boolean(data.verificacion_previa_firplak),
             planos_hidromasaje: data.planos_hidromasaje,
             fecha_entrega: data.fecha_entrega || null,
             nit_cliente_final: data.nit_cliente_final,
@@ -418,15 +626,19 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
 
         // Sincronizar estos mismos campos en la Cotización principal para el PDF F-V-29
         await db.quotes.update(quote.id, {
+            cierre_facturacion: pedData.cierre_facturacion,
+            es_muestra: pedData.es_muestra,
             cliente_final: pedData.cliente_final,
             email_contacto: pedData.email_contacto,
             contacto_ventas: pedData.contacto_ventas,
             contacto_logistico: pedData.contacto_logistico,
             contacto_tesoreria: pedData.contacto_tesoreria,
+            direccion_envio_factura: pedData.direccion_envio_factura,
             dir_envio_factura_tipo: pedData.dir_envio_factura_tipo,
             servicio_subida_hidromasaje: pedData.servicio_subida_hidromasaje,
             piso_entrega: pedData.piso_entrega,
             tiene_escaleras: pedData.tiene_escaleras,
+            verificacion_previa_firplak: pedData.verificacion_previa_firplak,
             planos_hidromasaje: pedData.planos_hidromasaje,
             fecha_entrega: pedData.fecha_entrega,
             nit_cliente_final: pedData.nit_cliente_final,
@@ -492,7 +704,9 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
                 
                 <div className="space-y-3">
                     {quoteItems.map(qi => {
-                        const consumido = consumosGlobales[qi.producto_id] || 0;
+                        if (!qi.producto_id) return null;
+                        const prodId = qi.producto_id;
+                        const consumido = consumosGlobales[prodId] || 0;
                         const disponible = qi.cantidad - consumido;
                         
                         return (
@@ -508,7 +722,7 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
                                         placeholder="0"
                                         min="0"
                                         max={disponible}
-                                        {...register(`selected_quantities.${qi.producto_id}`, { valueAsNumber: true })}
+                                        {...register(`selected_quantities.${prodId}`, { valueAsNumber: true })}
                                     />
                                     <span className="text-xs text-slate-500">uds</span>
                                 </div>
@@ -525,9 +739,9 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                         <label className="text-sm font-medium flex items-center gap-2 mb-1">
-                            <Calendar className="w-4 h-4 text-slate-400" /> Fecha Facturación
+                            <Calendar className="w-4 h-4 text-slate-400" /> Fecha Facturación <span className="text-red-500 font-bold">*</span>
                         </label>
-                        <input type="date" {...register("fecha_facturacion")} className="w-full p-2 border rounded-lg" />
+                        <input type="date" {...register("fecha_facturacion")} className="w-full p-2 border rounded-lg" required />
                     </div>
 
                     <div>
@@ -539,6 +753,17 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
                             <option value="Standard">Estándar</option>
                             <option value="Anticipo">Anticipo</option>
                         </select>
+                    </div>
+
+                    <div className="flex items-center gap-8 md:col-span-2 bg-slate-50 p-3 rounded-lg border">
+                        <label className="text-sm font-medium flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" {...register("cierre_facturacion")} className="w-4 h-4 rounded text-blue-600" />
+                            Cierre de Facturación <span className="text-red-500 font-bold">*</span>
+                        </label>
+                        <label className="text-sm font-medium flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" {...register("es_muestra")} className="w-4 h-4 rounded text-blue-600" />
+                            ¿Es Muestra? <span className="text-red-500 font-bold">*</span>
+                        </label>
                     </div>
 
                     <div className="md:col-span-2">
@@ -587,33 +812,49 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
                         <input {...register("contacto_tesoreria")} className="w-full mt-1 p-2 border rounded-lg" placeholder="Nombre y celular" />
                     </div>
 
-                    <div className="md:col-span-2">
-                        <p className="text-sm font-bold text-slate-700 mt-2">Entregas y Logística Específica</p>
+                    <div className="md:col-span-2 border-t pt-3">
+                        <p className="text-sm font-bold text-slate-700">Entregas y Logística Específica (Campos Obligatorios)</p>
                     </div>
+
+                    <div className="md:col-span-2">
+                        <label className="text-sm font-medium">Dirección Envío Factura <span className="text-red-500 font-bold">*</span></label>
+                        <input {...register("direccion_envio_factura")} className="w-full mt-1 p-2 border rounded-lg" placeholder="Dirección completa donde se enviará la factura" required />
+                    </div>
+
                     <div>
-                        <label className="text-sm font-medium">Dirección Envío Factura</label>
-                        <select {...register("dir_envio_factura_tipo")} className="w-full mt-1 p-2 border rounded-lg">
+                        <label className="text-sm font-medium">Tipo Dirección Factura (Oficina / Tienda) <span className="text-red-500 font-bold">*</span></label>
+                        <select {...register("dir_envio_factura_tipo")} className="w-full mt-1 p-2 border rounded-lg" required>
                             <option value="">Seleccione...</option>
                             <option value="OFICINA">Oficina</option>
                             <option value="TIENDA">Tienda</option>
                         </select>
                     </div>
+
                     <div>
-                        <label className="text-sm font-medium flex items-center gap-2 mt-1">
-                            <input type="checkbox" {...register("servicio_subida_hidromasaje")} />
-                            Requiere Servicio Subida Hidromasaje
+                        <label className="text-sm font-medium">Piso de Entrega (Default: 1) <span className="text-red-500 font-bold">*</span></label>
+                        <input type="number" {...register("piso_entrega")} className="w-full mt-1 p-2 border rounded-lg" placeholder="1" min="1" required />
+                    </div>
+
+                    <div>
+                        <label className="text-sm font-medium">Medio de Acceso (Ascensor o Escalera) <span className="text-red-500 font-bold">*</span></label>
+                        <select {...register("medio_acceso")} className="w-full mt-1 p-2 border rounded-lg" required>
+                            <option value="ASCENSOR">Ascensor</option>
+                            <option value="ESCALERA">Escalera</option>
+                        </select>
+                    </div>
+
+                    <div className="md:col-span-2 flex flex-wrap gap-6 bg-slate-50 p-3 rounded-lg border">
+                        <label className="text-sm font-medium flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" {...register("servicio_subida_hidromasaje")} className="w-4 h-4 rounded text-blue-600" />
+                            Requiere Servicio Subida Hidromasaje <span className="text-red-500 font-bold">*</span>
+                        </label>
+
+                        <label className="text-sm font-medium flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" {...register("verificacion_previa_firplak")} className="w-4 h-4 rounded text-blue-600" />
+                            Verificación previa por parte de personal Firplak <span className="text-red-500 font-bold">*</span>
                         </label>
                     </div>
-                    <div>
-                        <label className="text-sm font-medium">Piso de Entrega</label>
-                        <input type="number" {...register("piso_entrega")} className="w-full mt-1 p-2 border rounded-lg" placeholder="Ej. 1" min="1" />
-                    </div>
-                    <div>
-                        <label className="text-sm font-medium flex items-center gap-2 mt-1">
-                            <input type="checkbox" {...register("tiene_escaleras")} />
-                            ¿Tiene escaleras?
-                        </label>
-                    </div>
+
                     <div className="md:col-span-2 flex flex-wrap gap-6 bg-slate-50 p-3 rounded-lg border">
                         <label className="text-sm font-medium flex items-center gap-2">
                             <input type="checkbox" {...register("entrega_en_obra")} />
