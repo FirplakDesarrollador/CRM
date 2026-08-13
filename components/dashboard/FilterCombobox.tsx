@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Command, CommandInput, CommandEmpty, CommandGroup, CommandItem, CommandList } from "@/components/ui/command";
 import { Check, ChevronDown } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, includesNormalized } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
 export interface FilterComboboxProps {
@@ -39,7 +39,7 @@ export function FilterCombobox({ options, value, onChange, placeholder, classNam
                 </Button>
             </PopoverTrigger>
             <PopoverContent className="w-[250px] p-0" align="start">
-                <Command>
+                <Command filter={(value, search) => (includesNormalized(value, search) ? 1 : 0)}>
                     <CommandInput placeholder={`Buscar ${placeholder.toLowerCase()}...`} />
                     <CommandList>
                         <CommandEmpty>No se encontraron resultados.</CommandEmpty>

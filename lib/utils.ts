@@ -13,3 +13,19 @@ export function formatCurrency(amount: number) {
         maximumFractionDigits: 0,
     }).format(amount);
 }
+
+/**
+ * Normaliza un texto removiendo tildes y caracteres diacríticos, convirtiéndolo a minúsculas.
+ */
+export function removeAccents(str: string | null | undefined): string {
+    if (!str) return "";
+    return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
+/**
+ * Verifica si `text` contiene `searchQuery` ignorando tildes y mayúsculas/minúsculas.
+ */
+export function includesNormalized(text: string | null | undefined, searchQuery: string | null | undefined): boolean {
+    if (!text || !searchQuery) return false;
+    return removeAccents(text).includes(removeAccents(searchQuery));
+}

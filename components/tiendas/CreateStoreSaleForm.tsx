@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { Loader2, Store, DollarSign, CalendarPlus, Search, Trash2, TicketCheck } from "lucide-react";
+import { Loader2, Store, DollarSign, CalendarPlus, Search, Trash2, TicketCheck, ChevronDown, ChevronUp } from "lucide-react";
 import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useOpportunities } from "@/lib/hooks/useOpportunities";
 import { useActivities } from "@/lib/hooks/useActivities";
@@ -17,6 +17,7 @@ import { useUsers } from "@/lib/hooks/useUsers";
 import { useOpportunityOrigins } from "@/lib/hooks/useOpportunityOrigins";
 import { reserveFairInventory, useInventorySummary } from "@/lib/hooks/useInventory";
 import { getProductPrice, SALES_CHANNELS } from "@/lib/salesChannels";
+import { includesNormalized } from "@/lib/utils";
 
 // Eschema de validación combinado
 const storeSaleSchema = z.object({
@@ -56,8 +57,7 @@ const storeSaleSchema = z.object({
     })),
 
     // Actividad
-    fecha_inicio: z.string().min(1, "Fecha de inicio requerida"),
-    fecha_fin: z.string().min(1, "Fecha de fin requerida"),
+    fecha_fin: z.string().min(1, "Fecha de vencimiento requerida"),
     clasificacion_id: z.string().min(1, "Clasificación requerida"),
     prioridad: z.enum(["Baja", "Media", "Alta"]),
     actividad_descripcion: z.string().optional()
@@ -70,6 +70,20 @@ interface CreateStoreSaleFormProps {
     onSuccess?: () => void;
 }
 
+// Helper para calcular la fecha de vencimiento por defecto: 7 días después a las 10:00 am
+const getDefaultDueDate = () => {
+    const defaultDueDate = new Date();
+    defaultDueDate.setDate(defaultDueDate.getDate() + 7);
+    defaultDueDate.setHours(10, 0, 0, 0);
+
+    const year = defaultDueDate.getFullYear();
+    const month = String(defaultDueDate.getMonth() + 1).padStart(2, '0');
+    const day = String(defaultDueDate.getDate()).padStart(2, '0');
+    const hours = String(defaultDueDate.getHours()).padStart(2, '0');
+    const minutes = String(defaultDueDate.getMinutes()).padStart(2, '0');
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+};
+
 export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
     const { createAccount, updateAccount } = useAccounts();
     const { createOpportunity } = useOpportunities();
@@ -79,6 +93,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
     const { origins, isLoading: isLoadingOrigins } = useOpportunityOrigins();
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
+    const [isActivityExpanded, setIsActivityExpanded] = useState(false);
     
     const { products: searchResults, isLoading: isSearching } = useProductSearch(searchTerm);
     const searchProductIds = useMemo(() => searchResults.map(product => product.id), [searchResults]);
@@ -149,8 +164,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             comentarios: "",
             origen_oportunidad: "visita",
             venta_feria: false,
-            fecha_inicio: "",
-            fecha_fin: "",
+            fecha_fin: getDefaultDueDate(),
             clasificacion_id: "",
             prioridad: "Media",
             actividad_descripcion: "",
@@ -173,6 +187,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
     // Filtrado estricto de asesores: Si el vendedor no tiene país o departamento asignado, NO aparece en el desplegable.
     const selectedPais = watch("pais_id");
     const selectedDept = watch("departamento_id");
+    const selectedAdvisorId = watch("asesor_id");
 
     const filteredAdvisors = useMemo(() => {
         const activeUsers = users?.filter(u => u.is_active) || [];
@@ -202,7 +217,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
     // Garantizar que Colombia quede seleccionado automáticamente cuando los países terminen de cargar
     useEffect(() => {
         if (displayCountries.length > 0) {
-            const colombia = displayCountries.find(c => c.nombre.toLowerCase().includes("colombia")) || displayCountries.find(c => String(c.id) === "1");
+            const colombia = displayCountries.find(c => includesNormalized(c.nombre, "colombia")) || displayCountries.find(c => String(c.id) === "1");
             const targetId = colombia ? String(colombia.id) : "1";
             const currentPais = watch("pais_id");
             if (!currentPais || currentPais === "") {
@@ -213,18 +228,46 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
 
     // Seleccionar automáticamente un asesor si el actual no pertenece al filtro o está vacío
     useEffect(() => {
-        const currentAdvisor = watch("asesor_id");
         if (filteredAdvisors.length > 0) {
-            if (!currentAdvisor || !filteredAdvisors.some(u => u.id === currentAdvisor)) {
+            if (!selectedAdvisorId || !filteredAdvisors.some(u => u.id === selectedAdvisorId)) {
                 setValue("asesor_id", filteredAdvisors[0].id);
             }
         } else {
             setValue("asesor_id", "");
         }
-    }, [filteredAdvisors, setValue, watch]);
+    }, [filteredAdvisors, selectedAdvisorId, setValue]);
+
+    // Selección bidireccional: Al seleccionar un asesor, se toma por defecto su país y departamento (el primero de su lista asignada si la selección actual no le pertenece)
+    useEffect(() => {
+        if (!selectedAdvisorId || !users || users.length === 0) return;
+
+        const advisor = users.find(u => u.id === selectedAdvisorId);
+        if (!advisor) return;
+
+        const advPaises = (
+            advisor.paises && advisor.paises.length > 0
+                ? advisor.paises
+                : (advisor.pais ? [advisor.pais] : [])
+        ).map(p => String(p));
+
+        const advDepts = (
+            advisor.departamentos && advisor.departamentos.length > 0
+                ? advisor.departamentos
+                : (advisor.departamento ? [advisor.departamento] : [])
+        ).map(d => String(d));
+
+        if (advPaises.length > 0 && (!selectedPais || !advPaises.includes(String(selectedPais)))) {
+            setValue("pais_id", advPaises[0]);
+        }
+
+        if (advDepts.length > 0 && (!selectedDept || !advDepts.includes(String(selectedDept)))) {
+            setValue("departamento_id", advDepts[0]);
+            setValue("ciudad_id", "");
+        }
+    }, [selectedAdvisorId, selectedPais, selectedDept, users, setValue]);
 
     const resetStoreForm = useCallback(() => {
-        const colombia = displayCountries.find(c => c.nombre.toLowerCase().includes("colombia")) || displayCountries.find(c => String(c.id) === "1");
+        const colombia = displayCountries.find(c => includesNormalized(c.nombre, "colombia")) || displayCountries.find(c => String(c.id) === "1");
         const defaultPaisId = colombia ? String(colombia.id) : "1";
 
         reset({
@@ -243,18 +286,29 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             comentarios: "",
             origen_oportunidad: "visita",
             venta_feria: false,
+            fecha_fin: getDefaultDueDate(),
             clasificacion_id: "",
             prioridad: "Media",
             actividad_descripcion: "",
             items: []
         });
+    }, [reset, displayCountries]);
 
-        const now = new Date();
-        now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
-        const later = new Date(now.getTime() + 60 * 60 * 1000);
-        setValue("fecha_inicio", now.toISOString().slice(0, 16));
-        setValue("fecha_fin", later.toISOString().slice(0, 16));
-    }, [reset, setValue, displayCountries]);
+    // Seleccionar automáticamente la clasificación "Llamada telefónica" por defecto
+    useEffect(() => {
+        if (classifications.length > 0) {
+            const currentClasif = watch("clasificacion_id");
+            if (!currentClasif) {
+                const callClasif = classifications.find(c => 
+                    includesNormalized(c.nombre, "llamada")
+                ) || eventClassifications[0] || classifications[0];
+                
+                if (callClasif) {
+                    setValue("clasificacion_id", String(callClasif.id));
+                }
+            }
+        }
+    }, [classifications, eventClassifications, setValue, watch]);
 
     // Cargar fechas por defecto al abrir el formulario.
     useEffect(() => {
@@ -445,7 +499,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                 clasificacion_id: Number(data.clasificacion_id),
                 tipo_actividad: "EVENTO",
                 descripcion: data.actividad_descripcion || "Seguimiento de venta en tienda",
-                fecha_inicio: data.fecha_inicio,
+                fecha_inicio: data.fecha_fin,
                 fecha_fin: data.fecha_fin,
                 prioridad: data.prioridad,
                 user_id: data.asesor_id || user?.id,
@@ -783,69 +837,80 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                         </section>
 
                         {/* SECCIÓN ACTIVIDAD */}
-                        <section className="space-y-4">
-                            <h3 className="text-lg font-semibold flex items-center gap-2 text-orange-600 border-b pb-2">
-                                <CalendarPlus className="w-5 h-5" /> Actividad Programada
-                            </h3>
-                            
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                    <label className="text-sm font-medium text-slate-700">Clasificación *</label>
-                                    <select 
-                                        {...register("clasificacion_id")} 
-                                        className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-orange-500 outline-none"
+                        <section className="space-y-4 rounded-xl border border-slate-200 bg-slate-50/50 p-4 transition-all">
+                            <div 
+                                onClick={() => setIsActivityExpanded(!isActivityExpanded)}
+                                className="flex items-center justify-between cursor-pointer select-none"
+                            >
+                                <h3 className="text-lg font-semibold flex items-center gap-2 text-orange-600">
+                                    <CalendarPlus className="w-5 h-5" /> Actividad Programada
+                                </h3>
+                                <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
+                                    {!isActivityExpanded && (
+                                        <span className="hidden sm:inline-block bg-orange-100/80 text-orange-800 px-2.5 py-1 rounded-full border border-orange-200/70 font-semibold text-[11px]">
+                                            Llamada Telefónica · Prioridad Media (Vence en 7 días)
+                                        </span>
+                                    )}
+                                    <button
+                                        type="button"
+                                        className="p-1 hover:bg-slate-200/60 rounded-lg text-slate-600 transition-colors"
+                                        aria-label="Expandir o colapsar sección de actividad"
                                     >
-                                        <option value="">Seleccione...</option>
-                                        {eventClassifications.map(c => (
-                                            <option key={c.id} value={String(c.id)}>{c.nombre}</option>
-                                        ))}
-                                    </select>
-                                    {errors.clasificacion_id && <p className="text-red-500 text-xs mt-1">{errors.clasificacion_id.message}</p>}
-                                </div>
-                                
-                                <div>
-                                    <label className="text-sm font-medium text-slate-700">Prioridad *</label>
-                                    <select 
-                                        {...register("prioridad")} 
-                                        className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-orange-500 outline-none"
-                                    >
-                                        <option value="Alta">Alta</option>
-                                        <option value="Media">Media</option>
-                                        <option value="Baja">Baja</option>
-                                    </select>
-                                    {errors.prioridad && <p className="text-red-500 text-xs mt-1">{errors.prioridad.message}</p>}
-                                </div>
-                                
-                                <div>
-                                    <label className="text-sm font-medium text-slate-700">Fecha y Hora Inicial *</label>
-                                    <input 
-                                        {...register("fecha_inicio")} 
-                                        type="datetime-local" 
-                                        className="w-full mt-1 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-orange-500 outline-none" 
-                                    />
-                                    {errors.fecha_inicio && <p className="text-red-500 text-xs mt-1">{errors.fecha_inicio.message}</p>}
-                                </div>
-                                
-                                <div>
-                                    <label className="text-sm font-medium text-slate-700">Fecha y Hora Final *</label>
-                                    <input 
-                                        {...register("fecha_fin")} 
-                                        type="datetime-local" 
-                                        className="w-full mt-1 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-orange-500 outline-none" 
-                                    />
-                                    {errors.fecha_fin && <p className="text-red-500 text-xs mt-1">{errors.fecha_fin.message}</p>}
-                                </div>
-                                
-                                <div className="md:col-span-2">
-                                    <label className="text-sm font-medium text-slate-700">Comentarios de la Actividad (Opcional)</label>
-                                    <textarea 
-                                        {...register("actividad_descripcion")} 
-                                        rows={3}
-                                        className="w-full mt-1 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-orange-500 outline-none resize-none" 
-                                        placeholder="Detalles sobre lo que se realizará en la actividad..." 
-                                    />
+                                        {isActivityExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                                    </button>
                                 </div>
                             </div>
+                            
+                            {isActivityExpanded && (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3 border-t border-slate-200/60">
+                                    <div>
+                                        <label className="text-sm font-medium text-slate-700">Clasificación *</label>
+                                        <select 
+                                            {...register("clasificacion_id")} 
+                                            className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-orange-500 outline-none"
+                                        >
+                                            <option value="">Seleccione...</option>
+                                            {(eventClassifications.length > 0 ? eventClassifications : classifications).map(c => (
+                                                <option key={c.id} value={String(c.id)}>{c.nombre}</option>
+                                            ))}
+                                        </select>
+                                        {errors.clasificacion_id && <p className="text-red-500 text-xs mt-1">{errors.clasificacion_id.message}</p>}
+                                    </div>
+                                    
+                                    <div>
+                                        <label className="text-sm font-medium text-slate-700">Prioridad *</label>
+                                        <select 
+                                            {...register("prioridad")} 
+                                            className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-orange-500 outline-none"
+                                        >
+                                            <option value="Alta">Alta</option>
+                                            <option value="Media">Media</option>
+                                            <option value="Baja">Baja</option>
+                                        </select>
+                                        {errors.prioridad && <p className="text-red-500 text-xs mt-1">{errors.prioridad.message}</p>}
+                                    </div>
+                                    
+                                    <div className="md:col-span-2">
+                                        <label className="text-sm font-medium text-slate-700">Fecha y Hora de Vencimiento *</label>
+                                        <input 
+                                            {...register("fecha_fin")} 
+                                            type="datetime-local" 
+                                            className="w-full mt-1 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-orange-500 outline-none" 
+                                        />
+                                        {errors.fecha_fin && <p className="text-red-500 text-xs mt-1">{errors.fecha_fin.message}</p>}
+                                    </div>
+                                    
+                                    <div className="md:col-span-2">
+                                        <label className="text-sm font-medium text-slate-700">Comentarios de la Actividad (Opcional)</label>
+                                        <textarea 
+                                            {...register("actividad_descripcion")} 
+                                            rows={3}
+                                            className="w-full mt-1 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-orange-500 outline-none resize-none" 
+                                            placeholder="Detalles sobre lo que se realizará en la actividad..." 
+                                        />
+                                    </div>
+                                </div>
+                            )}
                         </section>
 
                     </form>
