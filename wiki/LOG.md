@@ -3,6 +3,16 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-08-12 - Ingest: Valores por Defecto y Sección Colapsable en Actividad Programada de /tiendas
+
+- Se actualizó el formulario `CreateStoreSaleForm.tsx` del módulo `/tiendas` (Tiendas-Ferias).
+- Se simplificó el campo de fecha reduciéndolo únicamente a **Fecha y Hora de Vencimiento** (eliminando `fecha_inicio`).
+- Se configuró el valor por defecto de la fecha de vencimiento a 7 días posteriores a las 10:00 AM local.
+- Se configuró la **Clasificación por defecto** seleccionando automáticamente "Llamada telefónica" al cargar las opciones.
+- Se mantuvo la **Prioridad por defecto** en "Media".
+- Se transformó la sección "Actividad Programada" en un acordeón colapsable (cerrado por defecto) que muestra un resumen visual y permite desplegar y editar la información según el usuario lo requiera.
+- Páginas actualizadas: `wiki/LOG.md`.
+
 ## 2026-08-10 - Ingest: Filtrado de Asesor por País y Departamento en Formulario /tiendas
 
 - Se agregaron las columnas `paises` y `departamentos` (arreglos `TEXT[]`) a la tabla `CRM_Usuarios` en Supabase (`20260810_add_user_country_department.sql`).

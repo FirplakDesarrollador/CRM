@@ -35,7 +35,7 @@ const storeSaleSchema = z.object({
     
     // Oportunidad
     fase_id: z.string().min(1, "Fase requerida"),
-    amount: z.number().min(0, "Debe ser mayor a 0"),
+    amount: z.number().optional().default(0),
     comentarios: z.string().min(1, "Comentario requerido"),
     origen_oportunidad: z.string().min(1, "Origen requerido"),
     venta_feria: z.boolean(),
@@ -226,11 +226,12 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         }
     }, [displayCountries, setValue, watch]);
 
-    // Seleccionar automáticamente un asesor si el actual no pertenece al filtro o está vacío
+    // Seleccionar automáticamente un asesor (priorizando a Juan Correa si está disponible) si el actual no pertenece al filtro o está vacío
     useEffect(() => {
         if (filteredAdvisors.length > 0) {
             if (!selectedAdvisorId || !filteredAdvisors.some(u => u.id === selectedAdvisorId)) {
-                setValue("asesor_id", filteredAdvisors[0].id);
+                const juanCorrea = filteredAdvisors.find(u => includesNormalized(u.full_name || "", "juan correa"));
+                setValue("asesor_id", juanCorrea ? juanCorrea.id : filteredAdvisors[0].id);
             }
         } else {
             setValue("asesor_id", "");
@@ -269,6 +270,8 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
     const resetStoreForm = useCallback(() => {
         const colombia = displayCountries.find(c => includesNormalized(c.nombre, "colombia")) || displayCountries.find(c => String(c.id) === "1");
         const defaultPaisId = colombia ? String(colombia.id) : "1";
+        const primerContactoPhase = phasesList.find(p => includesNormalized(p.nombre, "primer contacto"));
+        const defaultPhaseId = primerContactoPhase ? String(primerContactoPhase.id) : (phasesList[0] ? String(phasesList[0].id) : "");
 
         reset({
             nombre_cuenta: "",
@@ -282,7 +285,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             canal_id: "PROPIO",
             subclasificacion_id: "",
             amount: 0,
-            fase_id: "",
+            fase_id: defaultPhaseId,
             comentarios: "",
             origen_oportunidad: "visita",
             venta_feria: false,
@@ -292,37 +295,21 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             actividad_descripcion: "",
             items: []
         });
-    }, [reset, displayCountries]);
-
-    // Seleccionar automáticamente la clasificación "Llamada telefónica" por defecto
-    useEffect(() => {
-        if (classifications.length > 0) {
-            const currentClasif = watch("clasificacion_id");
-            if (!currentClasif) {
-                const callClasif = classifications.find(c => 
-                    includesNormalized(c.nombre, "llamada")
-                ) || eventClassifications[0] || classifications[0];
-                
-                if (callClasif) {
-                    setValue("clasificacion_id", String(callClasif.id));
-                }
-            }
-        }
-    }, [classifications, eventClassifications, setValue, watch]);
-
-    // Cargar fechas por defecto al abrir el formulario.
-    useEffect(() => {
-        resetStoreForm();
-    }, [resetStoreForm]);
+    }, [reset, displayCountries, phasesList]);
 
     const watchedItems = watch("items");
     const items = useMemo(() => watchedItems || [], [watchedItems]);
 
-    // Cada canal inicia con su primera fase y subclasificacion disponibles.
+    // Cada canal inicia con la fase "Primer Contacto" por defecto (o su primera fase disponible).
     useEffect(() => {
         const currentPhase = watch("fase_id");
-        if (phasesList.length > 0 && !phasesList.some(phase => String(phase.id) === currentPhase)) {
-            setValue("fase_id", String(phasesList[0].id));
+        if (phasesList.length > 0) {
+            const primerContactoPhase = phasesList.find(p => includesNormalized(p.nombre, "primer contacto"));
+            const defaultPhaseId = primerContactoPhase ? String(primerContactoPhase.id) : String(phasesList[0].id);
+
+            if (!currentPhase || !phasesList.some(phase => String(phase.id) === currentPhase)) {
+                setValue("fase_id", defaultPhaseId);
+            }
         }
     }, [phasesList, setValue, watch]);
 
@@ -339,6 +326,22 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             setValue("origen_oportunidad", origins[0].codigo);
         }
     }, [origins, setValue, watch]);
+
+    // Seleccionar automáticamente la clasificación "Llamada telefónica" por defecto
+    useEffect(() => {
+        if (classifications.length > 0) {
+            const currentClasif = watch("clasificacion_id");
+            if (!currentClasif) {
+                const callClasif = classifications.find(c => 
+                    includesNormalized(c.nombre, "llamada")
+                ) || eventClassifications[0] || classifications[0];
+                
+                if (callClasif) {
+                    setValue("clasificacion_id", String(callClasif.id));
+                }
+            }
+        }
+    }, [classifications, eventClassifications, setValue, watch]);
 
     // Recalcular los productos ya elegidos al cambiar canal o venta de feria.
     useEffect(() => {
@@ -674,27 +677,6 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         ))}
                                     </select>
                                     {errors.fase_id && <p className="text-red-500 text-xs mt-1">{errors.fase_id.message}</p>}
-                                </div>
-                                
-                                <div>
-                                    <label className="text-sm font-medium text-slate-700">Valor Estimado *</label>
-                                    <div className="relative mt-1">
-                                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                            <span className="text-slate-500 sm:text-sm">$</span>
-                                        </div>
-                                        <input 
-                                            {...register("amount", { valueAsNumber: true })}
-                                            type="number" 
-                                            readOnly={items.length > 0}
-                                            className={`w-full pl-7 pr-12 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-green-500 outline-none ${items.length > 0 ? "bg-slate-100" : ""}`} 
-                                            placeholder="0.00" 
-                                        />
-                                        <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
-                                            <span className="text-slate-500 sm:text-sm">COP</span>
-                                        </div>
-                                    </div>
-                                    {items.length > 0 && <p className="text-[10px] text-blue-600 mt-1">Calculado automáticamente por productos</p>}
-                                    {errors.amount && <p className="text-red-500 text-xs mt-1">{errors.amount.message}</p>}
                                 </div>
                                 
                                 <div>
