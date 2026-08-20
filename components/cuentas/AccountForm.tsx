@@ -41,6 +41,7 @@ const accountSchema = z.object({
     nivel_premium: z.enum(['PREMIUM', 'DESTACADO', 'ACTIVO']).nullable().optional(),
     ignorar_limites_descuento: z.boolean().optional(),
     comentarios: z.string().nullable().optional(),
+    origen_cuenta: z.string().nullable().optional(),
 });
 
 type AccountFormData = z.infer<typeof accountSchema>;
@@ -207,7 +208,8 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             es_premium: account?.es_premium || false,
             nivel_premium: account?.nivel_premium || null,
             ignorar_limites_descuento: account?.ignorar_limites_descuento || false,
-            comentarios: account?.comentarios || ""
+            comentarios: account?.comentarios || "",
+            origen_cuenta: (account as any)?.origen_cuenta || ""
         }
     });
 
@@ -240,7 +242,8 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             es_premium: !!data.nivel_premium,
             nivel_premium: data.nivel_premium || null,
             ignorar_limites_descuento: data.ignorar_limites_descuento || false,
-            comentarios: data.comentarios || null
+            comentarios: data.comentarios || null,
+            origen_cuenta: data.origen_cuenta || null
         };
         await updateAccount(account.id, payload);
     };
@@ -409,7 +412,8 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                 es_premium: !!data.nivel_premium,
                 nivel_premium: data.nivel_premium || null,
                 ignorar_limites_descuento: data.ignorar_limites_descuento || false,
-                comentarios: data.comentarios || null
+                comentarios: data.comentarios || null,
+                origen_cuenta: data.origen_cuenta || null
             };
 
             // DEBUG: Log the final payload
@@ -790,6 +794,10 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                             <label className="text-sm font-medium">Email</label>
                             <input {...register("email")} type="email" className="w-full border p-2 rounded" placeholder="correo@ejemplo.com" />
                             {errors.email && <span className="text-red-500 text-xs">{errors.email.message}</span>}
+                        </div>
+                        <div>
+                            <label className="text-sm font-medium">Origen de la Cuenta <span className="text-slate-400 font-normal text-xs">(Opcional)</span></label>
+                            <input {...register("origen_cuenta")} className="w-full border p-2 rounded" placeholder="Ej. Referido, Feria, Publicidad, Web..." />
                         </div>
                     </div>
 

@@ -41,6 +41,7 @@ export function useContacts(accountId?: string) {
             email: data.email,
             telefono: data.telefono,
             es_principal: data.es_principal || false,
+            comentarios: data.comentarios,
             created_by: user?.id,
             updated_by: user?.id,
             updated_at: new Date().toISOString()

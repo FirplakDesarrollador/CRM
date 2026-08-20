@@ -3,6 +3,26 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-08-20 - Ingest: Autocompletado, Búsqueda Flexible, Enmascaramiento y Sección de Contacto en /tiendas
+
+- Se integró búsqueda interactiva de cuentas existentes en el campo "Nombre de la Cuenta / Cliente" del formulario de creación rápida en `/tiendas` (`CreateStoreSaleForm.tsx`).
+- Se implementó la utilidad `matchesSearchTokens` en `lib/utils.ts` permitiendo búsquedas multi-término independientes del orden, mayúsculas y acentos.
+- Al seleccionar una cuenta existente:
+  - Se completan e inhabilitan (bloquean) los 10 campos de datos del cliente: `nit_base`, `telefono`, `email`, `canal_id`, `subclasificacion_id`, `pais_id`, `departamento_id`, `ciudad_id`, `asesor_id` y `direccion`.
+  - Los campos sensibles `nit_base`, `telefono` y `email` se enmascaran visualmente con `*****`.
+  - Aparece una **sección comprimida de Contacto** (acordeón colapsable) inmediatamente después de los datos del cliente, permitiendo registrar un nuevo contacto (`nombre`, `cargo`, `email`, `telefono`, `comentarios`) asociado a la cuenta existente seleccionada.
+  - Se enlaza la oportunidad, actividad y nuevo contacto directamente a la cuenta existente (`account_id`) sin sobreescribir datos sensibles en la base de datos.
+- Si se desvincula o se borra el nombre del cliente, el formulario vuelve a su estado por defecto editable y oculta/limpia la sección de contacto.
+- Se aseguró que `createContact` en `lib/hooks/useContacts.ts` persista el campo opcional `comentarios`.
+- Páginas actualizadas: `wiki/LOG.md`.
+
+## 2026-08-20 - Ingest: Columna origen_cuenta en CRM_Cuentas y Wizard de Creación
+
+- Se creó la migración `20260820_add_origen_cuenta.sql` agregando la columna `origen_cuenta TEXT` en `CRM_Cuentas`.
+- Se integró el campo opcional de texto "Origen de la Cuenta" en el paso 2 (Ubicación y Contacto) del wizard de creación `CreateAccountWizard.tsx`.
+- Se actualizó el formulario de edición `AccountForm.tsx`, la interfaz `LocalCuenta` en `lib/db.ts` y el tipo `AccountServer` en `useAccountsServer.ts`.
+- Páginas actualizadas: `wiki/pages/cuentas.md`, `wiki/LOG.md`.
+
 ## 2026-08-12 - Ingest: Valores por Defecto y Sección Colapsable en Actividad Programada de /tiendas
 
 - Se actualizó el formulario `CreateStoreSaleForm.tsx` del módulo `/tiendas` (Tiendas-Ferias).

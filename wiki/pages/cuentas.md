@@ -13,6 +13,7 @@ que determina su lista de precios.
 - **Propietario:** `owner_user_id` (`20260218_add_account_owner.sql`), usado también por RLS.
 - **Nivel premium:** `es_premium` + `nivel_premium` jerárquico
   (`PREMIUM` > `DESTACADO` > `ACTIVO`), migración `20260113_premium_clients`.
+- **Origen de la cuenta:** `origen_cuenta` (opcional de texto, ej. Referido, Feria, Publicidad, Web, etc., migración `20260820_add_origen_cuenta.sql`).
 - **Descuentos:** `ignorar_limites_descuento` permite saltar los límites de descuento por
   volumen en cotizaciones (ver [[cotizaciones-y-pedidos]]).
 - **Geografía:** `pais_id` / `departamento_id` / `ciudad_id` contra catálogos de Colombia
@@ -21,7 +22,7 @@ que determina su lista de precios.
 ## UI
 
 - Creación mediante `app/cuentas/nueva/CreateAccountWizard.tsx`: wizard de 3 pasos
-  (información base, ubicación/contacto y clasificación). La cuenta solo se crea
+  (información base, ubicación/contacto con origen_cuenta, y clasificación). La cuenta solo se crea
   desde el último paso con `Crear Cuenta`; el submit está protegido contra avances
   o doble clics que intenten saltarse la clasificación.
 - Prueba E2E dev-only en `/e2e/cuentas-wizard` para validar el wizard sin depender
@@ -53,4 +54,4 @@ que determina su lista de precios.
 - `app/e2e/cuentas-wizard/page.tsx`, `e2e/create_account_wizard.spec.ts`,
   `playwright.e2e.config.ts`
 - `lib/hooks/useAccounts.ts`, `useAccountsServer.ts`, `lib/db.ts` (interfaz `LocalCuenta`)
-- Migraciones: `20260108_sales_channels`, `20260113_premium_clients`, `20260119_subclassifications`, `20260218_add_account_owner`
+- Migraciones: `20260108_sales_channels`, `20260113_premium_clients`, `20260119_subclassifications`, `20260218_add_account_owner`, `20260820_add_origen_cuenta`

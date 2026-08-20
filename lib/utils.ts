@@ -29,3 +29,15 @@ export function includesNormalized(text: string | null | undefined, searchQuery:
     if (!text || !searchQuery) return false;
     return removeAccents(text).includes(removeAccents(searchQuery));
 }
+
+/**
+ * Verifica si `text` contiene todas las palabras de `searchQuery` en cualquier orden, ignorando tildes y mayúsculas.
+ */
+export function matchesSearchTokens(text: string | null | undefined, searchQuery: string | null | undefined): boolean {
+    if (!text || !searchQuery) return false;
+    const normalizedText = removeAccents(text);
+    const tokens = removeAccents(searchQuery).trim().split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) return false;
+    return tokens.every(token => normalizedText.includes(token));
+}
+

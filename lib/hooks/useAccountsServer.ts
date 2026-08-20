@@ -33,6 +33,7 @@ export type AccountServer = {
     _hasPendingSync?: boolean;
     comentarios?: string | null;
     ignorar_limites_descuento?: boolean;
+    origen_cuenta?: string | null;
 };
 
 type UseAccountsServerProps = {

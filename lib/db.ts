@@ -44,6 +44,7 @@ export interface LocalCuenta {
     updated_by?: string;
     updated_at?: string;
     comentarios?: string;
+    origen_cuenta?: string | null;
 }
 
 export interface LocalPais {
