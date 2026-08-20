@@ -908,7 +908,8 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         {selectedAccount && <Lock className="w-3 h-3 text-slate-400" />}
                                     </label>
                                     <select 
-                                        {...register("canal_id")} 
+                                        {...register("canal_id")}
+                                        value={watch("canal_id") || "PROPIO"}
                                         disabled={!!selectedAccount}
                                         className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                                     >
@@ -923,7 +924,8 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         {selectedAccount && <Lock className="w-3 h-3 text-slate-400" />}
                                     </label>
                                     <select 
-                                        {...register("subclasificacion_id")} 
+                                        {...register("subclasificacion_id")}
+                                        value={watch("subclasificacion_id") || ""}
                                         disabled={!!selectedAccount || !selectedChannel || (channelSubclassifications.length === 0 && !selectedAccount)} 
                                         className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed focus:ring-2 focus:ring-blue-500 outline-none"
                                     >
@@ -947,6 +949,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                     </label>
                                     <select
                                         {...register("pais_id")}
+                                        value={watch("pais_id") || ""}
                                         disabled={!!selectedAccount}
                                         className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                                         onChange={(e) => {
@@ -968,6 +971,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                     </label>
                                     <select
                                         {...register("departamento_id")}
+                                        value={watch("departamento_id") || ""}
                                         className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                                         disabled={!!selectedAccount || !watch("pais_id")}
                                         onChange={(e) => {
@@ -990,6 +994,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                     </label>
                                     <select
                                         {...register("ciudad_id")}
+                                        value={watch("ciudad_id") || ""}
                                         className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                                         disabled={!!selectedAccount || !watch("departamento_id")}
                                     >
@@ -1011,6 +1016,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                     </label>
                                     <select 
                                         {...register("asesor_id")} 
+                                        value={watch("asesor_id") || ""}
                                         disabled={!!selectedAccount}
                                         className="w-full mt-1 border p-2 rounded-lg bg-white border-blue-300 focus:ring-2 focus:ring-blue-500 outline-none font-medium text-slate-800 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                                     >
