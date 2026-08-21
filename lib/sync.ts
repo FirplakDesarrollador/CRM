@@ -2081,18 +2081,39 @@ export class SyncEngine {
             const items: OutboxItem[] = [];
 
             if (options.isSnapshot) {
-                // Modo Snapshot: Enviar todo el objeto como una sola mutación atómica
-                items.push({
-                    id: uuidv4(),
-                    entity_type: entityTable,
-                    entity_id: entityId,
-                    field_name: '_complete_snapshot_',
-                    old_value: null,
-                    new_value: changes,
-                    field_timestamp: now,
-                    status: 'PENDING',
-                    retry_count: 0
-                });
+                // Modo Snapshot: Check if there is already an active snapshot or pending fields for this entity
+                const existingItems = await db.outbox
+                    .where('entity_type').equals(entityTable)
+                    .and(item => item.entity_id === entityId && (item.status === 'PENDING' || item.status === 'FAILED'))
+                    .toArray();
+
+                if (existingItems.length > 0) {
+                    // Update the primary item to hold the fresh snapshot and purge any duplicates immediately
+                    const [primary, ...duplicates] = existingItems;
+                    await db.outbox.update(primary.id, {
+                        field_name: '_complete_snapshot_',
+                        new_value: changes,
+                        field_timestamp: now,
+                        status: 'PENDING',
+                        error: undefined
+                    });
+
+                    if (duplicates.length > 0) {
+                        await db.outbox.bulkDelete(duplicates.map(d => d.id));
+                    }
+                } else {
+                    items.push({
+                        id: uuidv4(),
+                        entity_type: entityTable,
+                        entity_id: entityId,
+                        field_name: '_complete_snapshot_',
+                        old_value: null,
+                        new_value: changes,
+                        field_timestamp: now,
+                        status: 'PENDING',
+                        retry_count: 0
+                    });
+                }
             } else {
                 // Modo Normal: Desglosar por campos para LWW granular
                 for (const [field, value] of Object.entries(changes)) {
@@ -2100,24 +2121,38 @@ export class SyncEngine {
                     if (field === 'id') continue;
                     if (field === '_sync_metadata') continue;
 
-                    items.push({
-                        id: uuidv4(),
-                        entity_type: entityTable,
-                        entity_id: entityId,
-                        field_name: field,
-                        old_value: null,
-                        new_value: value,
-                        field_timestamp: now,
-                        status: 'PENDING',
-                        retry_count: 0
-                    });
+                    const existingItem = await db.outbox
+                        .where('entity_type').equals(entityTable)
+                        .and(item => item.entity_id === entityId && item.field_name === field && (item.status === 'PENDING' || item.status === 'FAILED'))
+                        .first();
+
+                    if (existingItem) {
+                        await db.outbox.update(existingItem.id, {
+                            new_value: value,
+                            field_timestamp: now,
+                            status: 'PENDING',
+                            error: undefined
+                        });
+                    } else {
+                        items.push({
+                            id: uuidv4(),
+                            entity_type: entityTable,
+                            entity_id: entityId,
+                            field_name: field,
+                            old_value: null,
+                            new_value: value,
+                            field_timestamp: now,
+                            status: 'PENDING',
+                            retry_count: 0
+                        });
+                    }
                 }
             }
 
             if (items.length > 0) {
                 await db.outbox.bulkAdd(items);
-                this.updatePendingCount();
             }
+            await this.updatePendingCount();
 
             // Despachar evento global para Optimistic UI
             if (typeof window !== 'undefined') {

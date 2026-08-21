@@ -735,6 +735,31 @@ Prevention Rule:
 Tags:
 [sync] [infinite-pull-loop] [outbox-retry] [push-only]
 
+---
+
+## [Bug ID: 20260821-05]
+
+Context:
+`lib/hooks/useFormAutoSave.ts` y `lib/sync.ts` (`queueMutation`).
+
+Problem:
+Al editar un formulario (como el nombre de una cuenta), se acumulaban decenas o cientos de mutaciones idénticas (`_complete_snapshot_`) en la cola de salida (Outbox).
+
+Root Cause:
+1. En `useFormAutoSave.ts`, la suscripción a `form.watch` retornaba una función `() => clearTimeout(timer)` que no es ejecutada por el callback de react-hook-form, disparando un temporizador no cancelado por cada pulsación de tecla.
+2. En `queueMutation`, cada llamada encolaba un nuevo registro con `id = uuidv4()` sin verificar si ya existía una mutación pendiente para la misma entidad en Dexie.
+
+Fix Applied:
+1. Se implementó `timerRef` persistente en `useFormAutoSave` para limpiar el debounce correctamente antes de iniciar un nuevo temporizador.
+2. Se implementó deduplicación/upsert in-place en `queueMutation` al momento de encolar (`db.outbox.update(existing.id)`).
+
+Prevention Rule:
+**Debounce Cleanup via useRef and Enqueue-Time In-Place Upsert**: Todos los hooks de auto-guardado deben manejar temporizadores de debounce mediante `useRef` explícito. Las funciones de encolado del Outbox deben realizar un *upsert in-place* sobre mutaciones pendientes de la misma entidad para prevenir proliferación de registros redundantes.
+
+Tags:
+[autosave] [debounce-ref] [enqueue-upsert] [outbox-dedup]
+
+
 
 
 
