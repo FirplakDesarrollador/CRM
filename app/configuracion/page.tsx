@@ -731,10 +731,11 @@ function ConfigPageContent() {
                         </div>
                         <button
                             onClick={() => {
+                                const actualPending = outboxItems.filter(i => i.status === 'PENDING' || i.status === 'SYNCING' || i.status === 'FAILED');
                                 const report = outboxItems.map(item =>
                                     `[${item.status}] ${item.entity_type} (${item.field_name}): ${item.error || 'OK'}`
                                 ).join('\n');
-                                const fullReport = `=== REPORTE DE SINCRONIZACIÓN ===\nFecha: ${new Date().toLocaleString()}\nPending Items: ${outboxItems.length}\n\n${report}`;
+                                const fullReport = `=== REPORTE DE SINCRONIZACIÓN ===\nFecha: ${new Date().toLocaleString()}\nPendientes Reales: ${actualPending.length} / Total Registros: ${outboxItems.length}\n\n${report}`;
                                 navigator.clipboard.writeText(fullReport);
                                 setModalConfig({
                                     isOpen: true,

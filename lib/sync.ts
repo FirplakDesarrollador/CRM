@@ -89,6 +89,44 @@ export class SyncEngine {
             this.isSyncing = false;
             useSyncStore.getState().setSyncing(false);
             await this.updatePendingCount();
+
+            // Clean up dead items (exceeded max retries)
+            try {
+                const deadItems = await db.outbox
+                    .where('status').equals('FAILED')
+                    .filter(i => (i.retry_count || 0) >= MAX_RETRIES)
+                    .toArray();
+
+                if (deadItems.length > 0) {
+                    console.warn(`[Sync] Removing ${deadItems.length} permanently failed items from outbox.`);
+                    await db.outbox.bulkDelete(deadItems.map(i => i.id));
+                    await this.updatePendingCount();
+                }
+            } catch (cleanupErr) {
+                console.error('[Sync] Failed to clean up dead items in push:', cleanupErr);
+            }
+
+            // Check if more retryable items remain and schedule next push cycle
+            try {
+                const remaining = await db.outbox
+                    .where('status').anyOf(['PENDING', 'FAILED'])
+                    .filter(i => (i.retry_count || 0) < MAX_RETRIES && i.field_name !== '_sync_metadata')
+                    .toArray();
+
+                if (remaining.length > 0 && navigator.onLine) {
+                    const hasPending = remaining.some(i => i.status === 'PENDING');
+                    if (hasPending) {
+                        setTimeout(() => this.triggerPush(), 100);
+                    } else {
+                        const failedItems = remaining.filter(i => i.status === 'FAILED');
+                        const maxRetry = Math.max(0, ...failedItems.map(i => i.retry_count || 0));
+                        const delay = getBackoffDelay(maxRetry);
+                        setTimeout(() => this.triggerPush(), delay);
+                    }
+                }
+            } catch (retryErr) {
+                console.error('[Sync] Failed to check remaining items in push:', retryErr);
+            }
         }
     }
 
@@ -166,15 +204,15 @@ export class SyncEngine {
 
                     if (hasPending) {
                         // Immediate continuation for healthy pending items
-                        console.log(`[Sync] ${remaining.length} items remaining with active PENDING tasks, continuing immediately...`);
-                        setTimeout(() => this.triggerSync(), 100);
+                        console.log(`[Sync] ${remaining.length} items remaining with active PENDING tasks, continuing push immediately...`);
+                        setTimeout(() => this.triggerPush(), 100);
                     } else {
                         // Exponential backoff only when ALL remaining items are FAILED
                         const failedItems = remaining.filter(i => i.status === 'FAILED');
                         const maxRetry = Math.max(0, ...failedItems.map(i => i.retry_count || 0));
                         const delay = getBackoffDelay(maxRetry);
-                        console.log(`[Sync] ${failedItems.length} failed items pending retry (max retry: ${maxRetry}), scheduling retry in ${delay}ms...`);
-                        setTimeout(() => this.triggerSync(), delay);
+                        console.log(`[Sync] ${failedItems.length} failed items pending retry (max retry: ${maxRetry}), scheduling push retry in ${delay}ms...`);
+                        setTimeout(() => this.triggerPush(), delay);
                     }
                 }
             } catch (retryErr) {
@@ -810,13 +848,13 @@ export class SyncEngine {
                 // If filtering removed all updates for this table, skip it
                 if (updates.length === 0) continue;
 
-                // Mark _sync_metadata as COMPLETED from outbox (to prevent loops)
+                // Delete _sync_metadata from outbox (to prevent loops)
                 // BUT keep them in the RPC payload so the server sees the timestamps
                 const metadataIdsToComplete = pending
                     .filter(p => p.entity_type === table && p.field_name === '_sync_metadata')
                     .map(p => p.id);
                 if (metadataIdsToComplete.length > 0) {
-                    await db.outbox.where('id').anyOf(metadataIdsToComplete).modify({ status: 'COMPLETED' });
+                    await db.outbox.bulkDelete(metadataIdsToComplete);
                 }
 
                 if (table === 'CRM_Cuentas') {
@@ -840,18 +878,12 @@ export class SyncEngine {
 
                 for (const result of results) {
                     if (result.success) {
-                        if (result.field === '_all' || result.field === '_complete_snapshot_') {
-                            // Successful Snapshot/Consolidated update: mark ALL items for this entity ID in this batch as COMPLETED
-                            const idsToComplete = pending
-                                .filter(p => p.entity_id === result.id && p.entity_type === table)
-                                .map(p => p.id);
-                            await db.outbox.where('id').anyOf(idsToComplete).modify({ status: 'COMPLETED' });
-                        } else {
-                            // Successful single field update: mark ALL items for this field from outbox in this batch as COMPLETED
-                            const idsToComplete = pending
-                                .filter(p => p.entity_id === result.id && p.field_name === result.field && p.entity_type === table)
-                                .map(p => p.id);
-                            await db.outbox.where('id').anyOf(idsToComplete).modify({ status: 'COMPLETED' });
+                        const idsToComplete = (result.field === '_all' || result.field === '_complete_snapshot_')
+                            ? pending.filter(p => p.entity_id === result.id && p.entity_type === table).map(p => p.id)
+                            : pending.filter(p => p.entity_id === result.id && p.field_name === result.field && p.entity_type === table).map(p => p.id);
+                        
+                        if (idsToComplete.length > 0) {
+                            await db.outbox.bulkDelete(idsToComplete);
                         }
                     } else {
                         // Failure: Mark ALL relevant items as FAILED

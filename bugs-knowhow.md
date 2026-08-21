@@ -713,6 +713,29 @@ Prevention Rule:
 Tags:
 [sync] [push-pull-decoupling] [zustand-persist] [incremental-sync] [outbox]
 
+---
+
+## [Bug ID: 20260821-04]
+
+Context:
+`lib/sync.ts`, bloque `finally` de reintentos en `triggerSync()`.
+
+Problem:
+Al recargar la página en localhost o existir ítems en estado `FAILED` o `PENDING` en el Outbox, el motor de sincronización iniciaba un bucle infinito que ejecutaba `pullChanges()` cada 100ms, volviendo a descargar todas las tablas de Supabase continuamente.
+
+Root Cause:
+En el bloque `finally` de `triggerSync()`, al detectar ítems restantes para reintento se invocaba recursivamente `setTimeout(() => this.triggerSync(), ...)`. Al invocar `triggerSync` en vez de `triggerPush`, cada iteración de reintento del lote ejecutaba nuevamente la fase de descarga (`pullChanges`), saturando la red y la CPU.
+
+Fix Applied:
+Se cambió la reprogramación de reintentos en el bloque `finally` para invocar exclusivamente `this.triggerPush()`. La fase de descarga (`pullChanges`) queda confinada a ejecuciones únicas e independientes.
+
+Prevention Rule:
+**Never Retry Pull in Outbox Processing Loops**: Los bucles de reintento de la cola de salida (*outbox retry loops*) deben invocar únicamente funciones de envío (*push-only*). Jamás se debe invocar una rutina que contenga descargas (*pull*) dentro de la lógica de reintento de mutaciones.
+
+Tags:
+[sync] [infinite-pull-loop] [outbox-retry] [push-only]
+
+
 
 
 
