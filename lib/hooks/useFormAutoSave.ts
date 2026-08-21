@@ -16,6 +16,7 @@ export function useFormAutoSave<T extends FieldValues>({
 }: AutoSaveConfig<T>) {
     const [status, setStatus] = useState<"saved" | "saving" | "error">("saved");
     const lastSavedData = useRef<string>("");
+    const timerRef = useRef<NodeJS.Timeout | null>(null);
 
     // Initialize lastSavedData when hook is mounted or enabled
     useEffect(() => {
@@ -34,7 +35,11 @@ export function useFormAutoSave<T extends FieldValues>({
 
             setStatus("saving");
 
-            const timer = setTimeout(async () => {
+            if (timerRef.current) {
+                clearTimeout(timerRef.current);
+            }
+
+            timerRef.current = setTimeout(async () => {
                 // If form is valid, trigger save
                 const isValid = await form.trigger();
                 if (isValid) {
@@ -51,13 +56,17 @@ export function useFormAutoSave<T extends FieldValues>({
                     setStatus("error");
                 }
             }, debounceMs);
-
-            return () => clearTimeout(timer);
         });
 
-        return () => subscription.unsubscribe();
+        return () => {
+            subscription.unsubscribe();
+            if (timerRef.current) {
+                clearTimeout(timerRef.current);
+            }
+        };
     }, [form, onSave, debounceMs, isEnabled]);
 
     return { status };
 }
+
 export default useFormAutoSave;
