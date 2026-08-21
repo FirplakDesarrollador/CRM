@@ -23,12 +23,18 @@ Tiles de KPI como ventas ganadas (`VentasGanadasTile`).
 ## Informes (`/informes`, solo ADMIN)
 
 Reportes exportables a Excel (`exceljs`/`xlsx`, utilidades en `lib/utils/informes.ts`).
-Permisos `view_reports` / `view_team_reports` / `export_reports`
-(ver [[roles-y-permisos]]).
+Permisos `view_reports` / `view_team_reports` / `export_reports` (ver [[roles-y-permisos]]).
 
-- **Informe S&OP:** Reporte pre-diseñado para la planificación de ventas y producción.
-  - **Lógica de Fechas y Pedidos Parciales:** Extrae de forma automática el Año, Mes Planta y Mes Comercial en español. Considera el fraccionamiento de fechas por entregas parciales: si una Oportunidad tiene pedidos creados (`CRM_Pedidos`), se consolida la información a nivel de ítems de pedido (`CRM_PedidoItems`), tomando las fechas de facturación (Comercial) y entrega (Planta) de cada pedido parcial. Si no tiene pedidos, se proyecta globalmente a partir de la `fecha_cierre_estimada` de la Oportunidad y su cotización activa/ganadora.
-  - **Formato Excel:** Genera un archivo con dos pestañas: la sábana de datos planos (`S&OP`) y una tabla de contingencia resumen de canales contra meses comerciales (`TD`), utilizando `exceljs` para maquetación y formato de contabilidad.
+- **Filtros Avanzados por Entidad:**
+  - **Oportunidades:** Rango fechas creación, asesor, canal, estado, fase, segmento, origen, rango de valor ($ min/max) y departamento/ciudad.
+  - **Cuentas:** Rango fechas creación, asesor asignado, canal, tipo cliente premium/VIP y departamento/ciudad.
+  - **Contactos:** Rango fechas creación, asesor/creador y cargo/rol de decisión.
+  - **Cotizaciones:** Rango fechas creación, asesor, estado (DRAFT, SENT, WINNER, REJECTED, EXPIRED) y rango de valor ($ min/max).
+  - **Actividades:** Rango fechas creación, rango fechas vencimiento (`fecha_fin`), asesor, estado cumplimiento (completadas/pendientes), tipo actividad, clasificación y subclasificación.
+  - **Informe S&OP:** Reporte pre-diseñado para la planificación de ventas y producción.
+    - **Filtros S&OP:** Asesor, canal, estado, año/mes comercial, planta (PC, ALM, FVH), familia de producto, probabilidad mínima (%), quincena (1ª/2ª) y tipo de registro (pedidos/proyectado).
+    - **Lógica de Fechas y Pedidos Parciales:** Extrae el Año, Mes Planta y Mes Comercial en español. Considera fraccionamiento por entregas parciales: si una Oportunidad tiene pedidos (`CRM_Pedidos`), consolida por ítems (`CRM_PedidoItems`) con fecha de facturación (`"EXTRA_Fecha de facturación"`) y fecha de entrega (`"EXTRA_Fecha mínima requerida por comercial/cliente"`). Si no tiene pedidos, proyecta a partir de `fecha_cierre_estimada` y su cotización.
+    - **Formato Excel:** Genera dos pestañas: la sábana de datos planos (`S&OP`) y la tabla de contingencia dinámica (`TD`), maquetada con `exceljs`.
 
 ## Metas (Goals)
 

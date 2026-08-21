@@ -39,6 +39,19 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
 
         const toNum = (val: any) => (val !== undefined && val !== null && val !== "") ? Number(val) : null;
 
+        // Local duplicate check before inserting
+        if (data.nit_base) {
+            const existingLocal = await db.accounts
+                .where('nit_base')
+                .equals(data.nit_base)
+                .toArray();
+            
+            // Allow child accounts (sucursales) to share NIT
+            if (existingLocal.length > 0 && !data.is_child) {
+                throw new Error(`Ya existe una cuenta localmente con el NIT ${data.nit_base}`);
+            }
+        }
+
         const sanitizedData = {
             ...data,
             subclasificacion_id: toNum(data.subclasificacion_id),
@@ -112,51 +125,89 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
     };
 
     const deleteAccount = async (id: string) => {
-        console.log('[useAccounts] deleteAccount - Starting cascade delete for:', id);
+        console.log('[useAccounts] deleteAccount - Starting Local-First cascade delete for:', id);
 
-        // 1. Delete Contacts associated with this account (server-side)
-        const { data: contacts } = await supabase.from('CRM_Contactos').select('id').eq('account_id', id);
-        if (contacts && contacts.length > 0) {
-            const contactIds = contacts.map(c => c.id);
-            await supabase.from('CRM_Contactos').update({ is_deleted: true }).in('id', contactIds);
-            console.log('[useAccounts] Deleted contacts:', contactIds.length);
-        }
+        const currentAccount = await db.accounts.get(id);
+        if (!currentAccount) return;
 
-        // 2. Get Opportunities associated with this account
-        const { data: opportunities } = await supabase.from('CRM_Oportunidades').select('id').eq('account_id', id);
-        if (opportunities && opportunities.length > 0) {
-            const oppIds = opportunities.map(o => o.id);
+        // 1. Gather all local child entities from Dexie
+        const contacts = await db.contacts.where('account_id').equals(id).toArray();
+        const opportunities = await db.opportunities.where('account_id').equals(id).toArray();
+        const oppIds = opportunities.map(o => o.id);
 
-            // 3. Delete Activities associated with these opportunities
-            await supabase.from('CRM_Actividades').update({ is_deleted: true }).in('opportunity_id', oppIds);
+        let quotes: any[] = [];
+        let quoteItems: any[] = [];
+        let activities: any[] = [];
+        let pedidos: any[] = [];
+        let pedidoItems: any[] = [];
 
-            // 4. Get Quotes associated with these opportunities
-            const { data: quotes } = await supabase.from('CRM_Cotizaciones').select('id').in('opportunity_id', oppIds);
-            if (quotes && quotes.length > 0) {
-                const quoteIds = quotes.map(q => q.id);
-
-                // 5. Delete Quote Items
-                await supabase.from('CRM_CotizacionItems').update({ is_deleted: true }).in('cotizacion_id', quoteIds);
-
-                // 6. Delete Quotes
-                await supabase.from('CRM_Cotizaciones').update({ is_deleted: true }).in('id', quoteIds);
+        if (oppIds.length > 0) {
+            quotes = await db.quotes.where('opportunity_id').anyOf(oppIds).toArray();
+            const quoteIds = quotes.map(q => q.id);
+            if (quoteIds.length > 0) {
+                quoteItems = await db.quoteItems.where('cotizacion_id').anyOf(quoteIds).toArray();
             }
-
-            // 7. Delete Opportunities
-            await supabase.from('CRM_Oportunidades').update({ is_deleted: true }).in('id', oppIds);
-            console.log('[useAccounts] Deleted opportunities:', oppIds.length);
+            activities = await db.activities.where('opportunity_id').anyOf(oppIds).toArray();
+            pedidos = await db.pedidos.where('opportunity_id').anyOf(oppIds).toArray();
+            const pedidoUuids = pedidos.map(p => p.uuid_generado).filter(Boolean);
+            if (pedidoUuids.length > 0) {
+                pedidoItems = await db.pedidoItems.where('pedido_uuid').anyOf(pedidoUuids).toArray();
+            }
         }
 
-        // 8. Finally Delete the Account itself
-        const { error } = await supabase.from('CRM_Cuentas').update({ is_deleted: true }).eq('id', id);
-        if (error) {
-            console.error('[useAccounts] Error deleting account:', error);
-            throw error;
+        // 2. Perform atomic local deletion in Dexie
+        await db.transaction('rw', [
+            db.accounts,
+            db.contacts,
+            db.opportunities,
+            db.quotes,
+            db.quoteItems,
+            db.activities,
+            db.pedidos,
+            db.pedidoItems
+        ], async () => {
+            await db.accounts.delete(id);
+            if (contacts.length > 0) await db.contacts.where('account_id').equals(id).delete();
+            if (oppIds.length > 0) {
+                await db.opportunities.where('account_id').equals(id).delete();
+                await db.quotes.where('opportunity_id').anyOf(oppIds).delete();
+                const quoteIds = quotes.map(q => q.id);
+                if (quoteIds.length > 0) await db.quoteItems.where('cotizacion_id').anyOf(quoteIds).delete();
+                await db.activities.where('opportunity_id').anyOf(oppIds).delete();
+                await db.pedidos.where('opportunity_id').anyOf(oppIds).delete();
+                const pedidoUuids = pedidos.map(p => p.uuid_generado).filter(Boolean);
+                if (pedidoUuids.length > 0) await db.pedidoItems.where('pedido_uuid').anyOf(pedidoUuids).delete();
+            }
+        });
+
+        console.log('[useAccounts] Local Dexie delete complete. Queueing outbox mutations...');
+
+        // 3. Queue Soft Delete mutations for server sync
+        await syncEngine.queueMutation('CRM_Cuentas', id, { ...currentAccount, is_deleted: true }, { isSnapshot: true });
+
+        for (const contact of contacts) {
+            await syncEngine.queueMutation('CRM_Contactos', contact.id, { ...contact, is_deleted: true }, { isSnapshot: true });
+        }
+        for (const opp of opportunities) {
+            await syncEngine.queueMutation('CRM_Oportunidades', opp.id, { ...opp, is_deleted: true }, { isSnapshot: true });
+        }
+        for (const quote of quotes) {
+            await syncEngine.queueMutation('CRM_Cotizaciones', quote.id, { ...quote, is_deleted: true }, { isSnapshot: true });
+        }
+        for (const item of quoteItems) {
+            await syncEngine.queueMutation('CRM_CotizacionItems', item.id, { ...item, is_deleted: true }, { isSnapshot: true });
+        }
+        for (const act of activities) {
+            await syncEngine.queueMutation('CRM_Actividades', act.id, { ...act, is_deleted: true }, { isSnapshot: true });
+        }
+        for (const ped of pedidos) {
+            await syncEngine.queueMutation('CRM_Pedidos', ped.uuid_generado, { ...ped, is_deleted: true }, { isSnapshot: true });
+        }
+        for (const pItem of pedidoItems) {
+            await syncEngine.queueMutation('CRM_PedidoItems', pItem.id, { ...pItem, is_deleted: true }, { isSnapshot: true });
         }
 
-        // Also remove from local Dexie DB for offline consistency
-        await db.accounts.delete(id);
-        console.log('[useAccounts] Account deleted successfully:', id);
+        console.log('[useAccounts] All server mutations queued successfully for offline delete.');
     };
 
     return {

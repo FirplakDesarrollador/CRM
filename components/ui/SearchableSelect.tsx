@@ -42,6 +42,7 @@ export function SearchableSelect({
         <Popover open={open} onOpenChange={setOpen}>
             <PopoverTrigger asChild>
                 <button
+                    type="button"
                     className={cn(
                         "flex items-center justify-between gap-2 bg-transparent text-sm font-semibold text-slate-600 focus:outline-none px-2 py-1.5 min-w-[140px] hover:bg-slate-100/50 rounded-lg transition-colors",
                         triggerClassName
@@ -53,7 +54,7 @@ export function SearchableSelect({
                     <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-40" />
                 </button>
             </PopoverTrigger>
-            <PopoverContent className={cn("w-full p-0", className)} align="start">
+            <PopoverContent className={cn("w-[var(--radix-popover-trigger-width)] min-w-[220px] p-0", className)} align="start">
                 <Command className="w-full">
                     <CommandInput placeholder="Buscar..." />
                     <CommandList>

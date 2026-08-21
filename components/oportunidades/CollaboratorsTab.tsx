@@ -9,6 +9,8 @@ import { Loader2, Save } from 'lucide-react';
 import { syncEngine } from '@/lib/sync';
 import { v4 as uuidv4 } from 'uuid';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
+import { supabase } from '@/lib/supabase';
+import { canEditOpportunityCollaborators } from '@/lib/opportunityCollaboratorPermissions';
 
 export function CollaboratorsTab({ opportunityId }: { opportunityId: string }) {
     const dbCollaborators = useLiveQuery(
@@ -20,13 +22,53 @@ export function CollaboratorsTab({ opportunityId }: { opportunityId: string }) {
         [opportunityId]
     );
 
-    const { user } = useCurrentUser();
+    const { user, role } = useCurrentUser();
     const [entries, setEntries] = useState<CollaboratorEntry[]>([]);
     const [isSaving, setIsSaving] = useState(false);
     const [isDirty, setIsDirty] = useState(false);
+    const [ownerCoordinatorIds, setOwnerCoordinatorIds] = useState<string[]>([]);
 
     const opportunity = useLiveQuery(() => db.opportunities.get(opportunityId), [opportunityId]);
-    const isOwner = user?.id === opportunity?.owner_user_id;
+    const ownerId = opportunity?.owner_user_id;
+    useEffect(() => {
+        let isCancelled = false;
+
+        const checkCoordinatorAccess = async () => {
+            if (role !== 'COORDINADOR' || !user?.id || !ownerId) {
+                setOwnerCoordinatorIds([]);
+                return;
+            }
+
+            const { data, error } = await supabase
+                .from('CRM_Usuarios')
+                .select('coordinadores')
+                .eq('id', ownerId)
+                .single();
+
+            if (isCancelled) return;
+
+            if (error) {
+                console.error('Error checking opportunity coordinator access:', error);
+                setOwnerCoordinatorIds([]);
+                return;
+            }
+
+            setOwnerCoordinatorIds(data?.coordinadores ?? []);
+        };
+
+        checkCoordinatorAccess();
+
+        return () => {
+            isCancelled = true;
+        };
+    }, [ownerId, role, user?.id]);
+
+    const canEdit = canEditOpportunityCollaborators({
+        userId: user?.id,
+        role,
+        ownerId,
+        ownerCoordinatorIds,
+    });
 
     // Initialize state from DB
     useEffect(() => {
@@ -43,7 +85,7 @@ export function CollaboratorsTab({ opportunityId }: { opportunityId: string }) {
     }, [dbCollaborators]);
 
     const handleSave = async () => {
-        if (!dbCollaborators) return;
+        if (!dbCollaborators || !canEdit) return;
 
         // Validate: no empty users or 0% entries
         const invalid = entries.find(e => !e.usuario_id || !e.porcentaje || e.porcentaje <= 0);
@@ -140,12 +182,12 @@ export function CollaboratorsTab({ opportunityId }: { opportunityId: string }) {
                 <div>
                     <h3 className="font-bold text-slate-900 text-lg">Colaboradores y Comisiones</h3>
                     <p className="text-xs text-slate-500">
-                        {isOwner 
-                            ? "Gestione quien participa en esta oportunidad" 
-                            : "Solo el propietario de la oportunidad puede gestionar colaboradores"}
+                        {canEdit
+                            ? "Gestione quién participa en esta oportunidad"
+                            : "Puede editar el responsable, uno de sus coordinadores o un administrador"}
                     </p>
                 </div>
-                {isDirty && isOwner && (
+                {isDirty && canEdit && (
                     <Button
                         onClick={handleSave}
                         disabled={isSaving}
@@ -160,13 +202,13 @@ export function CollaboratorsTab({ opportunityId }: { opportunityId: string }) {
             <CollaboratorSelector
                 value={entries}
                 onChange={(updated) => {
-                    if (isOwner) {
+                    if (canEdit) {
                         setEntries(updated);
                         setIsDirty(true);
                     }
                 }}
                 ownerId={opportunity?.owner_user_id}
-                disabled={!isOwner}
+                disabled={!canEdit}
             />
         </div>
     );

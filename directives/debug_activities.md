@@ -54,3 +54,4 @@ Si el select de clasificación está vacío:
 
 ## Aprendizajes
 - [2026-01-27]: Problema de zona horaria en fechas de tareas. Input type="date" requiere parseo especial como hora local, no UTC. Implementado `toISODateString()` en useActivities.ts.
+- [2026-07-16]: `CRM_Actividades.tipo_actividad` solo admite `EVENTO` o `TAREA` por la restriccion `check_tipo_actividad`. Los formularios con fecha y hora de inicio/fin, como Tiendas, deben crear `EVENTO` y mostrar unicamente clasificaciones de ese mismo tipo.

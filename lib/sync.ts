@@ -58,6 +58,79 @@ export class SyncEngine {
     }
 
     /**
+     * PUSH-ONLY Trigger: For local edits and mutations
+     * Immediately pushes local changes to Supabase without triggering heavy table pulls
+     */
+    async triggerPush() {
+        const { isPaused } = useSyncStore.getState();
+        if (this.isSyncing || !navigator.onLine || isPaused) return;
+
+        this.isSyncing = true;
+        useSyncStore.getState().setSyncing(true);
+        useSyncStore.getState().setError(null);
+
+        try {
+            let user;
+            try {
+                const { data } = await supabase.auth.getUser();
+                user = data?.user;
+            } catch (e) {
+                return;
+            }
+            if (!user) return;
+
+            await this.resetStuckItems();
+            await this.yield();
+            await this.pushChanges(user);
+        } catch (err: any) {
+            console.error('[Sync] Push failed:', err);
+            useSyncStore.getState().setError(err.message);
+        } finally {
+            this.isSyncing = false;
+            useSyncStore.getState().setSyncing(false);
+            await this.updatePendingCount();
+
+            // Clean up dead items (exceeded max retries)
+            try {
+                const deadItems = await db.outbox
+                    .where('status').equals('FAILED')
+                    .filter(i => (i.retry_count || 0) >= MAX_RETRIES)
+                    .toArray();
+
+                if (deadItems.length > 0) {
+                    console.warn(`[Sync] Removing ${deadItems.length} permanently failed items from outbox.`);
+                    await db.outbox.bulkDelete(deadItems.map(i => i.id));
+                    await this.updatePendingCount();
+                }
+            } catch (cleanupErr) {
+                console.error('[Sync] Failed to clean up dead items in push:', cleanupErr);
+            }
+
+            // Check if more retryable items remain and schedule next push cycle
+            try {
+                const remaining = await db.outbox
+                    .where('status').anyOf(['PENDING', 'FAILED'])
+                    .filter(i => (i.retry_count || 0) < MAX_RETRIES && i.field_name !== '_sync_metadata')
+                    .toArray();
+
+                if (remaining.length > 0 && navigator.onLine) {
+                    const hasPending = remaining.some(i => i.status === 'PENDING');
+                    if (hasPending) {
+                        setTimeout(() => this.triggerPush(), 100);
+                    } else {
+                        const failedItems = remaining.filter(i => i.status === 'FAILED');
+                        const maxRetry = Math.max(0, ...failedItems.map(i => i.retry_count || 0));
+                        const delay = getBackoffDelay(maxRetry);
+                        setTimeout(() => this.triggerPush(), delay);
+                    }
+                }
+            } catch (retryErr) {
+                console.error('[Sync] Failed to check remaining items in push:', retryErr);
+            }
+        }
+    }
+
+    /**
      * Main Sync Loop
      */
     async triggerSync() {
@@ -119,18 +192,28 @@ export class SyncEngine {
                 console.error('[Sync] Failed to clean up dead items:', cleanupErr);
             }
 
-            // Check if more retryable items remain and schedule retry with backoff
+            // Check if more retryable items remain and schedule next sync cycle
             try {
                 const remaining = await db.outbox
                     .where('status').anyOf(['PENDING', 'FAILED'])
-                    .filter(i => (i.retry_count || 0) < MAX_RETRIES)
+                    .filter(i => (i.retry_count || 0) < MAX_RETRIES && i.field_name !== '_sync_metadata')
                     .toArray();
 
                 if (remaining.length > 0 && navigator.onLine) {
-                    const maxRetry = Math.max(0, ...remaining.map(i => i.retry_count || 0));
-                    const delay = getBackoffDelay(maxRetry);
-                    console.log(`[Sync] ${remaining.length} items still pending (max retry: ${maxRetry}), scheduling retry in ${delay}ms...`);
-                    setTimeout(() => this.triggerSync(), delay);
+                    const hasPending = remaining.some(i => i.status === 'PENDING');
+
+                    if (hasPending) {
+                        // Immediate continuation for healthy pending items
+                        console.log(`[Sync] ${remaining.length} items remaining with active PENDING tasks, continuing push immediately...`);
+                        setTimeout(() => this.triggerPush(), 100);
+                    } else {
+                        // Exponential backoff only when ALL remaining items are FAILED
+                        const failedItems = remaining.filter(i => i.status === 'FAILED');
+                        const maxRetry = Math.max(0, ...failedItems.map(i => i.retry_count || 0));
+                        const delay = getBackoffDelay(maxRetry);
+                        console.log(`[Sync] ${failedItems.length} failed items pending retry (max retry: ${maxRetry}), scheduling push retry in ${delay}ms...`);
+                        setTimeout(() => this.triggerPush(), delay);
+                    }
                 }
             } catch (retryErr) {
                 console.error('[Sync] Failed to check remaining items:', retryErr);
@@ -160,6 +243,62 @@ export class SyncEngine {
                 return false;
             })
             .delete();
+
+        // Universal Outbox Deduplication & Compaction:
+        // Consolidates redundant snapshots and duplicate field mutations across all entities
+        try {
+            const activeItems = await db.outbox
+                .where('status').anyOf(['PENDING', 'SYNCING', 'FAILED'])
+                .toArray();
+
+            if (activeItems.length > 1) {
+                // Group by entity_type + entity_id
+                const byEntity = new Map<string, OutboxItem[]>();
+                for (const item of activeItems) {
+                    const key = `${item.entity_type}:${item.entity_id}`;
+                    if (!byEntity.has(key)) byEntity.set(key, []);
+                    byEntity.get(key)!.push(item);
+                }
+
+                const itemsToDelete: string[] = [];
+
+                for (const [_key, items] of Array.from(byEntity.entries())) {
+                    if (items.length <= 1) continue;
+
+                    // If entity has snapshots, keep only the latest snapshot and delete older snapshots & field mutations
+                    const snapshots = items.filter(i => i.field_name === '_complete_snapshot_');
+                    if (snapshots.length > 0) {
+                        snapshots.sort((a, b) => (b.field_timestamp || 0) - (a.field_timestamp || 0));
+                        const keepSnapshot = snapshots[0];
+
+                        for (const item of items) {
+                            if (item.id !== keepSnapshot.id) {
+                                itemsToDelete.push(item.id);
+                            }
+                        }
+                    } else {
+                        // If entity has multiple updates for the same field_name, keep only the newest per field
+                        const byField = new Map<string, OutboxItem>();
+                        for (const item of items) {
+                            const existing = byField.get(item.field_name);
+                            if (!existing || (item.field_timestamp || 0) > (existing.field_timestamp || 0)) {
+                                if (existing) itemsToDelete.push(existing.id);
+                                byField.set(item.field_name, item);
+                            } else {
+                                itemsToDelete.push(item.id);
+                            }
+                        }
+                    }
+                }
+
+                if (itemsToDelete.length > 0) {
+                    await db.outbox.bulkDelete(itemsToDelete);
+                    console.log(`[Sync] Universal deduplication: purged ${itemsToDelete.length} redundant outbox items.`);
+                }
+            }
+        } catch (dedupErr) {
+            console.warn('[Sync] Universal deduplication warning:', dedupErr);
+        }
             
         await this.updatePendingCount();
     }
@@ -177,8 +316,31 @@ export class SyncEngine {
 
     /**
      * PUSH: Send local mutations to Supabase via RPC
+     * Processes batches continuously until the queue is clear or a stopping condition is met
      */
     private async pushChanges(user: any) {
+        let batchIteration = 0;
+        const MAX_CONSECUTIVE_BATCHES = 50; // Safety cap: up to 25,000 items in a single push phase
+
+        while (batchIteration < MAX_CONSECUTIVE_BATCHES) {
+            batchIteration++;
+            const { processed, hasFatalError } = await this.pushBatch(user);
+
+            if (processed === 0 || hasFatalError) {
+                break;
+            }
+
+            await this.updatePendingCount();
+            await this.yield(); // Cedes execution to browser event loop to keep UI fluid
+        }
+    }
+
+    /**
+     * Executes a single batch of up to 500 pending items
+     */
+    private async pushBatch(user: any): Promise<{ processed: number; hasFatalError: boolean }> {
+        let hasFatalError = false;
+
         // 1. Get Pending Items (skip items that exceeded max retries)
         const pending = await db.outbox
             .orderBy('field_timestamp')
@@ -186,7 +348,7 @@ export class SyncEngine {
             .limit(500)
             .toArray();
 
-        if (pending.length === 0) return;
+        if (pending.length === 0) return { processed: 0, hasFatalError: false };
 
         // 2. Group by Table
         const batches: Record<string, any[]> = {};
@@ -629,86 +791,6 @@ export class SyncEngine {
             }
         }
 
-        if (batches['CRM_Oportunidades']) {
-            const updates = batches['CRM_Oportunidades'];
-
-            // 3.4 SELF-HEALING: Check for missing accounts
-            const uniqueAccountIds = new Set<string>();
-
-            // Gather account IDs from updates (if present in payload)
-            updates.forEach(u => {
-                if (u.field === 'account_id' && typeof u.value === 'string') uniqueAccountIds.add(u.value);
-            });
-
-            // Also check items in the DB for these opportunities if account_id isn't in the update payload
-            const oppIds = Array.from(new Set(updates.map(u => u.id)));
-            if (oppIds.length > 0) {
-                try {
-                    const localOpps = await db.opportunities.where('id').anyOf(oppIds).toArray();
-                    localOpps.forEach(o => {
-                        if (o.account_id) uniqueAccountIds.add(o.account_id);
-                    });
-                } catch (e) { console.warn("[Sync] Failed to read local opps for account check", e); }
-            }
-
-            if (uniqueAccountIds.size > 0) {
-                const accountIdsToCheck = Array.from(uniqueAccountIds);
-                // Check server existence (blind check)
-                const { data: existingAccounts, error: accCheckErr } = await supabase
-                    .from('CRM_Cuentas')
-                    .select('id')
-                    .in('id', accountIdsToCheck);
-
-                if (!accCheckErr && existingAccounts) {
-                    const foundIds = new Set(existingAccounts.map(a => a.id));
-                    const missingAccountIds = accountIdsToCheck.filter(id => !foundIds.has(id));
-
-                    if (missingAccountIds.length > 0) {
-                        console.warn(`[Sync] Self-healing: Found ${missingAccountIds.length} missing accounts referenced by opportunities.`);
-
-                        const pendingAccounts = await db.outbox
-                            .where('entity_type').equals('CRM_Cuentas')
-                            .and(i => i.status === 'PENDING' || i.status === 'SYNCING')
-                            .toArray();
-                        const pendingAccountIds = new Set(pendingAccounts.map(p => p.entity_id));
-
-                        for (const missingId of missingAccountIds) {
-                            if (pendingAccountIds.has(missingId)) continue; // Already queueing
-
-                            // Check existence in local DB
-                            const localAccount = await db.accounts.get(missingId);
-                            if (localAccount) {
-                                console.log(`[Sync] Re-queueing missing local account: ${missingId}`);
-                                const fieldsToSync: (keyof typeof localAccount)[] =
-                                    ['nombre', 'nit', 'nit_base', 'canal_id', 'telefono', 'email', 'direccion', 'pais_id', 'departamento_id', 'ciudad_id', 'subclasificacion_id', 'owner_user_id', 'nivel_premium', 'es_premium', 'created_by', 'created_at', 'updated_at', 'comentarios'];
-
-                                const newOutboxItems: any[] = [];
-                                fieldsToSync.forEach(field => {
-                                    const val = localAccount[field];
-                                    if (val !== undefined && val !== null) {
-                                        newOutboxItems.push({
-                                            id: uuidv4(),
-                                            entity_type: 'CRM_Cuentas',
-                                            entity_id: missingId,
-                                            field_name: field as string,
-                                            old_value: null,
-                                            new_value: val,
-                                            field_timestamp: now,
-                                            status: 'PENDING',
-                                            retry_count: 0
-                                        });
-                                    }
-                                });
-
-                                await db.outbox.bulkPut(newOutboxItems);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-
         // 4. Extract CRM_Oportunidades_Colaboradores to process AFTER main tables
         let collabUpdatesPending: any[] | null = null;
         if (batches['CRM_Oportunidades_Colaboradores']) {
@@ -744,16 +826,35 @@ export class SyncEngine {
                     }
                 }
 
+                // 3.7 DEFENSIVE SANITIZATION: Ensure CRM_Cuentas nit is valid 32-bit integer or null (nit_base contains text)
+                if (table === 'CRM_Cuentas') {
+                    const MAX_INT32 = 2147483647;
+                    updates = updates.map(u => {
+                        if (u.field === '_complete_snapshot_' && u.value && typeof u.value === 'object') {
+                            const val = { ...u.value };
+                            if (val.nit !== undefined && val.nit !== null) {
+                                const parsedNit = parseInt(String(val.nit).replace(/\D/g, ''), 10);
+                                val.nit = (!isNaN(parsedNit) && parsedNit <= MAX_INT32) ? parsedNit : null;
+                            }
+                            return { ...u, value: val };
+                        } else if (u.field === 'nit' && u.value !== null && u.value !== undefined) {
+                            const parsedNit = parseInt(String(u.value).replace(/\D/g, ''), 10);
+                            return { ...u, value: (!isNaN(parsedNit) && parsedNit <= MAX_INT32) ? parsedNit : null };
+                        }
+                        return u;
+                    });
+                }
+
                 // If filtering removed all updates for this table, skip it
                 if (updates.length === 0) continue;
 
-                // Mark _sync_metadata as COMPLETED from outbox (to prevent loops)
+                // Delete _sync_metadata from outbox (to prevent loops)
                 // BUT keep them in the RPC payload so the server sees the timestamps
                 const metadataIdsToComplete = pending
                     .filter(p => p.entity_type === table && p.field_name === '_sync_metadata')
                     .map(p => p.id);
                 if (metadataIdsToComplete.length > 0) {
-                    await db.outbox.where('id').anyOf(metadataIdsToComplete).modify({ status: 'COMPLETED' });
+                    await db.outbox.bulkDelete(metadataIdsToComplete);
                 }
 
                 if (table === 'CRM_Cuentas') {
@@ -777,22 +878,16 @@ export class SyncEngine {
 
                 for (const result of results) {
                     if (result.success) {
-                        if (result.field === '_all') {
-                            // Successful INSERT (or consolidated update): mark ALL pending items for this ID as COMPLETED
-                            const idsToComplete = pending
-                                .filter(p => p.entity_id === result.id && p.entity_type === table)
-                                .map(p => p.id);
-                            await db.outbox.where('id').anyOf(idsToComplete).modify({ status: 'COMPLETED' });
-                        } else {
-                            // Successful single field update: mark ALL items for this field from outbox in this batch as COMPLETED
-                            const idsToComplete = pending
-                                .filter(p => p.entity_id === result.id && p.field_name === result.field && p.entity_type === table)
-                                .map(p => p.id);
-                            await db.outbox.where('id').anyOf(idsToComplete).modify({ status: 'COMPLETED' });
+                        const idsToComplete = (result.field === '_all' || result.field === '_complete_snapshot_')
+                            ? pending.filter(p => p.entity_id === result.id && p.entity_type === table).map(p => p.id)
+                            : pending.filter(p => p.entity_id === result.id && p.field_name === result.field && p.entity_type === table).map(p => p.id);
+                        
+                        if (idsToComplete.length > 0) {
+                            await db.outbox.bulkDelete(idsToComplete);
                         }
                     } else {
                         // Failure: Mark ALL relevant items as FAILED
-                        const itemsToFail = result.field === '_all'
+                        const itemsToFail = (result.field === '_all' || result.field === '_complete_snapshot_')
                             ? pending.filter(p => p.entity_id === result.id && p.entity_type === table)
                             : pending.filter(p => p.entity_id === result.id && p.field_name === result.field && p.entity_type === table);
 
@@ -831,6 +926,7 @@ export class SyncEngine {
 
                 // BREAK ON FATAL: Prevent processing child tables if parent has a fatal RPC error
                 console.warn(`[Sync] Breaking sync loop due to fatal failure in ${table}.`);
+                hasFatalError = true;
                 break;
             }
         }
@@ -955,6 +1051,8 @@ export class SyncEngine {
                 }
             }
         }
+
+        return { processed: pending.length, hasFatalError };
     }
 
     /**
@@ -1070,22 +1168,44 @@ export class SyncEngine {
 
         try {
             // Pull Accounts (CRM_Cuentas)
-            // PERF OPTIMIZATION: Incremental sync based on lastSyncTime
-            let accountsQuery = supabase
-                .from('CRM_Cuentas')
-                .select('*')
-                .eq('is_deleted', false);
-
+            // PERF OPTIMIZATION: Incremental sync based on lastSyncTime + Segmented Advisor Priority
+            let accounts: any[] = [];
             if (lastSync) {
-                accountsQuery = accountsQuery.gte('updated_at', lastSync);
+                const { data: updatedAccs, error: accErr } = await supabase
+                    .from('CRM_Cuentas')
+                    .select('*')
+                    .eq('is_deleted', false)
+                    .gte('updated_at', lastSync);
+                if (accErr) throw accErr;
+                accounts = updatedAccs || [];
             } else {
-                // Initial Load limit to 3000 most recent for caching
-                accountsQuery = accountsQuery.order('updated_at', { ascending: false }).limit(3000);
+                // 1. PRIORITY PULL: 100% of accounts owned or created by this user
+                let userAccounts: any[] = [];
+                if (_user?.id) {
+                    const { data: ownAccs } = await supabase
+                        .from('CRM_Cuentas')
+                        .select('*')
+                        .eq('is_deleted', false)
+                        .or(`owner_user_id.eq.${_user.id},created_by.eq.${_user.id}`);
+                    if (ownAccs) userAccounts = ownAccs;
+                }
+
+                // 2. DISCOVERY PULL: Top 3000 most recent general accounts
+                const { data: generalAccs, error: accErr } = await supabase
+                    .from('CRM_Cuentas')
+                    .select('*')
+                    .eq('is_deleted', false)
+                    .order('updated_at', { ascending: false })
+                    .limit(3000);
+                if (accErr) throw accErr;
+
+                // Merge and deduplicate by ID
+                const accMap = new Map<string, any>();
+                (generalAccs || []).forEach(a => accMap.set(a.id, a));
+                userAccounts.forEach(a => accMap.set(a.id, a)); // Advisor accounts always take precedence
+                accounts = Array.from(accMap.values());
+                console.log(`[Sync] Segmented Pull: ${userAccounts.length} advisor accounts + ${accounts.length} total cached.`);
             }
-
-            const { data: accounts, error: accountsError } = await accountsQuery;
-
-            if (accountsError) throw accountsError;
 
             if (accounts && accounts.length > 0) {
                 const pendingAccountIds = new Set(
@@ -2006,9 +2126,9 @@ export class SyncEngine {
                 }));
             }
 
-            // Trigger Sync in background
-            this.triggerSync().catch(err => {
-                console.warn('[Sync] Background sync triggered from mutation failed:', err);
+            // Trigger immediate push in background (without downloading all tables)
+            this.triggerPush().catch(err => {
+                console.warn('[Sync] Background push triggered from mutation failed:', err);
             });
         } catch (err) {
             console.error('[Sync] Failed to queue mutation:', err);
@@ -2022,6 +2142,75 @@ export class SyncEngine {
         }
         // Fallback to server if needed
         return await supabase.auth.getUser();
+    }
+
+    /**
+     * CLEAN RE-SYNC:
+     * Clears all cached Dexie tables while STRICTLY PRESERVING any un-synced outbox mutations (PENDING, SYNCING, FAILED).
+     * Resets lastSyncTime and runs a full fresh pull from Supabase.
+     */
+    public async cleanResync(): Promise<{ success: boolean; message: string }> {
+        try {
+            console.log('[Sync] Starting clean re-sync...');
+            useSyncStore.getState().setIsSyncing(true);
+
+            // 1. Clear cache tables in Dexie (preserving outbox)
+            await db.transaction('rw', [
+                db.accounts,
+                db.contacts,
+                db.opportunities,
+                db.opportunityCollaborators,
+                db.quotes,
+                db.quoteItems,
+                db.activities,
+                db.pedidos,
+                db.pedidoItems,
+                db.phases,
+                db.subclasificaciones,
+                db.departments,
+                db.countries,
+                db.cities,
+                db.products,
+                db.priceList
+            ], async () => {
+                await Promise.all([
+                    db.accounts.clear(),
+                    db.contacts.clear(),
+                    db.opportunities.clear(),
+                    db.opportunityCollaborators.clear(),
+                    db.quotes.clear(),
+                    db.quoteItems.clear(),
+                    db.activities.clear(),
+                    db.pedidos.clear(),
+                    db.pedidoItems.clear(),
+                    db.phases.clear(),
+                    db.subclasificaciones.clear(),
+                    db.departments.clear(),
+                    db.countries.clear(),
+                    db.cities.clear(),
+                    db.products.clear(),
+                    db.priceList.clear()
+                ]);
+            });
+
+            // 2. Reset lastSyncTime in store to trigger full initial pull
+            useSyncStore.getState().setLastSyncTime(null);
+
+            // 3. Get current user and trigger pull
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                await this.pullChanges(user);
+            }
+
+            console.log('[Sync] Clean re-sync completed successfully.');
+            return { success: true, message: 'Re-sincronización limpia completada con éxito.' };
+        } catch (error: any) {
+            console.error('[Sync] Clean re-sync failed:', error);
+            return { success: false, message: error.message || 'Error durante la re-sincronización.' };
+        } finally {
+            useSyncStore.getState().setIsSyncing(false);
+            useSyncStore.getState().setIsLoadingData(false);
+        }
     }
 }
 

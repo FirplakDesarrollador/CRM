@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 
 interface SyncState {
     isOnline: boolean;
@@ -18,40 +19,50 @@ interface SyncState {
     setProcessing: (isProcessing: boolean) => void;
     setPaused: (isPaused: boolean) => void;
     setPendingCount: (count: number) => void;
-    setLastSyncTime: (time: string) => void;
+    setLastSyncTime: (time: string | null) => void;
     setError: (error: string | null) => void;
     setNavigating: (isNavigating: boolean) => void;
     setIsLoadingData: (isLoading: boolean) => void;
     setUserRole: (role: 'SALES' | 'COORDINATOR' | 'ADMIN') => void;
 }
 
-export const useSyncStore = create<SyncState>((set) => ({
-    isOnline: true,
-    isSyncing: false,
-    isProcessing: false,
-    pendingCount: 0,
-    lastSyncTime: null,
-    error: null,
-    isPaused: false,
-    isNavigating: false,
-    isLoadingData: false,
-    loadingCount: 0,
-    userRole: 'ADMIN',
+export const useSyncStore = create<SyncState>()(
+    persist(
+        (set) => ({
+            isOnline: true,
+            isSyncing: false,
+            isProcessing: false,
+            pendingCount: 0,
+            lastSyncTime: null,
+            error: null,
+            isPaused: false,
+            isNavigating: false,
+            isLoadingData: false,
+            loadingCount: 0,
+            userRole: 'ADMIN',
 
-    setOnline: (status) => set({ isOnline: status }),
-    setSyncing: (isSyncing) => set({ isSyncing }),
-    setProcessing: (isProcessing) => set({ isProcessing }),
-    setPaused: (isPaused) => set({ isPaused }),
-    setPendingCount: (pendingCount) => set({ pendingCount }),
-    setLastSyncTime: (lastSyncTime) => set({ lastSyncTime }),
-    setError: (error) => set({ error }),
-    setNavigating: (isNavigating) => set({ isNavigating }),
-    setIsLoadingData: (isLoading) => set((state) => {
-        const newCount = isLoading ? state.loadingCount + 1 : Math.max(0, state.loadingCount - 1);
-        return { 
-            loadingCount: newCount,
-            isLoadingData: newCount > 0
-        };
-    }),
-    setUserRole: (role) => set({ userRole: role }),
-}));
+            setOnline: (status) => set({ isOnline: status }),
+            setSyncing: (isSyncing) => set({ isSyncing }),
+            setProcessing: (isProcessing) => set({ isProcessing }),
+            setPaused: (isPaused) => set({ isPaused }),
+            setPendingCount: (pendingCount) => set({ pendingCount }),
+            setLastSyncTime: (lastSyncTime) => set({ lastSyncTime }),
+            setError: (error) => set({ error }),
+            setNavigating: (isNavigating) => set({ isNavigating }),
+            setIsLoadingData: (isLoading) => set((state) => {
+                const newCount = isLoading ? state.loadingCount + 1 : Math.max(0, state.loadingCount - 1);
+                return { 
+                    loadingCount: newCount,
+                    isLoadingData: newCount > 0
+                };
+            }),
+            setUserRole: (role) => set({ userRole: role }),
+        }),
+        {
+            name: 'crm-sync-storage',
+            partialize: (state) => ({
+                lastSyncTime: state.lastSyncTime
+            })
+        }
+    )
+);

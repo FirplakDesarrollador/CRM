@@ -25,6 +25,8 @@ import {
     DollarSign,
     BarChart3,
     Store,
+    BookOpen,
+    Warehouse,
 } from "lucide-react";
 import packageJson from "../../package.json";
 
@@ -37,7 +39,9 @@ const NAV_ITEMS = [
     { label: "Pedidos", href: "/pedidos", icon: Truck },
     { label: "Comisiones", href: "/comisiones", icon: DollarSign },
     { label: "Indicadores", href: "/indicadores", icon: BarChart3 },
-    { label: "Tiendas", href: "/tiendas", icon: Store },
+    { label: "Tiendas-Ferias", href: "/tiendas", icon: Store },
+    { label: "Catálogo", href: "/catalogo", icon: BookOpen },
+    { label: "Inventarios", href: "/inventarios", icon: Warehouse, requiredRole: 'ADMIN' },
     { label: "Informes", href: "/informes", icon: FileSpreadsheet, requiredRole: 'ADMIN' },
     { label: "Usuarios", href: "/usuarios", icon: UserCircle, requiredRole: 'ADMIN' },
     { label: "Configuración", href: "/configuracion", icon: Settings },

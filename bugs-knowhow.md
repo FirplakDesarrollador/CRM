@@ -621,3 +621,121 @@ Prevention Rule:
 
 Tags:
 [react] [deep-linking] [state-sync] [debounce] [accounts]
+
+---
+
+## [Bug ID: 20260724-01]
+
+Context:
+`app/informes/page.tsx` y exportación de informes / Proyección S&OP a Excel y CSV.
+
+Problem:
+La exportación de informes (especialmente la Proyección S&OP, Cotizaciones y Contactos) arrojaba error "column CRM_Pedidos.fecha_facturacion does not exist" o generaba archivos con columnas de nombres/importes en blanco.
+
+Root Cause:
+1. `CRM_Pedidos` no posee columnas `fecha_facturacion` ni `fecha_entrega`; las columnas reales en PostgreSQL provienen de campos SAP (`"EXTRA_Fecha de facturación"` y `"EXTRA_Fecha mínima requerida por comercial/cliente"`). Al consultar columnas inexistentes, Supabase devolvía error 42703.
+2. `CRM_Contactos` usa la columna `nombre` en lugar de `nombres` y `apellidos`.
+3. `CRM_Cotizaciones` usa `numero_cotizacion`, `total_amount` y `status` en lugar de `codigo`, `total_final` y `estado`.
+4. `CRM_Oportunidades` no vinculaba `probabilidad` con la clave `probability` usada en el encabezado del informe.
+
+Fix Applied:
+1. Se corrigió la consulta `.select()` de `CRM_Pedidos` especificando los nombres de columnas de Supabase entre comillas dobles y con valores de respaldo (`closeDate`, `expectedCloseDate`).
+2. Se mejoró `getYearAndMonth` para soportar formatos `DD/MM/YYYY`, `YYYY-MM-DD` e ISO.
+3. Se alinearon los mapeos de `flattenFn` para Contactos, Cotizaciones, Oportunidades y Cuentas con las columnas reales de las tablas `CRM_*`.
+
+---
+
+## [Bug ID: 20260821-01]
+
+Context:
+`lib/sync.ts` y modo snapshot (`_complete_snapshot_`) en sincronización offline contra la función RPC `process_field_updates`.
+
+Problem:
+Al sincronizar cuentas en modo snapshot con números de NIT de 10 o más dígitos (o strings formateados), PostgreSQL arrojaba el error: `value "..." is out of range for type integer [Context: _complete_snapshot_ (INSERT)]` o `invalid input syntax for type integer`, abortando la inserción.
+
+Root Cause:
+Fix Applied:
+Se agregó sanitización defensiva en `SyncEngine` (`lib/sync.ts`) para `CRM_Cuentas` antes de enviar el RPC: si `nit` no es un entero puro o supera `MAX_INT32 = 2147483647`, se establece en `null`, garantizando que `nit_base` conserve el NIT íntegro sin generar errores en PostgreSQL.
+
+Prevention Rule:
+**Integer Bounds Checking in Snapshot RPCs**: Al enviar payloads consolidados (`_complete_snapshot_`) a funciones dinámicas en PostgreSQL, asegurarse de que los campos con columnas legacy de tipo `integer` estén acotados (`<= 2147483647`) o sean enviados como `null` cuando exista una columna `text` correspondiente (`nit_base`).
+
+Tags:
+[sync] [snapshot] [postgres] [integer-range] [nit] [lww]
+
+---
+
+## [Bug ID: 20260821-02]
+
+Context:
+`lib/sync.ts`, ciclo de sincronización y generación de ítems en la cola `db.outbox`.
+
+Problem:
+Al editar un registro en la aplicación o iniciar la sincronización, el contador de pendientes se disparaba a más de 1,600 elementos ("Pendientes: 1685"), generando un bucle de carga masiva en el Outbox.
+
+Root Cause:
+1. Dentro de `pushBatch`, una validación de auto-curación consultaba `CRM_Cuentas` en Supabase con el JWT del asesor para verificar cuentas vinculadas a oportunidades del lote. Debido a políticas de RLS o latencia, la consulta devolvía menos cuentas, asumiendo que "faltaban" y re-encolando un nuevo snapshot con un UUID aleatorio (`uuidv4()`) en cada ciclo de sincronización.
+2. La respuesta del RPC `process_field_updates` para `_complete_snapshot_` no completaba en bloque todas las mutaciones previas del mismo `entity_id`.
+3. La compactación previa en `resetStuckItems` ignoraba ítems con `_complete_snapshot_`, impidiendo que los snapshots duplicados se fusionaran.
+
+Fix Applied:
+1. Se eliminó la re-consulta ciega dentro de `pushBatch`.
+2. Se implementó deduplicación universal en `resetStuckItems()` que colapsa cualquier colección de snapshots y mutaciones repetidas de una misma entidad en su versión más reciente.
+3. Se actualizó el procesador de respuesta del RPC para marcar como `COMPLETED` todas las mutaciones del mismo `entity_id` tras un snapshot exitoso.
+
+Prevention Rule:
+**Idempotent Outbox Mutations**: Las funciones de sincronización por lotes (`pushBatch`) nunca deben generar nuevas mutaciones de Outbox durante la ejecución del lote con IDs aleatorios. Cualquier auto-curación y compactación debe ser idempotente y ejecutarse antes del bucle de envío.
+
+Tags:
+[sync] [outbox] [deduplication] [infinite-loop] [self-healing]
+
+---
+
+## [Bug ID: 20260821-03]
+
+Context:
+`lib/sync.ts` y `lib/stores/useSyncStore.ts`, ciclo de sincronización reactiva al guardar/editar registros.
+
+Problem:
+Al editar cualquier campo de un registro (por ejemplo, el nombre de una cuenta), el navegador iniciaba una descarga masiva de miles de registros de todas las tablas ("descargando cientos de datos").
+
+Root Cause:
+1. `queueMutation` disparaba `triggerSync()`, el cual ejecutaba `pullChanges()` en cada mutación individual/autosave.
+2. `useSyncStore` no utilizaba persistencia en `localStorage` para `lastSyncTime`, por lo que cada recarga o sesión nueva iniciaba con `lastSyncTime = null`, provocando que `pullChanges()` hiciera una descarga completa inicial de 3,000 cuentas, 3,000 oportunidades, 3,000 contactos, 3,000 cotizaciones, etc.
+
+Fix Applied:
+1. Se añadió `triggerPush()` a `SyncEngine` para que `queueMutation` realice un envío inmediato y ligero de los cambios locales sin descargar ninguna tabla.
+2. Se configuró el middleware `persist` de Zustand en `useSyncStore` para guardar `lastSyncTime` en `localStorage`, garantizando que cualquier pull posterior sea estrictamente incremental (`gte('updated_at', lastSync)`).
+
+Prevention Rule:
+**Decouple Push from Pull in Local-First Outbox**: Las mutaciones locales del usuario deben disparar únicamente operaciones de envío (*push*). Las descargas completas o incrementales (*pull*) deben estar desacopladas y ejecutarse por intervalos de fondo, al iniciar la aplicación o por acción explícita del usuario.
+
+Tags:
+[sync] [push-pull-decoupling] [zustand-persist] [incremental-sync] [outbox]
+
+---
+
+## [Bug ID: 20260821-04]
+
+Context:
+`lib/sync.ts`, bloque `finally` de reintentos en `triggerSync()`.
+
+Problem:
+Al recargar la página en localhost o existir ítems en estado `FAILED` o `PENDING` en el Outbox, el motor de sincronización iniciaba un bucle infinito que ejecutaba `pullChanges()` cada 100ms, volviendo a descargar todas las tablas de Supabase continuamente.
+
+Root Cause:
+En el bloque `finally` de `triggerSync()`, al detectar ítems restantes para reintento se invocaba recursivamente `setTimeout(() => this.triggerSync(), ...)`. Al invocar `triggerSync` en vez de `triggerPush`, cada iteración de reintento del lote ejecutaba nuevamente la fase de descarga (`pullChanges`), saturando la red y la CPU.
+
+Fix Applied:
+Se cambió la reprogramación de reintentos en el bloque `finally` para invocar exclusivamente `this.triggerPush()`. La fase de descarga (`pullChanges`) queda confinada a ejecuciones únicas e independientes.
+
+Prevention Rule:
+**Never Retry Pull in Outbox Processing Loops**: Los bucles de reintento de la cola de salida (*outbox retry loops*) deben invocar únicamente funciones de envío (*push-only*). Jamás se debe invocar una rutina que contenga descargas (*pull*) dentro de la lógica de reintento de mutaciones.
+
+Tags:
+[sync] [infinite-pull-loop] [outbox-retry] [push-only]
+
+
+
+
+

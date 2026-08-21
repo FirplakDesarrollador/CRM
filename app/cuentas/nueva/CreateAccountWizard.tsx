@@ -30,6 +30,7 @@ const accountSchema = z.object({
     nivel_premium: z.enum(['PREMIUM', 'DESTACADO', 'ACTIVO']).nullable().optional(),
     ignorar_limites_descuento: z.boolean().optional(),
     comentarios: z.string().nullable().optional(),
+    origen_cuenta: z.string().nullable().optional(),
 });
 
 type AccountFormInput = z.input<typeof accountSchema>;
@@ -124,7 +125,8 @@ export default function CreateAccountWizard() {
             es_premium: false,
             nivel_premium: null,
             ignorar_limites_descuento: false,
-            comentarios: ""
+            comentarios: "",
+            origen_cuenta: ""
         }
     });
 
@@ -173,16 +175,28 @@ export default function CreateAccountWizard() {
 
         setIsSubmitting(true);
         try {
-            // Check duplicates against Supabase
+            // Check duplicates against Supabase using individual safe queries
             const checkDuplicates = async () => {
-                const query = supabase
-                    .from('CRM_Cuentas')
-                    .select('id, nombre, nit_base, telefono, email')
-                    .eq('is_deleted', false)
-                    .or(`nombre.eq.${data.nombre},nit_base.eq.${data.nit_base}${data.telefono ? `,telefono.eq.${data.telefono}` : ''}${data.email ? `,email.eq.${data.email}` : ''}`);
+                const checks = [
+                    supabase.from('CRM_Cuentas').select('id, nombre, nit_base, telefono, email').eq('is_deleted', false).eq('nombre', data.nombre),
+                    supabase.from('CRM_Cuentas').select('id, nombre, nit_base, telefono, email').eq('is_deleted', false).eq('nit_base', data.nit_base),
+                ];
+                if (data.telefono) {
+                    checks.push(supabase.from('CRM_Cuentas').select('id, nombre, nit_base, telefono, email').eq('is_deleted', false).eq('telefono', data.telefono));
+                }
+                if (data.email) {
+                    checks.push(supabase.from('CRM_Cuentas').select('id, nombre, nit_base, telefono, email').eq('is_deleted', false).eq('email', data.email));
+                }
 
-                const { data: duplicates } = await query;
-                return (duplicates ?? []) as DuplicateAccount[];
+                const results = await Promise.all(checks);
+                const allDuplicates = results.flatMap(r => r.data ?? []);
+                // Deduplicate by id
+                const seen = new Set<string>();
+                return allDuplicates.filter(d => {
+                    if (seen.has(d.id)) return false;
+                    seen.add(d.id);
+                    return true;
+                }) as DuplicateAccount[];
             };
 
             const duplicates = await checkDuplicates();
@@ -226,14 +240,16 @@ export default function CreateAccountWizard() {
                 es_premium: !!data.nivel_premium,
                 nivel_premium: data.nivel_premium || null,
                 ignorar_limites_descuento: data.ignorar_limites_descuento || false,
-                comentarios: data.comentarios || undefined
+                comentarios: data.comentarios || undefined,
+                origen_cuenta: data.origen_cuenta || undefined
             };
 
             const newId = await createAccount(payload);
             router.push(`/cuentas?id=${newId}`);
         } catch (error) {
             console.error("Error creating account:", error);
-            alert("Error al crear la cuenta");
+            const msg = error instanceof Error ? error.message : String(error);
+            alert(`Error al crear la cuenta: ${msg}`);
         } finally {
             setIsSubmitting(false);
         }
@@ -398,6 +414,11 @@ export default function CreateAccountWizard() {
                             <div className="space-y-1">
                                 <label className="text-sm font-bold text-slate-700 block">Dirección Física</label>
                                 <input {...register("direccion")} className="w-full border p-3 rounded-xl border-slate-200 outline-none focus:ring-2 focus:ring-blue-500" placeholder="Calle 123 # 45 - 67" />
+                            </div>
+
+                            <div className="space-y-1">
+                                <label className="text-sm font-bold text-slate-700 block">Origen de la Cuenta <span className="text-slate-400 font-normal">(Opcional)</span></label>
+                                <input {...register("origen_cuenta")} className="w-full border p-3 rounded-xl border-slate-200 outline-none focus:ring-2 focus:ring-blue-500" placeholder="Ej. Referido, Feria, Publicidad, Web, etc." />
                             </div>
                         </div>
                     )}

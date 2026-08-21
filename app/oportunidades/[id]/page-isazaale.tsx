@@ -259,13 +259,26 @@ export default function OpportunityDetailPage() {
 }
 
 const LOSS_REASONS = [
-    "Precio elevado",
-    "Compra en la competencia por precio",
-    "No contesta",
-    "Lo pospone",
-    "No va a comprar",
-    "Tiempos de entrega",
-    "No hay medida o color",
+    "N - No responde 1mer contacto",
+    "N- Sin información de contacto",
+    "N- Inadecuada Segmentación",
+    "N- No va a comprar",
+    "RED- Firplak Home",
+    "RED- Ser. Tecnico",
+    "RED- Distribución",
+    "RED- Obras",
+    "RED- MAC",
+    "INT - Abandona Conversación",
+    "INT - Precio Elevado",
+    "INT - Sin cobertura",
+    "INT - Tiempos de entrega",
+    "INT - No se fabrica",
+    "INT- No se tiene medida / Color",
+    "INT- Competencia diferente a precio",
+    "INT- Compro FIRPLAK",
+    "INT- Pago contraentrega",
+    "INT - Lo pospone",
+    "INT - Compra en Homcenter"
 ];
 
 function SummaryTab({ opportunity }: { opportunity: any }) {
@@ -1089,7 +1102,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                 </div>
 
                 {/* Account Card */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-blue-300 transition-all flex flex-col justify-between">
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-blue-300 transition-all flex flex-col justify-between h-fit">
                     <div>
                         <div className="flex items-center gap-3 mb-4">
                             <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">

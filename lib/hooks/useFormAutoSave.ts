@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { UseFormReturn } from "react-hook-form";
+import { FieldValues, UseFormReturn } from "react-hook-form";
 
-interface AutoSaveConfig<T> {
+interface AutoSaveConfig<T extends FieldValues> {
     form: UseFormReturn<T>;
     onSave: (data: T) => Promise<void>;
     debounceMs?: number;
     isEnabled: boolean;
 }
 
-export function useFormAutoSave<T extends object>({
+export function useFormAutoSave<T extends FieldValues>({
     form,
     onSave,
     debounceMs = 1500,
@@ -27,7 +27,7 @@ export function useFormAutoSave<T extends object>({
     useEffect(() => {
         if (!isEnabled) return;
 
-        const subscription = form.watch((value, { name }) => {
+        const subscription = form.watch((value) => {
             // Avoid saving if value matches last saved snapshot
             const valueStr = JSON.stringify(value);
             if (valueStr === lastSavedData.current) return;

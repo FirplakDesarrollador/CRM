@@ -15,6 +15,21 @@ export function useContacts(accountId?: string) {
     const createContact = async (data: Omit<LocalContact, 'id' | 'account_id'> & { account_id?: string }) => {
         if (!data.account_id && !accountId) throw new Error("Account ID is required for contacts");
 
+        const targetAccountId = data.account_id || accountId!;
+
+        // Local duplicate check before inserting (phone)
+        if (data.telefono && data.telefono.trim() !== '') {
+            const existingLocal = await db.contacts
+                .where('account_id')
+                .equals(targetAccountId)
+                .toArray();
+            
+            const hasDuplicate = existingLocal.some(c => c.telefono === data.telefono && !c.is_deleted);
+            if (hasDuplicate) {
+                throw new Error(`Ya existe un contacto con el teléfono ${data.telefono} en esta cuenta.`);
+            }
+        }
+
         const id = uuidv4();
         const { data: { user } } = await syncEngine.getCurrentUser();
 
@@ -26,6 +41,7 @@ export function useContacts(accountId?: string) {
             email: data.email,
             telefono: data.telefono,
             es_principal: data.es_principal || false,
+            comentarios: data.comentarios,
             created_by: user?.id,
             updated_by: user?.id,
             updated_at: new Date().toISOString()

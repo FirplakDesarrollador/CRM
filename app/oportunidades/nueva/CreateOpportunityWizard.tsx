@@ -73,42 +73,54 @@ export default function CreateOpportunityWizard() {
     const [fallbackDepartments, setFallbackDepartments] = useState<any[]>([]);
     const [fallbackCities, setFallbackCities] = useState<any[]>([]);
 
-    // Catalogs for cities
+    // Catalogs for cities & segments
     const countriesList = useLiveQuery(() => db.countries.toArray()) || [];
     const departmentsList = useLiveQuery(() => db.departments.toArray()) || [];
     const citiesList = useLiveQuery(() => db.cities.toArray()) || [];
+    const dbSegments = useLiveQuery(() => db.segments.toArray()) || [];
 
     const [phasesLoading, setPhasesLoading] = useState(false);
     const [phasesError, setPhasesError] = useState<string | null>(null);
     const [collaborators, setCollaborators] = useState<CollaboratorEntry[]>([]);
 
     useEffect(() => {
-        // Fetch all segments (small table, safe to fetch all)
+        // Fallback fetch for segments if local DB is empty
         const fetchSegments = async () => {
-            const { supabase } = await import("@/lib/supabase");
-            const { data } = await supabase.from('CRM_Segmentos').select('*');
-            if (data) setSegments(data);
+            if (dbSegments.length === 0) {
+                try {
+                    const { supabase } = await import("@/lib/supabase");
+                    const { data } = await supabase.from('CRM_Segmentos').select('*');
+                    if (data) setSegments(data);
+                } catch (e) {
+                    console.warn('[CreateOppWizard] Failed to fetch remote segments:', e);
+                }
+            }
         };
         fetchSegments();
 
         const fetchCatalogs = async () => {
-            const { supabase } = await import("@/lib/supabase");
-            if (countriesList.length === 0) {
-                const { data } = await supabase.from('CRM_Paises').select('*');
-                if (data) setFallbackCountries(data);
-            }
-            if (departmentsList.length === 0) {
-                const { data } = await supabase.from('CRM_Departamentos').select('*');
-                if (data) setFallbackDepartments(data);
-            }
-            if (citiesList.length === 0) {
-                const { data } = await supabase.from('CRM_Ciudades').select('*');
-                if (data) setFallbackCities(data);
+            try {
+                const { supabase } = await import("@/lib/supabase");
+                if (countriesList.length === 0) {
+                    const { data } = await supabase.from('CRM_Paises').select('*');
+                    if (data) setFallbackCountries(data);
+                }
+                if (departmentsList.length === 0) {
+                    const { data } = await supabase.from('CRM_Departamentos').select('*');
+                    if (data) setFallbackDepartments(data);
+                }
+                if (citiesList.length === 0) {
+                    const { data } = await supabase.from('CRM_Ciudades').select('*');
+                    if (data) setFallbackCities(data);
+                }
+            } catch (e) {
+                console.warn('[CreateOppWizard] Failed to fetch remote catalogs:', e);
             }
         };
         fetchCatalogs();
-    }, [countriesList.length, departmentsList.length, citiesList.length]);
+    }, [countriesList.length, departmentsList.length, citiesList.length, dbSegments.length]);
 
+    const displaySegments = dbSegments.length > 0 ? dbSegments : segments;
     const displayCountries = countriesList.length > 0 ? countriesList : fallbackCountries;
     const displayDepartments = departmentsList.length > 0 ? departmentsList : fallbackDepartments;
     const displayCities = citiesList.length > 0 ? citiesList : fallbackCities;

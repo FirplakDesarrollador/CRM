@@ -5,9 +5,12 @@ import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useUsers, User, CreateUserData, UpdateUserData } from '@/lib/hooks/useUsers';
-import { UserRole } from '@/lib/hooks/useCurrentUser';
 import { X, Loader2 } from 'lucide-react';
 import { MultiSelect } from '@/components/ui/MultiSelect';
+import { SALES_CHANNELS } from '@/lib/salesChannels';
+
+import { useLiveQuery } from 'dexie-react-hooks';
+import { db } from '@/lib/db';
 
 const userSchema = z.object({
     email: z.string().email('Email inválido'),
@@ -16,6 +19,11 @@ const userSchema = z.object({
     role: z.enum(['ADMIN', 'COORDINADOR', 'VENDEDOR']),
     allowed_modules: z.array(z.string()).optional(),
     coordinadores: z.array(z.string()).optional(),
+    pais: z.string().optional(),
+    departamento: z.string().optional(),
+    paises: z.array(z.string()).optional(),
+    departamentos: z.array(z.string()).optional(),
+    canales: z.array(z.string()).optional(),
 });
 
 type UserFormData = z.infer<typeof userSchema>;
@@ -32,6 +40,9 @@ const AVAILABLE_MODULES = [
     { value: '/contactos', label: 'Contactos' },
     { value: '/actividades', label: 'Actividades' },
     { value: '/pedidos', label: 'Pedidos' },
+    { value: '/tiendas', label: 'Tiendas-Ferias' },
+    { value: '/catalogo', label: 'Catálogo' },
+    { value: '/inventarios', label: 'Inventarios' },
     { value: '/informes', label: 'Informes' },
     { value: '/configuracion', label: 'Configuración' },
 ];
@@ -40,6 +51,12 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
     const { createUser, updateUser, users } = useUsers();
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
+
+    const countriesList = useLiveQuery(() => db.countries.toArray()) || [];
+    const departmentsList = useLiveQuery(() => db.departments.toArray()) || [];
+
+    const countryOptions = countriesList.map(c => ({ label: c.nombre, value: String(c.id) }));
+    const channelOptions = SALES_CHANNELS.map(c => ({ label: c.nombre, value: c.id }));
 
     const {
         register,
@@ -55,12 +72,27 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
             role: user.role,
             allowed_modules: user.allowed_modules || [],
             coordinadores: user.coordinadores || [],
+            pais: user.pais || '',
+            departamento: user.departamento || '',
+            paises: user.paises || (user.pais ? [user.pais] : []),
+            departamentos: user.departamentos || (user.departamento ? [user.departamento] : []),
+            canales: user.canales || [],
         } : {
             role: 'VENDEDOR',
             allowed_modules: [],
             coordinadores: [],
+            pais: '',
+            departamento: '',
+            paises: [],
+            departamentos: [],
+            canales: [],
         },
     });
+
+    const selectedPaises = watch('paises') || [];
+    const departmentOptions = departmentsList
+        .filter(d => selectedPaises.length === 0 || selectedPaises.includes(String(d.pais_id)))
+        .map(d => ({ label: d.nombre, value: String(d.id) }));
 
     const coordinatorOptions = users
         .filter(u => (u.role === 'COORDINADOR' || u.role === 'ADMIN') && u.id !== user?.id)
@@ -74,6 +106,12 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
         setError(null);
 
         try {
+            const paisesArray = data.paises || [];
+            const deptsArray = data.departamentos || [];
+            const canalesArray = data.canales || [];
+            const primaryPais = paisesArray.length > 0 ? paisesArray[0] : '';
+            const primaryDept = deptsArray.length > 0 ? deptsArray[0] : '';
+
             if (user) {
                 // Update existing user
                 const updates: UpdateUserData = {
@@ -81,6 +119,11 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
                     role: data.role,
                     allowed_modules: data.allowed_modules,
                     coordinadores: data.coordinadores,
+                    pais: primaryPais,
+                    departamento: primaryDept,
+                    paises: paisesArray,
+                    departamentos: deptsArray,
+                    canales: canalesArray,
                 };
 
                 const result = await updateUser(user.id, updates);
@@ -103,6 +146,11 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
                     role: data.role,
                     allowed_modules: data.allowed_modules,
                     coordinadores: data.coordinadores,
+                    pais: primaryPais,
+                    departamento: primaryDept,
+                    paises: paisesArray,
+                    departamentos: deptsArray,
+                    canales: canalesArray,
                 };
 
                 const result = await createUser(createData);
@@ -215,6 +263,74 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
                         <p className="mt-1 text-xs text-slate-500">
                             Define los permisos y accesos del usuario en el sistema
                         </p>
+                    </div>
+
+                    {/* Ubicación Geográfica Asignada (Selección Múltiple) */}
+                    <div className="space-y-3 p-3 border border-slate-200 rounded-lg bg-slate-50/50">
+                        <label className="block text-sm font-semibold text-slate-800">
+                            Ubicación Geográfica Asignada
+                            <span className="block text-xs font-normal text-slate-500 mt-0.5">
+                                Selecciona uno o varios países y departamentos. Si se dejan vacíos, el vendedor podrá operar en cualquier país o departamento.
+                            </span>
+                        </label>
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                                Países Permitidos
+                            </label>
+                            <Controller
+                                control={control}
+                                name="paises"
+                                render={({ field }) => (
+                                    <MultiSelect
+                                        options={countryOptions}
+                                        selected={field.value || []}
+                                        onChange={field.onChange}
+                                        placeholder="Todos los países (Sin restricción)..."
+                                    />
+                                )}
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                                Departamentos Permitidos
+                            </label>
+                            <Controller
+                                control={control}
+                                name="departamentos"
+                                render={({ field }) => (
+                                    <MultiSelect
+                                        options={departmentOptions}
+                                        selected={field.value || []}
+                                        onChange={field.onChange}
+                                        placeholder="Todos los departamentos (Sin restricción)..."
+                                    />
+                                )}
+                            />
+                        </div>
+                    </div>
+
+                    {/* Canales de Venta Asignados (Selección Múltiple) */}
+                    <div className="space-y-3 p-3 border border-slate-200 rounded-lg bg-slate-50/50">
+                        <label className="block text-sm font-semibold text-slate-800">
+                            Canales de Venta Asignados
+                            <span className="block text-xs font-normal text-slate-500 mt-0.5">
+                                Selecciona uno o más canales de venta en los que opera este asesor (ej. Canal Propio, Distribución, Obras/Constructor).
+                            </span>
+                        </label>
+                        <div>
+                            <Controller
+                                control={control}
+                                name="canales"
+                                render={({ field }) => (
+                                    <MultiSelect
+                                        options={channelOptions}
+                                        selected={field.value || []}
+                                        onChange={field.onChange}
+                                        placeholder="Seleccionar canales de venta..."
+                                    />
+                                )}
+                            />
+                        </div>
                     </div>
 
                     {/* Coordinators */}

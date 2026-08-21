@@ -30,6 +30,7 @@ import { CollaboratorsTab } from "@/components/oportunidades/CollaboratorsTab";
 import { AssignedTab } from "@/components/oportunidades/AssignedTab";
 import { DollarSign } from "lucide-react";
 import { useSyncStore } from "@/lib/stores/useSyncStore";
+import { useOpportunityOrigins } from "@/lib/hooks/useOpportunityOrigins";
 
 export default function OpportunityDetailPage() {
     const params = useParams();
@@ -38,7 +39,6 @@ export default function OpportunityDetailPage() {
     const { opportunities, deleteOpportunity } = useOpportunities();
     const { user: currentUser, role: userRole } = useCurrentUser();
     const setIsLoadingData = useSyncStore(state => state.setIsLoadingData);
-
     const phases = useLiveQuery(() => db.phases.toArray());
     const phaseMap = new Map(phases?.map(p => [p.id, p.nombre]));
 
@@ -259,17 +259,31 @@ export default function OpportunityDetailPage() {
 }
 
 const LOSS_REASONS = [
-    "Precio elevado",
-    "Compra en la competencia por precio",
-    "No contesta",
-    "Lo pospone",
-    "No va a comprar",
-    "Tiempos de entrega",
-    "No hay medida o color",
+    "N - No responde 1mer contacto",
+    "N- Sin información de contacto",
+    "N- Inadecuada Segmentación",
+    "N- No va a comprar",
+    "RED- Firplak Home",
+    "RED- Ser. Tecnico",
+    "RED- Distribución",
+    "RED- Obras",
+    "RED- MAC",
+    "INT - Abandona Conversación",
+    "INT - Precio Elevado",
+    "INT - Sin cobertura",
+    "INT - Tiempos de entrega",
+    "INT - No se fabrica",
+    "INT- No se tiene medida / Color",
+    "INT- Competencia diferente a precio",
+    "INT- Compro FIRPLAK",
+    "INT- Pago contraentrega",
+    "INT - Lo pospone",
+    "INT - Compra en Homcenter"
 ];
 
 function SummaryTab({ opportunity }: { opportunity: any }) {
     const { updateOpportunity } = useOpportunities();
+    const { origins: opportunityOrigins } = useOpportunityOrigins();
     const { quotes } = useQuotes(opportunity.id);
     const [localAmount, setLocalAmount] = useState(opportunity.amount || 0);
     const [localClosingDate, setLocalClosingDate] = useState(toInputDate(opportunity.fecha_cierre_estimada));
@@ -499,7 +513,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
         );
     }
 
-    const currentPhaseIndex = phases?.findIndex(p => p.id === opportunity.fase_id) ?? -1;
+    const currentPhaseIndex = phases?.findIndex(p => Number(p.id) === Number(opportunity.fase_id)) ?? -1;
 
     return (
         <div className="space-y-6 animate-in fade-in duration-500">
@@ -586,7 +600,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                         return normalized.includes('cerrada') || normalized.includes('ganada') || normalized.includes('perdida');
                                     }).map((phase) => {
                                         const isWon = phase.nombre.toLowerCase().includes('ganada');
-                                        const isActive = opportunity.fase_id === phase.id;
+                                        const isActive = Number(opportunity.fase_id) === Number(phase.id);
 
                                         const isLostPhase = phase.nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes('perdida');
                                         const isBlocked = isLostPhase && !lossFieldsComplete;
@@ -612,7 +626,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                             >
                                                 <div className={cn(
                                                     "w-2 h-2 rounded-full",
-                                                    isBlocked ? "bg-slate-300" : isWon ? "bg-green-500" : "bg-red-500"
+                                                    isBlocked ? "bg-slate-300" : isActive ? (isWon ? "bg-green-500" : "bg-red-500") : "bg-slate-300"
                                                 )} />
                                                 {phase.nombre}
                                                 {isBlocked && <span className="ml-0.5 text-[8px] opacity-70">🔒</span>}
@@ -860,6 +874,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                 <div className="relative group">
                                     <input
                                         type="text"
+                                        list="opportunity-origin-options"
                                         value={localOrigen}
                                         onChange={(e) => setLocalOrigen(e.target.value)}
                                         onBlur={async () => {
@@ -872,6 +887,9 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                         className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none placeholder:text-slate-400"
                                         placeholder="Ej: Llamada, Evento..."
                                     />
+                                    <datalist id="opportunity-origin-options">
+                                        {opportunityOrigins.map(origin => <option key={origin.id} value={origin.codigo}>{origin.nombre}</option>)}
+                                    </datalist>
                                     {isSavingOrigen && (
                                         <div className="absolute right-3 top-1/2 -translate-y-1/2">
                                             <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
@@ -1089,7 +1107,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                 </div>
 
                 {/* Account Card */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-blue-300 transition-all flex flex-col justify-between">
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-blue-300 transition-all flex flex-col justify-between h-fit">
                     <div>
                         <div className="flex items-center gap-3 mb-4">
                             <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">

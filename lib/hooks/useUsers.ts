@@ -10,6 +10,11 @@ export interface User {
     is_active: boolean;
     allowed_modules?: string[] | null;
     coordinadores?: string[] | null;
+    pais?: string | null;
+    departamento?: string | null;
+    paises?: string[] | null;
+    departamentos?: string[] | null;
+    canales?: string[] | null;
     created_at: string;
     updated_at: string;
 }
@@ -21,6 +26,11 @@ export interface CreateUserData {
     role: UserRole;
     allowed_modules?: string[];
     coordinadores?: string[];
+    pais?: string | null;
+    departamento?: string | null;
+    paises?: string[];
+    departamentos?: string[];
+    canales?: string[];
 }
 
 export interface UpdateUserData {
@@ -29,6 +39,11 @@ export interface UpdateUserData {
     is_active?: boolean;
     allowed_modules?: string[] | null;
     coordinadores?: string[] | null;
+    pais?: string | null;
+    departamento?: string | null;
+    paises?: string[] | null;
+    departamentos?: string[] | null;
+    canales?: string[] | null;
 }
 
 /**
@@ -88,13 +103,34 @@ export function useUsers() {
             if (userData.role) updates.role = userData.role;
             if (userData.allowed_modules) updates.allowed_modules = userData.allowed_modules;
             if (userData.coordinadores) updates.coordinadores = userData.coordinadores;
+            if (userData.pais !== undefined) updates.pais = userData.pais;
+            if (userData.departamento !== undefined) updates.departamento = userData.departamento;
+            if (userData.paises !== undefined) updates.paises = userData.paises;
+            if (userData.departamentos !== undefined) updates.departamentos = userData.departamentos;
+            if (userData.canales !== undefined) updates.canales = userData.canales;
 
             // Only update if there are extra fields beyond the basic trigger defaults
             if (Object.keys(updates).length > 1 || updates.role !== 'VENDEDOR') {
-                const { error: updateError } = await supabase
+                let { error: updateError } = await supabase
                     .from('CRM_Usuarios')
                     .update(updates)
                     .eq('id', authData.user.id);
+
+                if (updateError && (updateError.message.includes('canales') || updateError.message.includes('departamento') || updateError.message.includes('pais') || updateError.message.includes('schema cache'))) {
+                    console.warn('[useUsers] Columnas adicionales no encontradas en la DB remota durante createUser, reintentando sin campos extendidos...');
+                    delete updates.canales;
+                    delete updates.pais;
+                    delete updates.departamento;
+                    delete updates.paises;
+                    delete updates.departamentos;
+
+                    const retryRes = await supabase
+                        .from('CRM_Usuarios')
+                        .update(updates)
+                        .eq('id', authData.user.id);
+                    
+                    updateError = retryRes.error;
+                }
 
                 if (updateError) throw updateError;
             }
@@ -112,13 +148,31 @@ export function useUsers() {
     // Update user
     const updateUser = async (userId: string, updates: UpdateUserData): Promise<{ success: boolean; error?: string }> => {
         try {
-            const { error: updateError } = await supabase
+            const payload: any = {
+                ...updates,
+                updated_at: new Date().toISOString(),
+            };
+
+            let { error: updateError } = await supabase
                 .from('CRM_Usuarios')
-                .update({
-                    ...updates,
-                    updated_at: new Date().toISOString(),
-                })
+                .update(payload)
                 .eq('id', userId);
+
+            if (updateError && (updateError.message.includes('canales') || updateError.message.includes('departamento') || updateError.message.includes('pais') || updateError.message.includes('schema cache'))) {
+                console.warn('[useUsers] Columnas adicionales no encontradas en la DB remota, reintentando sin campos extendidos...');
+                delete payload.canales;
+                delete payload.pais;
+                delete payload.departamento;
+                delete payload.paises;
+                delete payload.departamentos;
+
+                const retryRes = await supabase
+                    .from('CRM_Usuarios')
+                    .update(payload)
+                    .eq('id', userId);
+                
+                updateError = retryRes.error;
+            }
 
             if (updateError) throw updateError;
 

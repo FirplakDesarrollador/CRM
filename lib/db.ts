@@ -44,6 +44,7 @@ export interface LocalCuenta {
     updated_by?: string;
     updated_at?: string;
     comentarios?: string;
+    origen_cuenta?: string | null;
 }
 
 export interface LocalPais {
@@ -84,7 +85,7 @@ export interface LocalQuote {
     formas_pago?: string;
     facturacion_electronica?: boolean;
     oc_cot?: string;
-    cierre_facturacion?: string;
+    cierre_facturacion?: boolean | string;
     es_muestra?: boolean;
     aplica_contrato?: boolean;
     multa_incumplimiento?: boolean;
@@ -103,10 +104,12 @@ export interface LocalQuote {
     contacto_ventas?: string;
     contacto_logistico?: string;
     contacto_tesoreria?: string;
+    direccion_envio_factura?: string;
     dir_envio_factura_tipo?: string;
     servicio_subida_hidromasaje?: boolean;
     piso_entrega?: number;
     tiene_escaleras?: boolean;
+    verificacion_previa_firplak?: boolean;
     planos_hidromasaje?: string;
     fecha_entrega?: string;
     nit_cliente_final?: string;
@@ -158,7 +161,7 @@ export interface LocalPedido {
     formas_pago?: string;
     facturacion_electronica?: boolean;
     oc_cot?: string;
-    cierre_facturacion?: string;
+    cierre_facturacion?: boolean | string;
     es_muestra?: boolean;
     aplica_contrato?: boolean;
     multa_incumplimiento?: boolean;
@@ -181,10 +184,12 @@ export interface LocalPedido {
     contacto_ventas?: string;
     contacto_logistico?: string;
     contacto_tesoreria?: string;
+    direccion_envio_factura?: string;
     dir_envio_factura_tipo?: string;
     servicio_subida_hidromasaje?: boolean;
     piso_entrega?: number;
     tiene_escaleras?: boolean;
+    verificacion_previa_firplak?: boolean;
     planos_hidromasaje?: string;
     fecha_entrega?: string;
     nit_cliente_final?: string;
@@ -307,10 +312,10 @@ export class CRMFirplakDB extends Dexie {
 
     constructor() {
         super('CRMFirplakDB');
-        this.version(11).stores({
+        this.version(12).stores({
             outbox: 'id, entity_type, status, field_timestamp, field_name',
             fileQueue: 'id, status',
-            accounts: 'id, nit, nombre, owner_user_id',
+            accounts: 'id, nit, nit_base, nombre, owner_user_id',
             opportunities: 'id, account_id, owner_user_id', // Simplified index
             contacts: 'id, account_id, email',
             quotes: 'id, opportunity_id, status, es_pedido',
@@ -340,6 +345,9 @@ export interface LocalOpportunityCollaborator {
     porcentaje: number;
     rol: string;
     created_at?: string;
+    updated_at?: string;
+    updated_by?: string;
+    _sync_metadata?: Record<string, number>;
     synced_at?: string;
     is_deleted?: boolean;
 }
