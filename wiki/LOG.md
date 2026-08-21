@@ -3,6 +3,12 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-08-21 - Ingest: Desacoplamiento Push / Pull y Deduplicación Universal de Outbox en SyncEngine
+- **Desacoplamiento Push / Pull (`triggerPush`):** Las mutaciones locales (`queueMutation`) ahora disparan exclusivamente `triggerPush()`, enviando inmediatamente los cambios locales vía RPC sin ejecutar descargas masivas de tablas.
+- **Persistencia de `lastSyncTime` en Zustand:** Se aplicó el middleware `persist` en `useSyncStore` para guardar `lastSyncTime` en `localStorage`, evitando que en cada recarga se dispare una descarga inicial completa de 3,000 registros por tabla.
+- **Deduplicación Universal en `resetStuckItems()`:** Purga automática de snapshots y mutaciones redundantes agrupadas por entidad en `db.outbox`.
+- Páginas actualizadas: `wiki/pages/sincronizacion-offline.md`, `wiki/LOG.md`.
+
 ## 2026-08-21 - Ingest: Origen por Defecto Único en /configuracion y Selección Automática en /tiendas
 
 - Se creó y ejecutó la migración `20260821_add_is_default_to_opportunity_origins.sql` agregando `is_default BOOLEAN NOT NULL DEFAULT FALSE` con índice único condicional `uq_crm_origenes_is_default` en `CRM_OrigenesOportunidad`.

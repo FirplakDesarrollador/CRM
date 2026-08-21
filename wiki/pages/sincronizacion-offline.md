@@ -16,7 +16,9 @@ Cada mutación local genera un `OutboxItem`:
 ### Modos de Mutación
 - **Modo Normal (Granular):** Genera un `OutboxItem` por campo modificado. Dos usuarios pueden editar campos distintos del mismo registro sin pisarse (LWW a nivel de campo).
 - **Modo Snapshot:** Si se especifica `isSnapshot: true` (ej. en cuentas, pedidos u oportunidades complejas), se crea un único item con `field_name: '_complete_snapshot_'` conteniendo todo el payload del objeto para una inserción o actualización consolidada.
-- **Compactación Retroactiva:** Al arrancar el sync (`resetStuckItems`), si existen colas con múltiples mutaciones de campo para una misma cuenta, el motor las compacta automáticamente en un único `_complete_snapshot_`, reduciendo drásticamente el tamaño del outbox.
+- **Deduplicación Universal:** Al arrancar el sync (`resetStuckItems`), el motor agrupa las mutaciones de cualquier entidad y purga automáticamente snapshots o mutaciones repetidas, conservando solo la más reciente.
+- **Desacoplamiento Push / Pull (`triggerPush`):** Al guardar o editar un registro localmente, se invoca `triggerPush()` que envía inmediatamente los cambios locales vía RPC sin descargar tablas desde Supabase. Las descargas completas o incrementales (`pullChanges`) se reservan para el inicio de sesión, background intervals o acciones explícitas.
+- **Persistencia de `lastSyncTime`:** El store `useSyncStore` persiste `lastSyncTime` en `localStorage` con middleware `persist` de Zustand, garantizando que los pulls sean siempre incrementales (`gte('updated_at', lastSync)`).
 
 - **Bucle de Lotes Continuo:** `pushChanges` procesa lotes de hasta 500 ítems de manera continua con micro-pausas (`yield()`) para no bloquear el hilo de la UI.
 - **Reintentos y Backoff Desacoplado:** Si quedan ítems en estado `PENDING`, el motor continúa de inmediato (100ms); solo cuando todos los ítems restantes están en `FAILED` se aplica backoff exponencial (`2^n` segundos, tope 30s, máximo 5 reintentos).
