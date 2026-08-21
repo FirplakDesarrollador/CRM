@@ -171,56 +171,60 @@ export class SyncEngine {
             })
             .delete();
 
-        // Self-heal: Retroactive Outbox Compaction for fragmented account updates
-        // Consolidates multiple pending field-level updates for the same account into a single atomic snapshot
+        // Universal Outbox Deduplication & Compaction:
+        // Consolidates redundant snapshots and duplicate field mutations across all entities
         try {
-            const pendingAccountItems = await db.outbox
-                .where('entity_type').equals('CRM_Cuentas')
-                .and(i => (i.status === 'PENDING' || i.status === 'FAILED') && i.field_name !== '_complete_snapshot_' && i.field_name !== '_sync_metadata')
+            const activeItems = await db.outbox
+                .where('status').anyOf(['PENDING', 'SYNCING', 'FAILED'])
                 .toArray();
 
-            if (pendingAccountItems.length > 5) {
+            if (activeItems.length > 1) {
+                // Group by entity_type + entity_id
                 const byEntity = new Map<string, OutboxItem[]>();
-                for (const item of pendingAccountItems) {
-                    if (!byEntity.has(item.entity_id)) byEntity.set(item.entity_id, []);
-                    byEntity.get(item.entity_id)!.push(item);
+                for (const item of activeItems) {
+                    const key = `${item.entity_type}:${item.entity_id}`;
+                    if (!byEntity.has(key)) byEntity.set(key, []);
+                    byEntity.get(key)!.push(item);
                 }
 
                 const itemsToDelete: string[] = [];
-                const snapshotsToAdd: OutboxItem[] = [];
 
-                for (const [entityId, items] of Array.from(byEntity.entries())) {
-                    if (items.length >= 2) {
-                        const localAccount = await db.accounts.get(entityId);
-                        if (localAccount) {
-                            const { _sync_metadata, id, ...accountData } = localAccount;
-                            const maxTs = Math.max(...items.map(i => i.field_timestamp || Date.now()));
+                for (const [_key, items] of Array.from(byEntity.entries())) {
+                    if (items.length <= 1) continue;
 
-                            snapshotsToAdd.push({
-                                id: uuidv4(),
-                                entity_type: 'CRM_Cuentas',
-                                entity_id: entityId,
-                                field_name: '_complete_snapshot_',
-                                old_value: null,
-                                new_value: accountData,
-                                field_timestamp: maxTs,
-                                status: 'PENDING',
-                                retry_count: 0
-                            });
+                    // If entity has snapshots, keep only the latest snapshot and delete older snapshots & field mutations
+                    const snapshots = items.filter(i => i.field_name === '_complete_snapshot_');
+                    if (snapshots.length > 0) {
+                        snapshots.sort((a, b) => (b.field_timestamp || 0) - (a.field_timestamp || 0));
+                        const keepSnapshot = snapshots[0];
 
-                            items.forEach(i => itemsToDelete.push(i.id));
+                        for (const item of items) {
+                            if (item.id !== keepSnapshot.id) {
+                                itemsToDelete.push(item.id);
+                            }
+                        }
+                    } else {
+                        // If entity has multiple updates for the same field_name, keep only the newest per field
+                        const byField = new Map<string, OutboxItem>();
+                        for (const item of items) {
+                            const existing = byField.get(item.field_name);
+                            if (!existing || (item.field_timestamp || 0) > (existing.field_timestamp || 0)) {
+                                if (existing) itemsToDelete.push(existing.id);
+                                byField.set(item.field_name, item);
+                            } else {
+                                itemsToDelete.push(item.id);
+                            }
                         }
                     }
                 }
 
                 if (itemsToDelete.length > 0) {
                     await db.outbox.bulkDelete(itemsToDelete);
-                    await db.outbox.bulkPut(snapshotsToAdd);
-                    console.log(`[Sync] Retroactive compaction: reduced ${itemsToDelete.length} fragmented items into ${snapshotsToAdd.length} atomic snapshots.`);
+                    console.log(`[Sync] Universal deduplication: purged ${itemsToDelete.length} redundant outbox items.`);
                 }
             }
-        } catch (compactErr) {
-            console.warn('[Sync] Retroactive compaction non-critical warning:', compactErr);
+        } catch (dedupErr) {
+            console.warn('[Sync] Universal deduplication warning:', dedupErr);
         }
             
         await this.updatePendingCount();
@@ -714,79 +718,6 @@ export class SyncEngine {
             }
         }
 
-        if (batches['CRM_Oportunidades']) {
-            const updates = batches['CRM_Oportunidades'];
-
-            // 3.4 SELF-HEALING: Check for missing accounts
-            const uniqueAccountIds = new Set<string>();
-
-            // Gather account IDs from updates (if present in payload)
-            updates.forEach(u => {
-                if (u.field === 'account_id' && typeof u.value === 'string') uniqueAccountIds.add(u.value);
-            });
-
-            // Also check items in the DB for these opportunities if account_id isn't in the update payload
-            const oppIds = Array.from(new Set(updates.map(u => u.id)));
-            if (oppIds.length > 0) {
-                try {
-                    const localOpps = await db.opportunities.where('id').anyOf(oppIds).toArray();
-                    localOpps.forEach(o => {
-                        if (o.account_id) uniqueAccountIds.add(o.account_id);
-                    });
-                } catch (e) { console.warn("[Sync] Failed to read local opps for account check", e); }
-            }
-
-            if (uniqueAccountIds.size > 0) {
-                const accountIdsToCheck = Array.from(uniqueAccountIds);
-                // Check server existence (blind check)
-                const { data: existingAccounts, error: accCheckErr } = await supabase
-                    .from('CRM_Cuentas')
-                    .select('id')
-                    .in('id', accountIdsToCheck);
-
-                if (!accCheckErr && existingAccounts) {
-                    const foundIds = new Set(existingAccounts.map(a => a.id));
-                    const missingAccountIds = accountIdsToCheck.filter(id => !foundIds.has(id));
-
-                    if (missingAccountIds.length > 0) {
-                        console.warn(`[Sync] Self-healing: Found ${missingAccountIds.length} missing accounts referenced by opportunities.`);
-
-                        const pendingAccounts = await db.outbox
-                            .where('entity_type').equals('CRM_Cuentas')
-                            .and(i => i.status === 'PENDING' || i.status === 'SYNCING')
-                            .toArray();
-                        const pendingAccountIds = new Set(pendingAccounts.map(p => p.entity_id));
-
-                        for (const missingId of missingAccountIds) {
-                            if (pendingAccountIds.has(missingId)) continue; // Already queueing
-
-                            // Check existence in local DB
-                            const localAccount = await db.accounts.get(missingId);
-                            if (localAccount) {
-                                console.log(`[Sync] Re-queueing missing local account as snapshot: ${missingId}`);
-                                const { _sync_metadata, id, ...accountData } = localAccount;
-
-                                const newOutboxItem: OutboxItem = {
-                                    id: uuidv4(),
-                                    entity_type: 'CRM_Cuentas',
-                                    entity_id: missingId,
-                                    field_name: '_complete_snapshot_',
-                                    old_value: null,
-                                    new_value: accountData,
-                                    field_timestamp: now,
-                                    status: 'PENDING',
-                                    retry_count: 0
-                                };
-
-                                await db.outbox.put(newOutboxItem);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-
         // 4. Extract CRM_Oportunidades_Colaboradores to process AFTER main tables
         let collabUpdatesPending: any[] | null = null;
         if (batches['CRM_Oportunidades_Colaboradores']) {
@@ -874,8 +805,8 @@ export class SyncEngine {
 
                 for (const result of results) {
                     if (result.success) {
-                        if (result.field === '_all') {
-                            // Successful INSERT (or consolidated update): mark ALL pending items for this ID as COMPLETED
+                        if (result.field === '_all' || result.field === '_complete_snapshot_') {
+                            // Successful Snapshot/Consolidated update: mark ALL items for this entity ID in this batch as COMPLETED
                             const idsToComplete = pending
                                 .filter(p => p.entity_id === result.id && p.entity_type === table)
                                 .map(p => p.id);
@@ -889,7 +820,7 @@ export class SyncEngine {
                         }
                     } else {
                         // Failure: Mark ALL relevant items as FAILED
-                        const itemsToFail = result.field === '_all'
+                        const itemsToFail = (result.field === '_all' || result.field === '_complete_snapshot_')
                             ? pending.filter(p => p.entity_id === result.id && p.entity_type === table)
                             : pending.filter(p => p.entity_id === result.id && p.field_name === result.field && p.entity_type === table);
 

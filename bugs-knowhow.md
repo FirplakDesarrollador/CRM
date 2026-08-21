@@ -654,8 +654,6 @@ Problem:
 Al sincronizar cuentas en modo snapshot con números de NIT de 10 o más dígitos (o strings formateados), PostgreSQL arrojaba el error: `value "..." is out of range for type integer [Context: _complete_snapshot_ (INSERT)]` o `invalid input syntax for type integer`, abortando la inserción.
 
 Root Cause:
-En PostgreSQL, la columna legacy `CRM_Cuentas.nit` es de tipo `integer` (int4 con límite de 2,147,483,647). La columna moderna y adecuada para el NIT completo es `CRM_Cuentas.nit_base` (tipo `text`/`varchar`). Al hacer el cast dinámico de campos en el RPC `process_field_updates`, cualquier valor en `nit` mayor al límite int4 causaba fallo de casteo.
-
 Fix Applied:
 Se agregó sanitización defensiva en `SyncEngine` (`lib/sync.ts`) para `CRM_Cuentas` antes de enviar el RPC: si `nit` no es un entero puro o supera `MAX_INT32 = 2147483647`, se establece en `null`, garantizando que `nit_base` conserve el NIT íntegro sin generar errores en PostgreSQL.
 
@@ -664,5 +662,32 @@ Prevention Rule:
 
 Tags:
 [sync] [snapshot] [postgres] [integer-range] [nit] [lww]
+
+---
+
+## [Bug ID: 20260821-02]
+
+Context:
+`lib/sync.ts`, ciclo de sincronización y generación de ítems en la cola `db.outbox`.
+
+Problem:
+Al editar un registro en la aplicación o iniciar la sincronización, el contador de pendientes se disparaba a más de 1,600 elementos ("Pendientes: 1685"), generando un bucle de carga masiva en el Outbox.
+
+Root Cause:
+1. Dentro de `pushBatch`, una validación de auto-curación consultaba `CRM_Cuentas` en Supabase con el JWT del asesor para verificar cuentas vinculadas a oportunidades del lote. Debido a políticas de RLS o latencia, la consulta devolvía menos cuentas, asumiendo que "faltaban" y re-encolando un nuevo snapshot con un UUID aleatorio (`uuidv4()`) en cada ciclo de sincronización.
+2. La respuesta del RPC `process_field_updates` para `_complete_snapshot_` no completaba en bloque todas las mutaciones previas del mismo `entity_id`.
+3. La compactación previa en `resetStuckItems` ignoraba ítems con `_complete_snapshot_`, impidiendo que los snapshots duplicados se fusionaran.
+
+Fix Applied:
+1. Se eliminó la re-consulta ciega dentro de `pushBatch`.
+2. Se implementó deduplicación universal en `resetStuckItems()` que colapsa cualquier colección de snapshots y mutaciones repetidas de una misma entidad en su versión más reciente.
+3. Se actualizó el procesador de respuesta del RPC para marcar como `COMPLETED` todas las mutaciones del mismo `entity_id` tras un snapshot exitoso.
+
+Prevention Rule:
+**Idempotent Outbox Mutations**: Las funciones de sincronización por lotes (`pushBatch`) nunca deben generar nuevas mutaciones de Outbox durante la ejecución del lote con IDs aleatorios. Cualquier auto-curación y compactación debe ser idempotente y ejecutarse antes del bucle de envío.
+
+Tags:
+[sync] [outbox] [deduplication] [infinite-loop] [self-healing]
+
 
 
