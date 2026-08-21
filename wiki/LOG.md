@@ -3,6 +3,58 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-08-21 - Ingest: Origen por Defecto Único en /configuracion y Selección Automática en /tiendas
+
+- Se creó y ejecutó la migración `20260821_add_is_default_to_opportunity_origins.sql` agregando `is_default BOOLEAN NOT NULL DEFAULT FALSE` con índice único condicional `uq_crm_origenes_is_default` en `CRM_OrigenesOportunidad`.
+- **Módulo `/configuracion` (`OpportunityOriginsManager.tsx`):** Se agregó toggle de radio exclusivo "Default" por origen, permitiendo marcar solo uno como predeterminado.
+- **Hook `useOpportunityOrigins.ts`:** Se extendió la interfaz `OpportunityOrigin` y consulta con el campo `is_default`.
+- **Módulo `/tiendas` (`CreateStoreSaleForm.tsx`):** Se actualizó el efecto de selección inicial para asignar prioritariamente el origen configurado como `is_default`.
+- Páginas actualizadas: `wiki/LOG.md`.
+
+## 2026-08-21 - Ingest: Backfill de origen_cuenta desde Oportunidades y Trigger Automático
+
+- Se creó y ejecutó la migración `20260821_backfill_account_origin_from_opportunities.sql`.
+- **Backfill histórico:** Se poblaron **2,548 cuentas** tomando el origen de su oportunidad más reciente.
+- **Trigger automático:** Se implementó `trg_sync_opportunity_origin_to_account` en `CRM_Oportunidades` para que cualquier oportunidad nueva o actualizada con origen propague automáticamente el valor a `CRM_Cuentas.origen_cuenta` si la cuenta no lo tiene aún.
+- Páginas actualizadas: `wiki/pages/cuentas.md`, `wiki/LOG.md`.
+
+## 2026-08-21 - Ingest: Propagación de origen_cuenta en Creación de Cuentas desde /tiendas
+
+- Se actualizó `CreateStoreSaleForm.tsx` en el módulo `/tiendas` para que al crear una nueva cuenta se persista automáticamente `origen_cuenta` con el valor seleccionado en `origen_oportunidad` (ej. visita, referido, feria, etc.).
+- Páginas actualizadas: `wiki/LOG.md`.
+
+## 2026-08-21 - Ingest: Asignación de Canales de Venta a Usuarios y Filtrado en Formulario /tiendas
+
+- **Columna `canales` en `CRM_Usuarios`:** Se creó la migración `20260821_add_user_channels.sql` agregando la columna `canales TEXT[] DEFAULT '{}'` para permitir la asignación de uno o múltiples canales de venta a cada usuario/asesor.
+- **Módulo `/usuarios`:**
+  - Se incorporó selector múltiple `MultiSelect` de canales de venta en `UserForm.tsx` con las opciones de `SALES_CHANNELS` (Canal Propio, Distribución Nacional, Distribución Internacional, Obras Nacional / Constructor, Obras Internacional, Feria).
+  - Se añadieron badges informativos de canales asignados en la tabla de usuarios de `UserList.tsx`.
+  - Se actualizó el hook `useUsers.ts` (`User`, `CreateUserData`, `UpdateUserData`) con manejo resiliente ante variaciones de esquema en Supabase.
+- **Módulo `/tiendas` (`CreateStoreSaleForm.tsx`):**
+  - Se extendió el hook de filtrado `filteredAdvisors` para validar que el asesor tenga asignado el canal de venta seleccionado (`watch("canal_id")`).
+  - Al cambiar de canal en el formulario, se reevalúan los asesores disponibles y se auto-selecciona el primer asesor válido para la combinación de país, departamento y canal.
+  - Se agregó mensaje informativo si ningún asesor coincide con los criterios seleccionados.
+- Páginas actualizadas: `wiki/pages/canales-de-venta.md`, `wiki/pages/modelo-de-datos.md`, `wiki/LOG.md`.
+
+## 2026-08-21 - Ingest: Arquitectura Local-First Pura, Pull Segmentado y Re-Sync Limpio
+
+- **Local-First en `useAccounts.ts`:** Se eliminaron las llamadas directas HTTP de `deleteAccount`, delegando el borrado en cascada a Dexie local y encolando mutaciones de soft-delete en el Outbox (100% offline).
+- **Pull Segmentado por Asesor en `lib/sync.ts`:** `pullChanges` descarga prioritariamente el 100% de las cuentas del asesor activo (`owner_user_id` y `created_by`) antes de limitar el histórico general a 3,000 registros, garantizando que ninguna cuenta propia quede fuera del caché local.
+- **Herramienta de Re-sincronización Limpia (`cleanResync`):** Nuevo método en `SyncEngine` y botón en `/configuracion` que vacía las tablas de caché de Dexie y re-descarga todo desde Supabase conservando de forma segura cualquier mutación pendiente en el Outbox.
+- **Diagnóstico de Almacenamiento en `/configuracion`:** Visualización en tiempo real del almacenamiento IndexedDB usado vía `navigator.storage.estimate()`.
+- **Carga Local-First de Segmentos en `CreateOpportunityWizard.tsx`:** Uso de `useLiveQuery` sobre `db.segments` con fallback de red.
+- Páginas actualizadas: `wiki/pages/sincronizacion-offline.md`, `wiki/LOG.md`.
+
+## 2026-08-21 - Ingest: Optimización de Rendimiento y Compactación en SyncEngine
+
+- Se optimizó el motor de sincronización (`SyncEngine` en `lib/sync.ts`):
+  - **Compactación Retroactiva en `resetStuckItems`:** Agrupa y compacta colas fragmentadas de múltiples campos por cuenta a 1 solo `_complete_snapshot_`, reduciendo el volumen de ítems hasta en un 94% al iniciar el sync.
+  - **Auto-curación en Modo Snapshot:** Al re-encolar cuentas locales faltantes para oportunidades, se encolan directamente en modo snapshot atómico.
+  - **Bucle de Lotes Continuo en `pushChanges`:** Procesa lotes consecutivos de hasta 500 ítems con micro-pausas (`yield()`) en lugar de terminar tras un único lote.
+  - **Desacoplamiento de Backoff:** Continuación inmediata (100ms) cuando existen ítems saludables `PENDING`, reservando las pausas de retardo exponencial únicamente para fallos `FAILED`.
+  - **Sanitización de `nit` Legacy:** Validación de límite de 32-bit (`<= 2147483647`) en `CRM_Cuentas.nit` para evitar fallos de casteo int4 en PostgreSQL.
+- Páginas actualizadas: `wiki/pages/sincronizacion-offline.md`, `wiki/LOG.md`, `bugs-knowhow.md` (Bug ID: 20260821-01).
+
 ## 2026-08-20 - Ingest: Autocompletado, Búsqueda Flexible, Enmascaramiento y Sección de Contacto en /tiendas
 
 - Se integró búsqueda interactiva de cuentas existentes en el campo "Nombre de la Cuenta / Cliente" del formulario de creación rápida en `/tiendas` (`CreateStoreSaleForm.tsx`).

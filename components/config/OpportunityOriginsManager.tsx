@@ -36,10 +36,24 @@ export function OpportunityOriginsManager() {
             nombre,
             codigo: toCode(nombre),
             orden: origins.length ? Math.max(...origins.map(item => item.orden)) + 10 : 10,
+            is_default: origins.length === 0
         });
         setSavingId(null);
         if (insertError) return alert(`No se pudo crear el origen: ${insertError.message}`);
         setNewName("");
+        await refresh();
+    };
+
+    const setDefaultOrigin = async (id: string) => {
+        setSavingId(id);
+        // Primero desactivar is_default en todos, luego activar en el seleccionado
+        await supabase.from("CRM_OrigenesOportunidad").update({ is_default: false }).neq("id", id);
+        const { error: updateError } = await supabase
+            .from("CRM_OrigenesOportunidad")
+            .update({ is_default: true, updated_at: new Date().toISOString() })
+            .eq("id", id);
+        setSavingId(null);
+        if (updateError) return alert(`No se pudo marcar como default: ${updateError.message}`);
         await refresh();
     };
 
@@ -66,8 +80,8 @@ export function OpportunityOriginsManager() {
             <div className="flex items-center gap-3">
                 <div className="p-3 rounded-2xl bg-emerald-100 text-emerald-700"><Tags className="w-5 h-5" /></div>
                 <div>
-                    <h3 className="font-bold text-slate-900 text-lg">Origenes de oportunidad</h3>
-                    <p className="text-sm text-slate-500">Opciones editables que aparecen en Tiendas-Ferias.</p>
+                    <h3 className="font-bold text-slate-900 text-lg">Orígenes de oportunidad</h3>
+                    <p className="text-sm text-slate-500">Opciones editables y selección de valor por defecto para Tiendas-Ferias.</p>
                 </div>
             </div>
 
@@ -76,7 +90,7 @@ export function OpportunityOriginsManager() {
                     value={newName}
                     onChange={event => setNewName(event.target.value)}
                     onKeyDown={event => event.key === "Enter" && void createOrigin()}
-                    placeholder="Ej. Instagram, Referido, Feria Medellin"
+                    placeholder="Ej. Instagram, Referido, Feria Medellín"
                     className="flex-1 border border-slate-300 rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-emerald-500"
                 />
                 <button onClick={() => void createOrigin()} disabled={!newName.trim() || savingId === "new"} className="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold disabled:opacity-50 flex items-center justify-center gap-2">
@@ -84,18 +98,31 @@ export function OpportunityOriginsManager() {
                 </button>
             </div>
 
-            {error && <p className="text-sm text-red-600">La tabla de origenes aun no esta disponible: {error}</p>}
-            {isLoading ? <div className="text-sm text-slate-500">Cargando origenes...</div> : (
+            {error && <p className="text-sm text-red-600">La tabla de orígenes aún no está disponible: {error}</p>}
+            {isLoading ? <div className="text-sm text-slate-500">Cargando orígenes...</div> : (
                 <div className="space-y-2">
                     {origins.map(origin => {
                         const draft = getDraft(origin);
                         return (
-                            <div key={origin.id} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_90px_auto_auto] gap-2 p-3 border border-slate-200 rounded-xl items-center">
+                            <div key={origin.id} className="grid grid-cols-1 md:grid-cols-[1fr_1fr_80px_auto_auto_auto] gap-2 p-3 border border-slate-200 rounded-xl items-center">
                                 <input value={draft.nombre} onChange={event => setDrafts(current => ({ ...current, [origin.id]: { ...draft, nombre: event.target.value } }))} className="border rounded-lg px-2 py-1.5" />
                                 <input value={draft.codigo} onChange={event => setDrafts(current => ({ ...current, [origin.id]: { ...draft, codigo: event.target.value } }))} className="border rounded-lg px-2 py-1.5 font-mono text-xs" />
                                 <input type="number" value={draft.orden} onChange={event => setDrafts(current => ({ ...current, [origin.id]: { ...draft, orden: Number(event.target.value) || 0 } }))} className="border rounded-lg px-2 py-1.5" />
-                                <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={draft.is_active} onChange={event => setDrafts(current => ({ ...current, [origin.id]: { ...draft, is_active: event.target.checked } }))} /> Activo</label>
-                                <button onClick={() => void saveOrigin(origin.id)} disabled={!drafts[origin.id] || savingId === origin.id} className="p-2 rounded-lg bg-slate-900 text-white disabled:opacity-40" title="Guardar"><Save className="w-4 h-4" /></button>
+                                <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 cursor-pointer">
+                                    <input type="checkbox" checked={draft.is_active} onChange={event => setDrafts(current => ({ ...current, [origin.id]: { ...draft, is_active: event.target.checked } }))} className="rounded text-emerald-600 focus:ring-emerald-500" /> Activo
+                                </label>
+                                <label className="flex items-center gap-1.5 text-xs font-semibold text-emerald-800 bg-emerald-50 px-2 py-1 rounded-lg border border-emerald-200 cursor-pointer hover:bg-emerald-100 transition-colors">
+                                    <input
+                                        type="radio"
+                                        name="default_origin"
+                                        checked={!!origin.is_default}
+                                        disabled={savingId === origin.id}
+                                        onChange={() => void setDefaultOrigin(origin.id)}
+                                        className="text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                                    />
+                                    Default
+                                </label>
+                                <button onClick={() => void saveOrigin(origin.id)} disabled={!drafts[origin.id] || savingId === origin.id} className="p-2 rounded-lg bg-slate-900 text-white disabled:opacity-40 hover:bg-slate-800" title="Guardar"><Save className="w-4 h-4" /></button>
                             </div>
                         );
                     })}

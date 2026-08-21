@@ -643,9 +643,26 @@ Fix Applied:
 2. Se mejoró `getYearAndMonth` para soportar formatos `DD/MM/YYYY`, `YYYY-MM-DD` e ISO.
 3. Se alinearon los mapeos de `flattenFn` para Contactos, Cotizaciones, Oportunidades y Cuentas con las columnas reales de las tablas `CRM_*`.
 
+---
+
+## [Bug ID: 20260821-01]
+
+Context:
+`lib/sync.ts` y modo snapshot (`_complete_snapshot_`) en sincronización offline contra la función RPC `process_field_updates`.
+
+Problem:
+Al sincronizar cuentas en modo snapshot con números de NIT de 10 o más dígitos (o strings formateados), PostgreSQL arrojaba el error: `value "..." is out of range for type integer [Context: _complete_snapshot_ (INSERT)]` o `invalid input syntax for type integer`, abortando la inserción.
+
+Root Cause:
+En PostgreSQL, la columna legacy `CRM_Cuentas.nit` es de tipo `integer` (int4 con límite de 2,147,483,647). La columna moderna y adecuada para el NIT completo es `CRM_Cuentas.nit_base` (tipo `text`/`varchar`). Al hacer el cast dinámico de campos en el RPC `process_field_updates`, cualquier valor en `nit` mayor al límite int4 causaba fallo de casteo.
+
+Fix Applied:
+Se agregó sanitización defensiva en `SyncEngine` (`lib/sync.ts`) para `CRM_Cuentas` antes de enviar el RPC: si `nit` no es un entero puro o supera `MAX_INT32 = 2147483647`, se establece en `null`, garantizando que `nit_base` conserve el NIT íntegro sin generar errores en PostgreSQL.
+
 Prevention Rule:
-**Strict Table Schema Mapping**: Al realizar consultas `.select()` o aplanar objetos para informes/exports, verificar siempre el esquema real de la base de datos PostgreSQL/Supabase en lugar de asumir nombres de propiedades.
+**Integer Bounds Checking in Snapshot RPCs**: Al enviar payloads consolidados (`_complete_snapshot_`) a funciones dinámicas en PostgreSQL, asegurarse de que los campos con columnas legacy de tipo `integer` estén acotados (`<= 2147483647`) o sean enviados como `null` cuando exista una columna `text` correspondiente (`nit_base`).
 
 Tags:
-[informes] [sop] [exportar] [excel] [csv] [supabase] [schema]
+[sync] [snapshot] [postgres] [integer-range] [nit] [lww]
+
 

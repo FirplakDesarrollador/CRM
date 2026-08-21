@@ -217,7 +217,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             amount: 0,
             fase_id: "",
             comentarios: "",
-            origen_oportunidad: "visita",
+            origen_oportunidad: "",
             venta_feria: false,
             fecha_fin: getDefaultDueDate(),
             clasificacion_id: "",
@@ -374,7 +374,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         [subclassifications, selectedChannel],
     );
 
-    // Filtrado estricto de asesores: Si el vendedor no tiene país o departamento asignado, NO aparece en el desplegable.
+    // Filtrado estricto de asesores: Si el vendedor no tiene país, departamento o canal asignado, NO aparece en el desplegable.
     const selectedPais = watch("pais_id");
     const selectedDept = watch("departamento_id");
     const selectedAdvisorId = watch("asesor_id");
@@ -400,9 +400,18 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                 if (!matchesDept) return false;
             }
 
+            // 3. Verificar Canal de Venta: El vendedor debe tener asignado el canal seleccionado en el formulario.
+            if (selectedChannel) {
+                const userChannels = u.canales || [];
+                if (userChannels.length === 0) return false;
+
+                const matchesChannel = userChannels.includes(selectedChannel);
+                if (!matchesChannel) return false;
+            }
+
             return true;
         });
-    }, [users, selectedPais, selectedDept]);
+    }, [users, selectedPais, selectedDept, selectedChannel]);
 
     // Garantizar que Colombia quede seleccionado automáticamente cuando los países terminen de cargar (solo si no hay cuenta seleccionada)
     useEffect(() => {
@@ -490,7 +499,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             amount: 0,
             fase_id: defaultPhaseId,
             comentarios: "",
-            origen_oportunidad: "visita",
+            origen_oportunidad: origins.find(o => o.is_default && o.is_active)?.codigo || origins.find(o => o.is_active)?.codigo || "",
             venta_feria: false,
             fecha_fin: getDefaultDueDate(),
             clasificacion_id: "",
@@ -498,7 +507,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             actividad_descripcion: "",
             items: []
         });
-    }, [reset, displayCountries, phasesList]);
+    }, [reset, displayCountries, phasesList, origins]);
 
     const watchedItems = watch("items");
     const items = useMemo(() => watchedItems || [], [watchedItems]);
@@ -526,8 +535,11 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
 
     useEffect(() => {
         const currentOrigin = watch("origen_oportunidad");
-        if (origins.length > 0 && !origins.some(origin => origin.codigo === currentOrigin)) {
-            setValue("origen_oportunidad", origins[0].codigo);
+        if (origins.length > 0) {
+            const defaultOrigin = origins.find(o => o.is_default && o.is_active) || origins.find(o => o.is_active) || origins[0];
+            if (!currentOrigin || !origins.some(origin => origin.codigo === currentOrigin)) {
+                setValue("origen_oportunidad", defaultOrigin.codigo);
+            }
         }
     }, [origins, setValue, watch]);
 
@@ -665,7 +677,8 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                         ciudad_id: data.ciudad_id ? Number(data.ciudad_id) : null,
                         // Conservamos compatibilidad string con DB
                         ciudad: data.ciudad_id ? citiesList.find(c => String(c.id) === data.ciudad_id)?.nombre : undefined,
-                        es_premium: false
+                        es_premium: false,
+                        origen_cuenta: data.origen_oportunidad || undefined
                     };
 
                     const newId = await createAccount(accountData);
@@ -1033,6 +1046,11 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         ))}
                                     </select>
                                     <p className="text-[11px] text-slate-500 mt-1">El cliente queda anclado primariamente a este asesor desde su creación.</p>
+                                    {filteredAdvisors.length === 0 && !selectedAccount && (
+                                        <p className="text-[11px] text-amber-600 font-medium mt-1">
+                                            No hay asesores asignados para el país, departamento y canal seleccionado.
+                                        </p>
+                                    )}
                                     {errors.asesor_id && (
                                         <p className="text-red-500 text-xs mt-1">{errors.asesor_id.message}</p>
                                     )}

@@ -8,7 +8,7 @@ mantiene un espejo local en IndexedDB vía Dexie (`lib/db.ts`) con interfaces `L
 
 | Tabla | Contenido |
 |---|---|
-| `CRM_Usuarios` | Usuarios de la app, rol, `allowed_modules`, coordinadores, ubicación geográfica (`pais`, `departamento`). Ver [[roles-y-permisos]] |
+| `CRM_Usuarios` | Usuarios de la app, rol, `allowed_modules`, coordinadores, ubicación geográfica (`paises`, `departamentos`), canales asignados (`canales`). Ver [[roles-y-permisos]] |
 | `CRM_Cuentas` | Clientes/empresas: NIT, canal (`canal_id`), propietario, nivel premium, geografía. Ver [[cuentas]] |
 | `CRM_Contactos` | Personas asociadas a cuentas. Ver [[contactos]] |
 | `CRM_Oportunidades` | Negocios en curso: fase, estado, probabilidad, motivo de pérdida. Ver [[oportunidades]] |

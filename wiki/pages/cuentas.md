@@ -54,4 +54,4 @@ que determina su lista de precios.
 - `app/e2e/cuentas-wizard/page.tsx`, `e2e/create_account_wizard.spec.ts`,
   `playwright.e2e.config.ts`
 - `lib/hooks/useAccounts.ts`, `useAccountsServer.ts`, `lib/db.ts` (interfaz `LocalCuenta`)
-- Migraciones: `20260108_sales_channels`, `20260113_premium_clients`, `20260119_subclassifications`, `20260218_add_account_owner`, `20260820_add_origen_cuenta`
+- Migraciones: `20260108_sales_channels`, `20260113_premium_clients`, `20260119_subclassifications`, `20260218_add_account_owner`, `20260820_add_origen_cuenta`, `20260821_backfill_account_origin_from_opportunities`
