@@ -58,6 +58,41 @@ export class SyncEngine {
     }
 
     /**
+     * PUSH-ONLY Trigger: For local edits and mutations
+     * Immediately pushes local changes to Supabase without triggering heavy table pulls
+     */
+    async triggerPush() {
+        const { isPaused } = useSyncStore.getState();
+        if (this.isSyncing || !navigator.onLine || isPaused) return;
+
+        this.isSyncing = true;
+        useSyncStore.getState().setSyncing(true);
+        useSyncStore.getState().setError(null);
+
+        try {
+            let user;
+            try {
+                const { data } = await supabase.auth.getUser();
+                user = data?.user;
+            } catch (e) {
+                return;
+            }
+            if (!user) return;
+
+            await this.resetStuckItems();
+            await this.yield();
+            await this.pushChanges(user);
+        } catch (err: any) {
+            console.error('[Sync] Push failed:', err);
+            useSyncStore.getState().setError(err.message);
+        } finally {
+            this.isSyncing = false;
+            useSyncStore.getState().setSyncing(false);
+            await this.updatePendingCount();
+        }
+    }
+
+    /**
      * Main Sync Loop
      */
     async triggerSync() {
@@ -2059,9 +2094,9 @@ export class SyncEngine {
                 }));
             }
 
-            // Trigger Sync in background
-            this.triggerSync().catch(err => {
-                console.warn('[Sync] Background sync triggered from mutation failed:', err);
+            // Trigger immediate push in background (without downloading all tables)
+            this.triggerPush().catch(err => {
+                console.warn('[Sync] Background push triggered from mutation failed:', err);
             });
         } catch (err) {
             console.error('[Sync] Failed to queue mutation:', err);

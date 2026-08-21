@@ -689,5 +689,30 @@ Prevention Rule:
 Tags:
 [sync] [outbox] [deduplication] [infinite-loop] [self-healing]
 
+---
+
+## [Bug ID: 20260821-03]
+
+Context:
+`lib/sync.ts` y `lib/stores/useSyncStore.ts`, ciclo de sincronización reactiva al guardar/editar registros.
+
+Problem:
+Al editar cualquier campo de un registro (por ejemplo, el nombre de una cuenta), el navegador iniciaba una descarga masiva de miles de registros de todas las tablas ("descargando cientos de datos").
+
+Root Cause:
+1. `queueMutation` disparaba `triggerSync()`, el cual ejecutaba `pullChanges()` en cada mutación individual/autosave.
+2. `useSyncStore` no utilizaba persistencia en `localStorage` para `lastSyncTime`, por lo que cada recarga o sesión nueva iniciaba con `lastSyncTime = null`, provocando que `pullChanges()` hiciera una descarga completa inicial de 3,000 cuentas, 3,000 oportunidades, 3,000 contactos, 3,000 cotizaciones, etc.
+
+Fix Applied:
+1. Se añadió `triggerPush()` a `SyncEngine` para que `queueMutation` realice un envío inmediato y ligero de los cambios locales sin descargar ninguna tabla.
+2. Se configuró el middleware `persist` de Zustand en `useSyncStore` para guardar `lastSyncTime` en `localStorage`, garantizando que cualquier pull posterior sea estrictamente incremental (`gte('updated_at', lastSync)`).
+
+Prevention Rule:
+**Decouple Push from Pull in Local-First Outbox**: Las mutaciones locales del usuario deben disparar únicamente operaciones de envío (*push*). Las descargas completas o incrementales (*pull*) deben estar desacopladas y ejecutarse por intervalos de fondo, al iniciar la aplicación o por acción explícita del usuario.
+
+Tags:
+[sync] [push-pull-decoupling] [zustand-persist] [incremental-sync] [outbox]
+
+
 
 
