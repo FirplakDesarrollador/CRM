@@ -8,7 +8,9 @@
     "dev": "next dev",
     "build": "next build --webpack",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:sync": "vitest run lib/sync-runtime.test.ts lib/sync-engine.test.ts lib/hooks/useFormAutoSave.test.tsx",
+    "typecheck:sync": "tsc -p tsconfig.sync.json"
   },
   "dependencies": {
     "@ducanh2912/next-pwa": "^10.2.9",
@@ -59,6 +61,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.1.1",
+    "fake-indexeddb": "^6.2.4",
     "jsdom": "^29.0.2",
     "lodash": "^4.17.23",
     "tailwindcss": "^4",

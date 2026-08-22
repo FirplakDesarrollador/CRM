@@ -81,19 +81,19 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         if (isPublicPage) return;
 
         // 1. Initial sync on mount
-        syncEngine.triggerSync();
+        syncEngine.triggerSync('app-mount');
 
         // 2. Periodic sync every 5 minutes
         const intervalId = setInterval(() => {
             if (navigator.onLine) {
-                syncEngine.triggerSync();
+                syncEngine.triggerSync('periodic-5m');
             }
         }, 5 * 60 * 1000);
 
         // 3. Sync when user returns to tab
         const handleVisibilityChange = () => {
             if (document.visibilityState === 'visible' && navigator.onLine) {
-                syncEngine.triggerSync();
+                syncEngine.triggerSync('visibility');
             }
         };
         document.addEventListener('visibilitychange', handleVisibilityChange);

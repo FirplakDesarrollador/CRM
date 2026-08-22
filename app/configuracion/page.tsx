@@ -2,7 +2,7 @@
 
 import { useSyncStore } from '@/lib/stores/useSyncStore';
 import { syncEngine } from '@/lib/sync';
-import { db, OutboxItem } from '@/lib/db';
+import { db, OutboxItem, SyncRun } from '@/lib/db';
 import {
     Settings,
     RefreshCw,
@@ -92,6 +92,7 @@ function ConfigPageContent() {
     const { logs, clearLogs } = useAuditLogStore();
     const searchParams = useSearchParams();
     const [outboxItems, setOutboxItems] = useState<OutboxItem[]>([]);
+    const [syncRuns, setSyncRuns] = useState<SyncRun[]>([]);
     const [msConnected, setMsConnected] = useState<boolean | null>(null);
     const [stats, setStats] = useState<Stats | null>(null);
     const [isMounted, setIsMounted] = useState(false);
@@ -140,6 +141,7 @@ function ConfigPageContent() {
     const fetchDebugInfo = async () => {
         const items = await db.outbox.toArray();
         setOutboxItems(items);
+        setSyncRuns(await db.syncRuns.orderBy('started_at').reverse().limit(10).toArray());
 
         const s = {
             opportunities: await db.opportunities.count(),
@@ -307,7 +309,7 @@ function ConfigPageContent() {
             });
             return;
         }
-        syncEngine.triggerSync();
+        syncEngine.triggerSync('manual-settings');
     };
 
     const togglePause = () => {
@@ -315,7 +317,7 @@ function ConfigPageContent() {
         setPaused(newState);
         if (!newState) {
             // If resuming, trigger a sync
-            setTimeout(() => syncEngine.triggerSync(), 500);
+            setTimeout(() => syncEngine.triggerSync('resume-settings'), 500);
         }
     };
 
@@ -497,6 +499,7 @@ function ConfigPageContent() {
                                                             </div>
                                                             <span className={cn(
                                                                 "uppercase font-bold text-[8px] px-1.5 py-0.5 rounded-full",
+                                                                item.status === 'DEAD_LETTER' ? "bg-red-200 text-red-800" :
                                                                 item.status === 'FAILED' ? "bg-red-100 text-red-600" :
                                                                 item.status === 'SYNCING' ? "bg-blue-200 text-blue-800" :
                                                                 item.status === 'COMPLETED' ? "bg-emerald-100 text-emerald-700" :
@@ -552,8 +555,7 @@ function ConfigPageContent() {
                                     variant: "info",
                                     onConfirm: async () => {
                                         setModalConfig(prev => ({ ...prev, isLoading: true }));
-                                        await db.phases.clear();
-                                        await syncEngine.triggerSync();
+                                        await syncEngine.refreshPhases();
                                         setModalConfig({
                                             isOpen: true,
                                             title: "Recarga Iniciada",
@@ -731,11 +733,14 @@ function ConfigPageContent() {
                         </div>
                         <button
                             onClick={() => {
-                                const actualPending = outboxItems.filter(i => i.status === 'PENDING' || i.status === 'SYNCING' || i.status === 'FAILED');
+                                const actualPending = outboxItems.filter(i => i.status === 'PENDING' || i.status === 'SYNCING' || i.status === 'FAILED' || i.status === 'DEAD_LETTER');
                                 const report = outboxItems.map(item =>
                                     `[${item.status}] ${item.entity_type} (${item.field_name}): ${item.error || 'OK'}`
                                 ).join('\n');
-                                const fullReport = `=== REPORTE DE SINCRONIZACIÓN ===\nFecha: ${new Date().toLocaleString()}\nPendientes Reales: ${actualPending.length} / Total Registros: ${outboxItems.length}\n\n${report}`;
+                                const runReport = syncRuns.map(run =>
+                                    `[${run.status}] ${run.kind}/${run.trigger} ${run.duration_ms ?? '-'}ms pendientes ${run.pending_before}->${run.pending_after ?? '-'} ${run.error || 'OK'}`
+                                ).join('\n');
+                                const fullReport = `=== REPORTE DE SINCRONIZACIÓN ===\nFecha: ${new Date().toLocaleString()}\nVersión: ${CRM_VERSION}\nPendientes Reales: ${actualPending.length} / Total Registros: ${outboxItems.length}\n\n--- OUTBOX ---\n${report || 'Vacío'}\n\n--- ÚLTIMAS EJECUCIONES ---\n${runReport || 'Sin datos'}`;
                                 navigator.clipboard.writeText(fullReport);
                                 setModalConfig({
                                     isOpen: true,
@@ -751,6 +756,17 @@ function ConfigPageContent() {
                             <Info className="w-3 h-3" />
                             Copiar Info Técnica
                         </button>
+                        {outboxItems.some(item => item.status === 'DEAD_LETTER') && (
+                            <button
+                                onClick={async () => {
+                                    await syncEngine.retryDeadLetters();
+                                    await fetchDebugInfo();
+                                }}
+                                className="text-xs font-bold text-red-700 hover:text-red-800 bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-lg transition-colors border border-red-100"
+                            >
+                                Reintentar bloqueados
+                            </button>
+                        )}
                     </div>
                     <div className="overflow-x-auto">
                         <table className="w-full text-left text-sm">
@@ -791,7 +807,7 @@ function ConfigPageContent() {
                                             </span>
                                         </td>
                                         <td className="px-6 py-4 max-w-[200px]">
-                                            {item.status === 'FAILED' ? (
+                                            {item.status === 'FAILED' || item.status === 'DEAD_LETTER' ? (
                                                 <div className="text-xs text-red-600 bg-red-50 p-2 rounded border border-red-100">
                                                     <strong>Error:</strong> {getFriendlyErrorMessage(item.error)}
                                                 </div>
