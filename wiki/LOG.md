@@ -3,6 +3,24 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-08-21 - Lint: Wiki posterior al endurecimiento del SyncEngine
+
+- Estructura: `listed=15`, `pages=15`, `missing=0`, `orphans=0`.
+- Enlaces: `broken=0`; no se introdujeron enlaces `[[...]]` sin destino.
+- Fuentes: las 15 páginas conservan su sección `## Fuentes`.
+- Contraste contra código: se verificaron los estados y tiempos del Outbox, la frontera `syncUpperBound`, los cursores `syncCursors`, la paginación de 1.000 filas, el TTL de catálogos, `CRM_PedidoItems.updated_at`, la telemetría `syncRuns` y el contrato de la migración contra `lib/sync.ts`, `lib/sync-runtime.ts`, `lib/db.ts` y `supabase/migrations/20260821230051_harden_sync_engine.sql`.
+- Correcciones aplicadas: se eliminaron de `sincronizacion-offline.md` las afirmaciones obsoletas sobre cursor exclusivo en localStorage, reintentos sin programación durable y descarte de mutaciones agotadas.
+
+## 2026-08-21 - Ingest: Endurecimiento integral del motor de sincronización
+
+- **Outbox recuperable:** se documentaron compactación transaccional al encolar, leases multipestaña, backoff con `next_attempt_at`, estado `DEAD_LETTER`, recuperación manual y reactivación mediante una nueva edición.
+- **Push/pull y cursores:** se sustituyó la descripción obsoleta del cursor exclusivo en localStorage por cursores durables en Dexie, aislados por usuario, una frontera `syncUpperBound` y confirmación únicamente tras un pull completo exitoso.
+- **Paginación y catálogos:** se registró la paginación explícita de PostgREST, los límites de bootstrap, el TTL de 24 horas para catálogos y los refrescos dirigidos.
+- **RPC y PedidoItems:** se documentó la migración `20260821230051_harden_sync_engine.sql`, el uso de `SECURITY INVOKER`, validación de identidad/lista blanca, correlación por `mutation_id` y `updated_at` para `CRM_PedidoItems`.
+- **Observabilidad y recuperación:** se añadieron `syncRuns`, diagnóstico desde `/configuracion`, preservación completa del Outbox en `cleanResync()` y la validación automatizada del subsistema.
+- **Validación ejecutada:** typecheck enfocado, 11 pruebas y build de producción aprobados; migración probada en PostgreSQL 17 aislado. La migración aún requiere aplicación y validación en Supabase antes del despliegue del cliente.
+- Páginas actualizadas: `wiki/pages/sincronizacion-offline.md`, `wiki/INDEX.md`, `wiki/LOG.md`. Los diagnósticos individuales permanecen en `bugs-knowhow.md` según `wiki/SCHEMA.md`.
+
 ## 2026-08-21 - Ingest: Desacoplamiento Push / Pull y Deduplicación Universal de Outbox en SyncEngine
 - **Desacoplamiento Push / Pull (`triggerPush`):** Las mutaciones locales (`queueMutation`) ahora disparan exclusivamente `triggerPush()`, enviando inmediatamente los cambios locales vía RPC sin ejecutar descargas masivas de tablas.
 - **Persistencia de `lastSyncTime` en Zustand:** Se aplicó el middleware `persist` en `useSyncStore` para guardar `lastSyncTime` en `localStorage`, evitando que en cada recarga se dispare una descarga inicial completa de 3,000 registros por tabla.

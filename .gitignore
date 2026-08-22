@@ -79,6 +79,7 @@ node_modules/
 *.sql
 !supabase/migrations/20260716_stores_fairs_catalog_inventory.sql
 !supabase/migrations/20260722143000_propagate_account_owner_to_opportunities.sql
+!supabase/migrations/20260821230051_harden_sync_engine.sql
 temp_*.ts
 temp_*.tsx
 temp_*.txt
