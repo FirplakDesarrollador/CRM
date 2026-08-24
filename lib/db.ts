@@ -68,6 +68,8 @@ export interface LocalCuenta {
     updated_at?: string;
     comentarios?: string;
     origen_cuenta?: string | null;
+    is_child?: boolean;
+    is_deleted?: boolean;
 }
 
 export interface LocalPais {
@@ -250,6 +252,7 @@ export interface LocalContact {
     created_by?: string;
     updated_by?: string;
     updated_at?: string;
+    is_deleted?: boolean;
 }
 
 export interface LocalFase {

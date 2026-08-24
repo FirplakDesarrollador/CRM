@@ -9,7 +9,7 @@ export interface DashboardFilterState {
     canal_id: string | null;
     advisor_id: string | null;
     subclasificacion_id: number | null;
-    nivel_premium: 'ORO' | 'PLATA' | 'BRONCE' | null;
+    nivel_premium: 'PREMIUM' | 'DESTACADO' | 'ACTIVO' | null;
     search_query: string | null;
     date_from: string | null;
     date_to: string | null;

@@ -36,6 +36,11 @@
     ".next/dev/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "workflows",
+    "n8n-mcp",
+    "supabase/functions",
+    "features",
+    "**/*-isazaale.tsx"
   ]
 }

@@ -935,8 +935,46 @@ Prevention Rule:
 Tags:
 [sync] [recovery] [dexie] [cursor] [schema-drift]
 
+## [Bug ID: 20260824-01]
 
+Context:
+`components/tiendas/CreateStoreSaleForm.tsx`, selectores dependientes de País, Departamento, Canal y Asesor.
 
+Problem:
+Flickering / parpadeo continuo en el selector de departamentos que impedía seleccionar departamentos o los revertía de inmediato.
 
+Root Cause:
+Dependencia circular reactiva entre `selectedDept`, `filteredAdvisors` y `selectedAdvisorId`. Un `useEffect` pasivo de sincronización bidireccional sobreescribía `departamento_id` cada vez que cambiaba el asesor o el departamento no coincidía con el asesor anterior, y otro `useEffect` auto-seleccionaba asesor cada vez que `filteredAdvisors` cambiaba, provocando un bucle infinito de re-renders.
+
+Fix Applied:
+Se eliminaron los `useEffect`s pasivos que forzaban la selección y sobreescritura de valores. Se delegó el reseteo de asesor (`setValue("asesor_id", "")`) a los eventos `onChange` explícitos de País, Departamento y Canal, y se añadió la opción por defecto `"Seleccione un asesor..."` con validación Zod.
+
+Prevention Rule:
+**Never Use Passive useEffects for Multi-Select Cascades**: El reseteo o propagación entre campos de formulario en cascada debe ocurrir en los manejadores de eventos de usuario (`onChange`), nunca en efectos reactivos que reaccionen a los propios valores que modifican.
+
+## [Bug ID: 20260824-02]
+
+Context:
+`components/tiendas/CreateStoreSaleForm.tsx`, `lib/sync.ts` y `lib/hooks/useAccounts.ts`. Fallo en cola de sincronización `Contacto - _complete_snapshot_ FAILED` y falta de detección temprana de cuentas/contactos duplicados en el formulario de tienda.
+
+Problem:
+Al registrar clientes o ventas en el módulo de Tiendas, mutaciones de contactos (`CRM_Contactos`) quedaban atascadas en estado `FAILED` (`_complete_snapshot_ FAILED`) por violaciones de clave foránea `fk_crmcontactos_account` o de unicidad `unique_active_contact_phone`. Adicionalmente, el formulario no alertaba tempranamente si el NIT, teléfono o email ya pertenecían a un cliente existente.
+
+Root Cause:
+1. `resolveDuplicateAccount()` en `lib/sync.ts` solo actualizaba mutaciones donde `field_name === 'account_id'`, omitiendo las mutaciones de tipo snapshot (`_complete_snapshot_`) cuyo `account_id` está dentro del objeto `new_value`. Al reintentar, el snapshot enviaba el `badAccountId` inexistente.
+2. `SyncEngine.pushBatch` no interceptaba los errores de duplicidad de teléfono (`unique_active_contact_phone`) ni de cuenta huérfana para contactos, dejando el ítem permanentemente en `FAILED`.
+3. El formulario no advertía al usuario en tiempo real cuando ingresaba un NIT, teléfono o email de un cliente existente, ni pasaba los datos personalizados de contacto al crear la cuenta.
+
+Fix Applied:
+1. Se extendió `resolveDuplicateAccount` para escanear y actualizar `account_id` dentro de todos los snapshots `_complete_snapshot_` en el outbox.
+2. Se implementaron los métodos de auto-curación `healDuplicateContactPhone` y `healOrphanedContactAccount` en `SyncEngine`.
+3. Se integró detección temprana reactiva en `CreateStoreSaleForm.tsx` para `nit_base`, `telefono` y `email` con badges de advertencia visual y botón de acción rápida `⚡ Vincular a este cliente`.
+4. Se habilitó el paso de `initialContactData` en `useAccounts.createAccount` para conservar datos reales de contacto.
+
+Prevention Rule:
+**Snapshot Foreign Keys Must Be Deep-Remapped in Self-Healing**: Toda rutina de deduplicación o remapeo de identificadores debe actualizar tanto mutaciones de campos planos como el interior de payloads estructurados (`_complete_snapshot_`). Los formularios deben proveer detección temprana en tiempo real para evitar intentos de inserción duplicada desde el origen.
+
+Tags:
+[sync] [self-healing] [snapshot] [contacts] [tiendas] [duplicate-detection]
 
 

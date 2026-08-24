@@ -33,7 +33,13 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
     }, [isVendedor, userId, filters?.advisor_id, filters?.showAll]);
     const isLoading = false; // Background sync handles loading
 
-    const createAccount = async (data: Partial<LocalCuenta>) => {
+    const createAccount = async (data: Partial<LocalCuenta>, initialContactData?: {
+        nombre?: string;
+        cargo?: string;
+        telefono?: string | null;
+        email?: string | null;
+        comentarios?: string;
+    }) => {
         const id = crypto.randomUUID();
         const { data: { user } } = await supabase.auth.getUser();
 
@@ -76,10 +82,11 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
             const contactData = {
                 id: contactId,
                 account_id: id,
-                nombre: sanitizedData.nombre || 'Cliente',
-                cargo: 'Cliente final',
-                telefono: sanitizedData.telefono || null,
-                email: (sanitizedData as any).email || null,
+                nombre: initialContactData?.nombre?.trim() || sanitizedData.nombre || 'Cliente',
+                cargo: initialContactData?.cargo?.trim() || 'Cliente final',
+                telefono: initialContactData?.telefono?.trim() || sanitizedData.telefono || null,
+                email: initialContactData?.email?.trim() || (sanitizedData as any).email || null,
+                comentarios: initialContactData?.comentarios?.trim() || undefined,
                 es_principal: true,
                 created_by: user?.id,
                 updated_by: user?.id,

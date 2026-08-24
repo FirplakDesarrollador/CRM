@@ -479,7 +479,7 @@ function AccountsContent() {
                             rowHeights={38}
                             renderAllRows={false}
                             licenseKey="non-commercial-and-evaluation"
-                            afterOnCellMouseDown={(event, coords, td) => {
+                            afterOnCellMouseDown={(event: any, coords: any, td: any) => {
                                 if (coords.row >= 0) {
                                     const acc = hotData[coords.row]._original;
                                     const target = event.target as HTMLElement;

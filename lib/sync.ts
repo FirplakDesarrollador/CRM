@@ -972,6 +972,18 @@ export class SyncEngine {
                                     setTimeout(() => this.resolveDuplicateAccount(result.id), 100);
                                 }
 
+                                // SELF-HEALING: Duplicate Contact Phone scenario
+                                if (table === 'CRM_Contactos' && result.message.includes('unique_active_contact_phone')) {
+                                    console.warn(`[Sync] Intercepted duplicated contact phone. Triggering identity resolution for contact ID ${result.id}...`);
+                                    setTimeout(() => this.healDuplicateContactPhone(result.id), 100);
+                                }
+
+                                // SELF-HEALING: Contact FK Account scenario
+                                if (table === 'CRM_Contactos' && result.message.includes('fk_crmcontactos_account')) {
+                                    console.warn(`[Sync] Intercepted orphaned contact FK. Triggering repair for contact ID ${result.id}...`);
+                                    setTimeout(() => this.healOrphanedContactAccount(result.id), 100);
+                                }
+
                                 await db.outbox.update(item.id, buildFailureUpdate(item, result.message));
                             }
                         });
@@ -1186,13 +1198,37 @@ export class SyncEngine {
                 await db.outbox.update(item.id, { new_value: realAccountId, status: 'PENDING', error: undefined, retry_count: 0 });
             }
 
+            // Repair snapshot outbox items referencing the bad account ID inside their new_value payload
+            const activeSnapshots = await db.outbox
+                .where('field_name').equals('_complete_snapshot_')
+                .toArray();
+
+            for (const item of activeSnapshots) {
+                if (item.new_value && typeof item.new_value === 'object' && item.new_value.account_id === badAccountId) {
+                    const updatedSnapshot = { ...item.new_value, account_id: realAccountId };
+                    await db.outbox.update(item.id, {
+                        new_value: updatedSnapshot,
+                        status: 'PENDING',
+                        error: undefined,
+                        retry_count: 0
+                    });
+                    console.log(`[Sync-Heal] Repaired snapshot ${item.entity_type} (${item.entity_id}) account_id -> ${realAccountId}`);
+                }
+            }
+
+            // Also repair activities in Dexie that point to the BAD account
+            const activitiesToFix = await db.activities.where('account_id').equals(badAccountId).toArray();
+            for (const act of activitiesToFix) {
+                await db.activities.update(act.id, { account_id: realAccountId });
+            }
+
             // Reset related dependent items that failed due to cascaded FK errors, so they try again
             const failedOutboxItems = await db.outbox
                 .where('status').equals('FAILED')
                 .toArray();
 
             for (const item of failedOutboxItems) {
-                if (['CRM_Contactos', 'CRM_Oportunidades', 'CRM_Cotizaciones', 'CRM_CotizacionItems', 'CRM_Oportunidades_Colaboradores'].includes(item.entity_type)) {
+                if (['CRM_Contactos', 'CRM_Oportunidades', 'CRM_Cotizaciones', 'CRM_CotizacionItems', 'CRM_Oportunidades_Colaboradores', 'CRM_Actividades'].includes(item.entity_type)) {
                     await db.outbox.update(item.id, { status: 'PENDING', retry_count: 0, error: undefined });
                 }
             }
@@ -1204,6 +1240,89 @@ export class SyncEngine {
             void this.triggerPush('self-heal-duplicate-account');
         } catch (e) {
             console.error(`[Sync-Heal] Error resolving duplicate account:`, e);
+        }
+    }
+
+    /**
+     * SELF-HEALING: Resolves contacts that fail sync due to duplicate phone constraint
+     */
+    private async healDuplicateContactPhone(badContactId: string) {
+        try {
+            console.log(`[Sync-Heal] Resolving duplicate contact phone for: ${badContactId}`);
+            const localContact = await db.contacts.get(badContactId);
+            const phone = localContact?.telefono;
+
+            if (phone && typeof navigator !== 'undefined' && navigator.onLine) {
+                const { data: serverContacts } = await supabase
+                    .from('CRM_Contactos')
+                    .select('id, account_id')
+                    .eq('telefono', phone)
+                    .eq('is_deleted', false)
+                    .limit(1);
+
+                if (serverContacts && serverContacts.length > 0) {
+                    await this.resolveDuplicateContact(badContactId, serverContacts[0].id);
+                    return;
+                }
+            }
+
+            // Fallback: Delete outbox items for this contact so sync is unblocked
+            await db.outbox.where('entity_id').equals(badContactId).and(i => i.entity_type === 'CRM_Contactos').delete();
+            console.log(`[Sync-Heal] Cleared outbox for duplicate contact phone ${badContactId}`);
+            await this.updatePendingCount();
+        } catch (e) {
+            console.error(`[Sync-Heal] Error healing duplicate contact phone:`, e);
+        }
+    }
+
+    /**
+     * SELF-HEALING: Resolves contacts whose referenced account does not exist in Supabase
+     */
+    private async healOrphanedContactAccount(badContactId: string) {
+        try {
+            console.log(`[Sync-Heal] Resolving orphaned contact account for: ${badContactId}`);
+            const localContact = await db.contacts.get(badContactId);
+            if (!localContact) {
+                await db.outbox.where('entity_id').equals(badContactId).and(i => i.entity_type === 'CRM_Contactos').delete();
+                await this.updatePendingCount();
+                return;
+            }
+
+            // Check if the account exists locally and has a nit_base to find the real account
+            const localAccount = await db.accounts.get(localContact.account_id);
+            if (localAccount?.nit_base && typeof navigator !== 'undefined' && navigator.onLine) {
+                const { data: realAccounts } = await supabase
+                    .from('CRM_Cuentas')
+                    .select('id')
+                    .eq('nit_base', localAccount.nit_base)
+                    .limit(1);
+
+                if (realAccounts && realAccounts.length > 0) {
+                    const realAccountId = realAccounts[0].id;
+                    await db.contacts.update(badContactId, { account_id: realAccountId });
+                    
+                    const outboxItems = await db.outbox.where('entity_id').equals(badContactId).toArray();
+                    for (const item of outboxItems) {
+                        if (item.field_name === '_complete_snapshot_' && typeof item.new_value === 'object') {
+                            await db.outbox.update(item.id, {
+                                new_value: { ...item.new_value, account_id: realAccountId },
+                                status: 'PENDING',
+                                error: undefined,
+                                retry_count: 0
+                            });
+                        }
+                    }
+                    console.log(`[Sync-Heal] Re-linked contact ${badContactId} to real account ${realAccountId}`);
+                    void this.triggerPush('self-heal-contact-account');
+                    return;
+                }
+            }
+
+            // If account is truly missing, remove outbox mutation to avoid deadlock
+            await db.outbox.where('entity_id').equals(badContactId).and(i => i.entity_type === 'CRM_Contactos').delete();
+            await this.updatePendingCount();
+        } catch (e) {
+            console.error(`[Sync-Heal] Error healing orphaned contact account:`, e);
         }
     }
 
@@ -1230,6 +1349,7 @@ export class SyncEngine {
             await db.contacts.delete(badContactId);
 
             console.log(`[Sync-Heal] Repaired duplicate contact. Removed bad local entry and cleaned its outbox.`);
+            await this.updatePendingCount();
         } catch (e) {
             console.error(`[Sync-Heal] Error resolving duplicate contact:`, e);
         }
@@ -1799,9 +1919,9 @@ export class SyncEngine {
                     await db.opportunityCollaborators.bulkPut(collabs);
                     console.log(`[Sync] Pulled ${collabs.length} opportunity collaborators.`);
                 }
-            } catch (cErr) {
-                console.error('[Sync] Failed to pull collaborators:', cErr);
-                pullErrors.push(`CRM_Oportunidades_Colaboradores: ${String(cErr)}`);
+            } catch (cErr: any) {
+                console.error('[Sync] Failed to pull collaborators:', cErr?.message || cErr);
+                pullErrors.push(`CRM_Oportunidades_Colaboradores: ${cErr?.message || String(cErr)}`);
             }
 
             // Pull Opportunities (CRM_Oportunidades) - SMART MERGE

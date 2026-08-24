@@ -658,7 +658,7 @@ function OpportunitiesContent() {
                                     autoRowSize={false}
                                     renderAllRows={false}
                                     licenseKey="non-commercial-and-evaluation"
-                                    afterOnCellMouseDown={(event, coords, td) => {
+                                    afterOnCellMouseDown={(event: any, coords: any, td: any) => {
                                         if (coords.row >= 0) {
                                             const opp = hotData[coords.row];
                                             if (opp && opp.id) {

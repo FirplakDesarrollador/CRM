@@ -49,7 +49,7 @@ const storeSaleSchema = z.object({
 
     // Oportunidad
     fase_id: z.string().min(1, "Fase requerida"),
-    amount: z.number().optional().default(0),
+    amount: z.number(),
     comentarios: z.string().min(1, "Comentario requerido"),
     origen_oportunidad: z.string().min(1, "Origen requerido"),
     venta_feria: z.boolean(),
@@ -223,7 +223,8 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             clasificacion_id: "",
             prioridad: "Media",
             actividad_descripcion: "",
-            items: []
+            items: [],
+            asesor_id: ""
         }
     });
 
@@ -268,6 +269,81 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
 
         return () => clearTimeout(timer);
     }, [accountSearchQuery, selectedAccount]);
+
+    // Detección temprana en tiempo real de cuentas duplicadas por NIT, Teléfono o Email
+    const watchedNit = watch("nit_base");
+    const watchedTelefono = watch("telefono");
+    const watchedEmail = watch("email");
+
+    const [remoteDuplicateAccounts, setRemoteDuplicateAccounts] = useState<LocalCuenta[]>([]);
+
+    useEffect(() => {
+        if (selectedAccount) return;
+        const cleanNit = (watchedNit || "").replace(/\D/g, "");
+        const cleanPhone = (watchedTelefono || "").replace(/\D/g, "");
+        const cleanMail = (watchedEmail || "").trim().toLowerCase();
+
+        const needsNitSearch = cleanNit.length >= 5 && watchedNit !== "*****" && !allLocalAccounts.some(a => (a.nit_base || "").replace(/\D/g, "") === cleanNit);
+        const needsPhoneSearch = cleanPhone.length >= 7 && watchedTelefono !== "*****" && !allLocalAccounts.some(a => (a.telefono || "").replace(/\D/g, "") === cleanPhone);
+        const needsEmailSearch = cleanMail.includes("@") && cleanMail.length >= 6 && watchedEmail !== "*****" && !allLocalAccounts.some(a => (a.email || "").trim().toLowerCase() === cleanMail);
+
+        if (!needsNitSearch && !needsPhoneSearch && !needsEmailSearch) return;
+
+        const timer = setTimeout(async () => {
+            if (typeof navigator !== "undefined" && navigator.onLine) {
+                let orConditions: string[] = [];
+                if (needsNitSearch) orConditions.push(`nit_base.eq.${cleanNit}`);
+                if (needsPhoneSearch) orConditions.push(`telefono.eq.${cleanPhone}`);
+                if (needsEmailSearch) orConditions.push(`email.ilike.${cleanMail}`);
+
+                if (orConditions.length > 0) {
+                    const { data } = await supabase
+                        .from('CRM_Cuentas')
+                        .select('*')
+                        .or(orConditions.join(','))
+                        .limit(5);
+
+                    if (data && data.length > 0) {
+                        setRemoteDuplicateAccounts(prev => {
+                            const next = [...prev];
+                            for (const item of data) {
+                                if (!next.some(a => a.id === item.id)) {
+                                    next.push(item as unknown as LocalCuenta);
+                                }
+                            }
+                            return next;
+                        });
+                    }
+                }
+            }
+        }, 300);
+
+        return () => clearTimeout(timer);
+    }, [watchedNit, watchedTelefono, watchedEmail, selectedAccount, allLocalAccounts]);
+
+    const duplicateAccountByNit = useMemo(() => {
+        if (selectedAccount || !watchedNit || watchedNit === "*****") return null;
+        const clean = (watchedNit || "").replace(/\D/g, "");
+        if (clean.length < 5) return null;
+        return allLocalAccounts.find(a => (a.nit_base || "").replace(/\D/g, "") === clean) ||
+               remoteDuplicateAccounts.find(a => (a.nit_base || "").replace(/\D/g, "") === clean) || null;
+    }, [watchedNit, allLocalAccounts, remoteDuplicateAccounts, selectedAccount]);
+
+    const duplicateAccountByPhone = useMemo(() => {
+        if (selectedAccount || !watchedTelefono || watchedTelefono === "*****") return null;
+        const clean = (watchedTelefono || "").replace(/\D/g, "");
+        if (clean.length < 7) return null;
+        return allLocalAccounts.find(a => (a.telefono || "").replace(/\D/g, "") === clean) ||
+               remoteDuplicateAccounts.find(a => (a.telefono || "").replace(/\D/g, "") === clean) || null;
+    }, [watchedTelefono, allLocalAccounts, remoteDuplicateAccounts, selectedAccount]);
+
+    const duplicateAccountByEmail = useMemo(() => {
+        if (selectedAccount || !watchedEmail || watchedEmail === "*****") return null;
+        const clean = (watchedEmail || "").trim().toLowerCase();
+        if (!clean.includes("@") || clean.length < 6) return null;
+        return allLocalAccounts.find(a => (a.email || "").trim().toLowerCase() === clean) ||
+               remoteDuplicateAccounts.find(a => (a.email || "").trim().toLowerCase() === clean) || null;
+    }, [watchedEmail, allLocalAccounts, remoteDuplicateAccounts, selectedAccount]);
 
     // Filtrado de cuentas tokenizado multi-palabra sin importar tildes, mayúsculas ni orden
     const filteredAccounts = useMemo(() => {
@@ -327,6 +403,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         setValue("contacto_email", "");
         setValue("contacto_telefono", "");
         setValue("contacto_comentarios", "");
+        setValue("asesor_id", "");
     }, [displayCountries, setValue]);
 
     const handleNombreCuentaChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -353,6 +430,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             setValue("contacto_email", "");
             setValue("contacto_telefono", "");
             setValue("contacto_comentarios", "");
+            setValue("asesor_id", "");
         }
 
         if (val.trim().length >= 2) {
@@ -374,39 +452,39 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         [subclassifications, selectedChannel],
     );
 
-    // Filtrado estricto de asesores: Si el vendedor no tiene país, departamento o canal asignado, NO aparece en el desplegable.
+    // Filtrado estricto de asesores: Valida que el asesor pertenezca al canal, país y departamento seleccionados.
     const selectedPais = watch("pais_id");
     const selectedDept = watch("departamento_id");
-    const selectedAdvisorId = watch("asesor_id");
 
     const filteredAdvisors = useMemo(() => {
         const activeUsers = users?.filter(u => u.is_active) || [];
         
         return activeUsers.filter(u => {
-            // 1. Verificar País: El vendedor debe tener al menos un país asignado y debe incluir el país del cliente.
-            const userPaises = u.paises && u.paises.length > 0 ? u.paises : (u.pais ? [u.pais] : []);
-            if (userPaises.length === 0) return false;
-
-            const matchesCountry = selectedPais && userPaises.includes(String(selectedPais));
-            if (!matchesCountry) return false;
-
-            // 2. Verificar Departamento (si se seleccionó departamento en el cliente):
-            // El vendedor debe tener asignado al menos un departamento y debe incluir el departamento del cliente.
-            if (selectedDept) {
-                const userDepts = u.departamentos && u.departamentos.length > 0 ? u.departamentos : (u.departamento ? [u.departamento] : []);
-                if (userDepts.length === 0) return false;
-
-                const matchesDept = userDepts.includes(String(selectedDept));
-                if (!matchesDept) return false;
+            // 1. Verificar Canal de Venta: El vendedor debe tener asignado el canal seleccionado
+            const userChannels = u.canales || [];
+            if (userChannels.length === 0 || !userChannels.includes(selectedChannel)) {
+                return false;
             }
 
-            // 3. Verificar Canal de Venta: El vendedor debe tener asignado el canal seleccionado en el formulario.
-            if (selectedChannel) {
-                const userChannels = u.canales || [];
-                if (userChannels.length === 0) return false;
+            // 2. Verificar País: El vendedor debe tener asignado el país seleccionado
+            if (selectedPais) {
+                const userPaises = u.paises && u.paises.length > 0 ? u.paises : (u.pais ? [String(u.pais)] : ["1"]);
+                if (!userPaises.includes(String(selectedPais))) {
+                    return false;
+                }
+            }
 
-                const matchesChannel = userChannels.includes(selectedChannel);
-                if (!matchesChannel) return false;
+            // 3. Verificar Departamento (si se seleccionó departamento en el formulario):
+            if (selectedDept) {
+                const userDepts = u.departamentos && u.departamentos.length > 0 ? u.departamentos : (u.departamento ? [String(u.departamento)] : []);
+                // En Canal Propio, si el asesor no tiene restricción de departamento, opera a nivel general de tienda
+                if (selectedChannel === "PROPIO" && userDepts.length === 0) {
+                    return true;
+                }
+                // En canales OBRAS y DISTRIBUCIÓN, la asignación de departamento es estricta por zona
+                if (userDepts.length === 0 || !userDepts.includes(String(selectedDept))) {
+                    return false;
+                }
             }
 
             return true;
@@ -425,49 +503,6 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             }
         }
     }, [displayCountries, setValue, watch, selectedAccount]);
-
-    // Seleccionar automáticamente un asesor si el actual no pertenece al filtro o está vacío (solo si no hay cuenta seleccionada)
-    useEffect(() => {
-        if (selectedAccount) return;
-        if (filteredAdvisors.length > 0) {
-            if (!selectedAdvisorId || !filteredAdvisors.some(u => u.id === selectedAdvisorId)) {
-                const juanCorrea = filteredAdvisors.find(u => includesNormalized(u.full_name || "", "juan correa"));
-                setValue("asesor_id", juanCorrea ? juanCorrea.id : filteredAdvisors[0].id);
-            }
-        } else {
-            setValue("asesor_id", "");
-        }
-    }, [filteredAdvisors, selectedAdvisorId, setValue, selectedAccount]);
-
-    // Selección bidireccional: Al seleccionar un asesor, se toma por defecto su país y departamento (solo si no hay cuenta seleccionada)
-    useEffect(() => {
-        if (selectedAccount) return;
-        if (!selectedAdvisorId || !users || users.length === 0) return;
-
-        const advisor = users.find(u => u.id === selectedAdvisorId);
-        if (!advisor) return;
-
-        const advPaises = (
-            advisor.paises && advisor.paises.length > 0
-                ? advisor.paises
-                : (advisor.pais ? [advisor.pais] : [])
-        ).map(p => String(p));
-
-        const advDepts = (
-            advisor.departamentos && advisor.departamentos.length > 0
-                ? advisor.departamentos
-                : (advisor.departamento ? [advisor.departamento] : [])
-        ).map(d => String(d));
-
-        if (advPaises.length > 0 && (!selectedPais || !advPaises.includes(String(selectedPais)))) {
-            setValue("pais_id", advPaises[0]);
-        }
-
-        if (advDepts.length > 0 && (!selectedDept || !advDepts.includes(String(selectedDept)))) {
-            setValue("departamento_id", advDepts[0]);
-            setValue("ciudad_id", "");
-        }
-    }, [selectedAdvisorId, selectedPais, selectedDept, users, setValue, selectedAccount]);
 
     const resetStoreForm = useCallback(() => {
         setSelectedAccount(null);
@@ -505,7 +540,8 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             clasificacion_id: "",
             prioridad: "Media",
             actividad_descripcion: "",
-            items: []
+            items: [],
+            asesor_id: ""
         });
     }, [reset, displayCountries, phasesList, origins]);
 
@@ -648,20 +684,28 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                 accountId = selectedAccount.id;
                 console.log("Usando cuenta existente seleccionada:", accountId);
             } else {
-                // VALIDACIÓN DE DUPLICADOS LOCALES
-                const duplicates = await db.accounts.filter(a => 
-                    a.nit_base === data.nit_base || (!!a.telefono && a.telefono === data.telefono)
-                ).toArray();
+                // VALIDACIÓN DE DUPLICADOS LOCALES Y REMOTOS (NIT, Teléfono o Email)
+                const cleanNit = (data.nit_base || "").replace(/\D/g, "");
+                const cleanPhone = (data.telefono || "").replace(/\D/g, "");
+                const cleanMail = (data.email || "").trim().toLowerCase();
 
-                if (duplicates.length > 0) {
+                const matchedAccount = duplicateAccountByNit || duplicateAccountByPhone || duplicateAccountByEmail || (
+                    allLocalAccounts.find(a => 
+                        (cleanNit.length >= 5 && (a.nit_base || "").replace(/\D/g, "") === cleanNit) ||
+                        (cleanPhone.length >= 7 && (a.telefono || "").replace(/\D/g, "") === cleanPhone) ||
+                        (cleanMail.length >= 6 && (a.email || "").trim().toLowerCase() === cleanMail)
+                    )
+                );
+
+                if (matchedAccount) {
                     // Usar el cliente existente
-                    accountId = duplicates[0].id;
+                    accountId = matchedAccount.id;
                     await updateAccount(accountId, {
-                        ...duplicates[0],
+                        ...matchedAccount,
                         canal_id: data.canal_id,
                         subclasificacion_id: Number(data.subclasificacion_id),
                     });
-                    console.log("Cliente ya existe por NIT/teléfono, usando ID existente:", accountId);
+                    console.log("Cliente ya existe por NIT/teléfono/email, usando ID existente:", accountId);
                 } else {
                     // 1. Crear Cuenta si no existe
                     const accountData = {
@@ -681,7 +725,15 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                         origen_cuenta: data.origen_oportunidad || undefined
                     };
 
-                    const newId = await createAccount(accountData);
+                    const initialContact = data.contacto_nombre?.trim() ? {
+                        nombre: data.contacto_nombre.trim(),
+                        cargo: data.contacto_cargo?.trim() || undefined,
+                        email: data.contacto_email?.trim() || undefined,
+                        telefono: data.contacto_telefono?.trim() || undefined,
+                        comentarios: data.contacto_comentarios?.trim() || undefined,
+                    } : undefined;
+
+                    const newId = await createAccount(accountData, initialContact);
                     if (newId) {
                         accountId = newId;
                     }
@@ -692,16 +744,21 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                 throw new Error("No se pudo obtener el ID de la cuenta.");
             }
 
-            // 2. Crear Contacto (si se especificó en cliente existente)
+            // 2. Crear Contacto (si se especificó en cliente existente y no es un duplicado)
             if (selectedAccount && data.contacto_nombre && data.contacto_nombre.trim() !== "") {
-                await createContact({
-                    account_id: accountId,
-                    nombre: data.contacto_nombre.trim(),
-                    cargo: data.contacto_cargo?.trim() || undefined,
-                    email: data.contacto_email?.trim() || undefined,
-                    telefono: data.contacto_telefono?.trim() || undefined,
-                    comentarios: data.contacto_comentarios?.trim() || undefined,
-                });
+                const existingContacts = await db.contacts.where('account_id').equals(accountId).toArray();
+                const isPhoneDuplicate = data.contacto_telefono?.trim() && existingContacts.some(c => c.telefono === data.contacto_telefono?.trim() && !c.is_deleted);
+
+                if (!isPhoneDuplicate) {
+                    await createContact({
+                        account_id: accountId,
+                        nombre: data.contacto_nombre.trim(),
+                        cargo: data.contacto_cargo?.trim() || undefined,
+                        email: data.contacto_email?.trim() || undefined,
+                        telefono: data.contacto_telefono?.trim() || undefined,
+                        comentarios: data.contacto_comentarios?.trim() || undefined,
+                    });
+                }
             }
 
             // 3. Crear Oportunidad
@@ -883,6 +940,21 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         className="w-full mt-1 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed" 
                                         placeholder="123456789" 
                                     />
+                                    {duplicateAccountByNit && (
+                                        <div className="mt-1.5 p-2 bg-amber-50 border border-amber-200 rounded-lg flex items-center justify-between gap-2 text-xs">
+                                            <div className="text-amber-800 font-medium flex items-center gap-1.5 truncate">
+                                                <span>⚠️ Ya existe:</span>
+                                                <span className="font-bold truncate">{duplicateAccountByNit.nombre}</span>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleSelectAccount(duplicateAccountByNit)}
+                                                className="shrink-0 bg-amber-600 hover:bg-amber-700 text-white font-semibold px-2 py-0.5 rounded text-[11px] shadow-sm transition-colors flex items-center gap-1"
+                                            >
+                                                ⚡ Vincular
+                                            </button>
+                                        </div>
+                                    )}
                                     {errors.nit_base && <p className="text-red-500 text-xs mt-1">{errors.nit_base.message}</p>}
                                 </div>
                                 <div>
@@ -896,6 +968,21 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         className="w-full mt-1 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed" 
                                         placeholder="300 000 0000" 
                                     />
+                                    {duplicateAccountByPhone && (
+                                        <div className="mt-1.5 p-2 bg-amber-50 border border-amber-200 rounded-lg flex items-center justify-between gap-2 text-xs">
+                                            <div className="text-amber-800 font-medium flex items-center gap-1.5 truncate">
+                                                <span>⚠️ Ya existe:</span>
+                                                <span className="font-bold truncate">{duplicateAccountByPhone.nombre}</span>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleSelectAccount(duplicateAccountByPhone)}
+                                                className="shrink-0 bg-amber-600 hover:bg-amber-700 text-white font-semibold px-2 py-0.5 rounded text-[11px] shadow-sm transition-colors flex items-center gap-1"
+                                            >
+                                                ⚡ Vincular
+                                            </button>
+                                        </div>
+                                    )}
                                     {errors.telefono && <p className="text-red-500 text-xs mt-1">{errors.telefono.message}</p>}
                                 </div>
                                 <div>
@@ -910,6 +997,21 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         className="w-full mt-1 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed" 
                                         placeholder="correo@ejemplo.com" 
                                     />
+                                    {duplicateAccountByEmail && (
+                                        <div className="mt-1.5 p-2 bg-amber-50 border border-amber-200 rounded-lg flex items-center justify-between gap-2 text-xs">
+                                            <div className="text-amber-800 font-medium flex items-center gap-1.5 truncate">
+                                                <span>⚠️ Ya existe:</span>
+                                                <span className="font-bold truncate">{duplicateAccountByEmail.nombre}</span>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleSelectAccount(duplicateAccountByEmail)}
+                                                className="shrink-0 bg-amber-600 hover:bg-amber-700 text-white font-semibold px-2 py-0.5 rounded text-[11px] shadow-sm transition-colors flex items-center gap-1"
+                                            >
+                                                ⚡ Vincular
+                                            </button>
+                                        </div>
+                                    )}
                                     {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email.message}</p>}
                                 </div>
                             </div>
@@ -925,6 +1027,11 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         value={watch("canal_id") || "PROPIO"}
                                         disabled={!!selectedAccount}
                                         className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
+                                        onChange={(e) => {
+                                            register("canal_id").onChange(e);
+                                            setValue("subclasificacion_id", "");
+                                            setValue("asesor_id", "");
+                                        }}
                                     >
                                         {SALES_CHANNELS.map(channel => <option key={channel.id} value={channel.id}>{channel.nombre}</option>)}
                                     </select>
@@ -969,6 +1076,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                             register("pais_id").onChange(e);
                                             setValue("departamento_id", "");
                                             setValue("ciudad_id", "");
+                                            setValue("asesor_id", "");
                                         }}
                                     >
                                         <option value="">Seleccione...</option>
@@ -990,11 +1098,12 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         onChange={(e) => {
                                             register("departamento_id").onChange(e);
                                             setValue("ciudad_id", "");
+                                            setValue("asesor_id", "");
                                         }}
                                     >
                                         <option value="">Seleccione...</option>
                                         {displayDepartments
-                                            .filter(dep => String(dep.pais_id) === watch("pais_id"))
+                                            .filter(dep => String(dep.pais_id) === watch("pais_id") || (!dep.pais_id && watch("pais_id") === "1"))
                                             .map(dep => (
                                                 <option key={dep.id} value={String(dep.id)}>{dep.nombre}</option>
                                             ))}

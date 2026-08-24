@@ -3,6 +3,20 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-08-24 - Fix: Detección Temprana de Duplicados en /tiendas y Auto-curación de Snapshots en SyncEngine
+
+- **Detección Temprana en Tiempo Real (`CreateStoreSaleForm.tsx`):** Monitoreo reactivo de `nit_base`, `telefono` y `email` contra Dexie y Supabase (con debounce). Si existe una cuenta coincidente, despliega tarjetas de advertencia con botón de acción rápida `⚡ Vincular` para autocompletar y proteger la cuenta existente con un solo clic.
+- **Reasignación Profunda de `account_id` en Snapshots (`lib/sync.ts`):** `resolveDuplicateAccount()` ahora reasigna `account_id` dentro de todos los snapshots `_complete_snapshot_` en el outbox (`CRM_Contactos`, `CRM_Oportunidades`, `CRM_Cotizaciones`, `CRM_Actividades`), eliminando fallos en cascada por clave foránea `fk_crmcontactos_account`.
+- **Auto-curación de Contactos (`healDuplicateContactPhone` & `healOrphanedContactAccount`):** Intercepción de errores `unique_active_contact_phone` y `fk_crmcontactos_account` en `SyncEngine.pushBatch` para sanear mutaciones huérfanas y desatascar la cola de sincronización.
+- **Propagación de Contacto Personalizado (`useAccounts.ts`):** `createAccount` ahora recibe y aplica `initialContactData` diligenciado en el formulario en lugar de crear contactos genéricos.
+
+## 2026-08-24 - Fix: Corrección de Flickering y Filtrado Estricto de Asesores por Canal/Zona en /tiendas
+
+- **Eliminación de Bucles Cíclicos:** Se removieron los `useEffect`s pasivos de selección forzada y sincronización bidireccional en `CreateStoreSaleForm.tsx` que provocaban parpadeo (flickering) al interactuar con el selector de departamentos.
+- **Opción por Defecto "Seleccione un asesor...":** Se configuró `asesor_id: ""` como valor inicial/default en el formulario y se mantiene la validación requerida de Zod antes de guardar.
+- **Deselección Automática en Cascada:** Al cambiar de País, Departamento o Canal de Venta, el selector de asesor se limpia automáticamente (`setValue("asesor_id", "")`).
+- **Filtrado Estricto por Canal y Departamento:** Se corrigió la condición de validación en `filteredAdvisors`: los asesores ahora deben tener **obligatoriamente** el canal asignado y, en canales zonales (Obras / Distribución), el departamento seleccionado debe estar dentro de sus zonas asignadas (ej. al seleccionar Obras Nacional + Antioquia únicamente aparece la asesora de zona correspondiente).
+
 ## 2026-08-21 - Lint: Wiki posterior al endurecimiento del SyncEngine
 
 - Estructura: `listed=15`, `pages=15`, `missing=0`, `orphans=0`.

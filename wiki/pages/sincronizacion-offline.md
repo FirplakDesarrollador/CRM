@@ -98,7 +98,7 @@ El Outbox respeta las dependencias FK:
 
 ## Auto-curación
 
-El motor conserva flujos de recuperación para NIT duplicado, cuentas padre faltantes, fases inválidas y actividades huérfanas. Las reparaciones reencolan snapshots o campos necesarios y luego ejecutan push-only; no descargan nuevamente todo el CRM.
+El motor conserva flujos de recuperación para NIT duplicado (con reasignación profunda de `account_id` en mutaciones planas y snapshots estructurados), contactos duplicados por teléfono (`unique_active_contact_phone`), contactos con cuentas huérfanas (`fk_crmcontactos_account`), cuentas padre faltantes, fases inválidas y actividades huérfanas. Las reparaciones reencolan snapshots o campos necesarios y luego ejecutan push-only; no descargan nuevamente todo el CRM.
 
 Los colaboradores inválidos o huérfanos se conservan en `DEAD_LETTER` con su error para diagnóstico, en lugar de eliminarse.
 
