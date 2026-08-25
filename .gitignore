@@ -98,6 +98,7 @@ temp_*.txt
 /tests/*
 !/tests/salesChannels.test.ts
 !/tests/opportunityCollaboratorPermissions.test.ts
+!/tests/opportunityCategories.test.ts
 
 
 # n8n-as-code AI helpers

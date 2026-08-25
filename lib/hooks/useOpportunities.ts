@@ -64,6 +64,8 @@ function sanitizeOpportunityForSync(opp: any) {
     if (sanitized.estado_id !== undefined) sanitized.estado_id = sanitized.estado_id ? Number(sanitized.estado_id) : 1;
     if (sanitized.fase_id !== undefined) sanitized.fase_id = sanitized.fase_id ? Number(sanitized.fase_id) : 1;
     if (sanitized.razon_perdida_id !== undefined) sanitized.razon_perdida_id = sanitized.razon_perdida_id ? Number(sanitized.razon_perdida_id) : null;
+    if (sanitized.clientes_atendidos !== undefined) sanitized.clientes_atendidos = sanitized.clientes_atendidos !== null && sanitized.clientes_atendidos !== "" ? Number(sanitized.clientes_atendidos) : 0;
+    if (sanitized.contactos_ids !== undefined) sanitized.contactos_ids = Array.isArray(sanitized.contactos_ids) ? sanitized.contactos_ids : [];
     // Text fields — pass through as-is (no conversion needed)
     // razon_perdida and comentarios_perdida are already strings or null
 
@@ -121,6 +123,8 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
             departamento_id: oppData.departamento_id ? Number(oppData.departamento_id) : null,
             ciudad_id: oppData.ciudad_id ? Number(oppData.ciudad_id) : null,
             fecha_cierre_estimada: oppData.fecha_cierre_estimada === "" ? null : (oppData.fecha_cierre_estimada || null),
+            contactos_ids: Array.isArray(oppData.contactos_ids) ? oppData.contactos_ids : [],
+            clientes_atendidos: oppData.clientes_atendidos !== undefined && oppData.clientes_atendidos !== null && oppData.clientes_atendidos !== "" ? Number(oppData.clientes_atendidos) : 0,
             created_by: user?.id,
             updated_by: user?.id,
             updated_at: new Date().toISOString()
@@ -346,6 +350,8 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
             razon_perdida_id: updates.razon_perdida_id !== undefined ? (updates.razon_perdida_id ? Number(updates.razon_perdida_id) : null) : undefined,
             razon_perdida: updates.razon_perdida !== undefined ? (updates.razon_perdida || null) : undefined,
             comentarios_perdida: updates.comentarios_perdida !== undefined ? (updates.comentarios_perdida || null) : undefined,
+            clientes_atendidos: updates.clientes_atendidos !== undefined ? (updates.clientes_atendidos !== null && updates.clientes_atendidos !== "" ? Number(updates.clientes_atendidos) : 0) : undefined,
+            contactos_ids: updates.contactos_ids !== undefined ? (Array.isArray(updates.contactos_ids) ? updates.contactos_ids : []) : undefined,
         };
 
         // Remove undefined fields to avoid overwriting with undefined

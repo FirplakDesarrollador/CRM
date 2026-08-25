@@ -11,7 +11,6 @@ export const SALES_CHANNELS = [
     { id: "DIST_INT", nombre: "Distribución Internacional" },
     { id: "OBRAS_NAC", nombre: "Obras Nacional" },
     { id: "OBRAS_INT", nombre: "Obras Internacional" },
-    { id: "FERIA", nombre: "Feria" },
 ] as const;
 
 export type SalesChannelId = (typeof SALES_CHANNELS)[number]["id"];
@@ -21,7 +20,7 @@ export function getProductPrice(
     channelId: string,
     isFairSale = false,
 ): number {
-    if (isFairSale || channelId === "FERIA") {
+    if (isFairSale) {
         return Number(product.precio_feria) || 0;
     }
 

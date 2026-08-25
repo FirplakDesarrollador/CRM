@@ -38,6 +38,8 @@ function OpportunitiesContent() {
         setSegmentFilter,
         setPhaseFilter,
         setStatusFilter,
+        setOriginFilter,
+        originFilter,
         setStartDate,
         setEndDate,
         setStartClosingDate,
@@ -129,6 +131,15 @@ function OpportunitiesContent() {
         }
         return null;
     });
+    const [selectedOrigin, setSelectedOrigin] = useState<string | null>(() => {
+        const fromUrl = searchParams.get('origin');
+        if (fromUrl) return fromUrl;
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_oportunidades_state');
+            if (saved) return new URLSearchParams(saved).get('origin') || null;
+        }
+        return null;
+    });
     const [statusFilter, setStatusFilterState] = useState<'all' | 'open' | 'won' | 'lost'>(() => {
         const fromUrl = searchParams.get('status');
         if (fromUrl) return (fromUrl as any);
@@ -197,6 +208,8 @@ function OpportunitiesContent() {
         if (initialSubclass) setSubclassificationFilter(Number(initialSubclass));
         if (initialSegment) setSegmentFilter(Number(initialSegment));
         if (initialPhase) setPhaseFilter(Number(initialPhase));
+        const initialOrigin = searchParams.get('origin') || selectedOrigin;
+        if (initialOrigin) setOriginFilter(initialOrigin);
         setUserFilter(initialTab);
         
         // Initial dates for the hook
@@ -265,6 +278,9 @@ function OpportunitiesContent() {
         if (selectedPhase) params.set('phase', String(selectedPhase));
         else params.delete('phase');
 
+        if (selectedOrigin) params.set('origin', selectedOrigin);
+        else params.delete('origin');
+
         if (statusFilter && statusFilter !== 'open') params.set('status', statusFilter);
         else params.delete('status');
         
@@ -299,12 +315,13 @@ function OpportunitiesContent() {
         
         const query = queryString ? `?${queryString}` : window.location.pathname;
         router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
-    }, [tab, selectedAccountOwnerIds, selectedChannel, selectedSubclass, selectedSegment, selectedPhase, statusFilter, startDate, endDate, startClosingDate, endClosingDate, searchParams, router]); // Notice inputValue is NOT in deps here to avoid URL churn during typing
+    }, [tab, selectedAccountOwnerIds, selectedChannel, selectedSubclass, selectedSegment, selectedPhase, selectedOrigin, statusFilter, startDate, endDate, startClosingDate, endClosingDate, searchParams, router]); // Notice inputValue is NOT in deps here to avoid URL churn during typing
 
 
     const handleFilterChange = useCallback(({ 
         channelId, subclassificationId, segmentId, phaseId, statusFilter: newStatus,
-        startDate: sD, endDate: eD, startClosingDate: sCD, endClosingDate: eCD
+        startDate: sD, endDate: eD, startClosingDate: sCD, endClosingDate: eCD,
+        origin: oG
     }: any) => {
         setSelectedChannel(channelId);
         setSelectedSubclass(subclassificationId);
@@ -315,6 +332,7 @@ function OpportunitiesContent() {
         setEndDateState(eD);
         setStartClosingDateState(sCD);
         setEndClosingDateState(eCD);
+        setSelectedOrigin(oG);
         
         setChannelFilter(channelId);
         setSubclassificationFilter(subclassificationId);
@@ -325,7 +343,8 @@ function OpportunitiesContent() {
         setEndDate(eD);
         setStartClosingDate(sCD);
         setEndClosingDate(eCD);
-    }, [setChannelFilter, setSubclassificationFilter, setSegmentFilter, setPhaseFilter, setStatusFilter, setStartDate, setEndDate, setStartClosingDate, setEndClosingDate]);
+        setOriginFilter(oG);
+    }, [setChannelFilter, setSubclassificationFilter, setSegmentFilter, setPhaseFilter, setStatusFilter, setStartDate, setEndDate, setStartClosingDate, setEndClosingDate, setOriginFilter]);
 
     const handleDeleteOpportunity = async (oppId: string) => {
         try {
@@ -375,6 +394,7 @@ function OpportunitiesContent() {
         id: opp.id,
         cuenta: opp.account?.nombre || "Sin cuenta",
         nombre: opp.nombre || "Sin nombre",
+        origen: opp.origen_oportunidad || "-",
         fase: opp.fase_data?.nombre || 'Pros.',
         estado: opp.estado_data?.nombre || 'Abierta',
         creada: opp.created_at ? new Date(opp.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' }) : "-",
@@ -404,6 +424,7 @@ function OpportunitiesContent() {
         }] : []),
         { data: 'cuenta', title: 'Cuenta', readOnly: true },
         { data: 'nombre', title: 'Nombre', readOnly: true },
+        { data: 'origen', title: 'Origen', readOnly: true },
         { data: 'fase', title: 'Fase', readOnly: true },
         { data: 'estado', title: 'Estado', readOnly: true },
         { data: 'creada', title: 'Creada', readOnly: true },
@@ -533,6 +554,7 @@ function OpportunitiesContent() {
                         initialSegmentId={selectedSegment}
                         initialPhaseId={selectedPhase}
                         initialStatusFilter={statusFilter}
+                        initialOrigin={selectedOrigin}
                         initialDates={{
                             startDate,
                             endDate,

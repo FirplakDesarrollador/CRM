@@ -309,6 +309,9 @@ export interface LocalOportunidad {
     updated_by?: string;
     comentarios?: string;
     direccion_entrega?: string;
+    categoria_oportunidad?: string | string[] | null;
+    contactos_ids?: string[] | null;
+    clientes_atendidos?: number | null;
 }
 
 export class CRMFirplakDB extends Dexie {

@@ -3,6 +3,48 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-08-25 - Ingest: Filtro por Origen (`origen_oportunidad`) en el Módulo Oportunidades
+
+- **Componente Filtros (`OpportunityFilters.tsx`):** Se integró el selector de "Origen" alimentado dinámicamente desde el catálogo `CRM_OrigenesOportunidad` (ordenado por `orden, nombre`), con soporte para limpiar filtros y sincronización de estado.
+- **Hook de Servidor (`useOpportunitiesServer.ts`):** Soporte para `originFilter`, filtrado en consultas online (Supabase `.ilike()` y soporte para aliases como WhatsApp/wp) y filtrado en motor offline (Dexie). Inclusión de `origen_oportunidad` en las consultas `select`.
+- **Página de Oportunidades (`app/oportunidades/page.tsx`):** Sincronización bidireccional del filtro `origin` con URL (`searchParams`) y `sessionStorage`, y visualización de la columna "Origen" en la tabla desktop (Handsontable).
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+
+## 2026-08-25 - Ingest: Múltiples Contactos Vinculados y Clientes Atendidos en Oportunidades (/tiendas y CRM)
+
+- **Migración Supabase y Modelo:** Nuevas columnas `contactos_ids uuid[]` y `clientes_atendidos integer` en `CRM_Oportunidades` (`20260825_add_opportunity_contacts_and_attended_clients.sql`) y en `LocalOportunidad` (`lib/db.ts`).
+- **Formulario /tiendas (`CreateStoreSaleForm.tsx`):** Sección de contacto habilitada de forma permanente y 100% opcional (para clientes nuevos y existentes). En cuentas existentes se despliega un `MultiSelect` prefiltrado con los contactos de la cuenta seleccionada (`account_id`), el cual actualiza dinámicamente el contador del campo numérico editable `Clientes atendidos`.
+- **Soporte Global en Oportunidades:** Integración de `contactos_ids` y `clientes_atendidos` en el wizard `/oportunidades/nueva` (`CreateOpportunityWizard.tsx`) y en el detalle `/oportunidades/[id]` (`app/oportunidades/[id]/page.tsx` - `SummaryTab`).
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/pages/modelo-de-datos.md`, `wiki/LOG.md`.
+
+## 2026-08-25 - Ingest: Soporte de Selección Múltiple de Categorías en Oportunidades (Todo el CRM)
+
+- **Módulo Central de Categorías (`lib/opportunityCategories.ts`):** Definición de categorías canónicas (`Baños`, `Cocinas`, `Zona de Labores`, `Hidromasajes`, `Institucional`), con utilidades bidireccionales `parseOpportunityCategories` (normaliza strings/arrays) y `formatOpportunityCategories` (serializa a string delimitado por comas).
+- **Módulo /tiendas (`CreateStoreSaleForm.tsx`):** Reemplazo del `<select>` simple por `<MultiSelect>`, guardado automático de múltiples categorías en `categoria_oportunidad` y concatenación descriptiva en comentarios.
+- **Wizard de Oportunidades (`CreateOpportunityWizard.tsx`):** Selector múltiple `MultiSelect` en el paso 2 de datos del negocio y persistencia en `categoria_oportunidad`.
+- **Detalle de Oportunidad (`app/oportunidades/[id]/page.tsx`):** Reemplazo del input de texto plano por `MultiSelect` con auto-guardado reactivo al modificar selecciones.
+- **Modelo Local y Edge Functions:** Soporte en `LocalOportunidad` (`lib/db.ts`) y normalización en `wordpress-lead-intake`.
+- **Pruebas Automatizadas:** 7 tests unitarios en `tests/opportunityCategories.test.ts`.
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+
+## 2026-08-25 - Fix: Campo Nombre de Oportunidad Obligatorio en Formulario de Tiendas (/tiendas)
+
+- **Campo Obligatorio:** Se incorporó el input `nombre_oportunidad` como obligatorio (`z.string().min(1, "Nombre de la oportunidad requerido")`) en la sección "Datos del Negocio (Oportunidad)" de `CreateStoreSaleForm.tsx`.
+- **Auto-sugerencia:** Al vincular una cuenta existente se auto-completa como valor inicial sugerido `Venta - [Nombre Cuenta]`, permitiendo su edición libre antes de guardar.
+
+## 2026-08-25 - Fix: Cédula / NIT Opcional en Formulario de Tiendas (/tiendas)
+
+- **Ajuste de Validación:** Se modificó `nit_base` en `storeSaleSchema` (`CreateStoreSaleForm.tsx`) para ser opcional (`z.string().optional().nullable()`), removiendo la restricción obligatoria y el asterisco del campo en la UI.
+- **Creación Segura de Cuenta:** Si `nit_base` no es diligenciado, se envía como `undefined` al motor de cuentas sin bloquear el registro de la venta ni la detección preventiva de duplicados por teléfono o email.
+
+## 2026-08-25 - Fix: Eliminación de FERIA como Canal de Venta Estructural
+
+- **Restablecimiento de los 5 Canales Canónicos:** Se eliminó `FERIA` de `SALES_CHANNELS` (`lib/salesChannels.ts`) y de `CRM_Canales`. Los canales estructurales de venta quedan exclusivamente en `PROPIO`, `DIST_NAC`, `DIST_INT`, `OBRAS_NAC` y `OBRAS_INT`.
+- **Tratamiento de Ferias:** Las ferias se manejan como origen de oportunidad comercial (`origen_oportunidad = 'Feria'`) y las tarifas especiales mediante la bandera `venta_feria = true` (`precio_feria` en `getProductPrice`).
+- **Limpieza en /tiendas (`CreateStoreSaleForm.tsx`):** Se eliminó la validación redundante `selectedChannel === "FERIA"`, operando con `isFairSale`.
+- **Migración DB (`20260825_remove_feria_as_channel.sql`):** Reasignación de cuentas `canal_id = 'FERIA'` a `PROPIO`, eliminación de fases/subclasificaciones huérfanas de `FERIA`, depuración de `CRM_Usuarios.canales`, y registro de 'Feria' en `CRM_OrigenesOportunidad`.
+- **Tests & Wiki:** Actualización de `tests/salesChannels.test.ts`, `wiki/pages/canales-de-venta.md`, `wiki/pages/modelo-de-datos.md` y `wiki/LOG.md`.
+
 ## 2026-08-24 - Fix: Detección Temprana de Duplicados en /tiendas y Auto-curación de Snapshots en SyncEngine
 
 - **Detección Temprana en Tiempo Real (`CreateStoreSaleForm.tsx`):** Monitoreo reactivo de `nit_base`, `telefono` y `email` contra Dexie y Supabase (con debounce). Si existe una cuenta coincidente, despliega tarjetas de advertencia con botón de acción rápida `⚡ Vincular` para autocompletar y proteger la cuenta existente con un solo clic.

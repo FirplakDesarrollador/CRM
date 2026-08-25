@@ -11,7 +11,7 @@ mantiene un espejo local en IndexedDB vía Dexie (`lib/db.ts`) con interfaces `L
 | `CRM_Usuarios` | Usuarios de la app, rol, `allowed_modules`, coordinadores, ubicación geográfica (`paises`, `departamentos`), canales asignados (`canales`). Ver [[roles-y-permisos]] |
 | `CRM_Cuentas` | Clientes/empresas: NIT, canal (`canal_id`), propietario, nivel premium, geografía. Ver [[cuentas]] |
 | `CRM_Contactos` | Personas asociadas a cuentas. Ver [[contactos]] |
-| `CRM_Oportunidades` | Negocios en curso: fase, estado, probabilidad, motivo de pérdida. Ver [[oportunidades]] |
+| `CRM_Oportunidades` | Negocios en curso: fase, estado, probabilidad, motivo de pérdida, `contactos_ids` (múltiples contactos vinculados), `clientes_atendidos`. Ver [[oportunidades]] |
 | `CRM_OportunidadColaboradores` | Colaboradores de una oportunidad (afecta reparto de [[comisiones]]) |
 | `CRM_TransferenciasOportunidad` | Historial de transferencias de oportunidades entre vendedores |
 | `CRM_Actividades` | Tareas, eventos, llamadas, visitas; con clasificación y subclasificación. Ver [[actividades]] |
@@ -20,7 +20,7 @@ mantiene un espejo local en IndexedDB vía Dexie (`lib/db.ts`) con interfaces `L
 | `CRM_Pedidos` / `CRM_PedidoItems` | Pedidos logísticos derivados de cotizaciones ganadoras (campos `EXTRA_` de SAP) |
 | `CRM_Productos` | Catálogo de productos |
 | `CRM_ListaDePrecios` | Precios por columna/canal, incluido `precio_feria`. Ver [[canales-de-venta]] |
-| `CRM_Canales` | Canales de venta y columna de precio asociada, incluido `FERIA`. Ver [[canales-de-venta]] |
+| `CRM_Canales` | Los 5 canales de venta inmutables y columna de precio asociada. Ver [[canales-de-venta]] |
 | `CRM_SapIntegrationQueue` | Cola de integración hacia SAP. Ver [[integraciones]] |
 | `CRM_Files` | Archivos adjuntos |
 | `CRM_Parameters` | Parámetros de configuración |

@@ -19,12 +19,14 @@ import { useOpportunityOrigins } from "@/lib/hooks/useOpportunityOrigins";
 import { reserveFairInventory, useInventorySummary } from "@/lib/hooks/useInventory";
 import { getProductPrice, SALES_CHANNELS } from "@/lib/salesChannels";
 import { cn, includesNormalized, matchesSearchTokens, removeAccents } from "@/lib/utils";
+import { MultiSelect } from "@/components/ui/MultiSelect";
+import { OPPORTUNITY_CATEGORIES, formatOpportunityCategories, parseOpportunityCategories } from "@/lib/opportunityCategories";
 
 // Eschema de validación combinado
 const storeSaleSchema = z.object({
     // Cuenta
     nombre_cuenta: z.string().min(2, "Nombre requerido"),
-    nit_base: z.string().min(1, "Cédula / NIT requerida"),
+    nit_base: z.string().optional().nullable(),
     telefono: z.string().min(1, "Teléfono requerido"),
     pais_id: z.string().min(1, "País requerido"),
     departamento_id: z.string().optional().nullable(),
@@ -37,7 +39,9 @@ const storeSaleSchema = z.object({
     canal_id: z.string().min(1, "Canal de venta requerido"),
     subclasificacion_id: z.string().min(1, "Subclasificación requerida"),
     
-    // Contacto (para cliente existente)
+    // Contactos (para cliente nuevo o existente)
+    contactos_ids: z.array(z.string()),
+    clientes_atendidos: z.number().min(0),
     contacto_nombre: z.string().optional(),
     contacto_cargo: z.string().optional(),
     contacto_email: z.string().optional().nullable().refine(val => {
@@ -48,12 +52,13 @@ const storeSaleSchema = z.object({
     contacto_comentarios: z.string().optional(),
 
     // Oportunidad
+    nombre_oportunidad: z.string().min(1, "Nombre de la oportunidad requerido"),
     fase_id: z.string().min(1, "Fase requerida"),
     amount: z.number(),
     comentarios: z.string().min(1, "Comentario requerido"),
     origen_oportunidad: z.string().min(1, "Origen requerido"),
     venta_feria: z.boolean(),
-    categoria_oportunidad: z.string().optional(),
+    categoria_oportunidad: z.union([z.array(z.string()), z.string()]).optional().nullable(),
     asesor_id: z.string().min(1, "El asesor es obligatorio"),
     items: z.array(z.object({
         product_id: z.string(),
@@ -75,31 +80,6 @@ const storeSaleSchema = z.object({
     clasificacion_id: z.string().min(1, "Clasificación requerida"),
     prioridad: z.enum(["Baja", "Media", "Alta"]),
     actividad_descripcion: z.string().optional()
-}).superRefine((data, ctx) => {
-    const hasAnyContactField = Boolean(
-        data.contacto_nombre?.trim() ||
-        data.contacto_cargo?.trim() ||
-        data.contacto_email?.trim() ||
-        data.contacto_telefono?.trim() ||
-        data.contacto_comentarios?.trim()
-    );
-
-    if (hasAnyContactField) {
-        if (!data.contacto_nombre || data.contacto_nombre.trim() === "") {
-            ctx.addIssue({
-                code: z.ZodIssueCode.custom,
-                message: "Nombre completo es obligatorio",
-                path: ["contacto_nombre"]
-            });
-        }
-        if (!data.contacto_telefono || data.contacto_telefono.trim() === "") {
-            ctx.addIssue({
-                code: z.ZodIssueCode.custom,
-                message: "Teléfono móvil es obligatorio",
-                path: ["contacto_telefono"]
-            });
-        }
-    }
 });
 
 type StoreSaleFormData = z.infer<typeof storeSaleSchema>;
@@ -134,7 +114,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
     const [isActivityExpanded, setIsActivityExpanded] = useState(false);
-    const [isContactExpanded, setIsContactExpanded] = useState(false);
+    const [isContactExpanded, setIsContactExpanded] = useState(true);
 
     // Estados para búsqueda y selección de cuentas existentes
     const [selectedAccount, setSelectedAccount] = useState<LocalCuenta | null>(null);
@@ -144,6 +124,53 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
     const accountDropdownRef = useRef<HTMLDivElement>(null);
 
     const allLocalAccounts = useLiveQuery(() => db.accounts.toArray()) || [];
+
+    // Contactos de la cuenta seleccionada (locales en Dexie + remotos en Supabase)
+    const localAccountContacts = useLiveQuery(
+        () => selectedAccount ? db.contacts.where('account_id').equals(selectedAccount.id).filter(c => !c.is_deleted).toArray() : [],
+        [selectedAccount?.id]
+    ) || [];
+
+    const [remoteAccountContacts, setRemoteAccountContacts] = useState<any[]>([]);
+
+    useEffect(() => {
+        setRemoteAccountContacts([]);
+        if (!selectedAccount?.id) {
+            return;
+        }
+        let isMounted = true;
+        if (typeof navigator !== "undefined" && navigator.onLine) {
+            supabase
+                .from('CRM_Contactos')
+                .select('*')
+                .eq('account_id', selectedAccount.id)
+                .eq('is_deleted', false)
+                .then(({ data }) => {
+                    if (isMounted && data) {
+                        setRemoteAccountContacts(data);
+                    }
+                });
+        }
+        return () => {
+            isMounted = false;
+        };
+    }, [selectedAccount?.id]);
+
+    const accountContacts = useMemo(() => {
+        const map = new Map<string, any>();
+        localAccountContacts.forEach(c => map.set(c.id, c));
+        remoteAccountContacts.forEach(c => {
+            if (!map.has(c.id)) map.set(c.id, c);
+        });
+        return Array.from(map.values());
+    }, [localAccountContacts, remoteAccountContacts]);
+
+    const contactOptions = useMemo(() => {
+        return accountContacts.map(c => ({
+            value: c.id,
+            label: `${c.nombre}${c.cargo ? ` (${c.cargo})` : ''}${c.telefono ? ` - ${c.telefono}` : ''}`
+        }));
+    }, [accountContacts]);
     
     const { products: searchResults, isLoading: isSearching } = useProductSearch(searchTerm);
     const searchProductIds = useMemo(() => searchResults.map(product => product.id), [searchResults]);
@@ -209,15 +236,19 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             email: "",
             canal_id: "PROPIO",
             subclasificacion_id: "",
+            contactos_ids: [],
+            clientes_atendidos: 0,
             contacto_nombre: "",
             contacto_cargo: "",
             contacto_email: "",
             contacto_telefono: "",
             contacto_comentarios: "",
             amount: 0,
+            nombre_oportunidad: "",
             fase_id: "",
             comentarios: "",
             origen_oportunidad: "",
+            categoria_oportunidad: [],
             venta_feria: false,
             fecha_fin: getDefaultDueDate(),
             clasificacion_id: "",
@@ -377,13 +408,22 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         setValue("ciudad_id", account.ciudad_id ? String(account.ciudad_id) : "");
         setValue("direccion", account.direccion || "");
         setValue("asesor_id", account.owner_user_id || "");
+        setValue("contactos_ids", []);
+        setValue("clientes_atendidos", 0);
+        setValue("contacto_nombre", "");
+        setValue("contacto_cargo", "");
+        setValue("contacto_email", "");
+        setValue("contacto_telefono", "");
+        setValue("contacto_comentarios", "");
+        if (!watch("nombre_oportunidad")) {
+            setValue("nombre_oportunidad", `Venta - ${account.nombre}`);
+        }
     };
 
     const handleDeselectAccount = useCallback(() => {
         setSelectedAccount(null);
         setAccountSearchQuery("");
         setIsAccountDropdownOpen(false);
-        setIsContactExpanded(false);
 
         const colombia = displayCountries.find(c => includesNormalized(c.nombre, "colombia")) || displayCountries.find(c => String(c.id) === "1");
         const defaultPaisId = colombia ? String(colombia.id) : "1";
@@ -398,11 +438,14 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         setValue("departamento_id", "");
         setValue("ciudad_id", "");
         setValue("direccion", "");
+        setValue("contactos_ids", []);
+        setValue("clientes_atendidos", 0);
         setValue("contacto_nombre", "");
         setValue("contacto_cargo", "");
         setValue("contacto_email", "");
         setValue("contacto_telefono", "");
         setValue("contacto_comentarios", "");
+        setValue("nombre_oportunidad", "");
         setValue("asesor_id", "");
     }, [displayCountries, setValue]);
 
@@ -414,7 +457,6 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         if (selectedAccount) {
             // Si había una cuenta seleccionada y se borra o edita el texto del nombre, resetear a valores por defecto
             setSelectedAccount(null);
-            setIsContactExpanded(false);
             setValue("nit_base", "");
             setValue("telefono", "");
             setValue("email", "");
@@ -425,6 +467,8 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             setValue("departamento_id", "");
             setValue("ciudad_id", "");
             setValue("direccion", "");
+            setValue("contactos_ids", []);
+            setValue("clientes_atendidos", 0);
             setValue("contacto_nombre", "");
             setValue("contacto_cargo", "");
             setValue("contacto_email", "");
@@ -508,7 +552,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         setSelectedAccount(null);
         setAccountSearchQuery("");
         setIsAccountDropdownOpen(false);
-        setIsContactExpanded(false);
+        setIsContactExpanded(true);
 
         const colombia = displayCountries.find(c => includesNormalized(c.nombre, "colombia")) || displayCountries.find(c => String(c.id) === "1");
         const defaultPaisId = colombia ? String(colombia.id) : "1";
@@ -526,15 +570,19 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             email: "",
             canal_id: "PROPIO",
             subclasificacion_id: "",
+            contactos_ids: [],
+            clientes_atendidos: 0,
             contacto_nombre: "",
             contacto_cargo: "",
             contacto_email: "",
             contacto_telefono: "",
             contacto_comentarios: "",
             amount: 0,
+            nombre_oportunidad: "",
             fase_id: defaultPhaseId,
             comentarios: "",
             origen_oportunidad: origins.find(o => o.is_default && o.is_active)?.codigo || origins.find(o => o.is_active)?.codigo || "",
+            categoria_oportunidad: [],
             venta_feria: false,
             fecha_fin: getDefaultDueDate(),
             clasificacion_id: "",
@@ -606,7 +654,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
     const addProduct = (product: PriceListProduct) => {
         const price = getProductPrice(product, selectedChannel, isFairSale);
         const available = inventoryByProduct.get(product.id)?.disponible || 0;
-        if ((isFairSale || selectedChannel === "FERIA") && price <= 0) {
+        if (isFairSale && price <= 0) {
             alert("Este producto no tiene precio de feria configurado.");
             return;
         }
@@ -710,7 +758,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                     // 1. Crear Cuenta si no existe
                     const accountData = {
                         nombre: data.nombre_cuenta,
-                        nit_base: data.nit_base,
+                        nit_base: data.nit_base?.trim() || undefined,
                         canal_id: data.canal_id,
                         subclasificacion_id: Number(data.subclasificacion_id),
                         telefono: data.telefono,
@@ -744,13 +792,16 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                 throw new Error("No se pudo obtener el ID de la cuenta.");
             }
 
-            // 2. Crear Contacto (si se especificó en cliente existente y no es un duplicado)
+            // 2. Manejo de contactos (existentes seleccionados + nuevo contacto opcional)
+            let finalContactosIds: string[] = Array.isArray(data.contactos_ids) ? [...data.contactos_ids] : [];
+
+            // Si se especificó un nuevo contacto para un cliente existente y no es duplicado
             if (selectedAccount && data.contacto_nombre && data.contacto_nombre.trim() !== "") {
                 const existingContacts = await db.contacts.where('account_id').equals(accountId).toArray();
                 const isPhoneDuplicate = data.contacto_telefono?.trim() && existingContacts.some(c => c.telefono === data.contacto_telefono?.trim() && !c.is_deleted);
 
                 if (!isPhoneDuplicate) {
-                    await createContact({
+                    const newContactId = await createContact({
                         account_id: accountId,
                         nombre: data.contacto_nombre.trim(),
                         cargo: data.contacto_cargo?.trim() || undefined,
@@ -758,24 +809,49 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                         telefono: data.contacto_telefono?.trim() || undefined,
                         comentarios: data.contacto_comentarios?.trim() || undefined,
                     });
+                    if (newContactId && !finalContactosIds.includes(newContactId)) {
+                        finalContactosIds.push(newContactId);
+                    }
                 }
             }
 
+            // Si es una cuenta nueva, obtener el contacto asociado creado
+            if (!selectedAccount) {
+                try {
+                    const newlyCreatedContacts = await db.contacts.where('account_id').equals(accountId).toArray();
+                    for (const c of newlyCreatedContacts) {
+                        if (c.id && !finalContactosIds.includes(c.id)) {
+                            finalContactosIds.push(c.id);
+                        }
+                    }
+                } catch (e) {
+                    console.warn("Could not retrieve contacts for new account:", e);
+                }
+            }
+
+            const attendedCount = typeof data.clientes_atendidos === 'number' && !isNaN(data.clientes_atendidos)
+                ? data.clientes_atendidos
+                : finalContactosIds.length;
+
             // 3. Crear Oportunidad
-            const combinedComentarios = data.categoria_oportunidad ? 
-                `Categoría: ${data.categoria_oportunidad}\n\n${data.comentarios}` : data.comentarios;
+            const formattedCategories = formatOpportunityCategories(data.categoria_oportunidad);
+            const combinedComentarios = formattedCategories ? 
+                `Categorías: ${formattedCategories}\n\n${data.comentarios}` : data.comentarios;
 
             const opportunityData = {
                 account_id: accountId,
-                nombre: `Venta - ${data.nombre_cuenta}`,
+                nombre: data.nombre_oportunidad?.trim() || `Venta - ${data.nombre_cuenta}`,
                 amount: data.amount,
                 fase_id: Number(data.fase_id),
                 estado_id: 1, // OPEN
                 currency_id: "COP",
                 origen_oportunidad: data.origen_oportunidad,
+                categoria_oportunidad: formattedCategories || undefined,
                 comentarios: combinedComentarios,
                 items: data.items,
                 owner_user_id: selectedAccount?.owner_user_id || data.asesor_id || user?.id,
+                contactos_ids: finalContactosIds,
+                clientes_atendidos: attendedCount,
             };
             const opportunityId = await createOpportunity(opportunityData);
 
@@ -931,7 +1007,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
 
                                 <div>
                                     <label className="text-sm font-medium text-slate-700 flex items-center justify-between">
-                                        <span>Cédula / NIT *</span>
+                                        <span>Cédula / NIT</span>
                                         {selectedAccount && <Lock className="w-3 h-3 text-slate-400" />}
                                     </label>
                                     <input 
@@ -1179,89 +1255,157 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                             </div>
                         </section>
 
-                        {/* SECCIÓN CONTACTO (Solo cuando se selecciona un cliente existente) */}
-                        {selectedAccount && (
-                            <section className="space-y-4 rounded-xl border border-indigo-200 bg-indigo-50/40 p-4 transition-all">
-                                <div 
-                                    onClick={() => setIsContactExpanded(!isContactExpanded)}
-                                    className="flex items-center justify-between cursor-pointer select-none"
-                                >
-                                    <h3 className="text-lg font-semibold flex items-center gap-2 text-indigo-800">
-                                        <UserPlus className="w-5 h-5 text-indigo-600" /> Contacto del Cliente
-                                    </h3>
-                                    <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
-                                        {!isContactExpanded && (
-                                            <span className="hidden sm:inline-block bg-indigo-100/80 text-indigo-800 px-2.5 py-1 rounded-full border border-indigo-200/70 font-semibold text-[11px]">
-                                                {watch("contacto_nombre") ? `Contacto: ${watch("contacto_nombre")}` : "+ Agregar nuevo contacto (Opcional)"}
-                                            </span>
-                                        )}
-                                        <button
-                                            type="button"
-                                            className="p-1 hover:bg-indigo-200/60 rounded-lg text-indigo-700 transition-colors"
-                                            aria-label="Expandir o colapsar sección de contacto"
-                                        >
-                                            {isContactExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
-                                        </button>
+                        {/* SECCIÓN CONTACTO (Habilitada permanentemente para cuentas nuevas y existentes) */}
+                        <section className="space-y-4 rounded-xl border border-indigo-200 bg-indigo-50/40 p-4 transition-all">
+                            <div 
+                                onClick={() => setIsContactExpanded(!isContactExpanded)}
+                                className="flex items-center justify-between cursor-pointer select-none"
+                            >
+                                <div className="flex items-center gap-2">
+                                    <UserPlus className="w-5 h-5 text-indigo-600" />
+                                    <div>
+                                        <h3 className="text-lg font-semibold text-indigo-900">
+                                            Contacto del Cliente
+                                        </h3>
+                                        <p className="text-xs text-indigo-700">
+                                            Todos los campos de contacto son opcionales.
+                                        </p>
                                     </div>
                                 </div>
-                                
-                                {isContactExpanded && (
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3 border-t border-indigo-200/60">
-                                        <div>
-                                            <label className="text-sm font-medium text-slate-700">Nombre Completo *</label>
-                                            <input 
-                                                {...register("contacto_nombre")} 
-                                                className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" 
-                                                placeholder="Nombre y apellidos" 
-                                            />
-                                            {errors.contacto_nombre && <p className="text-red-500 text-xs mt-1">{errors.contacto_nombre.message}</p>}
+                                <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
+                                    {!isContactExpanded && (
+                                        <span className="hidden sm:inline-block bg-indigo-100/80 text-indigo-800 px-2.5 py-1 rounded-full border border-indigo-200/70 font-semibold text-[11px]">
+                                            {watch("contacto_nombre") 
+                                                ? `Contacto: ${watch("contacto_nombre")}` 
+                                                : ((watch("contactos_ids")?.length || 0) > 0
+                                                    ? `${watch("contactos_ids")?.length} contacto(s) seleccionado(s)` 
+                                                    : "+ Información de contacto (Opcional)")}
+                                        </span>
+                                    )}
+                                    <button
+                                        type="button"
+                                        className="p-1 hover:bg-indigo-200/60 rounded-lg text-indigo-700 transition-colors"
+                                        aria-label="Expandir o colapsar sección de contacto"
+                                    >
+                                        {isContactExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            {isContactExpanded && (
+                                <div className="space-y-4 pt-3 border-t border-indigo-200/60">
+                                    {/* Multi-select de contactos existentes (si la cuenta seleccionada tiene contactos) */}
+                                    {selectedAccount && (
+                                        <div className="bg-white/80 p-3.5 rounded-xl border border-indigo-100 space-y-2">
+                                            <label className="text-sm font-semibold text-indigo-900 block">
+                                                Contactos vinculados a la cuenta (Selección múltiple)
+                                            </label>
+                                            {contactOptions.length > 0 ? (
+                                                <MultiSelect
+                                                    options={contactOptions}
+                                                    selected={watch("contactos_ids") || []}
+                                                    onChange={(vals) => {
+                                                        setValue("contactos_ids", vals);
+                                                        // Auto-actualizar clientes atendidos con el conteo de contactos seleccionados
+                                                        setValue("clientes_atendidos", vals.length);
+                                                    }}
+                                                    placeholder="Seleccionar uno o más contactos de la cuenta..."
+                                                />
+                                            ) : (
+                                                <p className="text-xs text-slate-500 italic bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                                                    Esta cuenta no tiene contactos registrados previamente. Puedes registrar uno nuevo a continuación.
+                                                </p>
+                                            )}
+                                            <p className="text-[11px] text-slate-500">
+                                                Selecciona los contactos de esta cuenta vinculados a la oportunidad.
+                                            </p>
                                         </div>
-                                        
-                                        <div>
-                                            <label className="text-sm font-medium text-slate-700">Cargo / Posición</label>
+                                    )}
+
+                                    {/* Campo Clientes Atendidos */}
+                                    <div className="bg-white/80 p-3.5 rounded-xl border border-indigo-100">
+                                        <label className="text-sm font-semibold text-indigo-900 flex items-center justify-between">
+                                            <span>Clientes atendidos</span>
+                                            <span className="text-[11px] text-indigo-600 font-normal">
+                                                (Editable · Calculado automáticamente)
+                                            </span>
+                                        </label>
+                                        <div className="mt-1 flex items-center gap-3">
                                             <input 
-                                                {...register("contacto_cargo")} 
-                                                className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" 
-                                                placeholder="Ej. Gerente de Compras, Arquitecto" 
+                                                type="number"
+                                                min="0"
+                                                {...register("clientes_atendidos", { valueAsNumber: true })}
+                                                className="w-32 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none text-base font-semibold text-slate-800"
+                                                placeholder="0" 
                                             />
-                                            {errors.contacto_cargo && <p className="text-red-500 text-xs mt-1">{errors.contacto_cargo.message}</p>}
-                                        </div>
-                                        
-                                        <div>
-                                            <label className="text-sm font-medium text-slate-700">Correo Electrónico</label>
-                                            <input 
-                                                {...register("contacto_email")} 
-                                                type="email"
-                                                className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" 
-                                                placeholder="contacto@ejemplo.com" 
-                                            />
-                                            {errors.contacto_email && <p className="text-red-500 text-xs mt-1">{errors.contacto_email.message}</p>}
-                                        </div>
-                                        
-                                        <div>
-                                            <label className="text-sm font-medium text-slate-700">Teléfono Móvil *</label>
-                                            <input 
-                                                {...register("contacto_telefono")} 
-                                                className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" 
-                                                placeholder="300 000 0000" 
-                                            />
-                                            {errors.contacto_telefono && <p className="text-red-500 text-xs mt-1">{errors.contacto_telefono.message}</p>}
-                                        </div>
-                                        
-                                        <div className="md:col-span-2">
-                                            <label className="text-sm font-medium text-slate-700">Comentarios</label>
-                                            <textarea 
-                                                {...register("contacto_comentarios")} 
-                                                rows={2}
-                                                className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none resize-none" 
-                                                placeholder="Notas sobre el contacto, disponibilidad o canal preferido..." 
-                                            />
-                                            {errors.contacto_comentarios && <p className="text-red-500 text-xs mt-1">{errors.contacto_comentarios.message}</p>}
+                                            <span className="text-xs text-slate-500">
+                                                Contabiliza cuántas personas o clientes se atendieron en esta oportunidad.
+                                            </span>
                                         </div>
                                     </div>
-                                )}
-                            </section>
-                        )}
+
+                                    {/* Formulario de nuevo contacto (opcional) */}
+                                    <div className="pt-2">
+                                        <h4 className="text-xs font-bold uppercase tracking-wider text-indigo-700 mb-3">
+                                            {selectedAccount ? "Registrar un contacto adicional (Opcional)" : "Datos del contacto (Opcional)"}
+                                        </h4>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="text-sm font-medium text-slate-700">Nombre Completo (Opcional)</label>
+                                                <input 
+                                                    {...register("contacto_nombre")} 
+                                                    className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" 
+                                                    placeholder="Nombre y apellidos" 
+                                                />
+                                                {errors.contacto_nombre && <p className="text-red-500 text-xs mt-1">{errors.contacto_nombre.message}</p>}
+                                            </div>
+                                            
+                                            <div>
+                                                <label className="text-sm font-medium text-slate-700">Cargo / Posición (Opcional)</label>
+                                                <input 
+                                                    {...register("contacto_cargo")} 
+                                                    className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" 
+                                                    placeholder="Ej. Gerente de Compras, Arquitecto" 
+                                                />
+                                                {errors.contacto_cargo && <p className="text-red-500 text-xs mt-1">{errors.contacto_cargo.message}</p>}
+                                            </div>
+                                            
+                                            <div>
+                                                <label className="text-sm font-medium text-slate-700">Correo Electrónico (Opcional)</label>
+                                                <input 
+                                                    {...register("contacto_email")} 
+                                                    type="email"
+                                                    className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" 
+                                                    placeholder="contacto@ejemplo.com" 
+                                                />
+                                                {errors.contacto_email && <p className="text-red-500 text-xs mt-1">{errors.contacto_email.message}</p>}
+                                            </div>
+                                            
+                                            <div>
+                                                <label className="text-sm font-medium text-slate-700">Teléfono Móvil (Opcional)</label>
+                                                <input 
+                                                    {...register("contacto_telefono")} 
+                                                    className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" 
+                                                    placeholder="300 000 0000" 
+                                                />
+                                                {errors.contacto_telefono && <p className="text-red-500 text-xs mt-1">{errors.contacto_telefono.message}</p>}
+                                            </div>
+                                            
+                                            <div className="md:col-span-2">
+                                                <label className="text-sm font-medium text-slate-700">Comentarios (Opcional)</label>
+                                                <textarea 
+                                                    {...register("contacto_comentarios")} 
+                                                    rows={2}
+                                                    className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none resize-none" 
+                                                    placeholder="Notas sobre el contacto, disponibilidad o canal preferido..." 
+                                                />
+                                                {errors.contacto_comentarios && <p className="text-red-500 text-xs mt-1">{errors.contacto_comentarios.message}</p>}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </section>
 
                         {/* SECCIÓN OPORTUNIDAD */}
                         <section className="space-y-4">
@@ -1270,6 +1414,16 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                             </h3>
                             
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="md:col-span-2">
+                                    <label className="text-sm font-medium text-slate-700">Nombre de la Oportunidad *</label>
+                                    <input 
+                                        {...register("nombre_oportunidad")} 
+                                        className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-green-500 outline-none" 
+                                        placeholder={watch("nombre_cuenta") ? `Venta - ${watch("nombre_cuenta")}` : "Ej. Remodelación baño principal, Venta grifería..."} 
+                                    />
+                                    {errors.nombre_oportunidad && <p className="text-red-500 text-xs mt-1">{errors.nombre_oportunidad.message}</p>}
+                                </div>
+
                                 <div>
                                     <label className="text-sm font-medium text-slate-700">Fase de Oportunidad *</label>
                                     <select 
@@ -1303,17 +1457,14 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                 </div>
 
                                 <div>
-                                    <label className="text-sm font-medium text-slate-700">Categoría (Opcional)</label>
-                                    <select 
-                                        {...register("categoria_oportunidad")} 
-                                        className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-green-500 outline-none"
-                                    >
-                                        <option value="">Seleccione...</option>
-                                        <option value="Baños">Baños</option>
-                                        <option value="Zona de Labores">Zona de Labores</option>
-                                        <option value="Cocinas">Cocinas</option>
-                                        <option value="Hidromasajes">Hidromasajes</option>
-                                    </select>
+                                    <label className="text-sm font-medium text-slate-700">Categorías de Interés (Opcional)</label>
+                                    <MultiSelect
+                                        options={OPPORTUNITY_CATEGORIES}
+                                        selected={parseOpportunityCategories(watch("categoria_oportunidad"))}
+                                        onChange={(vals) => setValue("categoria_oportunidad", vals, { shouldValidate: true })}
+                                        placeholder="Seleccionar categorías..."
+                                        className="mt-1"
+                                    />
                                 </div>
                             </div>
 
