@@ -338,36 +338,59 @@ function ContactsContent() {
     });
 
     const hotColumns = [
-        { data: 'nombre', title: 'Contacto', type: 'text', readOnly: true },
-        { data: 'cargo', title: 'Cargo', type: 'text', readOnly: true },
-        { data: 'principal', title: 'Principal', type: 'text', readOnly: true },
-        { data: 'cuenta', title: 'Cuenta', type: 'text', readOnly: true },
-        { data: 'email', title: 'Email', type: 'text', readOnly: true },
-        { data: 'telefono', title: 'Teléfono', type: 'text', readOnly: true }
-    ];
-
-    if (isAdmin) {
-        hotColumns.unshift({
-            data: 'acciones',
-            title: 'Acciones',
-            renderer: function (instance: any, td: HTMLTableCellElement, row: number, col: number, prop: string, value: any, cellProperties: any) {
-                td.innerHTML = `
-                    <div style="text-align: center; white-space: nowrap;">
-                        <button class="edit-action-btn" title="Editar" style="cursor:pointer; color:#2563eb; background:none; border:none; padding:0 4px; margin:0; display:inline-block; vertical-align:middle;">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>
-                        </button>
-                        <button class="delete-action-btn" title="Eliminar" style="cursor:pointer; color:#dc2626; background:none; border:none; padding:0 4px; margin:0; display:inline-block; vertical-align:middle;">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
-                        </button>
-                    </div>
-                `;
-                td.className = "htCenter htMiddle";
+        { data: 'nombre', title: 'Contacto', readOnly: true, width: 200, wordWrap: false,
+            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+                const v = value || '';
+                const safe = v.replace(/"/g, '&quot;');
+                td.innerHTML = `<div style="font-weight:700;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</div>`;
+                td.style.overflow = 'hidden';
                 return td;
-            },
-            readOnly: true,
-            width: 80
-        } as any);
-    }
+            }
+        },
+        { data: 'cargo', title: 'Cargo', readOnly: true, width: 160, wordWrap: false,
+            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+                const v = value || '';
+                const safe = v.replace(/"/g, '&quot;');
+                td.innerHTML = `<div style="color:#475569;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</div>`;
+                td.style.overflow = 'hidden';
+                return td;
+            }
+        },
+        { data: 'principal', title: 'Principal', readOnly: true, width: 100, wordWrap: false,
+            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+                const isPrincipal = value === 'Principal';
+                const bg = isPrincipal ? '#dcfce7' : '#f1f5f9';
+                const c = isPrincipal ? '#166534' : '#64748b';
+                td.innerHTML = `<div style="display:flex;align-items:center;height:100%;"><span style="display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700;white-space:nowrap;background:${bg};color:${c};line-height:1.4;">${value || '-'}</span></div>`;
+                td.style.overflow = 'visible';
+                return td;
+            }
+        },
+        { data: 'cuenta', title: 'Cuenta', readOnly: true, width: 180, wordWrap: false,
+            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+                const v = value || '';
+                const safe = v.replace(/"/g, '&quot;');
+                td.innerHTML = `<div style="font-weight:600;color:#3b82f6;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</div>`;
+                td.style.overflow = 'hidden';
+                return td;
+            }
+        },
+        { data: 'email', title: 'Email', readOnly: true, width: 180, wordWrap: false,
+            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+                const v = value || '';
+                const safe = v.replace(/"/g, '&quot;');
+                td.innerHTML = `<div style="color:#64748b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</div>`;
+                td.style.overflow = 'hidden';
+                return td;
+            }
+        },
+        { data: 'telefono', title: 'Teléfono', readOnly: true, width: 130, wordWrap: false,
+            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+                td.innerHTML = `<span style="font-size:12.5px;color:#64748b;font-weight:500;font-variant-numeric:tabular-nums;">${value || '-'}</span>`;
+                return td;
+            }
+        }
+    ];
 
     // --- VIEW: Global List ---
     return (
@@ -435,7 +458,133 @@ function ContactsContent() {
             ) : (
                 <>
                     <div data-testid="contacts-list" className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                        <div className="w-full relative z-0" style={{ minHeight: '400px' }}>
+                        <div className="w-full relative z-0 opp-hot-wrap" style={{ minHeight: '400px' }}>
+                            <style>{`
+                                /* ── Scrollbar ── */
+                                .opp-hot-wrap .ht_master .wtHolder {
+                                    scrollbar-width: thin;
+                                    scrollbar-color: #c7d2de transparent;
+                                }
+                                .opp-hot-wrap .ht_master .wtHolder::-webkit-scrollbar { width: 6px; height: 6px; }
+                                .opp-hot-wrap .ht_master .wtHolder::-webkit-scrollbar-thumb {
+                                    background: #c7d2de; border-radius: 99px;
+                                }
+                                .opp-hot-wrap .ht_master .wtHolder::-webkit-scrollbar-track { background: transparent; }
+
+                                /* ── Header Cells ── */
+                                .opp-hot-wrap .handsontable th {
+                                    background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%) !important;
+                                    color: #475569 !important;
+                                    font-size: 10.5px !important;
+                                    font-weight: 800 !important;
+                                    letter-spacing: 0.08em !important;
+                                    text-transform: uppercase !important;
+                                    border-bottom: 2px solid #e2e8f0 !important;
+                                    border-right: 1px solid #e8ecf1 !important;
+                                    padding: 0 14px !important;
+                                    height: 40px !important;
+                                    white-space: nowrap !important;
+                                }
+                                .opp-hot-wrap .handsontable th:last-child {
+                                    border-right: none !important;
+                                }
+
+                                /* ── Row Number (Row Headers) ── */
+                                .opp-hot-wrap .handsontable .ht_clone_inline_start th,
+                                .opp-hot-wrap .handsontable th.rowHeader,
+                                .opp-hot-wrap .handsontable .ht_clone_inline_start td {
+                                    background: #f8fafc !important;
+                                    color: #94a3b8 !important;
+                                    font-size: 10px !important;
+                                    font-weight: 600 !important;
+                                    border-right: 1px solid #e2e8f0 !important;
+                                    text-align: center !important;
+                                    width: 42px !important;
+                                    min-width: 42px !important;
+                                    max-width: 42px !important;
+                                }
+
+                                /* ── Data Cells ── */
+                                .opp-hot-wrap .handsontable td {
+                                    font-size: 13px !important;
+                                    color: #334155 !important;
+                                    border-bottom: 1px solid #f1f5f9 !important;
+                                    border-right: 1px solid transparent !important;
+                                    height: 42px !important;
+                                    padding: 0 14px !important;
+                                    vertical-align: middle !important;
+                                    font-family: inherit !important;
+                                    transition: background 0.15s ease, box-shadow 0.15s ease !important;
+                                    line-height: 1.4 !important;
+                                }
+
+                                /* ── Zebra Striping ── */
+                                .opp-hot-wrap .handsontable tr:nth-child(even) td {
+                                    background: #fafbfd !important;
+                                }
+                                .opp-hot-wrap .handsontable tr:nth-child(odd) td {
+                                    background: #ffffff !important;
+                                }
+
+                                /* ── Row Hover ── */
+                                .opp-hot-wrap .handsontable tbody tr:hover td {
+                                    background: #eff6ff !important;
+                                    cursor: pointer;
+                                }
+                                .opp-hot-wrap .handsontable tbody tr:hover td:first-child {
+                                    box-shadow: inset 3px 0 0 0 #3b82f6 !important;
+                                }
+
+                                /* ── Selection ── */
+                                .opp-hot-wrap .handsontable .wtBorder.current {
+                                    background: #3b82f6 !important;
+                                }
+                                .opp-hot-wrap .handsontable td.area {
+                                    background: #eff6ff !important;
+                                }
+                                .opp-hot-wrap .handsontable td.current {
+                                    background: #e0edff !important;
+                                }
+
+                                /* ── Dropdown Filter Popover ── */
+                                .opp-hot-wrap .handsontable .htDropdownMenu,
+                                .htDropdownMenu .ht_master .wtHolder {
+                                    border-radius: 12px !important;
+                                    overflow: hidden !important;
+                                }
+                                .htDropdownMenu {
+                                    box-shadow: 0 12px 40px rgba(15, 23, 42, 0.14), 0 0 0 1px rgba(15, 23, 42, 0.06) !important;
+                                    border: none !important;
+                                    border-radius: 12px !important;
+                                }
+                                .opp-hot-wrap .handsontable .changeType {
+                                    border-color: #e2e8f0 !important;
+                                }
+
+                                /* ── Column Resize Handle ── */
+                                .opp-hot-wrap .handsontable .manualColumnResizer {
+                                    border-right: 2px solid #3b82f6 !important;
+                                    opacity: 0;
+                                    transition: opacity 0.2s ease;
+                                }
+                                .opp-hot-wrap .handsontable th:hover .manualColumnResizer {
+                                    opacity: 1;
+                                }
+
+                                /* ── Corner Header ── */
+                                .opp-hot-wrap .handsontable .ht_clone_top_inline_start_corner th {
+                                    background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%) !important;
+                                    border-right: 1px solid #e2e8f0 !important;
+                                    border-bottom: 2px solid #e2e8f0 !important;
+                                }
+
+                                /* ── Force single-line cells ── */
+                                .opp-hot-wrap .handsontable td {
+                                    white-space: nowrap !important;
+                                    overflow: hidden !important;
+                                    text-overflow: ellipsis !important;
+                                }
+                            `}</style>
                             <HotTable
                                 data={hotData}
                                 columns={hotColumns}
@@ -452,20 +601,10 @@ function ContactsContent() {
                                 licenseKey="non-commercial-and-evaluation"
                                 afterOnCellMouseDown={(event, coords, td) => {
                                     if (coords.row >= 0) {
-                                        const contact = hotData[coords.row]._original;
-                                        const target = event.target as HTMLElement;
-                                        
-                                        if (target.closest('.delete-action-btn')) {
-                                            setContactToDelete(contact);
-                                            return;
-                                        }
-                                        
-                                        if (target.closest('.edit-action-btn')) {
+                                        const contact = hotData[coords.row]?._original;
+                                        if (contact) {
                                             handleEdit(contact);
-                                            return;
                                         }
-                                        
-                                        handleEdit(contact);
                                     }
                                 }}
                                 stretchH="all"
