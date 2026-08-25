@@ -2,7 +2,7 @@
 
 import { useOpportunities, useQuotes, useQuoteItems } from "@/lib/hooks/useOpportunities";
 import { DetailHeader } from "@/components/ui/DetailHeader";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { FileText, Plus, AlertCircle, Check, Trash2, Loader2, Truck, Package, Building, ChevronRight, TrendingUp, User, Users, Copy } from "lucide-react";
 import Link from "next/link";
@@ -31,6 +31,8 @@ import { AssignedTab } from "@/components/oportunidades/AssignedTab";
 import { DollarSign } from "lucide-react";
 import { useSyncStore } from "@/lib/stores/useSyncStore";
 import { useOpportunityOrigins } from "@/lib/hooks/useOpportunityOrigins";
+import { MultiSelect } from "@/components/ui/MultiSelect";
+import { OPPORTUNITY_CATEGORIES, parseOpportunityCategories, formatOpportunityCategories } from "@/lib/opportunityCategories";
 
 export default function OpportunityDetailPage() {
     const params = useParams();
@@ -291,12 +293,16 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     const [localUrlOrigen, setLocalUrlOrigen] = useState(opportunity.url_origen || "");
     const [localFuente, setLocalFuente] = useState(opportunity.fuente_conversion || "");
     const [localCategoriaOportunidad, setLocalCategoriaOportunidad] = useState(opportunity.categoria_oportunidad || "");
+    const [localContactosIds, setLocalContactosIds] = useState<string[]>(opportunity.contactos_ids || []);
+    const [localClientesAtendidos, setLocalClientesAtendidos] = useState<number>(opportunity.clientes_atendidos || 0);
     const [isSaving, setIsSaving] = useState(false);
     const [isSavingDate, setIsSavingDate] = useState(false);
     const [isSavingOrigen, setIsSavingOrigen] = useState(false);
     const [isSavingUrl, setIsSavingUrl] = useState(false);
     const [isSavingFuente, setIsSavingFuente] = useState(false);
     const [isSavingCategoria, setIsSavingCategoria] = useState(false);
+    const [isSavingContactos, setIsSavingContactos] = useState(false);
+    const [isSavingClientesAtendidos, setIsSavingClientesAtendidos] = useState(false);
 
     // Loss reason inline fields
     const [localRazonPerdida, setLocalRazonPerdida] = useState(opportunity.razon_perdida || "");
@@ -354,7 +360,9 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
         setLocalComentarios(opportunity.comentarios || "");
         setLocalDireccion(opportunity.direccion_entrega || "");
         setLocalCategoriaOportunidad(opportunity.categoria_oportunidad || "");
-    }, [opportunity.segmento_id, opportunity.fecha_cierre_estimada, opportunity.origen_oportunidad, opportunity.url_origen, opportunity.fuente_conversion, opportunity.razon_perdida, opportunity.comentarios_perdida, opportunity.comentarios, opportunity.direccion_entrega, opportunity.categoria_oportunidad]);
+        setLocalContactosIds(opportunity.contactos_ids || []);
+        setLocalClientesAtendidos(opportunity.clientes_atendidos || 0);
+    }, [opportunity.segmento_id, opportunity.fecha_cierre_estimada, opportunity.origen_oportunidad, opportunity.url_origen, opportunity.fuente_conversion, opportunity.razon_perdida, opportunity.comentarios_perdida, opportunity.comentarios, opportunity.direccion_entrega, opportunity.categoria_oportunidad, opportunity.contactos_ids, opportunity.clientes_atendidos]);
 
     useEffect(() => {
         const fetchSegments = async () => {
@@ -445,6 +453,19 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
         },
         [account?.canal_id]
     );
+
+    // Fetch contacts for account to allow linking contacts to opportunity
+    const localAccountContacts = useLiveQuery(
+        () => effectiveAccount?.id ? db.contacts.where('account_id').equals(effectiveAccount.id).filter(c => !c.is_deleted).toArray() : [],
+        [effectiveAccount?.id]
+    ) || [];
+
+    const contactOptions = useMemo(() => {
+        return localAccountContacts.map(c => ({
+            value: c.id,
+            label: `${c.nombre}${c.cargo ? ` (${c.cargo})` : ''}${c.telefono ? ` - ${c.telefono}` : ''}`
+        }));
+    }, [localAccountContacts]);
 
     // Computed: both loss reason fields are filled
     const lossFieldsComplete = localRazonPerdida.trim() !== "" && localComentariosPerdida.trim() !== "";
@@ -948,25 +969,26 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
 
                             <div>
                                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                                    Categoría de Interés (Categoría Oportunidad)
+                                    Categorías de Interés (Categoría Oportunidad)
                                 </label>
                                 <div className="relative group">
-                                    <input
-                                        type="text"
-                                        value={localCategoriaOportunidad}
-                                        onChange={(e) => setLocalCategoriaOportunidad(e.target.value)}
-                                        onBlur={async () => {
-                                            if (localCategoriaOportunidad !== opportunity.categoria_oportunidad) {
+                                    <MultiSelect
+                                        options={OPPORTUNITY_CATEGORIES}
+                                        selected={parseOpportunityCategories(localCategoriaOportunidad)}
+                                        onChange={async (selected) => {
+                                            const formatted = formatOpportunityCategories(selected);
+                                            setLocalCategoriaOportunidad(formatted);
+                                            if (formatted !== (opportunity.categoria_oportunidad || "")) {
                                                 setIsSavingCategoria(true);
-                                                await updateOpportunity(opportunity.id, { categoria_oportunidad: localCategoriaOportunidad });
+                                                await updateOpportunity(opportunity.id, { categoria_oportunidad: formatted });
                                                 setIsSavingCategoria(false);
                                             }
                                         }}
-                                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none placeholder:text-slate-400"
-                                        placeholder="Ej: Cocinas, Baños..."
+                                        placeholder="Seleccionar categorías..."
+                                        className="bg-slate-50 border-slate-200 text-sm"
                                     />
                                     {isSavingCategoria && (
-                                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                        <div className="absolute right-8 top-1/2 -translate-y-1/2">
                                             <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
                                         </div>
                                     )}
@@ -1140,6 +1162,79 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                     <p className="text-slate-700">{effectiveAccount.direccion} {effectiveAccount.ciudad && `• ${effectiveAccount.ciudad}`}</p>
                                 </div>
                             )}
+
+                            {/* Contactos Vinculados */}
+                            <div className="pt-3 border-t border-slate-100">
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                                    Contactos Vinculados ({localContactosIds.length})
+                                </label>
+                                {contactOptions.length > 0 ? (
+                                    <div className="relative">
+                                        <MultiSelect
+                                            options={contactOptions}
+                                            selected={localContactosIds}
+                                            onChange={async (vals) => {
+                                                setLocalContactosIds(vals);
+                                                setIsSavingContactos(true);
+                                                try {
+                                                    const autoCount = vals.length;
+                                                    setLocalClientesAtendidos(autoCount);
+                                                    await updateOpportunity(opportunity.id, {
+                                                        contactos_ids: vals,
+                                                        clientes_atendidos: autoCount
+                                                    });
+                                                } finally {
+                                                    setIsSavingContactos(false);
+                                                }
+                                            }}
+                                            placeholder="Seleccionar contactos..."
+                                            className="bg-slate-50 border-slate-200 text-sm"
+                                        />
+                                        {isSavingContactos && (
+                                            <div className="absolute right-8 top-1/2 -translate-y-1/2">
+                                                <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                            </div>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <p className="text-xs text-slate-500 italic">No hay contactos registrados para esta cuenta.</p>
+                                )}
+                            </div>
+
+                            {/* Clientes Atendidos */}
+                            <div className="pt-3 border-t border-slate-100">
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                                    Clientes Atendidos
+                                </label>
+                                <div className="relative group flex items-center gap-2">
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        value={localClientesAtendidos}
+                                        onChange={(e) => setLocalClientesAtendidos(Number(e.target.value))}
+                                        onBlur={async () => {
+                                            if (Number(localClientesAtendidos) !== Number(opportunity.clientes_atendidos)) {
+                                                setIsSavingClientesAtendidos(true);
+                                                try {
+                                                    await updateOpportunity(opportunity.id, {
+                                                        clientes_atendidos: Number(localClientesAtendidos)
+                                                    });
+                                                } finally {
+                                                    setIsSavingClientesAtendidos(false);
+                                                }
+                                            }
+                                        }}
+                                        className="w-28 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-bold text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none"
+                                        placeholder="0"
+                                    />
+                                    <span className="text-xs text-slate-500">
+                                        personas atendidas
+                                    </span>
+                                    {isSavingClientesAtendidos && (
+                                        <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                    )}
+                                </div>
+                            </div>
                         </div>
                     </div>
 

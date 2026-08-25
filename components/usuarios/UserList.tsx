@@ -1,13 +1,14 @@
 "use client";
 
 import React, { useState } from 'react';
-import { useUsers, User, UpdateUserData } from '@/lib/hooks/useUsers';
+import { useUsers, User } from '@/lib/hooks/useUsers';
 import { UserRole } from '@/lib/hooks/useCurrentUser';
 import { UserForm } from '@/components/usuarios/UserForm';
 import { ConfirmationModal } from '@/components/ui/ConfirmationModal';
 import { Search, UserPlus, Edit, Power, Shield, Users as UsersIcon } from 'lucide-react';
 import { cn } from '@/components/ui/utils';
 import { includesNormalized } from '@/lib/utils';
+import { SALES_CHANNELS } from '@/lib/salesChannels';
 
 const ROLE_LABELS: Record<UserRole, string> = {
     ADMIN: 'Administrador',
@@ -22,7 +23,7 @@ const ROLE_COLORS: Record<UserRole, string> = {
 };
 
 export function UserList() {
-    const { users, isLoading, error, updateUserRole, toggleUserStatus, fetchUsers } = useUsers();
+    const { users, isLoading, error, toggleUserStatus, fetchUsers } = useUsers();
     const [searchTerm, setSearchTerm] = useState('');
     const [roleFilter, setRoleFilter] = useState<UserRole | 'ALL'>('ALL');
     const [showUserForm, setShowUserForm] = useState(false);
@@ -156,6 +157,15 @@ export function UserList() {
                                             {user.full_name || 'Sin nombre'}
                                         </span>
                                         <span className="text-sm text-slate-500">{user.email}</span>
+                                        {user.canales && user.canales.length > 0 && (
+                                            <div className="flex flex-wrap gap-1 mt-1.5">
+                                                {user.canales.map(ch => (
+                                                    <span key={ch} className="inline-block px-1.5 py-0.5 text-[10px] bg-slate-100 text-slate-600 rounded font-medium border border-slate-200">
+                                                        {SALES_CHANNELS.find(sc => sc.id === ch)?.nombre || ch}
+                                                    </span>
+                                                ))}
+                                            </div>
+                                        )}
                                     </div>
                                 </td>
                                 <td className="px-6 py-4">

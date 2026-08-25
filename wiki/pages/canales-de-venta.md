@@ -14,6 +14,8 @@ oportunidad** y la **subclasificación** de cada cuenta.
 | `DIST_INT` | Distribución Internacional | `lista_base_exportaciones` |
 | `PROPIO` | Canal Propio (B2C) | `distribuidor_pvp_iva` |
 
+> **Nota sobre Ferias:** Una feria no es un canal estructural de venta, sino una modalidad / origen de oportunidad comercial (`origen_oportunidad = 'Feria'`). Se gestiona dentro del canal del cliente (típicamente `PROPIO`) aplicando la tarifa especial mediante la bandera de precio `venta_feria = true` (`precio_feria`).
+
 ## Efectos del canal
 
 1. **Precio:** funciones de pricing en la DB resuelven el precio de un producto según la
@@ -26,9 +28,17 @@ oportunidad** y la **subclasificación** de cada cuenta.
 4. **Canal PROPIO (B2C):** recibe los leads del sitio WordPress
    (ver [[integraciones]]) y crea [[contactos]] automáticamente
    (`20260202_auto_contact_propio`).
+5. **Asesores y Módulo Tiendas-Ferias (`/tiendas`):** Cada usuario/asesor puede tener uno o más
+   canales asignados (`CRM_Usuarios.canales`, migración `20260821_add_user_channels.sql`).
+   En el formulario de `/tiendas`, la lista de asesores disponibles filtra de manera estricta
+   por el canal seleccionado (ej. Obras/Constructor, Propio, Distribución), asegurando que solo
+   se asignen oportunidades a asesores autorizados para dicho canal.
 
 ## Fuentes
 
 - `supabase/migrations/20260108_sales_channels.sql`
+- `supabase/migrations/20260821_add_user_channels.sql`
+- `supabase/migrations/20260825_remove_feria_as_channel.sql`
 - `supabase/crm_lista_precios.sql`, `supabase/fix_lista_precios.sql`
 - Migraciones de fases por canal (`20260109`–`20260112`)
+- `components/tiendas/CreateStoreSaleForm.tsx`, `components/usuarios/UserForm.tsx`, `lib/salesChannels.ts`

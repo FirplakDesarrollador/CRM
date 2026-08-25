@@ -38,6 +38,8 @@ function OpportunitiesContent() {
         setSegmentFilter,
         setPhaseFilter,
         setStatusFilter,
+        setOriginFilter,
+        originFilter,
         setStartDate,
         setEndDate,
         setStartClosingDate,
@@ -129,6 +131,15 @@ function OpportunitiesContent() {
         }
         return null;
     });
+    const [selectedOrigin, setSelectedOrigin] = useState<string | null>(() => {
+        const fromUrl = searchParams.get('origin');
+        if (fromUrl) return fromUrl;
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_oportunidades_state');
+            if (saved) return new URLSearchParams(saved).get('origin') || null;
+        }
+        return null;
+    });
     const [statusFilter, setStatusFilterState] = useState<'all' | 'open' | 'won' | 'lost'>(() => {
         const fromUrl = searchParams.get('status');
         if (fromUrl) return (fromUrl as any);
@@ -197,6 +208,8 @@ function OpportunitiesContent() {
         if (initialSubclass) setSubclassificationFilter(Number(initialSubclass));
         if (initialSegment) setSegmentFilter(Number(initialSegment));
         if (initialPhase) setPhaseFilter(Number(initialPhase));
+        const initialOrigin = searchParams.get('origin') || selectedOrigin;
+        if (initialOrigin) setOriginFilter(initialOrigin);
         setUserFilter(initialTab);
         
         // Initial dates for the hook
@@ -265,6 +278,9 @@ function OpportunitiesContent() {
         if (selectedPhase) params.set('phase', String(selectedPhase));
         else params.delete('phase');
 
+        if (selectedOrigin) params.set('origin', selectedOrigin);
+        else params.delete('origin');
+
         if (statusFilter && statusFilter !== 'open') params.set('status', statusFilter);
         else params.delete('status');
         
@@ -299,12 +315,13 @@ function OpportunitiesContent() {
         
         const query = queryString ? `?${queryString}` : window.location.pathname;
         router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
-    }, [tab, selectedAccountOwnerIds, selectedChannel, selectedSubclass, selectedSegment, selectedPhase, statusFilter, startDate, endDate, startClosingDate, endClosingDate, searchParams, router]); // Notice inputValue is NOT in deps here to avoid URL churn during typing
+    }, [tab, selectedAccountOwnerIds, selectedChannel, selectedSubclass, selectedSegment, selectedPhase, selectedOrigin, statusFilter, startDate, endDate, startClosingDate, endClosingDate, searchParams, router]); // Notice inputValue is NOT in deps here to avoid URL churn during typing
 
 
     const handleFilterChange = useCallback(({ 
         channelId, subclassificationId, segmentId, phaseId, statusFilter: newStatus,
-        startDate: sD, endDate: eD, startClosingDate: sCD, endClosingDate: eCD
+        startDate: sD, endDate: eD, startClosingDate: sCD, endClosingDate: eCD,
+        origin: oG
     }: any) => {
         setSelectedChannel(channelId);
         setSelectedSubclass(subclassificationId);
@@ -315,6 +332,7 @@ function OpportunitiesContent() {
         setEndDateState(eD);
         setStartClosingDateState(sCD);
         setEndClosingDateState(eCD);
+        setSelectedOrigin(oG);
         
         setChannelFilter(channelId);
         setSubclassificationFilter(subclassificationId);
@@ -325,7 +343,8 @@ function OpportunitiesContent() {
         setEndDate(eD);
         setStartClosingDate(sCD);
         setEndClosingDate(eCD);
-    }, [setChannelFilter, setSubclassificationFilter, setSegmentFilter, setPhaseFilter, setStatusFilter, setStartDate, setEndDate, setStartClosingDate, setEndClosingDate]);
+        setOriginFilter(oG);
+    }, [setChannelFilter, setSubclassificationFilter, setSegmentFilter, setPhaseFilter, setStatusFilter, setStartDate, setEndDate, setStartClosingDate, setEndClosingDate, setOriginFilter]);
 
     const handleDeleteOpportunity = async (oppId: string) => {
         try {
@@ -375,6 +394,7 @@ function OpportunitiesContent() {
     const ALL_COLUMNS = [
         { key: 'cuenta',   label: 'Cuenta' },
         { key: 'nombre',   label: 'Nombre' },
+        { key: 'origen',   label: 'Origen' },
         { key: 'fase',     label: 'Fase' },
         { key: 'estado',   label: 'Estado' },
         { key: 'creada',   label: 'Creada' },
@@ -403,6 +423,7 @@ function OpportunitiesContent() {
         id: opp.id,
         cuenta: opp.account?.nombre || "Sin cuenta",
         nombre: opp.nombre || "Sin nombre",
+        origen: opp.origen_oportunidad || "-",
         fase: opp.fase_data?.nombre || 'Pros.',
         estado: opp.estado_data?.nombre || 'Abierta',
         creada: opp.created_at ? new Date(opp.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' }) : "-",
@@ -429,6 +450,16 @@ function OpportunitiesContent() {
                 const v = value || '';
                 const safe = v.replace(/"/g, '&quot;');
                 td.innerHTML = `<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;color:#334155;" title="${safe}">${v}</div>`;
+                td.style.overflow = 'hidden';
+                return td;
+            }
+        },
+        origen: {
+            data: 'origen', title: 'Origen', readOnly: true, width: 140, wordWrap: false,
+            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+                const v = value || '-';
+                const safe = v.replace(/"/g, '&quot;');
+                td.innerHTML = `<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;color:#475569;font-size:12.5px;font-weight:500;" title="${safe}">${v}</div>`;
                 td.style.overflow = 'hidden';
                 return td;
             }
@@ -512,7 +543,7 @@ function OpportunitiesContent() {
 
     const hotColumns = [
         // Solo incluir las columnas marcadas como visibles, manteniendo el orden original
-        ...['cuenta','nombre','fase','estado','creada','valor','cierre','vendedor']
+        ...['cuenta','nombre','origen','fase','estado','creada','valor','cierre','vendedor']
             .filter(key => visibleColumns.includes(key))
             .map(key => ALL_COLUMN_DEFS[key])
     ];
@@ -651,7 +682,7 @@ function OpportunitiesContent() {
                                         <p className="text-xs font-bold text-slate-700 uppercase tracking-wide">Columnas visibles</p>
                                         <button
                                             onClick={() => {
-                                                const allKeys = ['cuenta','nombre','fase','estado','creada','valor','cierre','vendedor'];
+                                                const allKeys = ['cuenta','nombre','origen','fase','estado','creada','valor','cierre','vendedor'];
                                                 setVisibleColumns(allKeys);
                                                 localStorage.setItem('crm_opp_visible_cols', JSON.stringify(allKeys));
                                             }}
@@ -707,6 +738,7 @@ function OpportunitiesContent() {
                         initialSegmentId={selectedSegment}
                         initialPhaseId={selectedPhase}
                         initialStatusFilter={statusFilter}
+                        initialOrigin={selectedOrigin}
                         initialDates={{
                             startDate,
                             endDate,
@@ -946,7 +978,7 @@ function OpportunitiesContent() {
                                     autoRowSize={false}
                                     renderAllRows={false}
                                     licenseKey="non-commercial-and-evaluation"
-                                    afterOnCellMouseDown={(event, coords, td) => {
+                                    afterOnCellMouseDown={(event: any, coords: any, td: any) => {
                                         if (coords.row >= 0) {
                                             const opp = hotData[coords.row];
                                             if (opp && opp.id) {

@@ -3,6 +3,138 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-08-25 - Ingest: Filtro por Origen (`origen_oportunidad`) en el Módulo Oportunidades
+
+- **Componente Filtros (`OpportunityFilters.tsx`):** Se integró el selector de "Origen" alimentado dinámicamente desde el catálogo `CRM_OrigenesOportunidad` (ordenado por `orden, nombre`), con soporte para limpiar filtros y sincronización de estado.
+- **Hook de Servidor (`useOpportunitiesServer.ts`):** Soporte para `originFilter`, filtrado en consultas online (Supabase `.ilike()` y soporte para aliases como WhatsApp/wp) y filtrado en motor offline (Dexie). Inclusión de `origen_oportunidad` en las consultas `select`.
+- **Página de Oportunidades (`app/oportunidades/page.tsx`):** Sincronización bidireccional del filtro `origin` con URL (`searchParams`) y `sessionStorage`, y visualización de la columna "Origen" en la tabla desktop (Handsontable).
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+
+## 2026-08-25 - Ingest: Múltiples Contactos Vinculados y Clientes Atendidos en Oportunidades (/tiendas y CRM)
+
+- **Migración Supabase y Modelo:** Nuevas columnas `contactos_ids uuid[]` y `clientes_atendidos integer` en `CRM_Oportunidades` (`20260825_add_opportunity_contacts_and_attended_clients.sql`) y en `LocalOportunidad` (`lib/db.ts`).
+- **Formulario /tiendas (`CreateStoreSaleForm.tsx`):** Sección de contacto habilitada de forma permanente y 100% opcional (para clientes nuevos y existentes). En cuentas existentes se despliega un `MultiSelect` prefiltrado con los contactos de la cuenta seleccionada (`account_id`), el cual actualiza dinámicamente el contador del campo numérico editable `Clientes atendidos`.
+- **Soporte Global en Oportunidades:** Integración de `contactos_ids` y `clientes_atendidos` en el wizard `/oportunidades/nueva` (`CreateOpportunityWizard.tsx`) y en el detalle `/oportunidades/[id]` (`app/oportunidades/[id]/page.tsx` - `SummaryTab`).
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/pages/modelo-de-datos.md`, `wiki/LOG.md`.
+
+## 2026-08-25 - Ingest: Soporte de Selección Múltiple de Categorías en Oportunidades (Todo el CRM)
+
+- **Módulo Central de Categorías (`lib/opportunityCategories.ts`):** Definición de categorías canónicas (`Baños`, `Cocinas`, `Zona de Labores`, `Hidromasajes`, `Institucional`), con utilidades bidireccionales `parseOpportunityCategories` (normaliza strings/arrays) y `formatOpportunityCategories` (serializa a string delimitado por comas).
+- **Módulo /tiendas (`CreateStoreSaleForm.tsx`):** Reemplazo del `<select>` simple por `<MultiSelect>`, guardado automático de múltiples categorías en `categoria_oportunidad` y concatenación descriptiva en comentarios.
+- **Wizard de Oportunidades (`CreateOpportunityWizard.tsx`):** Selector múltiple `MultiSelect` en el paso 2 de datos del negocio y persistencia en `categoria_oportunidad`.
+- **Detalle de Oportunidad (`app/oportunidades/[id]/page.tsx`):** Reemplazo del input de texto plano por `MultiSelect` con auto-guardado reactivo al modificar selecciones.
+- **Modelo Local y Edge Functions:** Soporte en `LocalOportunidad` (`lib/db.ts`) y normalización en `wordpress-lead-intake`.
+- **Pruebas Automatizadas:** 7 tests unitarios en `tests/opportunityCategories.test.ts`.
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+
+## 2026-08-25 - Fix: Campo Nombre de Oportunidad Obligatorio en Formulario de Tiendas (/tiendas)
+
+- **Campo Obligatorio:** Se incorporó el input `nombre_oportunidad` como obligatorio (`z.string().min(1, "Nombre de la oportunidad requerido")`) en la sección "Datos del Negocio (Oportunidad)" de `CreateStoreSaleForm.tsx`.
+- **Auto-sugerencia:** Al vincular una cuenta existente se auto-completa como valor inicial sugerido `Venta - [Nombre Cuenta]`, permitiendo su edición libre antes de guardar.
+
+## 2026-08-25 - Fix: Cédula / NIT Opcional en Formulario de Tiendas (/tiendas)
+
+- **Ajuste de Validación:** Se modificó `nit_base` en `storeSaleSchema` (`CreateStoreSaleForm.tsx`) para ser opcional (`z.string().optional().nullable()`), removiendo la restricción obligatoria y el asterisco del campo en la UI.
+- **Creación Segura de Cuenta:** Si `nit_base` no es diligenciado, se envía como `undefined` al motor de cuentas sin bloquear el registro de la venta ni la detección preventiva de duplicados por teléfono o email.
+
+## 2026-08-25 - Fix: Eliminación de FERIA como Canal de Venta Estructural
+
+- **Restablecimiento de los 5 Canales Canónicos:** Se eliminó `FERIA` de `SALES_CHANNELS` (`lib/salesChannels.ts`) y de `CRM_Canales`. Los canales estructurales de venta quedan exclusivamente en `PROPIO`, `DIST_NAC`, `DIST_INT`, `OBRAS_NAC` y `OBRAS_INT`.
+- **Tratamiento de Ferias:** Las ferias se manejan como origen de oportunidad comercial (`origen_oportunidad = 'Feria'`) y las tarifas especiales mediante la bandera `venta_feria = true` (`precio_feria` en `getProductPrice`).
+- **Limpieza en /tiendas (`CreateStoreSaleForm.tsx`):** Se eliminó la validación redundante `selectedChannel === "FERIA"`, operando con `isFairSale`.
+- **Migración DB (`20260825_remove_feria_as_channel.sql`):** Reasignación de cuentas `canal_id = 'FERIA'` a `PROPIO`, eliminación de fases/subclasificaciones huérfanas de `FERIA`, depuración de `CRM_Usuarios.canales`, y registro de 'Feria' en `CRM_OrigenesOportunidad`.
+- **Tests & Wiki:** Actualización de `tests/salesChannels.test.ts`, `wiki/pages/canales-de-venta.md`, `wiki/pages/modelo-de-datos.md` y `wiki/LOG.md`.
+
+## 2026-08-24 - Fix: Detección Temprana de Duplicados en /tiendas y Auto-curación de Snapshots en SyncEngine
+
+- **Detección Temprana en Tiempo Real (`CreateStoreSaleForm.tsx`):** Monitoreo reactivo de `nit_base`, `telefono` y `email` contra Dexie y Supabase (con debounce). Si existe una cuenta coincidente, despliega tarjetas de advertencia con botón de acción rápida `⚡ Vincular` para autocompletar y proteger la cuenta existente con un solo clic.
+- **Reasignación Profunda de `account_id` en Snapshots (`lib/sync.ts`):** `resolveDuplicateAccount()` ahora reasigna `account_id` dentro de todos los snapshots `_complete_snapshot_` en el outbox (`CRM_Contactos`, `CRM_Oportunidades`, `CRM_Cotizaciones`, `CRM_Actividades`), eliminando fallos en cascada por clave foránea `fk_crmcontactos_account`.
+- **Auto-curación de Contactos (`healDuplicateContactPhone` & `healOrphanedContactAccount`):** Intercepción de errores `unique_active_contact_phone` y `fk_crmcontactos_account` en `SyncEngine.pushBatch` para sanear mutaciones huérfanas y desatascar la cola de sincronización.
+- **Propagación de Contacto Personalizado (`useAccounts.ts`):** `createAccount` ahora recibe y aplica `initialContactData` diligenciado en el formulario en lugar de crear contactos genéricos.
+
+## 2026-08-24 - Fix: Corrección de Flickering y Filtrado Estricto de Asesores por Canal/Zona en /tiendas
+
+- **Eliminación de Bucles Cíclicos:** Se removieron los `useEffect`s pasivos de selección forzada y sincronización bidireccional en `CreateStoreSaleForm.tsx` que provocaban parpadeo (flickering) al interactuar con el selector de departamentos.
+- **Opción por Defecto "Seleccione un asesor...":** Se configuró `asesor_id: ""` como valor inicial/default en el formulario y se mantiene la validación requerida de Zod antes de guardar.
+- **Deselección Automática en Cascada:** Al cambiar de País, Departamento o Canal de Venta, el selector de asesor se limpia automáticamente (`setValue("asesor_id", "")`).
+- **Filtrado Estricto por Canal y Departamento:** Se corrigió la condición de validación en `filteredAdvisors`: los asesores ahora deben tener **obligatoriamente** el canal asignado y, en canales zonales (Obras / Distribución), el departamento seleccionado debe estar dentro de sus zonas asignadas (ej. al seleccionar Obras Nacional + Antioquia únicamente aparece la asesora de zona correspondiente).
+
+## 2026-08-21 - Lint: Wiki posterior al endurecimiento del SyncEngine
+
+- Estructura: `listed=15`, `pages=15`, `missing=0`, `orphans=0`.
+- Enlaces: `broken=0`; no se introdujeron enlaces `[[...]]` sin destino.
+- Fuentes: las 15 páginas conservan su sección `## Fuentes`.
+- Contraste contra código: se verificaron los estados y tiempos del Outbox, la frontera `syncUpperBound`, los cursores `syncCursors`, la paginación de 1.000 filas, el TTL de catálogos, `CRM_PedidoItems.updated_at`, la telemetría `syncRuns` y el contrato de la migración contra `lib/sync.ts`, `lib/sync-runtime.ts`, `lib/db.ts` y `supabase/migrations/20260821230051_harden_sync_engine.sql`.
+- Correcciones aplicadas: se eliminaron de `sincronizacion-offline.md` las afirmaciones obsoletas sobre cursor exclusivo en localStorage, reintentos sin programación durable y descarte de mutaciones agotadas.
+
+## 2026-08-21 - Ingest: Endurecimiento integral del motor de sincronización
+
+- **Outbox recuperable:** se documentaron compactación transaccional al encolar, leases multipestaña, backoff con `next_attempt_at`, estado `DEAD_LETTER`, recuperación manual y reactivación mediante una nueva edición.
+- **Push/pull y cursores:** se sustituyó la descripción obsoleta del cursor exclusivo en localStorage por cursores durables en Dexie, aislados por usuario, una frontera `syncUpperBound` y confirmación únicamente tras un pull completo exitoso.
+- **Paginación y catálogos:** se registró la paginación explícita de PostgREST, los límites de bootstrap, el TTL de 24 horas para catálogos y los refrescos dirigidos.
+- **RPC y PedidoItems:** se documentó la migración `20260821230051_harden_sync_engine.sql`, el uso de `SECURITY INVOKER`, validación de identidad/lista blanca, correlación por `mutation_id` y `updated_at` para `CRM_PedidoItems`.
+- **Observabilidad y recuperación:** se añadieron `syncRuns`, diagnóstico desde `/configuracion`, preservación completa del Outbox en `cleanResync()` y la validación automatizada del subsistema.
+- **Validación ejecutada:** typecheck enfocado, 11 pruebas y build de producción aprobados; migración probada en PostgreSQL 17 aislado. La migración aún requiere aplicación y validación en Supabase antes del despliegue del cliente.
+- Páginas actualizadas: `wiki/pages/sincronizacion-offline.md`, `wiki/INDEX.md`, `wiki/LOG.md`. Los diagnósticos individuales permanecen en `bugs-knowhow.md` según `wiki/SCHEMA.md`.
+
+## 2026-08-21 - Ingest: Desacoplamiento Push / Pull y Deduplicación Universal de Outbox en SyncEngine
+- **Desacoplamiento Push / Pull (`triggerPush`):** Las mutaciones locales (`queueMutation`) ahora disparan exclusivamente `triggerPush()`, enviando inmediatamente los cambios locales vía RPC sin ejecutar descargas masivas de tablas.
+- **Persistencia de `lastSyncTime` en Zustand:** Se aplicó el middleware `persist` en `useSyncStore` para guardar `lastSyncTime` en `localStorage`, evitando que en cada recarga se dispare una descarga inicial completa de 3,000 registros por tabla.
+- **Deduplicación Universal en `resetStuckItems()`:** Purga automática de snapshots y mutaciones redundantes agrupadas por entidad en `db.outbox`.
+- Páginas actualizadas: `wiki/pages/sincronizacion-offline.md`, `wiki/LOG.md`.
+
+## 2026-08-21 - Ingest: Origen por Defecto Único en /configuracion y Selección Automática en /tiendas
+
+- Se creó y ejecutó la migración `20260821_add_is_default_to_opportunity_origins.sql` agregando `is_default BOOLEAN NOT NULL DEFAULT FALSE` con índice único condicional `uq_crm_origenes_is_default` en `CRM_OrigenesOportunidad`.
+- **Módulo `/configuracion` (`OpportunityOriginsManager.tsx`):** Se agregó toggle de radio exclusivo "Default" por origen, permitiendo marcar solo uno como predeterminado.
+- **Hook `useOpportunityOrigins.ts`:** Se extendió la interfaz `OpportunityOrigin` y consulta con el campo `is_default`.
+- **Módulo `/tiendas` (`CreateStoreSaleForm.tsx`):** Se actualizó el efecto de selección inicial para asignar prioritariamente el origen configurado como `is_default`.
+- Páginas actualizadas: `wiki/LOG.md`.
+
+## 2026-08-21 - Ingest: Backfill de origen_cuenta desde Oportunidades y Trigger Automático
+
+- Se creó y ejecutó la migración `20260821_backfill_account_origin_from_opportunities.sql`.
+- **Backfill histórico:** Se poblaron **2,548 cuentas** tomando el origen de su oportunidad más reciente.
+- **Trigger automático:** Se implementó `trg_sync_opportunity_origin_to_account` en `CRM_Oportunidades` para que cualquier oportunidad nueva o actualizada con origen propague automáticamente el valor a `CRM_Cuentas.origen_cuenta` si la cuenta no lo tiene aún.
+- Páginas actualizadas: `wiki/pages/cuentas.md`, `wiki/LOG.md`.
+
+## 2026-08-21 - Ingest: Propagación de origen_cuenta en Creación de Cuentas desde /tiendas
+
+- Se actualizó `CreateStoreSaleForm.tsx` en el módulo `/tiendas` para que al crear una nueva cuenta se persista automáticamente `origen_cuenta` con el valor seleccionado en `origen_oportunidad` (ej. visita, referido, feria, etc.).
+- Páginas actualizadas: `wiki/LOG.md`.
+
+## 2026-08-21 - Ingest: Asignación de Canales de Venta a Usuarios y Filtrado en Formulario /tiendas
+
+- **Columna `canales` en `CRM_Usuarios`:** Se creó la migración `20260821_add_user_channels.sql` agregando la columna `canales TEXT[] DEFAULT '{}'` para permitir la asignación de uno o múltiples canales de venta a cada usuario/asesor.
+- **Módulo `/usuarios`:**
+  - Se incorporó selector múltiple `MultiSelect` de canales de venta en `UserForm.tsx` con las opciones de `SALES_CHANNELS` (Canal Propio, Distribución Nacional, Distribución Internacional, Obras Nacional / Constructor, Obras Internacional, Feria).
+  - Se añadieron badges informativos de canales asignados en la tabla de usuarios de `UserList.tsx`.
+  - Se actualizó el hook `useUsers.ts` (`User`, `CreateUserData`, `UpdateUserData`) con manejo resiliente ante variaciones de esquema en Supabase.
+- **Módulo `/tiendas` (`CreateStoreSaleForm.tsx`):**
+  - Se extendió el hook de filtrado `filteredAdvisors` para validar que el asesor tenga asignado el canal de venta seleccionado (`watch("canal_id")`).
+  - Al cambiar de canal en el formulario, se reevalúan los asesores disponibles y se auto-selecciona el primer asesor válido para la combinación de país, departamento y canal.
+  - Se agregó mensaje informativo si ningún asesor coincide con los criterios seleccionados.
+- Páginas actualizadas: `wiki/pages/canales-de-venta.md`, `wiki/pages/modelo-de-datos.md`, `wiki/LOG.md`.
+
+## 2026-08-21 - Ingest: Arquitectura Local-First Pura, Pull Segmentado y Re-Sync Limpio
+
+- **Local-First en `useAccounts.ts`:** Se eliminaron las llamadas directas HTTP de `deleteAccount`, delegando el borrado en cascada a Dexie local y encolando mutaciones de soft-delete en el Outbox (100% offline).
+- **Pull Segmentado por Asesor en `lib/sync.ts`:** `pullChanges` descarga prioritariamente el 100% de las cuentas del asesor activo (`owner_user_id` y `created_by`) antes de limitar el histórico general a 3,000 registros, garantizando que ninguna cuenta propia quede fuera del caché local.
+- **Herramienta de Re-sincronización Limpia (`cleanResync`):** Nuevo método en `SyncEngine` y botón en `/configuracion` que vacía las tablas de caché de Dexie y re-descarga todo desde Supabase conservando de forma segura cualquier mutación pendiente en el Outbox.
+- **Diagnóstico de Almacenamiento en `/configuracion`:** Visualización en tiempo real del almacenamiento IndexedDB usado vía `navigator.storage.estimate()`.
+- **Carga Local-First de Segmentos en `CreateOpportunityWizard.tsx`:** Uso de `useLiveQuery` sobre `db.segments` con fallback de red.
+- Páginas actualizadas: `wiki/pages/sincronizacion-offline.md`, `wiki/LOG.md`.
+
+## 2026-08-21 - Ingest: Optimización de Rendimiento y Compactación en SyncEngine
+
+- Se optimizó el motor de sincronización (`SyncEngine` en `lib/sync.ts`):
+  - **Compactación Retroactiva en `resetStuckItems`:** Agrupa y compacta colas fragmentadas de múltiples campos por cuenta a 1 solo `_complete_snapshot_`, reduciendo el volumen de ítems hasta en un 94% al iniciar el sync.
+  - **Auto-curación en Modo Snapshot:** Al re-encolar cuentas locales faltantes para oportunidades, se encolan directamente en modo snapshot atómico.
+  - **Bucle de Lotes Continuo en `pushChanges`:** Procesa lotes consecutivos de hasta 500 ítems con micro-pausas (`yield()`) en lugar de terminar tras un único lote.
+  - **Desacoplamiento de Backoff:** Continuación inmediata (100ms) cuando existen ítems saludables `PENDING`, reservando las pausas de retardo exponencial únicamente para fallos `FAILED`.
+  - **Sanitización de `nit` Legacy:** Validación de límite de 32-bit (`<= 2147483647`) en `CRM_Cuentas.nit` para evitar fallos de casteo int4 en PostgreSQL.
+- Páginas actualizadas: `wiki/pages/sincronizacion-offline.md`, `wiki/LOG.md`, `bugs-knowhow.md` (Bug ID: 20260821-01).
+
 ## 2026-08-20 - Ingest: Autocompletado, Búsqueda Flexible, Enmascaramiento y Sección de Contacto en /tiendas
 
 - Se integró búsqueda interactiva de cuentas existentes en el campo "Nombre de la Cuenta / Cliente" del formulario de creación rápida en `/tiendas` (`CreateStoreSaleForm.tsx`).

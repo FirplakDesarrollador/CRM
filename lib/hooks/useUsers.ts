@@ -14,6 +14,7 @@ export interface User {
     departamento?: string | null;
     paises?: string[] | null;
     departamentos?: string[] | null;
+    canales?: string[] | null;
     created_at: string;
     updated_at: string;
 }
@@ -29,6 +30,7 @@ export interface CreateUserData {
     departamento?: string | null;
     paises?: string[];
     departamentos?: string[];
+    canales?: string[];
 }
 
 export interface UpdateUserData {
@@ -41,6 +43,7 @@ export interface UpdateUserData {
     departamento?: string | null;
     paises?: string[] | null;
     departamentos?: string[] | null;
+    canales?: string[] | null;
 }
 
 /**
@@ -104,6 +107,7 @@ export function useUsers() {
             if (userData.departamento !== undefined) updates.departamento = userData.departamento;
             if (userData.paises !== undefined) updates.paises = userData.paises;
             if (userData.departamentos !== undefined) updates.departamentos = userData.departamentos;
+            if (userData.canales !== undefined) updates.canales = userData.canales;
 
             // Only update if there are extra fields beyond the basic trigger defaults
             if (Object.keys(updates).length > 1 || updates.role !== 'VENDEDOR') {
@@ -112,8 +116,9 @@ export function useUsers() {
                     .update(updates)
                     .eq('id', authData.user.id);
 
-                if (updateError && (updateError.message.includes('departamento') || updateError.message.includes('pais') || updateError.message.includes('schema cache'))) {
-                    console.warn('[useUsers] Columnas de ubicación no encontradas en la DB remota durante createUser, reintentando sin pais/departamento...');
+                if (updateError && (updateError.message.includes('canales') || updateError.message.includes('departamento') || updateError.message.includes('pais') || updateError.message.includes('schema cache'))) {
+                    console.warn('[useUsers] Columnas adicionales no encontradas en la DB remota durante createUser, reintentando sin campos extendidos...');
+                    delete updates.canales;
                     delete updates.pais;
                     delete updates.departamento;
                     delete updates.paises;
@@ -153,8 +158,9 @@ export function useUsers() {
                 .update(payload)
                 .eq('id', userId);
 
-            if (updateError && (updateError.message.includes('departamento') || updateError.message.includes('pais') || updateError.message.includes('schema cache'))) {
-                console.warn('[useUsers] Columnas de ubicación no encontradas en la DB remota, reintentando sin pais/departamento/paises/departamentos...');
+            if (updateError && (updateError.message.includes('canales') || updateError.message.includes('departamento') || updateError.message.includes('pais') || updateError.message.includes('schema cache'))) {
+                console.warn('[useUsers] Columnas adicionales no encontradas en la DB remota, reintentando sin campos extendidos...');
+                delete payload.canales;
                 delete payload.pais;
                 delete payload.departamento;
                 delete payload.paises;

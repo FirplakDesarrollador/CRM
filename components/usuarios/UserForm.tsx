@@ -5,9 +5,9 @@ import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useUsers, User, CreateUserData, UpdateUserData } from '@/lib/hooks/useUsers';
-import { UserRole } from '@/lib/hooks/useCurrentUser';
 import { X, Loader2 } from 'lucide-react';
 import { MultiSelect } from '@/components/ui/MultiSelect';
+import { SALES_CHANNELS } from '@/lib/salesChannels';
 
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
@@ -23,6 +23,7 @@ const userSchema = z.object({
     departamento: z.string().optional(),
     paises: z.array(z.string()).optional(),
     departamentos: z.array(z.string()).optional(),
+    canales: z.array(z.string()).optional(),
 });
 
 type UserFormData = z.infer<typeof userSchema>;
@@ -55,13 +56,13 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
     const departmentsList = useLiveQuery(() => db.departments.toArray()) || [];
 
     const countryOptions = countriesList.map(c => ({ label: c.nombre, value: String(c.id) }));
+    const channelOptions = SALES_CHANNELS.map(c => ({ label: c.nombre, value: c.id }));
 
     const {
         register,
         handleSubmit,
         watch,
         control,
-        setValue,
         formState: { errors },
     } = useForm<UserFormData>({
         resolver: zodResolver(userSchema),
@@ -75,6 +76,7 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
             departamento: user.departamento || '',
             paises: user.paises || (user.pais ? [user.pais] : []),
             departamentos: user.departamentos || (user.departamento ? [user.departamento] : []),
+            canales: user.canales || [],
         } : {
             role: 'VENDEDOR',
             allowed_modules: [],
@@ -83,6 +85,7 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
             departamento: '',
             paises: [],
             departamentos: [],
+            canales: [],
         },
     });
 
@@ -105,6 +108,7 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
         try {
             const paisesArray = data.paises || [];
             const deptsArray = data.departamentos || [];
+            const canalesArray = data.canales || [];
             const primaryPais = paisesArray.length > 0 ? paisesArray[0] : '';
             const primaryDept = deptsArray.length > 0 ? deptsArray[0] : '';
 
@@ -119,6 +123,7 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
                     departamento: primaryDept,
                     paises: paisesArray,
                     departamentos: deptsArray,
+                    canales: canalesArray,
                 };
 
                 const result = await updateUser(user.id, updates);
@@ -145,6 +150,7 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
                     departamento: primaryDept,
                     paises: paisesArray,
                     departamentos: deptsArray,
+                    canales: canalesArray,
                 };
 
                 const result = await createUser(createData);
@@ -297,6 +303,30 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
                                         selected={field.value || []}
                                         onChange={field.onChange}
                                         placeholder="Todos los departamentos (Sin restricción)..."
+                                    />
+                                )}
+                            />
+                        </div>
+                    </div>
+
+                    {/* Canales de Venta Asignados (Selección Múltiple) */}
+                    <div className="space-y-3 p-3 border border-slate-200 rounded-lg bg-slate-50/50">
+                        <label className="block text-sm font-semibold text-slate-800">
+                            Canales de Venta Asignados
+                            <span className="block text-xs font-normal text-slate-500 mt-0.5">
+                                Selecciona uno o más canales de venta en los que opera este asesor (ej. Canal Propio, Distribución, Obras/Constructor).
+                            </span>
+                        </label>
+                        <div>
+                            <Controller
+                                control={control}
+                                name="canales"
+                                render={({ field }) => (
+                                    <MultiSelect
+                                        options={channelOptions}
+                                        selected={field.value || []}
+                                        onChange={field.onChange}
+                                        placeholder="Seleccionar canales de venta..."
                                     />
                                 )}
                             />

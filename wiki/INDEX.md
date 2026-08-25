@@ -7,7 +7,7 @@
 
 - [arquitectura-general](pages/arquitectura-general.md) — Qué es el CRM Firplak: PWA offline-first con Next.js 16 + Supabase + Dexie; mapa de módulos y principios de diseño.
 - [modelo-de-datos](pages/modelo-de-datos.md) — Todas las tablas `CRM_*`, tablas de referencia, convenciones (soft-delete, `_sync_metadata`, RLS).
-- [sincronizacion-offline](pages/sincronizacion-offline.md) — SyncEngine: patrón outbox por campo, conflictos LWW, orden de tablas por FK, pull de cambios.
+- [sincronizacion-offline](pages/sincronizacion-offline.md) — SyncEngine local-first: push/pull desacoplados, Outbox recuperable, cursores durables, paginación, catálogos con TTL, LWW y telemetría.
 - [roles-y-permisos](pages/roles-y-permisos.md) — Roles ADMIN/COORDINADOR/VENDEDOR, matriz de permisos, `allowed_modules`, coordinadores, RLS y auth.
 - [auditoria-local](pages/auditoria-local.md) — Registro local de modificaciones y creaciones de datos por usuario, persistido en localStorage con Zustand.
 

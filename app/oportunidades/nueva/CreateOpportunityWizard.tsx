@@ -5,7 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { useOpportunities } from "@/lib/hooks/useOpportunities";
 import { useAccounts } from "@/lib/hooks/useAccounts";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronRight, Check } from "lucide-react";
 import { cn } from "@/components/ui/utils";
@@ -19,6 +19,8 @@ import { useConfig } from "@/lib/hooks/useConfig";
 import { CollaboratorSelector, CollaboratorEntry } from "@/components/oportunidades/CollaboratorSelector";
 import { useUsers } from "@/lib/hooks/useUsers";
 import { useFormDraft } from "@/lib/hooks/useFormDraft";
+import { MultiSelect } from "@/components/ui/MultiSelect";
+import { OPPORTUNITY_CATEGORIES, parseOpportunityCategories, formatOpportunityCategories } from "@/lib/opportunityCategories";
 
 const STEP_LABELS = ["Cuenta", "Datos del Negocio", "Productos", "Equipo"];
 const LAST_STEP_INDEX = STEP_LABELS.length - 1;
@@ -38,10 +40,12 @@ const schema = z.object({
     origen_oportunidad: z.string().optional().nullable(),
     url_origen: z.string().optional().nullable(),
     fuente_conversion: z.string().optional().nullable(),
-    categoria_oportunidad: z.string().optional().nullable(),
+    categoria_oportunidad: z.union([z.array(z.string()), z.string()]).optional().nullable(),
     probability: z.coerce.number().min(0).max(100).default(0).optional().nullable(),
     comentarios: z.string().optional().nullable(),
     direccion_entrega: z.string().optional().nullable(),
+    contactos_ids: z.array(z.string()).optional().default([]),
+    clientes_atendidos: z.coerce.number().min(0).optional().default(0),
     items: z.array(z.object({
         product_id: z.string(),
         cantidad: z.number().min(1),
@@ -73,42 +77,54 @@ export default function CreateOpportunityWizard() {
     const [fallbackDepartments, setFallbackDepartments] = useState<any[]>([]);
     const [fallbackCities, setFallbackCities] = useState<any[]>([]);
 
-    // Catalogs for cities
+    // Catalogs for cities & segments
     const countriesList = useLiveQuery(() => db.countries.toArray()) || [];
     const departmentsList = useLiveQuery(() => db.departments.toArray()) || [];
     const citiesList = useLiveQuery(() => db.cities.toArray()) || [];
+    const dbSegments = useLiveQuery(() => db.segments.toArray()) || [];
 
     const [phasesLoading, setPhasesLoading] = useState(false);
     const [phasesError, setPhasesError] = useState<string | null>(null);
     const [collaborators, setCollaborators] = useState<CollaboratorEntry[]>([]);
 
     useEffect(() => {
-        // Fetch all segments (small table, safe to fetch all)
+        // Fallback fetch for segments if local DB is empty
         const fetchSegments = async () => {
-            const { supabase } = await import("@/lib/supabase");
-            const { data } = await supabase.from('CRM_Segmentos').select('*');
-            if (data) setSegments(data);
+            if (dbSegments.length === 0) {
+                try {
+                    const { supabase } = await import("@/lib/supabase");
+                    const { data } = await supabase.from('CRM_Segmentos').select('*');
+                    if (data) setSegments(data);
+                } catch (e) {
+                    console.warn('[CreateOppWizard] Failed to fetch remote segments:', e);
+                }
+            }
         };
         fetchSegments();
 
         const fetchCatalogs = async () => {
-            const { supabase } = await import("@/lib/supabase");
-            if (countriesList.length === 0) {
-                const { data } = await supabase.from('CRM_Paises').select('*');
-                if (data) setFallbackCountries(data);
-            }
-            if (departmentsList.length === 0) {
-                const { data } = await supabase.from('CRM_Departamentos').select('*');
-                if (data) setFallbackDepartments(data);
-            }
-            if (citiesList.length === 0) {
-                const { data } = await supabase.from('CRM_Ciudades').select('*');
-                if (data) setFallbackCities(data);
+            try {
+                const { supabase } = await import("@/lib/supabase");
+                if (countriesList.length === 0) {
+                    const { data } = await supabase.from('CRM_Paises').select('*');
+                    if (data) setFallbackCountries(data);
+                }
+                if (departmentsList.length === 0) {
+                    const { data } = await supabase.from('CRM_Departamentos').select('*');
+                    if (data) setFallbackDepartments(data);
+                }
+                if (citiesList.length === 0) {
+                    const { data } = await supabase.from('CRM_Ciudades').select('*');
+                    if (data) setFallbackCities(data);
+                }
+            } catch (e) {
+                console.warn('[CreateOppWizard] Failed to fetch remote catalogs:', e);
             }
         };
         fetchCatalogs();
-    }, [countriesList.length, departmentsList.length, citiesList.length]);
+    }, [countriesList.length, departmentsList.length, citiesList.length, dbSegments.length]);
 
+    const displaySegments = dbSegments.length > 0 ? dbSegments : segments;
     const displayCountries = countriesList.length > 0 ? countriesList : fallbackCountries;
     const displayDepartments = departmentsList.length > 0 ? departmentsList : fallbackDepartments;
     const displayCities = citiesList.length > 0 ? citiesList : fallbackCities;
@@ -180,6 +196,8 @@ export default function CreateOpportunityWizard() {
             probability: 0,
             comentarios: '',
             direccion_entrega: '',
+            contactos_ids: [],
+            clientes_atendidos: 0,
             items: [],
             owner_user_id: ''
         },
@@ -195,6 +213,18 @@ export default function CreateOpportunityWizard() {
         trigger,
         reset
     } = form;
+
+    const localAccountContacts = useLiveQuery(
+        () => selectedAccount ? db.contacts.where('account_id').equals(selectedAccount.id).filter(c => !c.is_deleted).toArray() : [],
+        [selectedAccount?.id]
+    ) || [];
+
+    const contactOptions = useMemo(() => {
+        return localAccountContacts.map(c => ({
+            value: c.id,
+            label: `${c.nombre}${c.cargo ? ` (${c.cargo})` : ''}${c.telefono ? ` - ${c.telefono}` : ''}`
+        }));
+    }, [localAccountContacts]);
 
     const { hasDraft, clearDraft } = useFormDraft(form, 'crm_draft_opportunity', true);
 
@@ -500,6 +530,9 @@ export default function CreateOpportunityWizard() {
                 ciudad_id: data.ciudad_id ? Number(data.ciudad_id) : null,
                 segmento_id: data.segmento_id ? Number(data.segmento_id) : null,
                 probability: data.probability ? Number(data.probability) : 0,
+                categoria_oportunidad: formatOpportunityCategories(data.categoria_oportunidad as any) || undefined,
+                contactos_ids: data.contactos_ids || [],
+                clientes_atendidos: data.clientes_atendidos !== undefined && data.clientes_atendidos !== null && data.clientes_atendidos !== "" ? Number(data.clientes_atendidos) : 0,
                 collaborators: collaborators
             };
 
@@ -819,6 +852,48 @@ export default function CreateOpportunityWizard() {
                                 <label className="text-sm font-medium">Fecha Cierre Estimada</label>
                                 <input type="date" {...register("fecha_cierre_estimada")} className="w-full p-2 border rounded-lg" />
                             </div>
+                        </div>
+
+                        {/* CONTACTOS VINCULADOS & CLIENTES ATENDIDOS */}
+                        {contactOptions.length > 0 && (
+                            <div>
+                                <label className="text-sm font-medium">Contactos vinculados (Selección múltiple)</label>
+                                <MultiSelect
+                                    options={contactOptions}
+                                    selected={watch("contactos_ids") || []}
+                                    onChange={(vals) => {
+                                        setValue("contactos_ids", vals);
+                                        setValue("clientes_atendidos", vals.length);
+                                    }}
+                                    placeholder="Seleccionar contactos de la cuenta..."
+                                    className="mt-1"
+                                />
+                            </div>
+                        )}
+
+                        <div>
+                            <label className="text-sm font-medium">Clientes atendidos</label>
+                            <input 
+                                type="number" 
+                                min="0" 
+                                {...register("clientes_atendidos")} 
+                                className="w-full p-2 border rounded-lg mt-1" 
+                                placeholder="0" 
+                            />
+                            <p className="text-[10px] text-slate-500 mt-0.5">
+                                Contabiliza cuántos clientes o personas se atendieron en esta oportunidad.
+                            </p>
+                        </div>
+
+                        <div>
+                            <label className="text-sm font-medium">Categorías de Interés (Opcional)</label>
+                            <MultiSelect
+                                options={OPPORTUNITY_CATEGORIES}
+                                selected={parseOpportunityCategories(watch("categoria_oportunidad"))}
+                                onChange={(vals) => setValue("categoria_oportunidad", vals, { shouldValidate: true })}
+                                placeholder="Seleccionar categorías..."
+                                className="mt-1"
+                            />
                         </div>
                         
                         <div>

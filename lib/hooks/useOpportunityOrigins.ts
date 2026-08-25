@@ -9,6 +9,7 @@ export interface OpportunityOrigin {
     nombre: string;
     orden: number;
     is_active: boolean;
+    is_default?: boolean;
 }
 
 export function useOpportunityOrigins(includeInactive = false) {
@@ -22,7 +23,7 @@ export function useOpportunityOrigins(includeInactive = false) {
 
         let query = supabase
             .from("CRM_OrigenesOportunidad")
-            .select("id, codigo, nombre, orden, is_active")
+            .select("id, codigo, nombre, orden, is_active, is_default")
             .order("orden")
             .order("nombre");
 

@@ -30,6 +30,8 @@ import { CollaboratorsTab } from "@/components/oportunidades/CollaboratorsTab";
 import { AssignedTab } from "@/components/oportunidades/AssignedTab";
 import { DollarSign } from "lucide-react";
 import { useSyncStore } from "@/lib/stores/useSyncStore";
+import { MultiSelect } from "@/components/ui/MultiSelect";
+import { OPPORTUNITY_CATEGORIES, parseOpportunityCategories, formatOpportunityCategories } from "@/lib/opportunityCategories";
 
 export default function OpportunityDetailPage() {
     const params = useParams();
@@ -943,25 +945,26 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
 
                             <div>
                                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                                    Categoría de Interés (Categoría Oportunidad)
+                                    Categorías de Interés (Categoría Oportunidad)
                                 </label>
                                 <div className="relative group">
-                                    <input
-                                        type="text"
-                                        value={localCategoriaOportunidad}
-                                        onChange={(e) => setLocalCategoriaOportunidad(e.target.value)}
-                                        onBlur={async () => {
-                                            if (localCategoriaOportunidad !== opportunity.categoria_oportunidad) {
+                                    <MultiSelect
+                                        options={OPPORTUNITY_CATEGORIES}
+                                        selected={parseOpportunityCategories(localCategoriaOportunidad)}
+                                        onChange={async (selected) => {
+                                            const formatted = formatOpportunityCategories(selected);
+                                            setLocalCategoriaOportunidad(formatted);
+                                            if (formatted !== (opportunity.categoria_oportunidad || "")) {
                                                 setIsSavingCategoria(true);
-                                                await updateOpportunity(opportunity.id, { categoria_oportunidad: localCategoriaOportunidad });
+                                                await updateOpportunity(opportunity.id, { categoria_oportunidad: formatted });
                                                 setIsSavingCategoria(false);
                                             }
                                         }}
-                                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none placeholder:text-slate-400"
-                                        placeholder="Ej: Cocinas, Baños..."
+                                        placeholder="Seleccionar categorías..."
+                                        className="bg-slate-50 border-slate-200 text-sm"
                                     />
                                     {isSavingCategoria && (
-                                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                        <div className="absolute right-8 top-1/2 -translate-y-1/2">
                                             <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
                                         </div>
                                     )}

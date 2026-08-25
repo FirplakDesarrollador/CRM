@@ -599,7 +599,7 @@ function ContactsContent() {
                                 rowHeights={38}
                                 renderAllRows={false}
                                 licenseKey="non-commercial-and-evaluation"
-                                afterOnCellMouseDown={(event, coords, td) => {
+                                afterOnCellMouseDown={(event: any, coords: any, td: any) => {
                                     if (coords.row >= 0) {
                                         const contact = hotData[coords.row]?._original;
                                         if (contact) {

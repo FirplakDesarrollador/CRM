@@ -17,7 +17,6 @@ describe("getProductPrice", () => {
         ["OBRAS_NAC", 300],
         ["OBRAS_INT", 200],
         ["PROPIO", 400],
-        ["FERIA", 500],
     ])("selecciona la tarifa del canal %s", (channel, expected) => {
         expect(getProductPrice(prices, channel)).toBe(expected);
     });

@@ -16,6 +16,15 @@ export function useFormAutoSave<T extends FieldValues>({
 }: AutoSaveConfig<T>) {
     const [status, setStatus] = useState<"saved" | "saving" | "error">("saved");
     const lastSavedData = useRef<string>("");
+    const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const onSaveRef = useRef(onSave);
+
+    // Callers commonly pass an inline callback. Keeping the latest callback in a
+    // ref prevents every render from tearing down the watcher and cancelling a
+    // pending autosave timer.
+    useEffect(() => {
+        onSaveRef.current = onSave;
+    }, [onSave]);
 
     // Initialize lastSavedData when hook is mounted or enabled
     useEffect(() => {
@@ -34,13 +43,18 @@ export function useFormAutoSave<T extends FieldValues>({
 
             setStatus("saving");
 
-            const timer = setTimeout(async () => {
+            if (timerRef.current) {
+                clearTimeout(timerRef.current);
+            }
+
+            timerRef.current = setTimeout(async () => {
+                timerRef.current = null;
                 // If form is valid, trigger save
                 const isValid = await form.trigger();
                 if (isValid) {
                     const currentValues = form.getValues();
                     try {
-                        await onSave(currentValues);
+                        await onSaveRef.current(currentValues);
                         lastSavedData.current = JSON.stringify(currentValues);
                         setStatus("saved");
                     } catch (err) {
@@ -51,13 +65,17 @@ export function useFormAutoSave<T extends FieldValues>({
                     setStatus("error");
                 }
             }, debounceMs);
-
-            return () => clearTimeout(timer);
         });
 
-        return () => subscription.unsubscribe();
-    }, [form, onSave, debounceMs, isEnabled]);
+        return () => {
+            subscription.unsubscribe();
+            if (timerRef.current) {
+                clearTimeout(timerRef.current);
+            }
+        };
+    }, [form, debounceMs, isEnabled]);
 
     return { status };
 }
+
 export default useFormAutoSave;

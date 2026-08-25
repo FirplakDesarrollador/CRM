@@ -13,8 +13,31 @@ export interface OutboxItem {
     new_value: any;
     field_timestamp: number;
     user_id?: string;
-    status: 'PENDING' | 'SYNCING' | 'FAILED' | 'COMPLETED';
+    status: 'PENDING' | 'SYNCING' | 'FAILED' | 'DEAD_LETTER' | 'COMPLETED';
     retry_count: number;
+    error?: string;
+    next_attempt_at?: number;
+    last_attempt_at?: number;
+}
+
+export interface SyncCursor {
+    id: string;
+    user_id: string;
+    table_name: string;
+    cursor: string;
+    updated_at: string;
+}
+
+export interface SyncRun {
+    id: string;
+    kind: 'PUSH' | 'FULL_SYNC';
+    trigger: string;
+    status: 'RUNNING' | 'COMPLETED' | 'FAILED';
+    started_at: number;
+    finished_at?: number;
+    duration_ms?: number;
+    pending_before: number;
+    pending_after?: number;
     error?: string;
 }
 
@@ -45,6 +68,8 @@ export interface LocalCuenta {
     updated_at?: string;
     comentarios?: string;
     origen_cuenta?: string | null;
+    is_child?: boolean;
+    is_deleted?: boolean;
 }
 
 export interface LocalPais {
@@ -211,6 +236,7 @@ export interface LocalPedidoItem {
     precio_unitario: number;
     descuento?: number;
     created_at?: string;
+    updated_at?: string;
 }
 
 // Types for Contacts
@@ -226,6 +252,7 @@ export interface LocalContact {
     created_by?: string;
     updated_by?: string;
     updated_at?: string;
+    is_deleted?: boolean;
 }
 
 export interface LocalFase {
@@ -282,12 +309,17 @@ export interface LocalOportunidad {
     updated_by?: string;
     comentarios?: string;
     direccion_entrega?: string;
+    categoria_oportunidad?: string | string[] | null;
+    contactos_ids?: string[] | null;
+    clientes_atendidos?: number | null;
 }
 
 export class CRMFirplakDB extends Dexie {
     // Sync Queues
     outbox!: Table<OutboxItem, string>;
     fileQueue!: Table<any, string>;
+    syncCursors!: Table<SyncCursor, string>;
+    syncRuns!: Table<SyncRun, string>;
 
     // Local Mirrors (Add more as needed)
     accounts!: Table<LocalCuenta, string>;
@@ -331,6 +363,30 @@ export class CRMFirplakDB extends Dexie {
             activitySubclassifications: 'id, clasificacion_id',
             lossReasons: 'id',
             opportunityCollaborators: 'id, oportunidad_id, usuario_id', // New table
+            pedidos: 'uuid_generado, cotizacion_id, opportunity_id',
+            pedidoItems: 'id, pedido_uuid'
+        });
+        this.version(13).stores({
+            outbox: 'id, entity_type, status, field_timestamp, field_name, next_attempt_at, [entity_type+entity_id+field_name]',
+            fileQueue: 'id, status',
+            syncCursors: 'id, user_id, table_name, updated_at',
+            syncRuns: 'id, kind, trigger, status, started_at',
+            accounts: 'id, nit, nit_base, nombre, owner_user_id',
+            opportunities: 'id, account_id, owner_user_id',
+            contacts: 'id, account_id, email',
+            quotes: 'id, opportunity_id, status, es_pedido',
+            quoteItems: 'id, cotizacion_id',
+            activities: 'id, opportunity_id, user_id, fecha_inicio, tipo_actividad',
+            phases: 'id, canal_id, orden',
+            subclasificaciones: 'id, canal_id',
+            segments: '++id, subclasificacion_id',
+            countries: 'id',
+            departments: 'id, pais_id, nombre',
+            cities: 'id, departamento_id, nombre',
+            activityClassifications: 'id, tipo_actividad',
+            activitySubclassifications: 'id, clasificacion_id',
+            lossReasons: 'id',
+            opportunityCollaborators: 'id, oportunidad_id, usuario_id',
             pedidos: 'uuid_generado, cotizacion_id, opportunity_id',
             pedidoItems: 'id, pedido_uuid'
         });

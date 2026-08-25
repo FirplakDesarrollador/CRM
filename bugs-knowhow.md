@@ -643,9 +643,338 @@ Fix Applied:
 2. Se mejoró `getYearAndMonth` para soportar formatos `DD/MM/YYYY`, `YYYY-MM-DD` e ISO.
 3. Se alinearon los mapeos de `flattenFn` para Contactos, Cotizaciones, Oportunidades y Cuentas con las columnas reales de las tablas `CRM_*`.
 
+---
+
+## [Bug ID: 20260821-01]
+
+Context:
+`lib/sync.ts` y modo snapshot (`_complete_snapshot_`) en sincronización offline contra la función RPC `process_field_updates`.
+
+Problem:
+Al sincronizar cuentas en modo snapshot con números de NIT de 10 o más dígitos (o strings formateados), PostgreSQL arrojaba el error: `value "..." is out of range for type integer [Context: _complete_snapshot_ (INSERT)]` o `invalid input syntax for type integer`, abortando la inserción.
+
+Root Cause:
+Fix Applied:
+Se agregó sanitización defensiva en `SyncEngine` (`lib/sync.ts`) para `CRM_Cuentas` antes de enviar el RPC: si `nit` no es un entero puro o supera `MAX_INT32 = 2147483647`, se establece en `null`, garantizando que `nit_base` conserve el NIT íntegro sin generar errores en PostgreSQL.
+
 Prevention Rule:
-**Strict Table Schema Mapping**: Al realizar consultas `.select()` o aplanar objetos para informes/exports, verificar siempre el esquema real de la base de datos PostgreSQL/Supabase en lugar de asumir nombres de propiedades.
+**Integer Bounds Checking in Snapshot RPCs**: Al enviar payloads consolidados (`_complete_snapshot_`) a funciones dinámicas en PostgreSQL, asegurarse de que los campos con columnas legacy de tipo `integer` estén acotados (`<= 2147483647`) o sean enviados como `null` cuando exista una columna `text` correspondiente (`nit_base`).
 
 Tags:
-[informes] [sop] [exportar] [excel] [csv] [supabase] [schema]
+[sync] [snapshot] [postgres] [integer-range] [nit] [lww]
+
+---
+
+## [Bug ID: 20260821-02]
+
+Context:
+`lib/sync.ts`, ciclo de sincronización y generación de ítems en la cola `db.outbox`.
+
+Problem:
+Al editar un registro en la aplicación o iniciar la sincronización, el contador de pendientes se disparaba a más de 1,600 elementos ("Pendientes: 1685"), generando un bucle de carga masiva en el Outbox.
+
+Root Cause:
+1. Dentro de `pushBatch`, una validación de auto-curación consultaba `CRM_Cuentas` en Supabase con el JWT del asesor para verificar cuentas vinculadas a oportunidades del lote. Debido a políticas de RLS o latencia, la consulta devolvía menos cuentas, asumiendo que "faltaban" y re-encolando un nuevo snapshot con un UUID aleatorio (`uuidv4()`) en cada ciclo de sincronización.
+2. La respuesta del RPC `process_field_updates` para `_complete_snapshot_` no completaba en bloque todas las mutaciones previas del mismo `entity_id`.
+3. La compactación previa en `resetStuckItems` ignoraba ítems con `_complete_snapshot_`, impidiendo que los snapshots duplicados se fusionaran.
+
+Fix Applied:
+1. Se eliminó la re-consulta ciega dentro de `pushBatch`.
+2. Se implementó deduplicación universal en `resetStuckItems()` que colapsa cualquier colección de snapshots y mutaciones repetidas de una misma entidad en su versión más reciente.
+3. Se actualizó el procesador de respuesta del RPC para marcar como `COMPLETED` todas las mutaciones del mismo `entity_id` tras un snapshot exitoso.
+
+Prevention Rule:
+**Idempotent Outbox Mutations**: Las funciones de sincronización por lotes (`pushBatch`) nunca deben generar nuevas mutaciones de Outbox durante la ejecución del lote con IDs aleatorios. Cualquier auto-curación y compactación debe ser idempotente y ejecutarse antes del bucle de envío.
+
+Tags:
+[sync] [outbox] [deduplication] [infinite-loop] [self-healing]
+
+---
+
+## [Bug ID: 20260821-03]
+
+Context:
+`lib/sync.ts` y `lib/stores/useSyncStore.ts`, ciclo de sincronización reactiva al guardar/editar registros.
+
+Problem:
+Al editar cualquier campo de un registro (por ejemplo, el nombre de una cuenta), el navegador iniciaba una descarga masiva de miles de registros de todas las tablas ("descargando cientos de datos").
+
+Root Cause:
+1. `queueMutation` disparaba `triggerSync()`, el cual ejecutaba `pullChanges()` en cada mutación individual/autosave.
+2. `useSyncStore` no utilizaba persistencia en `localStorage` para `lastSyncTime`, por lo que cada recarga o sesión nueva iniciaba con `lastSyncTime = null`, provocando que `pullChanges()` hiciera una descarga completa inicial de 3,000 cuentas, 3,000 oportunidades, 3,000 contactos, 3,000 cotizaciones, etc.
+
+Fix Applied:
+1. Se añadió `triggerPush()` a `SyncEngine` para que `queueMutation` realice un envío inmediato y ligero de los cambios locales sin descargar ninguna tabla.
+2. Se configuró el middleware `persist` de Zustand en `useSyncStore` para guardar `lastSyncTime` en `localStorage`, garantizando que cualquier pull posterior sea estrictamente incremental (`gte('updated_at', lastSync)`).
+
+Prevention Rule:
+**Decouple Push from Pull in Local-First Outbox**: Las mutaciones locales del usuario deben disparar únicamente operaciones de envío (*push*). Las descargas completas o incrementales (*pull*) deben estar desacopladas y ejecutarse por intervalos de fondo, al iniciar la aplicación o por acción explícita del usuario.
+
+Tags:
+[sync] [push-pull-decoupling] [zustand-persist] [incremental-sync] [outbox]
+
+---
+
+## [Bug ID: 20260821-04]
+
+Context:
+`lib/sync.ts`, bloque `finally` de reintentos en `triggerSync()`.
+
+Problem:
+Al recargar la página en localhost o existir ítems en estado `FAILED` o `PENDING` en el Outbox, el motor de sincronización iniciaba un bucle infinito que ejecutaba `pullChanges()` cada 100ms, volviendo a descargar todas las tablas de Supabase continuamente.
+
+Root Cause:
+En el bloque `finally` de `triggerSync()`, al detectar ítems restantes para reintento se invocaba recursivamente `setTimeout(() => this.triggerSync(), ...)`. Al invocar `triggerSync` en vez de `triggerPush`, cada iteración de reintento del lote ejecutaba nuevamente la fase de descarga (`pullChanges`), saturando la red y la CPU.
+
+Fix Applied:
+Se cambió la reprogramación de reintentos en el bloque `finally` para invocar exclusivamente `this.triggerPush()`. La fase de descarga (`pullChanges`) queda confinada a ejecuciones únicas e independientes.
+
+Prevention Rule:
+**Never Retry Pull in Outbox Processing Loops**: Los bucles de reintento de la cola de salida (*outbox retry loops*) deben invocar únicamente funciones de envío (*push-only*). Jamás se debe invocar una rutina que contenga descargas (*pull*) dentro de la lógica de reintento de mutaciones.
+
+Tags:
+[sync] [infinite-pull-loop] [outbox-retry] [push-only]
+
+---
+
+## [Bug ID: 20260821-05]
+
+Context:
+`lib/hooks/useFormAutoSave.ts` y `lib/sync.ts` (`queueMutation`).
+
+Problem:
+Al editar un formulario (como el nombre de una cuenta), se acumulaban decenas o cientos de mutaciones idénticas (`_complete_snapshot_`) en la cola de salida (Outbox).
+
+Root Cause:
+1. En `useFormAutoSave.ts`, la suscripción a `form.watch` retornaba una función `() => clearTimeout(timer)` que no es ejecutada por el callback de react-hook-form, disparando un temporizador no cancelado por cada pulsación de tecla.
+2. En `queueMutation`, cada llamada encolaba un nuevo registro con `id = uuidv4()` sin verificar si ya existía una mutación pendiente para la misma entidad en Dexie.
+
+Fix Applied:
+1. Se implementó `timerRef` persistente en `useFormAutoSave` para limpiar el debounce correctamente antes de iniciar un nuevo temporizador.
+2. Se implementó deduplicación/upsert in-place en `queueMutation` al momento de encolar (`db.outbox.update(existing.id)`).
+
+Prevention Rule:
+**Debounce Cleanup via useRef and Enqueue-Time In-Place Upsert**: Todos los hooks de auto-guardado deben manejar temporizadores de debounce mediante `useRef` explícito. Las funciones de encolado del Outbox deben realizar un *upsert in-place* sobre mutaciones pendientes de la misma entidad para prevenir proliferación de registros redundantes.
+
+Tags:
+[autosave] [debounce-ref] [enqueue-upsert] [outbox-dedup]
+
+---
+
+## [Bug ID: 20260821-06]
+
+Context:
+`lib/sync.ts`, `components/layout/AppLayout.tsx` y mantenimiento de catálogos.
+
+Problem:
+Una recarga, el retorno a la pestaña, el intervalo de cinco minutos o un cambio menor podían volver a descargar ciudades, departamentos, países, fases y demás catálogos completos.
+
+Root Cause:
+Los catálogos no tenían vigencia propia y formaban parte de cada `pullChanges()`. Además, algunas operaciones administrativas usaban una sincronización global para refrescar una sola tabla.
+
+Fix Applied:
+Se creó un cursor de catálogo con TTL de 24 horas, se paginaron todos los catálogos y se añadió `refreshPhases()` para la recarga dirigida. Los cambios de clasificación actualizan Dexie directamente y ya no disparan un pull global.
+
+Prevention Rule:
+**Catalog Sync Has Its Own Lifecycle**: Los catálogos de baja volatilidad deben tener cursor/TTL independiente y refrescos dirigidos. Una mutación de configuración nunca debe descargar todas las tablas del CRM.
+
+Tags:
+[sync] [catalogs] [ttl] [pagination] [network]
+
+---
+
+## [Bug ID: 20260821-07]
+
+Context:
+`lib/sync.ts`, cursores incrementales y recuperación de pulls parciales.
+
+Problem:
+Si una tabla fallaba durante el pull, el error se registraba pero la sincronización podía considerarse terminada y avanzar el cursor. También se tomaba la hora al final, creando una ventana en la que un cambio remoto podía quedar fuera para siempre.
+
+Root Cause:
+Los errores internos se absorbían y el cursor global se actualizaba aunque el conjunto no fuera consistente. El límite superior de la ventana no se capturaba antes de empezar.
+
+Fix Applied:
+El motor captura `syncUpperBound` al inicio, limita cada consulta incremental a esa frontera, acumula y propaga cualquier error parcial y solo persiste el cursor durable en Dexie cuando todo el pull termina correctamente. El cursor queda aislado por usuario y tabla lógica.
+
+Prevention Rule:
+**Commit Cursor Only After Atomic Pull Success**: Un cursor incremental es un commit. Debe avanzar únicamente si todas las lecturas cubiertas por su ventana finalizaron, usando un límite superior capturado antes del pull.
+
+Tags:
+[sync] [cursor] [partial-failure] [data-loss] [indexeddb]
+
+---
+
+## [Bug ID: 20260821-08]
+
+Context:
+`lib/sync.ts`, ciclo de vida y reintentos del Outbox.
+
+Problem:
+Los reintentos se consumían casi de inmediato y, al llegar al máximo, la mutación se borraba. Una corrección posterior del usuario podía conservar el contador agotado y volver a fallar sin oportunidad real de recuperación.
+
+Root Cause:
+No existía `next_attempt_at`, el backoff no gobernaba la selección del lote y el estado terminal se modelaba como eliminación.
+
+Fix Applied:
+Se añadió backoff exponencial, selección exclusiva de mutaciones vencidas, estado `DEAD_LETTER`, recuperación manual y reactivación automática al editar nuevamente la entidad. Ningún error agotado elimina el cambio del usuario.
+
+Prevention Rule:
+**Failed Sync Data Is Evidence, Not Garbage**: Una mutación agotada debe quedar visible y recuperable. El retry count, error y próxima fecha de intento deben persistir; nunca se debe borrar automáticamente información no sincronizada.
+
+Tags:
+[sync] [outbox] [retry] [dead-letter] [data-preservation]
+
+---
+
+## [Bug ID: 20260821-09]
+
+Context:
+`lib/hooks/useFormAutoSave.ts` y callbacks inline de formularios.
+
+Problem:
+Un solo cambio podía no guardarse cuando el componente se volvía a renderizar antes de vencer el debounce.
+
+Root Cause:
+La suscripción dependía de la identidad de `onSave`. Los callbacks inline cambiaban en cada render, el cleanup cancelaba el temporizador pendiente y no llegaba a ejecutarse el guardado.
+
+Fix Applied:
+`onSave` se conserva en un ref actualizado y la suscripción depende únicamente de `form` y `delay`. Una prueba con temporizadores simulados verifica que un cambio se guarda exactamente una vez aunque el callback cambie de identidad.
+
+Prevention Rule:
+**Debounced Subscriptions Must Read the Latest Callback Through a Ref**: No incluyas callbacks inline en las dependencias de una suscripción cuyo cleanup cancela trabajo pendiente.
+
+Tags:
+[react] [autosave] [debounce] [use-ref] [regression-test]
+
+---
+
+## [Bug ID: 20260821-10]
+
+Context:
+`lib/sync.ts` y deltas de Supabase/PostgREST.
+
+Problem:
+Consultas supuestamente completas quedaban limitadas al máximo de filas del API. Además, las ediciones de `CRM_PedidoItems` no aparecían porque el pull incremental filtraba por `created_at`.
+
+Root Cause:
+No se recorrían rangos con orden determinista y la tabla de ítems no disponía de una marca de actualización mantenida por la base de datos.
+
+Fix Applied:
+Se implementó paginación por `.range()` con orden estable y topes de seguridad. La migración añade `updated_at`, trigger e índice a `CRM_PedidoItems`, y el cliente usa ese campo para sus deltas.
+
+Prevention Rule:
+**Every Incremental Collection Needs Pagination and a Mutable Cursor Column**: Toda tabla sincronizada debe tener orden estable, paginación explícita y `updated_at` actualizado en cada modificación.
+
+Tags:
+[supabase] [postgrest] [pagination] [updated-at] [pedido-items]
+
+---
+
+## [Bug ID: 20260821-11]
+
+Context:
+RPC PostgreSQL `process_field_updates` y estrategia LWW por campo.
+
+Problem:
+La función aceptaba un nombre de tabla y `p_user_id` proporcionados por el navegador, operaba como `SECURITY DEFINER` y la ruta de actualización de un solo campo no avanzaba su timestamp en `_sync_metadata`. La respuesta tampoco identificaba inequívocamente la mutación del Outbox.
+
+Root Cause:
+El contrato del RPC mezclaba privilegios elevados, SQL dinámico y datos de identidad no verificados. El resultado se correlacionaba por entidad/campo, que no es único cuando existen ediciones concurrentes.
+
+Fix Applied:
+La migración mueve la implementación heredada a un esquema no expuesto, la convierte en `SECURITY INVOKER`, crea un wrapper público con lista blanca de tablas y validación `p_user_id = auth.uid()`, repara el timestamp LWW y devuelve `mutation_id`. El acceso queda sujeto a RLS.
+
+Prevention Rule:
+**Dynamic Sync RPCs Must Be Allowlists Under RLS**: Nunca combines tabla arbitraria, identidad enviada por el cliente y `SECURITY DEFINER`. Correlaciona cada resultado por un ID de mutación estable.
+
+Tags:
+[supabase] [postgres] [rls] [rpc] [security] [lww]
+
+---
+
+## [Bug ID: 20260821-12]
+
+Context:
+`lib/sync.ts`, recuperación de elementos `SYNCING` y concurrencia entre pestañas.
+
+Problem:
+Una pestaña podía devolver inmediatamente a `PENDING` las mutaciones que otra pestaña acababa de reclamar, ocasionando envíos duplicados.
+
+Root Cause:
+`resetStuckItems()` trataba cualquier estado `SYNCING` como abandonado, sin registrar cuándo empezó el intento ni respetar una concesión temporal.
+
+Fix Applied:
+El reclamo del lote y su paso a `SYNCING` ocurren en una transacción Dexie; se registra `last_attempt_at` y solo se recuperan concesiones vencidas después de dos minutos.
+
+Prevention Rule:
+**Outbox Claims Need a Lease**: Reclama lotes atómicamente y no recicles trabajo `SYNCING` activo. La recuperación debe depender de una marca temporal y un timeout explícito.
+
+Tags:
+[sync] [multi-tab] [lease] [dexie] [idempotency]
+
+---
+
+## [Bug ID: 20260821-13]
+
+Context:
+`lib/sync.ts`, operación administrativa `cleanResync()`.
+
+Problem:
+La resincronización limpia podía fallar antes del pull o volver a usar un cursor obsoleto después de vaciar IndexedDB.
+
+Root Cause:
+El procedimiento referenciaba tablas Dexie inexistentes (`products`, `priceList`), llamaba un método Zustand que no existía y no eliminaba el cursor durable correspondiente al usuario.
+
+Fix Applied:
+Se alineó la transacción con las tablas reales, se corrigió la API del store, se preserva todo el Outbox —incluido `DEAD_LETTER`— y se elimina/recrea el cursor durable solo después de un pull completo exitoso.
+
+Prevention Rule:
+**Recovery Paths Must Be Tested Against the Current Local Schema**: Los flujos de recuperación no pueden depender de nombres históricos ni de cursores externos a la base local que acaban de limpiar.
+
+Tags:
+[sync] [recovery] [dexie] [cursor] [schema-drift]
+
+## [Bug ID: 20260824-01]
+
+Context:
+`components/tiendas/CreateStoreSaleForm.tsx`, selectores dependientes de País, Departamento, Canal y Asesor.
+
+Problem:
+Flickering / parpadeo continuo en el selector de departamentos que impedía seleccionar departamentos o los revertía de inmediato.
+
+Root Cause:
+Dependencia circular reactiva entre `selectedDept`, `filteredAdvisors` y `selectedAdvisorId`. Un `useEffect` pasivo de sincronización bidireccional sobreescribía `departamento_id` cada vez que cambiaba el asesor o el departamento no coincidía con el asesor anterior, y otro `useEffect` auto-seleccionaba asesor cada vez que `filteredAdvisors` cambiaba, provocando un bucle infinito de re-renders.
+
+Fix Applied:
+Se eliminaron los `useEffect`s pasivos que forzaban la selección y sobreescritura de valores. Se delegó el reseteo de asesor (`setValue("asesor_id", "")`) a los eventos `onChange` explícitos de País, Departamento y Canal, y se añadió la opción por defecto `"Seleccione un asesor..."` con validación Zod.
+
+Prevention Rule:
+**Never Use Passive useEffects for Multi-Select Cascades**: El reseteo o propagación entre campos de formulario en cascada debe ocurrir en los manejadores de eventos de usuario (`onChange`), nunca en efectos reactivos que reaccionen a los propios valores que modifican.
+
+## [Bug ID: 20260824-02]
+
+Context:
+`components/tiendas/CreateStoreSaleForm.tsx`, `lib/sync.ts` y `lib/hooks/useAccounts.ts`. Fallo en cola de sincronización `Contacto - _complete_snapshot_ FAILED` y falta de detección temprana de cuentas/contactos duplicados en el formulario de tienda.
+
+Problem:
+Al registrar clientes o ventas en el módulo de Tiendas, mutaciones de contactos (`CRM_Contactos`) quedaban atascadas en estado `FAILED` (`_complete_snapshot_ FAILED`) por violaciones de clave foránea `fk_crmcontactos_account` o de unicidad `unique_active_contact_phone`. Adicionalmente, el formulario no alertaba tempranamente si el NIT, teléfono o email ya pertenecían a un cliente existente.
+
+Root Cause:
+1. `resolveDuplicateAccount()` en `lib/sync.ts` solo actualizaba mutaciones donde `field_name === 'account_id'`, omitiendo las mutaciones de tipo snapshot (`_complete_snapshot_`) cuyo `account_id` está dentro del objeto `new_value`. Al reintentar, el snapshot enviaba el `badAccountId` inexistente.
+2. `SyncEngine.pushBatch` no interceptaba los errores de duplicidad de teléfono (`unique_active_contact_phone`) ni de cuenta huérfana para contactos, dejando el ítem permanentemente en `FAILED`.
+3. El formulario no advertía al usuario en tiempo real cuando ingresaba un NIT, teléfono o email de un cliente existente, ni pasaba los datos personalizados de contacto al crear la cuenta.
+
+Fix Applied:
+1. Se extendió `resolveDuplicateAccount` para escanear y actualizar `account_id` dentro de todos los snapshots `_complete_snapshot_` en el outbox.
+2. Se implementaron los métodos de auto-curación `healDuplicateContactPhone` y `healOrphanedContactAccount` en `SyncEngine`.
+3. Se integró detección temprana reactiva en `CreateStoreSaleForm.tsx` para `nit_base`, `telefono` y `email` con badges de advertencia visual y botón de acción rápida `⚡ Vincular a este cliente`.
+4. Se habilitó el paso de `initialContactData` en `useAccounts.createAccount` para conservar datos reales de contacto.
+
+Prevention Rule:
+**Snapshot Foreign Keys Must Be Deep-Remapped in Self-Healing**: Toda rutina de deduplicación o remapeo de identificadores debe actualizar tanto mutaciones de campos planos como el interior de payloads estructurados (`_complete_snapshot_`). Los formularios deben proveer detección temprana en tiempo real para evitar intentos de inserción duplicada desde el origen.
+
+Tags:
+[sync] [self-healing] [snapshot] [contacts] [tiendas] [duplicate-detection]
+
 

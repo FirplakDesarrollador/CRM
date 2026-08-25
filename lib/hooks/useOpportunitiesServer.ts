@@ -19,6 +19,8 @@ export type OpportunityServer = {
     fecha_cierre_estimada?: string | null;
     segmento_id?: number | null;
     estado_id?: number | null;
+    origen_oportunidad?: string | null;
+    url_origen?: string | null;
     account?: { nombre: string; canal_id?: string } | null; // Joined data
     fase_data?: { nombre: string } | null; // Joined data
     estado_data?: { nombre: string } | null; // Joined data
@@ -49,6 +51,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
     const [segmentFilter, setSegmentFilter] = useState<number | null>(null);
     const [phaseFilter, setPhaseFilter] = useState<number | null>(null);
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('open');
+    const [originFilter, setOriginFilter] = useState<string | null>(null);
     const [accountIdFilter, setAccountIdFilter] = useState<string | null>(null);
 
     // Date Filters
@@ -210,6 +213,18 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                     localOpps = localOpps.filter(o => o.account_id === accountIdFilter);
                 }
 
+                if (originFilter) {
+                    const lowerOrigin = originFilter.toLowerCase();
+                    localOpps = localOpps.filter(o => {
+                        if (!o.origen_oportunidad) return false;
+                        const val = o.origen_oportunidad.toLowerCase();
+                        if (lowerOrigin === 'wp') {
+                            return val.includes('wp') || val.includes('whatsapp');
+                        }
+                        return val.includes(lowerOrigin);
+                    });
+                }
+
                 // Date Filters offline
                 if (startDate) {
                     localOpps = localOpps.filter(o => o.created_at && new Date(o.created_at) >= new Date(startDate));
@@ -363,6 +378,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                     fecha_cierre_estimada,
                     segmento_id,
                     created_by,
+                    origen_oportunidad,
                     ${accountRelation},
                     fase_data:CRM_FasesOportunidad(nombre),
                     estado_data:CRM_EstadosOportunidad(nombre),
@@ -397,6 +413,14 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
 
             if (phaseFilter) {
                 query = query.eq('fase_id', phaseFilter);
+            }
+
+            if (originFilter) {
+                if (originFilter.toLowerCase() === 'wp') {
+                    query = query.or('origen_oportunidad.ilike.%wp%,origen_oportunidad.ilike.%whatsapp%');
+                } else {
+                    query = query.ilike('origen_oportunidad', `%${originFilter}%`);
+                }
             }
 
             // Status Filter (won/lost/open) - combine phase names with legacy estado_id values.
@@ -472,6 +496,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                         fecha_cierre_estimada,
                         segmento_id,
                         created_by,
+                        origen_oportunidad,
                         ${accountRelation},
                         fase_data:CRM_FasesOportunidad(nombre),
                         estado_data:CRM_EstadosOportunidad(nombre),
@@ -591,7 +616,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
             setLoading(false);
             useSyncStore.getState().setIsLoadingData(false);
         }
-    }, [currentUserId, subordinateIds, pageSize, userFilter, searchTerm, accountIdFilter, accountOwnerIds, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, phasesReady, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc]);
+    }, [currentUserId, subordinateIds, pageSize, userFilter, searchTerm, accountIdFilter, accountOwnerIds, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, originFilter, phasesReady, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc]);
 
     // Initial Fetch & Filter Fetch - no longer depends on phase IDs (read from refs)
     useEffect(() => {
@@ -643,6 +668,8 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
         setSegmentFilter,
         setPhaseFilter,
         setStatusFilter,
+        setOriginFilter,
+        originFilter,
         setAccountIdFilter,
         setStartDate,
         setEndDate,

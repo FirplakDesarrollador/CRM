@@ -19,12 +19,14 @@ import { useOpportunityOrigins } from "@/lib/hooks/useOpportunityOrigins";
 import { reserveFairInventory, useInventorySummary } from "@/lib/hooks/useInventory";
 import { getProductPrice, SALES_CHANNELS } from "@/lib/salesChannels";
 import { cn, includesNormalized, matchesSearchTokens, removeAccents } from "@/lib/utils";
+import { MultiSelect } from "@/components/ui/MultiSelect";
+import { OPPORTUNITY_CATEGORIES, formatOpportunityCategories, parseOpportunityCategories } from "@/lib/opportunityCategories";
 
 // Eschema de validación combinado
 const storeSaleSchema = z.object({
     // Cuenta
     nombre_cuenta: z.string().min(2, "Nombre requerido"),
-    nit_base: z.string().min(1, "Cédula / NIT requerida"),
+    nit_base: z.string().optional().nullable(),
     telefono: z.string().min(1, "Teléfono requerido"),
     pais_id: z.string().min(1, "País requerido"),
     departamento_id: z.string().optional().nullable(),
@@ -37,7 +39,9 @@ const storeSaleSchema = z.object({
     canal_id: z.string().min(1, "Canal de venta requerido"),
     subclasificacion_id: z.string().min(1, "Subclasificación requerida"),
     
-    // Contacto (para cliente existente)
+    // Contactos (para cliente nuevo o existente)
+    contactos_ids: z.array(z.string()),
+    clientes_atendidos: z.number().min(0),
     contacto_nombre: z.string().optional(),
     contacto_cargo: z.string().optional(),
     contacto_email: z.string().optional().nullable().refine(val => {
@@ -48,12 +52,13 @@ const storeSaleSchema = z.object({
     contacto_comentarios: z.string().optional(),
 
     // Oportunidad
+    nombre_oportunidad: z.string().min(1, "Nombre de la oportunidad requerido"),
     fase_id: z.string().min(1, "Fase requerida"),
-    amount: z.number().optional().default(0),
+    amount: z.number(),
     comentarios: z.string().min(1, "Comentario requerido"),
     origen_oportunidad: z.string().min(1, "Origen requerido"),
     venta_feria: z.boolean(),
-    categoria_oportunidad: z.string().optional(),
+    categoria_oportunidad: z.union([z.array(z.string()), z.string()]).optional().nullable(),
     asesor_id: z.string().min(1, "El asesor es obligatorio"),
     items: z.array(z.object({
         product_id: z.string(),
@@ -75,31 +80,6 @@ const storeSaleSchema = z.object({
     clasificacion_id: z.string().min(1, "Clasificación requerida"),
     prioridad: z.enum(["Baja", "Media", "Alta"]),
     actividad_descripcion: z.string().optional()
-}).superRefine((data, ctx) => {
-    const hasAnyContactField = Boolean(
-        data.contacto_nombre?.trim() ||
-        data.contacto_cargo?.trim() ||
-        data.contacto_email?.trim() ||
-        data.contacto_telefono?.trim() ||
-        data.contacto_comentarios?.trim()
-    );
-
-    if (hasAnyContactField) {
-        if (!data.contacto_nombre || data.contacto_nombre.trim() === "") {
-            ctx.addIssue({
-                code: z.ZodIssueCode.custom,
-                message: "Nombre completo es obligatorio",
-                path: ["contacto_nombre"]
-            });
-        }
-        if (!data.contacto_telefono || data.contacto_telefono.trim() === "") {
-            ctx.addIssue({
-                code: z.ZodIssueCode.custom,
-                message: "Teléfono móvil es obligatorio",
-                path: ["contacto_telefono"]
-            });
-        }
-    }
 });
 
 type StoreSaleFormData = z.infer<typeof storeSaleSchema>;
@@ -134,7 +114,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
     const [isActivityExpanded, setIsActivityExpanded] = useState(false);
-    const [isContactExpanded, setIsContactExpanded] = useState(false);
+    const [isContactExpanded, setIsContactExpanded] = useState(true);
 
     // Estados para búsqueda y selección de cuentas existentes
     const [selectedAccount, setSelectedAccount] = useState<LocalCuenta | null>(null);
@@ -144,6 +124,53 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
     const accountDropdownRef = useRef<HTMLDivElement>(null);
 
     const allLocalAccounts = useLiveQuery(() => db.accounts.toArray()) || [];
+
+    // Contactos de la cuenta seleccionada (locales en Dexie + remotos en Supabase)
+    const localAccountContacts = useLiveQuery(
+        () => selectedAccount ? db.contacts.where('account_id').equals(selectedAccount.id).filter(c => !c.is_deleted).toArray() : [],
+        [selectedAccount?.id]
+    ) || [];
+
+    const [remoteAccountContacts, setRemoteAccountContacts] = useState<any[]>([]);
+
+    useEffect(() => {
+        setRemoteAccountContacts([]);
+        if (!selectedAccount?.id) {
+            return;
+        }
+        let isMounted = true;
+        if (typeof navigator !== "undefined" && navigator.onLine) {
+            supabase
+                .from('CRM_Contactos')
+                .select('*')
+                .eq('account_id', selectedAccount.id)
+                .eq('is_deleted', false)
+                .then(({ data }) => {
+                    if (isMounted && data) {
+                        setRemoteAccountContacts(data);
+                    }
+                });
+        }
+        return () => {
+            isMounted = false;
+        };
+    }, [selectedAccount?.id]);
+
+    const accountContacts = useMemo(() => {
+        const map = new Map<string, any>();
+        localAccountContacts.forEach(c => map.set(c.id, c));
+        remoteAccountContacts.forEach(c => {
+            if (!map.has(c.id)) map.set(c.id, c);
+        });
+        return Array.from(map.values());
+    }, [localAccountContacts, remoteAccountContacts]);
+
+    const contactOptions = useMemo(() => {
+        return accountContacts.map(c => ({
+            value: c.id,
+            label: `${c.nombre}${c.cargo ? ` (${c.cargo})` : ''}${c.telefono ? ` - ${c.telefono}` : ''}`
+        }));
+    }, [accountContacts]);
     
     const { products: searchResults, isLoading: isSearching } = useProductSearch(searchTerm);
     const searchProductIds = useMemo(() => searchResults.map(product => product.id), [searchResults]);
@@ -209,21 +236,26 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             email: "",
             canal_id: "PROPIO",
             subclasificacion_id: "",
+            contactos_ids: [],
+            clientes_atendidos: 0,
             contacto_nombre: "",
             contacto_cargo: "",
             contacto_email: "",
             contacto_telefono: "",
             contacto_comentarios: "",
             amount: 0,
+            nombre_oportunidad: "",
             fase_id: "",
             comentarios: "",
-            origen_oportunidad: "visita",
+            origen_oportunidad: "",
+            categoria_oportunidad: [],
             venta_feria: false,
             fecha_fin: getDefaultDueDate(),
             clasificacion_id: "",
             prioridad: "Media",
             actividad_descripcion: "",
-            items: []
+            items: [],
+            asesor_id: ""
         }
     });
 
@@ -269,6 +301,81 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         return () => clearTimeout(timer);
     }, [accountSearchQuery, selectedAccount]);
 
+    // Detección temprana en tiempo real de cuentas duplicadas por NIT, Teléfono o Email
+    const watchedNit = watch("nit_base");
+    const watchedTelefono = watch("telefono");
+    const watchedEmail = watch("email");
+
+    const [remoteDuplicateAccounts, setRemoteDuplicateAccounts] = useState<LocalCuenta[]>([]);
+
+    useEffect(() => {
+        if (selectedAccount) return;
+        const cleanNit = (watchedNit || "").replace(/\D/g, "");
+        const cleanPhone = (watchedTelefono || "").replace(/\D/g, "");
+        const cleanMail = (watchedEmail || "").trim().toLowerCase();
+
+        const needsNitSearch = cleanNit.length >= 5 && watchedNit !== "*****" && !allLocalAccounts.some(a => (a.nit_base || "").replace(/\D/g, "") === cleanNit);
+        const needsPhoneSearch = cleanPhone.length >= 7 && watchedTelefono !== "*****" && !allLocalAccounts.some(a => (a.telefono || "").replace(/\D/g, "") === cleanPhone);
+        const needsEmailSearch = cleanMail.includes("@") && cleanMail.length >= 6 && watchedEmail !== "*****" && !allLocalAccounts.some(a => (a.email || "").trim().toLowerCase() === cleanMail);
+
+        if (!needsNitSearch && !needsPhoneSearch && !needsEmailSearch) return;
+
+        const timer = setTimeout(async () => {
+            if (typeof navigator !== "undefined" && navigator.onLine) {
+                let orConditions: string[] = [];
+                if (needsNitSearch) orConditions.push(`nit_base.eq.${cleanNit}`);
+                if (needsPhoneSearch) orConditions.push(`telefono.eq.${cleanPhone}`);
+                if (needsEmailSearch) orConditions.push(`email.ilike.${cleanMail}`);
+
+                if (orConditions.length > 0) {
+                    const { data } = await supabase
+                        .from('CRM_Cuentas')
+                        .select('*')
+                        .or(orConditions.join(','))
+                        .limit(5);
+
+                    if (data && data.length > 0) {
+                        setRemoteDuplicateAccounts(prev => {
+                            const next = [...prev];
+                            for (const item of data) {
+                                if (!next.some(a => a.id === item.id)) {
+                                    next.push(item as unknown as LocalCuenta);
+                                }
+                            }
+                            return next;
+                        });
+                    }
+                }
+            }
+        }, 300);
+
+        return () => clearTimeout(timer);
+    }, [watchedNit, watchedTelefono, watchedEmail, selectedAccount, allLocalAccounts]);
+
+    const duplicateAccountByNit = useMemo(() => {
+        if (selectedAccount || !watchedNit || watchedNit === "*****") return null;
+        const clean = (watchedNit || "").replace(/\D/g, "");
+        if (clean.length < 5) return null;
+        return allLocalAccounts.find(a => (a.nit_base || "").replace(/\D/g, "") === clean) ||
+               remoteDuplicateAccounts.find(a => (a.nit_base || "").replace(/\D/g, "") === clean) || null;
+    }, [watchedNit, allLocalAccounts, remoteDuplicateAccounts, selectedAccount]);
+
+    const duplicateAccountByPhone = useMemo(() => {
+        if (selectedAccount || !watchedTelefono || watchedTelefono === "*****") return null;
+        const clean = (watchedTelefono || "").replace(/\D/g, "");
+        if (clean.length < 7) return null;
+        return allLocalAccounts.find(a => (a.telefono || "").replace(/\D/g, "") === clean) ||
+               remoteDuplicateAccounts.find(a => (a.telefono || "").replace(/\D/g, "") === clean) || null;
+    }, [watchedTelefono, allLocalAccounts, remoteDuplicateAccounts, selectedAccount]);
+
+    const duplicateAccountByEmail = useMemo(() => {
+        if (selectedAccount || !watchedEmail || watchedEmail === "*****") return null;
+        const clean = (watchedEmail || "").trim().toLowerCase();
+        if (!clean.includes("@") || clean.length < 6) return null;
+        return allLocalAccounts.find(a => (a.email || "").trim().toLowerCase() === clean) ||
+               remoteDuplicateAccounts.find(a => (a.email || "").trim().toLowerCase() === clean) || null;
+    }, [watchedEmail, allLocalAccounts, remoteDuplicateAccounts, selectedAccount]);
+
     // Filtrado de cuentas tokenizado multi-palabra sin importar tildes, mayúsculas ni orden
     const filteredAccounts = useMemo(() => {
         if (!accountSearchQuery || accountSearchQuery.trim().length < 2 || selectedAccount) {
@@ -301,13 +408,22 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         setValue("ciudad_id", account.ciudad_id ? String(account.ciudad_id) : "");
         setValue("direccion", account.direccion || "");
         setValue("asesor_id", account.owner_user_id || "");
+        setValue("contactos_ids", []);
+        setValue("clientes_atendidos", 0);
+        setValue("contacto_nombre", "");
+        setValue("contacto_cargo", "");
+        setValue("contacto_email", "");
+        setValue("contacto_telefono", "");
+        setValue("contacto_comentarios", "");
+        if (!watch("nombre_oportunidad")) {
+            setValue("nombre_oportunidad", `Venta - ${account.nombre}`);
+        }
     };
 
     const handleDeselectAccount = useCallback(() => {
         setSelectedAccount(null);
         setAccountSearchQuery("");
         setIsAccountDropdownOpen(false);
-        setIsContactExpanded(false);
 
         const colombia = displayCountries.find(c => includesNormalized(c.nombre, "colombia")) || displayCountries.find(c => String(c.id) === "1");
         const defaultPaisId = colombia ? String(colombia.id) : "1";
@@ -322,11 +438,15 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         setValue("departamento_id", "");
         setValue("ciudad_id", "");
         setValue("direccion", "");
+        setValue("contactos_ids", []);
+        setValue("clientes_atendidos", 0);
         setValue("contacto_nombre", "");
         setValue("contacto_cargo", "");
         setValue("contacto_email", "");
         setValue("contacto_telefono", "");
         setValue("contacto_comentarios", "");
+        setValue("nombre_oportunidad", "");
+        setValue("asesor_id", "");
     }, [displayCountries, setValue]);
 
     const handleNombreCuentaChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -337,7 +457,6 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         if (selectedAccount) {
             // Si había una cuenta seleccionada y se borra o edita el texto del nombre, resetear a valores por defecto
             setSelectedAccount(null);
-            setIsContactExpanded(false);
             setValue("nit_base", "");
             setValue("telefono", "");
             setValue("email", "");
@@ -348,11 +467,14 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             setValue("departamento_id", "");
             setValue("ciudad_id", "");
             setValue("direccion", "");
+            setValue("contactos_ids", []);
+            setValue("clientes_atendidos", 0);
             setValue("contacto_nombre", "");
             setValue("contacto_cargo", "");
             setValue("contacto_email", "");
             setValue("contacto_telefono", "");
             setValue("contacto_comentarios", "");
+            setValue("asesor_id", "");
         }
 
         if (val.trim().length >= 2) {
@@ -374,35 +496,44 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         [subclassifications, selectedChannel],
     );
 
-    // Filtrado estricto de asesores: Si el vendedor no tiene país o departamento asignado, NO aparece en el desplegable.
+    // Filtrado estricto de asesores: Valida que el asesor pertenezca al canal, país y departamento seleccionados.
     const selectedPais = watch("pais_id");
     const selectedDept = watch("departamento_id");
-    const selectedAdvisorId = watch("asesor_id");
 
     const filteredAdvisors = useMemo(() => {
         const activeUsers = users?.filter(u => u.is_active) || [];
         
         return activeUsers.filter(u => {
-            // 1. Verificar País: El vendedor debe tener al menos un país asignado y debe incluir el país del cliente.
-            const userPaises = u.paises && u.paises.length > 0 ? u.paises : (u.pais ? [u.pais] : []);
-            if (userPaises.length === 0) return false;
+            // 1. Verificar Canal de Venta: El vendedor debe tener asignado el canal seleccionado
+            const userChannels = u.canales || [];
+            if (userChannels.length === 0 || !userChannels.includes(selectedChannel)) {
+                return false;
+            }
 
-            const matchesCountry = selectedPais && userPaises.includes(String(selectedPais));
-            if (!matchesCountry) return false;
+            // 2. Verificar País: El vendedor debe tener asignado el país seleccionado
+            if (selectedPais) {
+                const userPaises = u.paises && u.paises.length > 0 ? u.paises : (u.pais ? [String(u.pais)] : ["1"]);
+                if (!userPaises.includes(String(selectedPais))) {
+                    return false;
+                }
+            }
 
-            // 2. Verificar Departamento (si se seleccionó departamento en el cliente):
-            // El vendedor debe tener asignado al menos un departamento y debe incluir el departamento del cliente.
+            // 3. Verificar Departamento (si se seleccionó departamento en el formulario):
             if (selectedDept) {
-                const userDepts = u.departamentos && u.departamentos.length > 0 ? u.departamentos : (u.departamento ? [u.departamento] : []);
-                if (userDepts.length === 0) return false;
-
-                const matchesDept = userDepts.includes(String(selectedDept));
-                if (!matchesDept) return false;
+                const userDepts = u.departamentos && u.departamentos.length > 0 ? u.departamentos : (u.departamento ? [String(u.departamento)] : []);
+                // En Canal Propio, si el asesor no tiene restricción de departamento, opera a nivel general de tienda
+                if (selectedChannel === "PROPIO" && userDepts.length === 0) {
+                    return true;
+                }
+                // En canales OBRAS y DISTRIBUCIÓN, la asignación de departamento es estricta por zona
+                if (userDepts.length === 0 || !userDepts.includes(String(selectedDept))) {
+                    return false;
+                }
             }
 
             return true;
         });
-    }, [users, selectedPais, selectedDept]);
+    }, [users, selectedPais, selectedDept, selectedChannel]);
 
     // Garantizar que Colombia quede seleccionado automáticamente cuando los países terminen de cargar (solo si no hay cuenta seleccionada)
     useEffect(() => {
@@ -417,54 +548,11 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         }
     }, [displayCountries, setValue, watch, selectedAccount]);
 
-    // Seleccionar automáticamente un asesor si el actual no pertenece al filtro o está vacío (solo si no hay cuenta seleccionada)
-    useEffect(() => {
-        if (selectedAccount) return;
-        if (filteredAdvisors.length > 0) {
-            if (!selectedAdvisorId || !filteredAdvisors.some(u => u.id === selectedAdvisorId)) {
-                const juanCorrea = filteredAdvisors.find(u => includesNormalized(u.full_name || "", "juan correa"));
-                setValue("asesor_id", juanCorrea ? juanCorrea.id : filteredAdvisors[0].id);
-            }
-        } else {
-            setValue("asesor_id", "");
-        }
-    }, [filteredAdvisors, selectedAdvisorId, setValue, selectedAccount]);
-
-    // Selección bidireccional: Al seleccionar un asesor, se toma por defecto su país y departamento (solo si no hay cuenta seleccionada)
-    useEffect(() => {
-        if (selectedAccount) return;
-        if (!selectedAdvisorId || !users || users.length === 0) return;
-
-        const advisor = users.find(u => u.id === selectedAdvisorId);
-        if (!advisor) return;
-
-        const advPaises = (
-            advisor.paises && advisor.paises.length > 0
-                ? advisor.paises
-                : (advisor.pais ? [advisor.pais] : [])
-        ).map(p => String(p));
-
-        const advDepts = (
-            advisor.departamentos && advisor.departamentos.length > 0
-                ? advisor.departamentos
-                : (advisor.departamento ? [advisor.departamento] : [])
-        ).map(d => String(d));
-
-        if (advPaises.length > 0 && (!selectedPais || !advPaises.includes(String(selectedPais)))) {
-            setValue("pais_id", advPaises[0]);
-        }
-
-        if (advDepts.length > 0 && (!selectedDept || !advDepts.includes(String(selectedDept)))) {
-            setValue("departamento_id", advDepts[0]);
-            setValue("ciudad_id", "");
-        }
-    }, [selectedAdvisorId, selectedPais, selectedDept, users, setValue, selectedAccount]);
-
     const resetStoreForm = useCallback(() => {
         setSelectedAccount(null);
         setAccountSearchQuery("");
         setIsAccountDropdownOpen(false);
-        setIsContactExpanded(false);
+        setIsContactExpanded(true);
 
         const colombia = displayCountries.find(c => includesNormalized(c.nombre, "colombia")) || displayCountries.find(c => String(c.id) === "1");
         const defaultPaisId = colombia ? String(colombia.id) : "1";
@@ -482,23 +570,28 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             email: "",
             canal_id: "PROPIO",
             subclasificacion_id: "",
+            contactos_ids: [],
+            clientes_atendidos: 0,
             contacto_nombre: "",
             contacto_cargo: "",
             contacto_email: "",
             contacto_telefono: "",
             contacto_comentarios: "",
             amount: 0,
+            nombre_oportunidad: "",
             fase_id: defaultPhaseId,
             comentarios: "",
-            origen_oportunidad: "visita",
+            origen_oportunidad: origins.find(o => o.is_default && o.is_active)?.codigo || origins.find(o => o.is_active)?.codigo || "",
+            categoria_oportunidad: [],
             venta_feria: false,
             fecha_fin: getDefaultDueDate(),
             clasificacion_id: "",
             prioridad: "Media",
             actividad_descripcion: "",
-            items: []
+            items: [],
+            asesor_id: ""
         });
-    }, [reset, displayCountries, phasesList]);
+    }, [reset, displayCountries, phasesList, origins]);
 
     const watchedItems = watch("items");
     const items = useMemo(() => watchedItems || [], [watchedItems]);
@@ -526,8 +619,11 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
 
     useEffect(() => {
         const currentOrigin = watch("origen_oportunidad");
-        if (origins.length > 0 && !origins.some(origin => origin.codigo === currentOrigin)) {
-            setValue("origen_oportunidad", origins[0].codigo);
+        if (origins.length > 0) {
+            const defaultOrigin = origins.find(o => o.is_default && o.is_active) || origins.find(o => o.is_active) || origins[0];
+            if (!currentOrigin || !origins.some(origin => origin.codigo === currentOrigin)) {
+                setValue("origen_oportunidad", defaultOrigin.codigo);
+            }
         }
     }, [origins, setValue, watch]);
 
@@ -558,7 +654,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
     const addProduct = (product: PriceListProduct) => {
         const price = getProductPrice(product, selectedChannel, isFairSale);
         const available = inventoryByProduct.get(product.id)?.disponible || 0;
-        if ((isFairSale || selectedChannel === "FERIA") && price <= 0) {
+        if (isFairSale && price <= 0) {
             alert("Este producto no tiene precio de feria configurado.");
             return;
         }
@@ -636,25 +732,33 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                 accountId = selectedAccount.id;
                 console.log("Usando cuenta existente seleccionada:", accountId);
             } else {
-                // VALIDACIÓN DE DUPLICADOS LOCALES
-                const duplicates = await db.accounts.filter(a => 
-                    a.nit_base === data.nit_base || (!!a.telefono && a.telefono === data.telefono)
-                ).toArray();
+                // VALIDACIÓN DE DUPLICADOS LOCALES Y REMOTOS (NIT, Teléfono o Email)
+                const cleanNit = (data.nit_base || "").replace(/\D/g, "");
+                const cleanPhone = (data.telefono || "").replace(/\D/g, "");
+                const cleanMail = (data.email || "").trim().toLowerCase();
 
-                if (duplicates.length > 0) {
+                const matchedAccount = duplicateAccountByNit || duplicateAccountByPhone || duplicateAccountByEmail || (
+                    allLocalAccounts.find(a => 
+                        (cleanNit.length >= 5 && (a.nit_base || "").replace(/\D/g, "") === cleanNit) ||
+                        (cleanPhone.length >= 7 && (a.telefono || "").replace(/\D/g, "") === cleanPhone) ||
+                        (cleanMail.length >= 6 && (a.email || "").trim().toLowerCase() === cleanMail)
+                    )
+                );
+
+                if (matchedAccount) {
                     // Usar el cliente existente
-                    accountId = duplicates[0].id;
+                    accountId = matchedAccount.id;
                     await updateAccount(accountId, {
-                        ...duplicates[0],
+                        ...matchedAccount,
                         canal_id: data.canal_id,
                         subclasificacion_id: Number(data.subclasificacion_id),
                     });
-                    console.log("Cliente ya existe por NIT/teléfono, usando ID existente:", accountId);
+                    console.log("Cliente ya existe por NIT/teléfono/email, usando ID existente:", accountId);
                 } else {
                     // 1. Crear Cuenta si no existe
                     const accountData = {
                         nombre: data.nombre_cuenta,
-                        nit_base: data.nit_base,
+                        nit_base: data.nit_base?.trim() || undefined,
                         canal_id: data.canal_id,
                         subclasificacion_id: Number(data.subclasificacion_id),
                         telefono: data.telefono,
@@ -665,10 +769,19 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                         ciudad_id: data.ciudad_id ? Number(data.ciudad_id) : null,
                         // Conservamos compatibilidad string con DB
                         ciudad: data.ciudad_id ? citiesList.find(c => String(c.id) === data.ciudad_id)?.nombre : undefined,
-                        es_premium: false
+                        es_premium: false,
+                        origen_cuenta: data.origen_oportunidad || undefined
                     };
 
-                    const newId = await createAccount(accountData);
+                    const initialContact = data.contacto_nombre?.trim() ? {
+                        nombre: data.contacto_nombre.trim(),
+                        cargo: data.contacto_cargo?.trim() || undefined,
+                        email: data.contacto_email?.trim() || undefined,
+                        telefono: data.contacto_telefono?.trim() || undefined,
+                        comentarios: data.contacto_comentarios?.trim() || undefined,
+                    } : undefined;
+
+                    const newId = await createAccount(accountData, initialContact);
                     if (newId) {
                         accountId = newId;
                     }
@@ -679,33 +792,66 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                 throw new Error("No se pudo obtener el ID de la cuenta.");
             }
 
-            // 2. Crear Contacto (si se especificó en cliente existente)
+            // 2. Manejo de contactos (existentes seleccionados + nuevo contacto opcional)
+            let finalContactosIds: string[] = Array.isArray(data.contactos_ids) ? [...data.contactos_ids] : [];
+
+            // Si se especificó un nuevo contacto para un cliente existente y no es duplicado
             if (selectedAccount && data.contacto_nombre && data.contacto_nombre.trim() !== "") {
-                await createContact({
-                    account_id: accountId,
-                    nombre: data.contacto_nombre.trim(),
-                    cargo: data.contacto_cargo?.trim() || undefined,
-                    email: data.contacto_email?.trim() || undefined,
-                    telefono: data.contacto_telefono?.trim() || undefined,
-                    comentarios: data.contacto_comentarios?.trim() || undefined,
-                });
+                const existingContacts = await db.contacts.where('account_id').equals(accountId).toArray();
+                const isPhoneDuplicate = data.contacto_telefono?.trim() && existingContacts.some(c => c.telefono === data.contacto_telefono?.trim() && !c.is_deleted);
+
+                if (!isPhoneDuplicate) {
+                    const newContactId = await createContact({
+                        account_id: accountId,
+                        nombre: data.contacto_nombre.trim(),
+                        cargo: data.contacto_cargo?.trim() || undefined,
+                        email: data.contacto_email?.trim() || undefined,
+                        telefono: data.contacto_telefono?.trim() || undefined,
+                        comentarios: data.contacto_comentarios?.trim() || undefined,
+                    });
+                    if (newContactId && !finalContactosIds.includes(newContactId)) {
+                        finalContactosIds.push(newContactId);
+                    }
+                }
             }
 
+            // Si es una cuenta nueva, obtener el contacto asociado creado
+            if (!selectedAccount) {
+                try {
+                    const newlyCreatedContacts = await db.contacts.where('account_id').equals(accountId).toArray();
+                    for (const c of newlyCreatedContacts) {
+                        if (c.id && !finalContactosIds.includes(c.id)) {
+                            finalContactosIds.push(c.id);
+                        }
+                    }
+                } catch (e) {
+                    console.warn("Could not retrieve contacts for new account:", e);
+                }
+            }
+
+            const attendedCount = typeof data.clientes_atendidos === 'number' && !isNaN(data.clientes_atendidos)
+                ? data.clientes_atendidos
+                : finalContactosIds.length;
+
             // 3. Crear Oportunidad
-            const combinedComentarios = data.categoria_oportunidad ? 
-                `Categoría: ${data.categoria_oportunidad}\n\n${data.comentarios}` : data.comentarios;
+            const formattedCategories = formatOpportunityCategories(data.categoria_oportunidad);
+            const combinedComentarios = formattedCategories ? 
+                `Categorías: ${formattedCategories}\n\n${data.comentarios}` : data.comentarios;
 
             const opportunityData = {
                 account_id: accountId,
-                nombre: `Venta - ${data.nombre_cuenta}`,
+                nombre: data.nombre_oportunidad?.trim() || `Venta - ${data.nombre_cuenta}`,
                 amount: data.amount,
                 fase_id: Number(data.fase_id),
                 estado_id: 1, // OPEN
                 currency_id: "COP",
                 origen_oportunidad: data.origen_oportunidad,
+                categoria_oportunidad: formattedCategories || undefined,
                 comentarios: combinedComentarios,
                 items: data.items,
                 owner_user_id: selectedAccount?.owner_user_id || data.asesor_id || user?.id,
+                contactos_ids: finalContactosIds,
+                clientes_atendidos: attendedCount,
             };
             const opportunityId = await createOpportunity(opportunityData);
 
@@ -861,7 +1007,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
 
                                 <div>
                                     <label className="text-sm font-medium text-slate-700 flex items-center justify-between">
-                                        <span>Cédula / NIT *</span>
+                                        <span>Cédula / NIT</span>
                                         {selectedAccount && <Lock className="w-3 h-3 text-slate-400" />}
                                     </label>
                                     <input 
@@ -870,6 +1016,21 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         className="w-full mt-1 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed" 
                                         placeholder="123456789" 
                                     />
+                                    {duplicateAccountByNit && (
+                                        <div className="mt-1.5 p-2 bg-amber-50 border border-amber-200 rounded-lg flex items-center justify-between gap-2 text-xs">
+                                            <div className="text-amber-800 font-medium flex items-center gap-1.5 truncate">
+                                                <span>⚠️ Ya existe:</span>
+                                                <span className="font-bold truncate">{duplicateAccountByNit.nombre}</span>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleSelectAccount(duplicateAccountByNit)}
+                                                className="shrink-0 bg-amber-600 hover:bg-amber-700 text-white font-semibold px-2 py-0.5 rounded text-[11px] shadow-sm transition-colors flex items-center gap-1"
+                                            >
+                                                ⚡ Vincular
+                                            </button>
+                                        </div>
+                                    )}
                                     {errors.nit_base && <p className="text-red-500 text-xs mt-1">{errors.nit_base.message}</p>}
                                 </div>
                                 <div>
@@ -883,6 +1044,21 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         className="w-full mt-1 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed" 
                                         placeholder="300 000 0000" 
                                     />
+                                    {duplicateAccountByPhone && (
+                                        <div className="mt-1.5 p-2 bg-amber-50 border border-amber-200 rounded-lg flex items-center justify-between gap-2 text-xs">
+                                            <div className="text-amber-800 font-medium flex items-center gap-1.5 truncate">
+                                                <span>⚠️ Ya existe:</span>
+                                                <span className="font-bold truncate">{duplicateAccountByPhone.nombre}</span>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleSelectAccount(duplicateAccountByPhone)}
+                                                className="shrink-0 bg-amber-600 hover:bg-amber-700 text-white font-semibold px-2 py-0.5 rounded text-[11px] shadow-sm transition-colors flex items-center gap-1"
+                                            >
+                                                ⚡ Vincular
+                                            </button>
+                                        </div>
+                                    )}
                                     {errors.telefono && <p className="text-red-500 text-xs mt-1">{errors.telefono.message}</p>}
                                 </div>
                                 <div>
@@ -897,6 +1073,21 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         className="w-full mt-1 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed" 
                                         placeholder="correo@ejemplo.com" 
                                     />
+                                    {duplicateAccountByEmail && (
+                                        <div className="mt-1.5 p-2 bg-amber-50 border border-amber-200 rounded-lg flex items-center justify-between gap-2 text-xs">
+                                            <div className="text-amber-800 font-medium flex items-center gap-1.5 truncate">
+                                                <span>⚠️ Ya existe:</span>
+                                                <span className="font-bold truncate">{duplicateAccountByEmail.nombre}</span>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleSelectAccount(duplicateAccountByEmail)}
+                                                className="shrink-0 bg-amber-600 hover:bg-amber-700 text-white font-semibold px-2 py-0.5 rounded text-[11px] shadow-sm transition-colors flex items-center gap-1"
+                                            >
+                                                ⚡ Vincular
+                                            </button>
+                                        </div>
+                                    )}
                                     {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email.message}</p>}
                                 </div>
                             </div>
@@ -912,6 +1103,11 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         value={watch("canal_id") || "PROPIO"}
                                         disabled={!!selectedAccount}
                                         className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
+                                        onChange={(e) => {
+                                            register("canal_id").onChange(e);
+                                            setValue("subclasificacion_id", "");
+                                            setValue("asesor_id", "");
+                                        }}
                                     >
                                         {SALES_CHANNELS.map(channel => <option key={channel.id} value={channel.id}>{channel.nombre}</option>)}
                                     </select>
@@ -956,6 +1152,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                             register("pais_id").onChange(e);
                                             setValue("departamento_id", "");
                                             setValue("ciudad_id", "");
+                                            setValue("asesor_id", "");
                                         }}
                                     >
                                         <option value="">Seleccione...</option>
@@ -977,11 +1174,12 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         onChange={(e) => {
                                             register("departamento_id").onChange(e);
                                             setValue("ciudad_id", "");
+                                            setValue("asesor_id", "");
                                         }}
                                     >
                                         <option value="">Seleccione...</option>
                                         {displayDepartments
-                                            .filter(dep => String(dep.pais_id) === watch("pais_id"))
+                                            .filter(dep => String(dep.pais_id) === watch("pais_id") || (!dep.pais_id && watch("pais_id") === "1"))
                                             .map(dep => (
                                                 <option key={dep.id} value={String(dep.id)}>{dep.nombre}</option>
                                             ))}
@@ -1033,6 +1231,11 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         ))}
                                     </select>
                                     <p className="text-[11px] text-slate-500 mt-1">El cliente queda anclado primariamente a este asesor desde su creación.</p>
+                                    {filteredAdvisors.length === 0 && !selectedAccount && (
+                                        <p className="text-[11px] text-amber-600 font-medium mt-1">
+                                            No hay asesores asignados para el país, departamento y canal seleccionado.
+                                        </p>
+                                    )}
                                     {errors.asesor_id && (
                                         <p className="text-red-500 text-xs mt-1">{errors.asesor_id.message}</p>
                                     )}
@@ -1052,89 +1255,157 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                             </div>
                         </section>
 
-                        {/* SECCIÓN CONTACTO (Solo cuando se selecciona un cliente existente) */}
-                        {selectedAccount && (
-                            <section className="space-y-4 rounded-xl border border-indigo-200 bg-indigo-50/40 p-4 transition-all">
-                                <div 
-                                    onClick={() => setIsContactExpanded(!isContactExpanded)}
-                                    className="flex items-center justify-between cursor-pointer select-none"
-                                >
-                                    <h3 className="text-lg font-semibold flex items-center gap-2 text-indigo-800">
-                                        <UserPlus className="w-5 h-5 text-indigo-600" /> Contacto del Cliente
-                                    </h3>
-                                    <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
-                                        {!isContactExpanded && (
-                                            <span className="hidden sm:inline-block bg-indigo-100/80 text-indigo-800 px-2.5 py-1 rounded-full border border-indigo-200/70 font-semibold text-[11px]">
-                                                {watch("contacto_nombre") ? `Contacto: ${watch("contacto_nombre")}` : "+ Agregar nuevo contacto (Opcional)"}
-                                            </span>
-                                        )}
-                                        <button
-                                            type="button"
-                                            className="p-1 hover:bg-indigo-200/60 rounded-lg text-indigo-700 transition-colors"
-                                            aria-label="Expandir o colapsar sección de contacto"
-                                        >
-                                            {isContactExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
-                                        </button>
+                        {/* SECCIÓN CONTACTO (Habilitada permanentemente para cuentas nuevas y existentes) */}
+                        <section className="space-y-4 rounded-xl border border-indigo-200 bg-indigo-50/40 p-4 transition-all">
+                            <div 
+                                onClick={() => setIsContactExpanded(!isContactExpanded)}
+                                className="flex items-center justify-between cursor-pointer select-none"
+                            >
+                                <div className="flex items-center gap-2">
+                                    <UserPlus className="w-5 h-5 text-indigo-600" />
+                                    <div>
+                                        <h3 className="text-lg font-semibold text-indigo-900">
+                                            Contacto del Cliente
+                                        </h3>
+                                        <p className="text-xs text-indigo-700">
+                                            Todos los campos de contacto son opcionales.
+                                        </p>
                                     </div>
                                 </div>
-                                
-                                {isContactExpanded && (
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3 border-t border-indigo-200/60">
-                                        <div>
-                                            <label className="text-sm font-medium text-slate-700">Nombre Completo *</label>
-                                            <input 
-                                                {...register("contacto_nombre")} 
-                                                className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" 
-                                                placeholder="Nombre y apellidos" 
-                                            />
-                                            {errors.contacto_nombre && <p className="text-red-500 text-xs mt-1">{errors.contacto_nombre.message}</p>}
+                                <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
+                                    {!isContactExpanded && (
+                                        <span className="hidden sm:inline-block bg-indigo-100/80 text-indigo-800 px-2.5 py-1 rounded-full border border-indigo-200/70 font-semibold text-[11px]">
+                                            {watch("contacto_nombre") 
+                                                ? `Contacto: ${watch("contacto_nombre")}` 
+                                                : ((watch("contactos_ids")?.length || 0) > 0
+                                                    ? `${watch("contactos_ids")?.length} contacto(s) seleccionado(s)` 
+                                                    : "+ Información de contacto (Opcional)")}
+                                        </span>
+                                    )}
+                                    <button
+                                        type="button"
+                                        className="p-1 hover:bg-indigo-200/60 rounded-lg text-indigo-700 transition-colors"
+                                        aria-label="Expandir o colapsar sección de contacto"
+                                    >
+                                        {isContactExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            {isContactExpanded && (
+                                <div className="space-y-4 pt-3 border-t border-indigo-200/60">
+                                    {/* Multi-select de contactos existentes (si la cuenta seleccionada tiene contactos) */}
+                                    {selectedAccount && (
+                                        <div className="bg-white/80 p-3.5 rounded-xl border border-indigo-100 space-y-2">
+                                            <label className="text-sm font-semibold text-indigo-900 block">
+                                                Contactos vinculados a la cuenta (Selección múltiple)
+                                            </label>
+                                            {contactOptions.length > 0 ? (
+                                                <MultiSelect
+                                                    options={contactOptions}
+                                                    selected={watch("contactos_ids") || []}
+                                                    onChange={(vals) => {
+                                                        setValue("contactos_ids", vals);
+                                                        // Auto-actualizar clientes atendidos con el conteo de contactos seleccionados
+                                                        setValue("clientes_atendidos", vals.length);
+                                                    }}
+                                                    placeholder="Seleccionar uno o más contactos de la cuenta..."
+                                                />
+                                            ) : (
+                                                <p className="text-xs text-slate-500 italic bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                                                    Esta cuenta no tiene contactos registrados previamente. Puedes registrar uno nuevo a continuación.
+                                                </p>
+                                            )}
+                                            <p className="text-[11px] text-slate-500">
+                                                Selecciona los contactos de esta cuenta vinculados a la oportunidad.
+                                            </p>
                                         </div>
-                                        
-                                        <div>
-                                            <label className="text-sm font-medium text-slate-700">Cargo / Posición</label>
+                                    )}
+
+                                    {/* Campo Clientes Atendidos */}
+                                    <div className="bg-white/80 p-3.5 rounded-xl border border-indigo-100">
+                                        <label className="text-sm font-semibold text-indigo-900 flex items-center justify-between">
+                                            <span>Clientes atendidos</span>
+                                            <span className="text-[11px] text-indigo-600 font-normal">
+                                                (Editable · Calculado automáticamente)
+                                            </span>
+                                        </label>
+                                        <div className="mt-1 flex items-center gap-3">
                                             <input 
-                                                {...register("contacto_cargo")} 
-                                                className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" 
-                                                placeholder="Ej. Gerente de Compras, Arquitecto" 
+                                                type="number"
+                                                min="0"
+                                                {...register("clientes_atendidos", { valueAsNumber: true })}
+                                                className="w-32 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none text-base font-semibold text-slate-800"
+                                                placeholder="0" 
                                             />
-                                            {errors.contacto_cargo && <p className="text-red-500 text-xs mt-1">{errors.contacto_cargo.message}</p>}
-                                        </div>
-                                        
-                                        <div>
-                                            <label className="text-sm font-medium text-slate-700">Correo Electrónico</label>
-                                            <input 
-                                                {...register("contacto_email")} 
-                                                type="email"
-                                                className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" 
-                                                placeholder="contacto@ejemplo.com" 
-                                            />
-                                            {errors.contacto_email && <p className="text-red-500 text-xs mt-1">{errors.contacto_email.message}</p>}
-                                        </div>
-                                        
-                                        <div>
-                                            <label className="text-sm font-medium text-slate-700">Teléfono Móvil *</label>
-                                            <input 
-                                                {...register("contacto_telefono")} 
-                                                className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" 
-                                                placeholder="300 000 0000" 
-                                            />
-                                            {errors.contacto_telefono && <p className="text-red-500 text-xs mt-1">{errors.contacto_telefono.message}</p>}
-                                        </div>
-                                        
-                                        <div className="md:col-span-2">
-                                            <label className="text-sm font-medium text-slate-700">Comentarios</label>
-                                            <textarea 
-                                                {...register("contacto_comentarios")} 
-                                                rows={2}
-                                                className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none resize-none" 
-                                                placeholder="Notas sobre el contacto, disponibilidad o canal preferido..." 
-                                            />
-                                            {errors.contacto_comentarios && <p className="text-red-500 text-xs mt-1">{errors.contacto_comentarios.message}</p>}
+                                            <span className="text-xs text-slate-500">
+                                                Contabiliza cuántas personas o clientes se atendieron en esta oportunidad.
+                                            </span>
                                         </div>
                                     </div>
-                                )}
-                            </section>
-                        )}
+
+                                    {/* Formulario de nuevo contacto (opcional) */}
+                                    <div className="pt-2">
+                                        <h4 className="text-xs font-bold uppercase tracking-wider text-indigo-700 mb-3">
+                                            {selectedAccount ? "Registrar un contacto adicional (Opcional)" : "Datos del contacto (Opcional)"}
+                                        </h4>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div>
+                                                <label className="text-sm font-medium text-slate-700">Nombre Completo (Opcional)</label>
+                                                <input 
+                                                    {...register("contacto_nombre")} 
+                                                    className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" 
+                                                    placeholder="Nombre y apellidos" 
+                                                />
+                                                {errors.contacto_nombre && <p className="text-red-500 text-xs mt-1">{errors.contacto_nombre.message}</p>}
+                                            </div>
+                                            
+                                            <div>
+                                                <label className="text-sm font-medium text-slate-700">Cargo / Posición (Opcional)</label>
+                                                <input 
+                                                    {...register("contacto_cargo")} 
+                                                    className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" 
+                                                    placeholder="Ej. Gerente de Compras, Arquitecto" 
+                                                />
+                                                {errors.contacto_cargo && <p className="text-red-500 text-xs mt-1">{errors.contacto_cargo.message}</p>}
+                                            </div>
+                                            
+                                            <div>
+                                                <label className="text-sm font-medium text-slate-700">Correo Electrónico (Opcional)</label>
+                                                <input 
+                                                    {...register("contacto_email")} 
+                                                    type="email"
+                                                    className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" 
+                                                    placeholder="contacto@ejemplo.com" 
+                                                />
+                                                {errors.contacto_email && <p className="text-red-500 text-xs mt-1">{errors.contacto_email.message}</p>}
+                                            </div>
+                                            
+                                            <div>
+                                                <label className="text-sm font-medium text-slate-700">Teléfono Móvil (Opcional)</label>
+                                                <input 
+                                                    {...register("contacto_telefono")} 
+                                                    className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" 
+                                                    placeholder="300 000 0000" 
+                                                />
+                                                {errors.contacto_telefono && <p className="text-red-500 text-xs mt-1">{errors.contacto_telefono.message}</p>}
+                                            </div>
+                                            
+                                            <div className="md:col-span-2">
+                                                <label className="text-sm font-medium text-slate-700">Comentarios (Opcional)</label>
+                                                <textarea 
+                                                    {...register("contacto_comentarios")} 
+                                                    rows={2}
+                                                    className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none resize-none" 
+                                                    placeholder="Notas sobre el contacto, disponibilidad o canal preferido..." 
+                                                />
+                                                {errors.contacto_comentarios && <p className="text-red-500 text-xs mt-1">{errors.contacto_comentarios.message}</p>}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </section>
 
                         {/* SECCIÓN OPORTUNIDAD */}
                         <section className="space-y-4">
@@ -1143,6 +1414,16 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                             </h3>
                             
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="md:col-span-2">
+                                    <label className="text-sm font-medium text-slate-700">Nombre de la Oportunidad *</label>
+                                    <input 
+                                        {...register("nombre_oportunidad")} 
+                                        className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-green-500 outline-none" 
+                                        placeholder={watch("nombre_cuenta") ? `Venta - ${watch("nombre_cuenta")}` : "Ej. Remodelación baño principal, Venta grifería..."} 
+                                    />
+                                    {errors.nombre_oportunidad && <p className="text-red-500 text-xs mt-1">{errors.nombre_oportunidad.message}</p>}
+                                </div>
+
                                 <div>
                                     <label className="text-sm font-medium text-slate-700">Fase de Oportunidad *</label>
                                     <select 
@@ -1176,17 +1457,14 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                 </div>
 
                                 <div>
-                                    <label className="text-sm font-medium text-slate-700">Categoría (Opcional)</label>
-                                    <select 
-                                        {...register("categoria_oportunidad")} 
-                                        className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-green-500 outline-none"
-                                    >
-                                        <option value="">Seleccione...</option>
-                                        <option value="Baños">Baños</option>
-                                        <option value="Zona de Labores">Zona de Labores</option>
-                                        <option value="Cocinas">Cocinas</option>
-                                        <option value="Hidromasajes">Hidromasajes</option>
-                                    </select>
+                                    <label className="text-sm font-medium text-slate-700">Categorías de Interés (Opcional)</label>
+                                    <MultiSelect
+                                        options={OPPORTUNITY_CATEGORIES}
+                                        selected={parseOpportunityCategories(watch("categoria_oportunidad"))}
+                                        onChange={(vals) => setValue("categoria_oportunidad", vals, { shouldValidate: true })}
+                                        placeholder="Seleccionar categorías..."
+                                        className="mt-1"
+                                    />
                                 </div>
                             </div>
 
