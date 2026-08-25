@@ -217,7 +217,7 @@ function ContactsContent() {
     // --- VIEW: Create Contact Flow (Step 1: Select Account) ---
     if (isCreating && !selectedAccountIdForCreate) {
         return (
-            <div className="p-6 max-w-7xl mx-auto space-y-8">
+            <div className="p-4 sm:p-6 max-w-7xl mx-auto space-y-6 sm:space-y-8">
                 <div className="flex flex-col gap-4">
                     <button
                         onClick={() => setIsCreating(false)}
@@ -232,10 +232,10 @@ function ContactsContent() {
                                 <Building size={32} />
                             </div>
                             <div>
-                                <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">
+                                <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
                                     Selecciona una Cuenta
                                 </h1>
-                                <p className="text-slate-500 font-medium">Elige la empresa vinculada al nuevo contacto</p>
+                                <p className="text-slate-500 font-medium text-sm sm:text-base">Elige la empresa vinculada al nuevo contacto</p>
                             </div>
                         </div>
                     </div>
@@ -249,7 +249,7 @@ function ContactsContent() {
                         placeholder="Buscar cuenta por nombre o NIT..."
                         value={accountSearchTerm}
                         onChange={(e) => setAccountSearchTerm(e.target.value)}
-                        className="w-full pl-12 pr-4 py-4 border border-slate-200 rounded-2xl shadow-sm focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] bg-white transition-all outline-none text-slate-700 font-medium placeholder:text-slate-400"
+                        className="w-full pl-12 pr-4 py-3.5 sm:py-4 border border-slate-200 rounded-2xl shadow-sm focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] bg-white transition-all outline-none text-slate-700 font-medium placeholder:text-slate-400"
                     />
                 </div>
 
@@ -267,7 +267,7 @@ function ContactsContent() {
                             <button
                                 key={acc.id}
                                 onClick={() => setSelectedAccountIdForCreate(acc.id)}
-                                className="group p-5 bg-white border border-slate-200 rounded-2xl hover:border-[#254153] hover:shadow-xl hover:shadow-slate-200/50 transition-all text-left relative flex flex-col gap-3"
+                                className="group p-4 sm:p-5 bg-white border border-slate-200 rounded-2xl hover:border-[#254153] hover:shadow-xl hover:shadow-slate-200/50 transition-all text-left relative flex flex-col gap-3"
                             >
                                 <div className="flex items-center gap-3">
                                     <div className="bg-slate-50 p-2 rounded-xl group-hover:bg-[#254153]/5 transition-colors">
@@ -294,7 +294,7 @@ function ContactsContent() {
     // --- VIEW: Create/Edit Form ---
     if (selectedAccountIdForCreate || editingContact) {
         return (
-            <div className="p-6 max-w-2xl mx-auto">
+            <div className="p-4 sm:p-6 max-w-2xl mx-auto">
                 <div className="flex justify-between items-center mb-4">
                     <button
                         onClick={resetView}
@@ -394,8 +394,8 @@ function ContactsContent() {
 
     // --- VIEW: Global List ---
     return (
-        <div data-testid="contacts-page" className="p-6 max-w-7xl mx-auto space-y-5">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div data-testid="contacts-page" className="p-4 sm:p-6 max-w-7xl mx-auto space-y-4 sm:space-y-5">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <div className="flex items-center gap-3">
                     <div className="bg-[#254153] p-2.5 rounded-xl text-white shadow-md shadow-[#254153]/15">
                         <User size={26} />
@@ -412,7 +412,7 @@ function ContactsContent() {
                 <button
                     data-testid="contacts-create-button"
                     onClick={() => setIsCreating(true)}
-                    className="w-full md:w-auto px-4 py-2.5 bg-[#254153] text-white rounded-lg hover:bg-[#1a2f3d] flex items-center justify-center gap-2 shadow-sm transition-all font-bold"
+                    className="w-full sm:w-auto px-4 py-2.5 bg-[#254153] text-white rounded-lg hover:bg-[#1a2f3d] flex items-center justify-center gap-2 shadow-sm transition-all font-bold"
                 >
                     <Plus size={18} />
                     Nuevo Contacto
@@ -457,7 +457,58 @@ function ContactsContent() {
                 </div>
             ) : (
                 <>
-                    <div data-testid="contacts-list" className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                    {/* VISTA MÓVIL: Tarjetas */}
+                    <div className="grid grid-cols-1 gap-3 md:hidden">
+                        {contacts.map((contact) => {
+                            const accountName = contact.account_name || accountMap.get(contact.account_id) || "Sin cuenta";
+                            return (
+                                <div 
+                                    key={contact.id}
+                                    onClick={() => handleEdit(contact)}
+                                    className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col hover:border-blue-300 active:scale-[0.99] transition-all relative cursor-pointer"
+                                >
+                                    <div className="p-4 border-b border-slate-100 flex justify-between items-start gap-3">
+                                        <div className="flex-1 min-w-0">
+                                            <div className="font-bold text-slate-900 text-sm mb-0.5 truncate">
+                                                {contact.nombre || "Sin nombre"}
+                                            </div>
+                                            <div className="text-slate-500 text-xs truncate">
+                                                {contact.cargo || "Sin cargo registrado"}
+                                            </div>
+                                        </div>
+                                        {contact.es_principal && (
+                                            <div className="shrink-0 flex items-start">
+                                                <span className="px-2.5 py-1 rounded-full text-[11px] font-bold border whitespace-nowrap bg-emerald-50 text-emerald-700 border-emerald-200">
+                                                    Principal
+                                                </span>
+                                            </div>
+                                        )}
+                                    </div>
+                                    
+                                    <div className="p-4 bg-slate-50/50 flex flex-col gap-2 text-xs">
+                                        <div className="flex items-center gap-2 text-slate-700 font-medium truncate">
+                                            <Building className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                                            <span className="truncate text-blue-700 font-semibold">{accountName}</span>
+                                        </div>
+                                        
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-slate-100">
+                                            <div className="flex items-center gap-2 text-slate-600 truncate">
+                                                <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                                <span className="truncate">{contact.email || "Sin email"}</span>
+                                            </div>
+                                            <div className="flex items-center gap-2 text-slate-600 truncate">
+                                                <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                                <span className="truncate">{contact.telefono || "Sin teléfono"}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+
+                    {/* VISTA DESKTOP: Tabla */}
+                    <div data-testid="contacts-list" className="hidden md:block overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
                         <div className="w-full relative z-0 opp-hot-wrap" style={{ minHeight: '400px' }}>
                             <style>{`
                                 /* ── Scrollbar ── */
@@ -614,11 +665,11 @@ function ContactsContent() {
                     </div>
 
                     {hasMore && (
-                        <div className="flex justify-center mt-12 mb-8">
+                        <div className="flex justify-center mt-8 mb-8 px-2">
                             <button
                                 onClick={loadMore}
                                 disabled={loading}
-                                className="flex items-center gap-2 px-8 py-3 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold hover:bg-slate-50 transition-all shadow-sm disabled:opacity-50"
+                                className="w-full sm:w-auto flex items-center justify-center gap-2 px-8 py-3.5 sm:py-3 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold hover:bg-slate-50 active:scale-[0.98] transition-all shadow-sm disabled:opacity-50"
                             >
                                 {loading && <Loader2 size={16} className="animate-spin" />}
                                 {loading ? "Cargando..." : "Cargar más contactos"}
