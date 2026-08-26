@@ -3,6 +3,13 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-08-26 - Ingest: Corrección Definitiva Validación Subclasificación (/tiendas)
+
+- **Eliminación de Error Falso "Subclasificación requerida" (`CreateStoreSaleForm.tsx`):**
+  - En React Hook Form con Zod, los campos con atributos condicionales o vinculados enviaban valor omitido disparando el error `"Subclasificación requerida"`.
+  - Se flexibilizó el esquema Zod (`storeSaleSchema`) para `subclasificacion_id`, `canal_id`, `pais_id` y `telefono`, resolviendo los valores de forma determinística en `onSubmit` tanto para cuentas nuevas como existentes vinculadas.
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
 ## 2026-08-26 - Ingest: Desbloqueo y Edición de Cuentas Vinculadas para Administradores (/tiendas)
 
 - **Permisos de Administrador en Formulario Tiendas-Ferias (`CreateStoreSaleForm.tsx`):**

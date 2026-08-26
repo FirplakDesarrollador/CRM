@@ -28,8 +28,8 @@ const storeSaleSchema = z.object({
     // Cuenta
     nombre_cuenta: z.string().min(2, "Nombre requerido"),
     nit_base: z.string().optional().nullable(),
-    telefono: z.string().min(1, "Teléfono requerido"),
-    pais_id: z.string().min(1, "País requerido"),
+    telefono: z.string().optional().nullable(),
+    pais_id: z.string().optional().nullable(),
     departamento_id: z.string().optional().nullable(),
     ciudad_id: z.string().optional().nullable(),
     direccion: z.string().optional().nullable(),
@@ -37,8 +37,8 @@ const storeSaleSchema = z.object({
         if (!val || val === "" || val === "*****") return true;
         return z.string().email().safeParse(val).success;
     }, { message: "Email inválido" }),
-    canal_id: z.string().min(1, "Canal de venta requerido"),
-    subclasificacion_id: z.string().min(1, "Subclasificación requerida"),
+    canal_id: z.string().optional().nullable(),
+    subclasificacion_id: z.string().optional().nullable(),
     
     // Contactos (para cliente nuevo o existente)
     contactos_ids: z.array(z.string()),
@@ -428,10 +428,10 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         // Subclasificación: buscar la del account o asignar la primera del canal si está vacía
         const matchingSub = subclassifications.find(s => String(s.id) === String(account.subclasificacion_id));
         if (account.subclasificacion_id && matchingSub) {
-            setValue("subclasificacion_id", String(matchingSub.id));
+            setValue("subclasificacion_id", String(matchingSub.id), { shouldValidate: true });
         } else {
             const firstChannelSub = subclassifications.find(s => s.canal_id === channel);
-            setValue("subclasificacion_id", firstChannelSub ? String(firstChannelSub.id) : "");
+            setValue("subclasificacion_id", firstChannelSub ? String(firstChannelSub.id) : "1", { shouldValidate: true });
         }
 
         setValue("pais_id", account.pais_id ? String(account.pais_id) : "1");
@@ -815,27 +815,33 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                 if (matchedAccount) {
                     // Usar el cliente existente
                     accountId = matchedAccount.id;
+                    const matchedSubId = data.subclasificacion_id ? Number(data.subclasificacion_id) : (matchedAccount.subclasificacion_id || 1);
                     await updateAccount(accountId, {
                         ...matchedAccount,
-                        canal_id: data.canal_id,
-                        subclasificacion_id: Number(data.subclasificacion_id),
+                        canal_id: data.canal_id || matchedAccount.canal_id || "PROPIO",
+                        subclasificacion_id: matchedSubId,
                     });
                     console.log("Cliente ya existe por NIT/teléfono/email, usando ID existente:", accountId);
                 } else {
                     // 1. Crear Cuenta si no existe
+                    const chosenCanal = data.canal_id || "PROPIO";
+                    const chosenSubId = data.subclasificacion_id 
+                        ? Number(data.subclasificacion_id) 
+                        : (channelSubclassifications[0]?.id ? Number(channelSubclassifications[0].id) : 1);
+
                     const accountData = {
                         nombre: data.nombre_cuenta,
                         nit_base: data.nit_base?.trim() || undefined,
-                        canal_id: data.canal_id,
-                        subclasificacion_id: Number(data.subclasificacion_id),
-                        telefono: data.telefono,
+                        canal_id: chosenCanal,
+                        subclasificacion_id: chosenSubId,
+                        telefono: data.telefono || undefined,
                         email: data.email || undefined,
                         direccion: data.direccion || undefined,
-                        pais_id: data.pais_id ? Number(data.pais_id) : null,
+                        pais_id: data.pais_id ? Number(data.pais_id) : 1,
                         departamento_id: data.departamento_id ? Number(data.departamento_id) : null,
                         ciudad_id: data.ciudad_id ? Number(data.ciudad_id) : null,
                         // Conservamos compatibilidad string con DB
-                        ciudad: data.ciudad_id ? citiesList.find(c => String(c.id) === data.ciudad_id)?.nombre : undefined,
+                        ciudad: data.ciudad_id ? (displayCities.find(c => String(c.id) === data.ciudad_id)?.nombre || citiesList.find(c => String(c.id) === data.ciudad_id)?.nombre) : undefined,
                         es_premium: false,
                         origen_cuenta: data.origen_oportunidad || undefined
                     };
