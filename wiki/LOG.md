@@ -3,6 +3,16 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-08-25 - Ingest: Optimización Responsive Móvil y Selección de Fila en Listados (Oportunidades, Cuentas, Contactos, Usuarios)
+
+- **Módulos Cuentas, Contactos y Oportunidades:**
+  - **Vista móvil:** Implementación de tarjetas interactivas adaptadas para dispositivos móviles con badges de estado, valores formateados, avatares y accesos directos.
+  - **Vista desktop (Handsontable):** Unificación de la interacción mediante clic/selección directa de fila para editar o navegar al detalle (eliminando la columna de botones manuales de acción en tabla a favor de un flujo más limpio).
+- **Módulo Usuarios (`/usuarios`, `UserList.tsx`):**
+  - **Vista móvil:** Tarjetas responsivas con badges de rol (`ROLE_LABELS`, `ROLE_COLORS`), estado activo/inactivo, chips de canales de venta asignados (`canales`) y botones de acción rápida para editar y alternar estado.
+  - **Vista desktop:** Tabla responsiva tradicional con detalle de roles, estado y canales autorizados.
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/pages/cuentas.md`, `wiki/pages/contactos.md`, `wiki/pages/roles-y-permisos.md`, `wiki/LOG.md`.
+
 ## 2026-08-25 - Ingest: Filtro por Origen (`origen_oportunidad`) en el Módulo Oportunidades
 
 - **Componente Filtros (`OpportunityFilters.tsx`):** Se integró el selector de "Origen" alimentado dinámicamente desde el catálogo `CRM_OrigenesOportunidad` (ordenado por `orden, nombre`), con soporte para limpiar filtros y sincronización de estado.

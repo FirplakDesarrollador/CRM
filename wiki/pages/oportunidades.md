@@ -45,6 +45,11 @@ solo COORDINADOR/ADMIN); el historial queda en `CRM_TransferenciasOportunidad`.
 (`/oportunidades/[id]/cotizaciones/[quoteId]`), actividades, colaboradores, asignados.
 `OpportunityQuickView` ofrece vista rápida desde listados.
 
+## Interfaz y Listado
+
+- **Vista móvil:** Tarjetas responsivas con badges de fase, estado, valor en COP, cierre estimado, avatar del vendedor y acceso directo al detalle.
+- **Vista desktop:** Tabla interactiva (Handsontable) con estilos adaptados, selección por clic de fila para navegar al detalle y persistencia de estado en `sessionStorage`/URL.
+
 ## Visibilidad
 
 VENDEDOR solo ve las suyas (`view_own_opportunities`); COORDINADOR/ADMIN ven todas.
