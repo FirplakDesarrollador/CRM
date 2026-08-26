@@ -3,6 +3,15 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-08-26 - Ingest: Robustez y Corrección en Módulo Inventarios (/inventarios)
+
+- **Corrección de Render y Manejo Defensivo (`InventoryManager.tsx`):**
+  - Se previno el error de conexión/render en React mediante validaciones nulas para `operation`, `meta`, `Icon` y `movement.producto`.
+  - Manejo seguro de arrays o joins simples devueltos por PostgREST para `producto:CRM_ListaDePrecios`.
+  - Carga optimizada de existencias activas globales (`useInventorySummary`) con feedback visual de carga independiente (`isLoadingMovements`).
+  - Depuración de precios de feria en Supabase (99 productos oficiales).
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
 ## 2026-08-26 - Ingest: Optimización Móvil y Desplegables con Búsqueda en Tiendas-Ferias (/tiendas)
 
 - **Desplegable de Asesor con Búsqueda (`SearchableSelect.tsx` & `CreateStoreSaleForm.tsx`):**
