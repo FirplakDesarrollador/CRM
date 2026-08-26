@@ -117,7 +117,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
     const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
     const productDropdownRef = useRef<HTMLDivElement>(null);
     const [isActivityExpanded, setIsActivityExpanded] = useState(false);
-    const [isContactExpanded, setIsContactExpanded] = useState(true);
+    const [isContactExpanded, setIsContactExpanded] = useState(false);
 
     // Estados para búsqueda y selección de cuentas existentes
     const [selectedAccount, setSelectedAccount] = useState<LocalCuenta | null>(null);
@@ -438,7 +438,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         setValue("departamento_id", account.departamento_id ? String(account.departamento_id) : "");
         setValue("ciudad_id", account.ciudad_id ? String(account.ciudad_id) : "");
         setValue("direccion", account.direccion || "");
-        setValue("asesor_id", account.owner_user_id || "");
+        setValue("asesor_id", account.owner_user_id || user?.id || "");
         setValue("contactos_ids", []);
         setValue("clientes_atendidos", 0);
         setValue("contacto_nombre", "");
@@ -446,9 +446,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         setValue("contacto_email", "");
         setValue("contacto_telefono", "");
         setValue("contacto_comentarios", "");
-        if (!watch("nombre_oportunidad")) {
-            setValue("nombre_oportunidad", `Venta - ${account.nombre}`);
-        }
+        setValue("nombre_oportunidad", `Venta - ${account.nombre}`);
     };
 
     const handleDeselectAccount = useCallback(() => {
@@ -477,13 +475,18 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         setValue("contacto_telefono", "");
         setValue("contacto_comentarios", "");
         setValue("nombre_oportunidad", "");
-        setValue("asesor_id", "");
-    }, [displayCountries, setValue]);
+        setValue("asesor_id", user?.id || "");
+    }, [displayCountries, setValue, user?.id]);
 
     const handleNombreCuentaChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const val = e.target.value;
         setAccountSearchQuery(val);
         setValue("nombre_cuenta", val);
+
+        const currentOppName = watch("nombre_oportunidad");
+        if (!currentOppName || currentOppName.startsWith("Venta - ")) {
+            setValue("nombre_oportunidad", val ? `Venta - ${val}` : "");
+        }
 
         if (selectedAccount) {
             // Si había una cuenta seleccionada y se borra o edita el texto del nombre, resetear a valores por defecto
@@ -505,7 +508,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             setValue("contacto_email", "");
             setValue("contacto_telefono", "");
             setValue("contacto_comentarios", "");
-            setValue("asesor_id", "");
+            setValue("asesor_id", user?.id || "");
         }
 
         if (val.trim().length >= 2) {
@@ -514,6 +517,13 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             setIsAccountDropdownOpen(false);
         }
     };
+
+    // Auto-asignar el usuario actual como asesor por defecto si no hay ninguno seleccionado
+    useEffect(() => {
+        if (user?.id && !watch("asesor_id") && !selectedAccount) {
+            setValue("asesor_id", user.id);
+        }
+    }, [user?.id, selectedAccount, setValue, watch]);
 
     const selectedChannel = watch("canal_id") || "PROPIO";
     const isFairSale = watch("venta_feria") || false;

@@ -3,6 +3,15 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-08-26 - Ingest: Contacto Colapsado por Defecto y Asesor Automático (/tiendas)
+
+- **Mejoras de Usabilidad en Tiendas-Ferias (`CreateStoreSaleForm.tsx`):**
+  - La sección "Contacto del Cliente" ahora permanece **cerrada/colapsada por defecto** (`isContactExpanded = false`) para evitar confusiones y recaptura redundante de datos.
+  - El "Asesor Encargado del Cliente" se autoselecciona con el usuario autenticado activo por defecto, evitando el error *"El asesor es obligatorio"*.
+  - Sincronización en tiempo real del nombre de la oportunidad al escribir el nombre del cliente.
+  - Incremento de versión a `1.1.2.4` para forzar invalidación de caché PWA en móviles.
+- **Páginas actualizadas:** `wiki/LOG.md`, `package.json`.
+
 ## 2026-08-26 - Ingest: Nombre de Oportunidad Opcional con Autogeneración (/tiendas)
 
 - **Desbloqueo de Campo Nombre de Oportunidad (`CreateStoreSaleForm.tsx`):**
