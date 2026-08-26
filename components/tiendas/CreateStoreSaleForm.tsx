@@ -76,9 +76,9 @@ const storeSaleSchema = z.object({
         inventario_disponible: z.number().optional(),
     })),
 
-    // Actividad
-    fecha_fin: z.string().min(1, "Fecha de vencimiento requerida"),
-    clasificacion_id: z.string().min(1, "Clasificación requerida"),
+    // Actividad (Opcional - con defaults)
+    fecha_fin: z.string().optional().nullable(),
+    clasificacion_id: z.string().optional().nullable(),
     prioridad: z.enum(["Baja", "Media", "Alta"]),
     actividad_descripcion: z.string().optional()
 });
@@ -974,15 +974,19 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             }
 
             // 3. Crear Actividad
+            const defaultClasif = eventClassifications[0]?.id || classifications[0]?.id || 1;
+            const finalClasifId = data.clasificacion_id ? Number(data.clasificacion_id) : Number(defaultClasif);
+            const finalFechaFin = data.fecha_fin || getDefaultDueDate();
+
             const activityData = {
                 opportunity_id: opportunityId,
                 account_id: accountId,
-                clasificacion_id: Number(data.clasificacion_id),
+                clasificacion_id: finalClasifId,
                 tipo_actividad: "EVENTO",
                 descripcion: data.actividad_descripcion || "Seguimiento de venta en tienda",
-                fecha_inicio: data.fecha_fin,
-                fecha_fin: data.fecha_fin,
-                prioridad: data.prioridad,
+                fecha_inicio: finalFechaFin,
+                fecha_fin: finalFechaFin,
+                prioridad: data.prioridad || "Media",
                 user_id: selectedAccount?.owner_user_id || data.asesor_id || user?.id,
             } satisfies Partial<LocalActivity>;
             await createActivity(activityData);

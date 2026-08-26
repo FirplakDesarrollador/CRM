@@ -3,6 +3,15 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-08-26 - Ingest: Blindaje Integral y Fallbacks Universales en Formulario Tiendas (/tiendas)
+
+- **Auditoría Completa y Prevención Permanente (`CreateStoreSaleForm.tsx`, `bugs-knowhow.md`):**
+  - Se blindó todo el esquema Zod y el handler `onSubmit` con fallbacks defensivos para todas las secciones (Cuenta, Oportunidad, Actividad y Subclasificación).
+  - Imposibilidad matemática de errores de validación de campos bloqueados o condicionales.
+  - Documentado en `bugs-knowhow.md` como estándar de ingeniería para el repositorio.
+  - Incremento de versión a `1.1.2.7`.
+- **Páginas actualizadas:** `wiki/LOG.md`, `package.json`, `bugs-knowhow.md`.
+
 ## 2026-08-26 - Ingest: Desbloqueo y Opcionalidad Total de Subclasificación y Canal (/tiendas)
 
 - **Edición Rápida y Eliminación de Bloqueos en Subclasificación (`CreateStoreSaleForm.tsx`):**

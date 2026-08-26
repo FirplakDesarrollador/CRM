@@ -1,5 +1,14 @@
 # Bugs & Known Issues (Know-how)
 
+## 0. React Hook Form + Disabled HTML Elements & Zod Validation Lock
+**Problema:** Al deshabilitar elementos HTML (`disabled={true}`) en React Hook Form (por ejemplo para bloquear edición de cuentas existentes vinculadas), el estándar HTML omite los valores de elementos deshabilitados durante el submit (`undefined` o `""`). Si el esquema de Zod tiene validación obligatoria (`.min(1)`), se produce un falso positivo de validación imposible de corregir por el usuario (e.g. "Subclasificación requerida", "Canal requerido").
+**Síntoma:** El usuario ve un campo bloqueado con un valor visible, pero al enviar el formulario aparece un mensaje rojo de error diciendo que el campo es requerido y el formulario no se envía.
+**Solución Definitiva:**
+1. Los esquemas Zod en formularios híbridos o rápidos no deben exigir `.min(1)` para campos condicionales o potencialmente bloqueados; deben ser `z.string().optional().nullable()`.
+2. En `onSubmit`, resolver el valor con fallback determinístico (e.g., `data.subclasificacion_id || selectedAccount?.subclasificacion_id || defaultSubclassId`).
+3. No deshabilitar el input (`disabled`), sino permitir su edición fluida o usar `readOnly` si se desea evitar edición sin perder el valor en RHF.
+**Archivos Afectados:** `components/tiendas/CreateStoreSaleForm.tsx`.
+
 ## 1. React Hook Form - Pérdida de Estado en Pestañas
 **Problema:** Al usar renderizado condicional para pestañas (e.g. `{activeTab === 'info' && <form>...}`) dentro de un componente que usa `useForm`, RHF desmonta y "desregistra" (unregisters) los campos por defecto. Si el usuario escribe en un campo, cambia de pestaña y vuelve, sus cambios se pierden.
 **Síntoma:** El usuario reporta que "no se guardan los comentarios" o cambios en ciertos campos si navega por el formulario antes de dar clic en Guardar.
