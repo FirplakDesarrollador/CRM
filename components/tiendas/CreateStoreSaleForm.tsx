@@ -109,7 +109,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
     const { createOpportunity } = useOpportunities();
     const { createActivity } = useActivities();
     const { createContact } = useContacts();
-    const { user } = useCurrentUser();
+    const { user, isAdmin } = useCurrentUser();
     const { users } = useUsers();
     const { origins, isLoading: isLoadingOrigins } = useOpportunityOrigins();
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -409,11 +409,31 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         setIsAccountDropdownOpen(false);
 
         setValue("nombre_cuenta", account.nombre);
-        setValue("nit_base", "*****");
-        setValue("telefono", "*****");
-        setValue("email", account.email ? "*****" : "");
-        setValue("canal_id", account.canal_id || "PROPIO");
-        setValue("subclasificacion_id", account.subclasificacion_id ? String(account.subclasificacion_id) : "");
+
+        // Si es ADMIN, siempre cargar los valores reales legibles
+        if (isAdmin) {
+            setValue("nit_base", account.nit_base || "");
+            setValue("telefono", account.telefono || "");
+            setValue("email", account.email || "");
+        } else {
+            // Para vendedores, enmascarar únicamente si el dato existe
+            setValue("nit_base", account.nit_base ? "*****" : "");
+            setValue("telefono", account.telefono ? "*****" : "");
+            setValue("email", account.email ? "*****" : "");
+        }
+
+        const channel = account.canal_id || "PROPIO";
+        setValue("canal_id", channel);
+
+        // Subclasificación: buscar la del account o asignar la primera del canal si está vacía
+        const matchingSub = subclassifications.find(s => String(s.id) === String(account.subclasificacion_id));
+        if (account.subclasificacion_id && matchingSub) {
+            setValue("subclasificacion_id", String(matchingSub.id));
+        } else {
+            const firstChannelSub = subclassifications.find(s => s.canal_id === channel);
+            setValue("subclasificacion_id", firstChannelSub ? String(firstChannelSub.id) : "");
+        }
+
         setValue("pais_id", account.pais_id ? String(account.pais_id) : "1");
         setValue("departamento_id", account.departamento_id ? String(account.departamento_id) : "");
         setValue("ciudad_id", account.ciudad_id ? String(account.ciudad_id) : "");
@@ -757,8 +777,26 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             let accountId = "";
 
             if (selectedAccount) {
-                // Usar directamente la cuenta existente seleccionada sin sobreescribir datos sensibles
                 accountId = selectedAccount.id;
+                // Si es admin o completó datos faltantes en la cuenta vinculada, actualizarla
+                const hasUpdates = isAdmin || !selectedAccount.subclasificacion_id || !selectedAccount.telefono || !selectedAccount.email || !selectedAccount.departamento_id;
+                if (hasUpdates) {
+                    await updateAccount(accountId, {
+                        ...selectedAccount,
+                        nombre: data.nombre_cuenta || selectedAccount.nombre,
+                        nit_base: data.nit_base && data.nit_base !== "*****" ? data.nit_base.trim() : selectedAccount.nit_base,
+                        telefono: data.telefono && data.telefono !== "*****" ? data.telefono : selectedAccount.telefono,
+                        email: data.email && data.email !== "*****" ? data.email : selectedAccount.email,
+                        canal_id: data.canal_id || selectedAccount.canal_id,
+                        subclasificacion_id: data.subclasificacion_id ? Number(data.subclasificacion_id) : selectedAccount.subclasificacion_id,
+                        pais_id: data.pais_id ? Number(data.pais_id) : selectedAccount.pais_id,
+                        departamento_id: data.departamento_id ? Number(data.departamento_id) : selectedAccount.departamento_id,
+                        ciudad_id: data.ciudad_id ? Number(data.ciudad_id) : selectedAccount.ciudad_id,
+                        ciudad: data.ciudad_id ? displayCities.find(c => String(c.id) === data.ciudad_id)?.nombre : selectedAccount.ciudad,
+                        direccion: data.direccion || selectedAccount.direccion,
+                        owner_user_id: data.asesor_id || selectedAccount.owner_user_id,
+                    });
+                }
                 console.log("Usando cuenta existente seleccionada:", accountId);
             } else {
                 // VALIDACIÓN DE DUPLICADOS LOCALES Y REMOTOS (NIT, Teléfono o Email)
@@ -935,16 +973,34 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                     <Store className="w-5 h-5" /> Datos Principales
                                 </h3>
                                 {selectedAccount && (
-                                    <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 text-blue-800 px-3 py-1 rounded-full text-xs font-medium">
-                                        <Lock className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                                        <span>Cliente existente · Datos protegidos</span>
-                                        <button
-                                            type="button"
-                                            onClick={handleDeselectAccount}
-                                            className="ml-1 text-blue-600 hover:text-blue-900 font-bold underline"
-                                        >
-                                            Limpiar / Desvincular
-                                        </button>
+                                    <div className={cn(
+                                        "flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium border",
+                                        isAdmin ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-blue-50 border-blue-200 text-blue-800"
+                                    )}>
+                                        {isAdmin ? (
+                                            <>
+                                                <span className="font-semibold">Cliente vinculado · Modo Administrador (Edición total)</span>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleDeselectAccount}
+                                                    className="ml-1 text-emerald-900 hover:text-emerald-950 font-bold underline"
+                                                >
+                                                    Limpiar / Desvincular
+                                                </button>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Lock className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                                                <span>Cliente existente · Datos protegidos</span>
+                                                <button
+                                                    type="button"
+                                                    onClick={handleDeselectAccount}
+                                                    className="ml-1 text-blue-600 hover:text-blue-900 font-bold underline"
+                                                >
+                                                    Limpiar / Desvincular
+                                                </button>
+                                            </>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -1032,7 +1088,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                                                         {account.canal_id}
                                                                     </span>
                                                                     {account.nit_base && (
-                                                                        <span className="text-slate-400 shrink-0">NIT: *****</span>
+                                                                        <span className="text-slate-400 shrink-0">NIT: {isAdmin ? account.nit_base : "*****"}</span>
                                                                     )}
                                                                     {account.ciudad && (
                                                                         <span className="text-slate-400 truncate">· {account.ciudad}</span>
@@ -1060,11 +1116,11 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                 <div>
                                     <label className="text-sm font-medium text-slate-700 flex items-center justify-between">
                                         <span>Teléfono *</span>
-                                        {selectedAccount && <Lock className="w-3 h-3 text-slate-400" />}
+                                        {selectedAccount && !isAdmin && !!selectedAccount.telefono && <Lock className="w-3 h-3 text-slate-400" />}
                                     </label>
                                     <input 
                                         {...register("telefono")} 
-                                        disabled={!!selectedAccount}
+                                        disabled={!isAdmin && !!selectedAccount && !!selectedAccount.telefono}
                                         className="w-full mt-1 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed" 
                                         placeholder="300 000 0000" 
                                     />
@@ -1090,12 +1146,12 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                 <div>
                                     <label className="text-sm font-medium text-slate-700 flex items-center justify-between">
                                         <span>Email (Opcional)</span>
-                                        {selectedAccount && <Lock className="w-3 h-3 text-slate-400" />}
+                                        {selectedAccount && !isAdmin && !!selectedAccount.email && <Lock className="w-3 h-3 text-slate-400" />}
                                     </label>
                                     <input 
                                         {...register("email")} 
-                                        type={selectedAccount ? "text" : "email"}
-                                        disabled={!!selectedAccount}
+                                        type={selectedAccount && !isAdmin && !!selectedAccount.email ? "text" : "email"}
+                                        disabled={!isAdmin && !!selectedAccount && !!selectedAccount.email}
                                         className="w-full mt-1 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed" 
                                         placeholder="correo@ejemplo.com" 
                                     />
@@ -1153,11 +1209,11 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                 <div>
                                     <label className="text-sm font-medium text-slate-700 flex items-center justify-between">
                                         <span>Cédula / NIT</span>
-                                        {selectedAccount && <Lock className="w-3 h-3 text-slate-400" />}
+                                        {selectedAccount && !isAdmin && !!selectedAccount.nit_base && <Lock className="w-3 h-3 text-slate-400" />}
                                     </label>
                                     <input 
                                         {...register("nit_base")} 
-                                        disabled={!!selectedAccount}
+                                        disabled={!isAdmin && !!selectedAccount && !!selectedAccount.nit_base}
                                         className="w-full mt-1 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed" 
                                         placeholder="123456789" 
                                     />
@@ -1184,12 +1240,12 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                 <div>
                                     <label className="text-sm font-medium text-slate-700 flex items-center justify-between">
                                         <span>Canal de Venta *</span>
-                                        {selectedAccount && <Lock className="w-3 h-3 text-slate-400" />}
+                                        {selectedAccount && !isAdmin && <Lock className="w-3 h-3 text-slate-400" />}
                                     </label>
                                     <select 
                                         {...register("canal_id")}
                                         value={watch("canal_id") || "PROPIO"}
-                                        disabled={!!selectedAccount}
+                                        disabled={!isAdmin && !!selectedAccount}
                                         className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                                         onChange={(e) => {
                                             register("canal_id").onChange(e);
@@ -1205,12 +1261,12 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                 <div>
                                     <label className="text-sm font-medium text-slate-700 flex items-center justify-between">
                                         <span>Subclasificación *</span>
-                                        {selectedAccount && <Lock className="w-3 h-3 text-slate-400" />}
+                                        {selectedAccount && !isAdmin && !!selectedAccount.subclasificacion_id && <Lock className="w-3 h-3 text-slate-400" />}
                                     </label>
                                     <select 
                                         {...register("subclasificacion_id")}
                                         value={watch("subclasificacion_id") || ""}
-                                        disabled={!!selectedAccount || !selectedChannel || (channelSubclassifications.length === 0 && !selectedAccount)} 
+                                        disabled={(!isAdmin && !!selectedAccount && !!selectedAccount.subclasificacion_id) || !selectedChannel || (channelSubclassifications.length === 0 && !selectedAccount)} 
                                         className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed focus:ring-2 focus:ring-blue-500 outline-none"
                                     >
                                         {channelSubclassifications.length === 0 && !selectedAccount && <option value="">Sin opciones sincronizadas</option>}
@@ -1229,12 +1285,12 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                 <div>
                                     <label className="text-sm font-medium text-slate-700 flex items-center justify-between">
                                         <span>País</span>
-                                        {selectedAccount && <Lock className="w-3 h-3 text-slate-400" />}
+                                        {selectedAccount && !isAdmin && !!selectedAccount.pais_id && <Lock className="w-3 h-3 text-slate-400" />}
                                     </label>
                                     <select
                                         {...register("pais_id")}
                                         value={watch("pais_id") || ""}
-                                        disabled={!!selectedAccount}
+                                        disabled={!isAdmin && !!selectedAccount && !!selectedAccount.pais_id}
                                         className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                                         onChange={(e) => {
                                             register("pais_id").onChange(e);
@@ -1252,13 +1308,13 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                 <div>
                                     <label className="text-sm font-medium text-slate-700 flex items-center justify-between">
                                         <span>Departamento</span>
-                                        {selectedAccount && <Lock className="w-3 h-3 text-slate-400" />}
+                                        {selectedAccount && !isAdmin && !!selectedAccount.departamento_id && <Lock className="w-3 h-3 text-slate-400" />}
                                     </label>
                                     <select
                                         {...register("departamento_id")}
                                         value={watch("departamento_id") || ""}
                                         className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
-                                        disabled={!!selectedAccount || !watch("pais_id")}
+                                        disabled={(!isAdmin && !!selectedAccount && !!selectedAccount.departamento_id) || !watch("pais_id")}
                                         onChange={(e) => {
                                             register("departamento_id").onChange(e);
                                             setValue("ciudad_id", "");
@@ -1276,13 +1332,13 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                 <div>
                                     <label className="text-sm font-medium text-slate-700 flex items-center justify-between">
                                         <span>Ciudad</span>
-                                        {selectedAccount && <Lock className="w-3 h-3 text-slate-400" />}
+                                        {selectedAccount && !isAdmin && !!selectedAccount.ciudad_id && <Lock className="w-3 h-3 text-slate-400" />}
                                     </label>
                                     <select
                                         {...register("ciudad_id")}
                                         value={watch("ciudad_id") || ""}
                                         className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
-                                        disabled={!!selectedAccount || !watch("departamento_id")}
+                                        disabled={(!isAdmin && !!selectedAccount && !!selectedAccount.ciudad_id) || !watch("departamento_id")}
                                     >
                                         <option value="">Seleccione...</option>
                                         {displayCities
@@ -1298,7 +1354,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                 <div>
                                     <label className="text-sm font-semibold text-blue-900 flex items-center justify-between">
                                         <span>Asesor Encargado del Cliente *</span>
-                                        {selectedAccount && <Lock className="w-3 h-3 text-slate-400" />}
+                                        {selectedAccount && !isAdmin && !!selectedAccount.owner_user_id && <Lock className="w-3 h-3 text-slate-400" />}
                                     </label>
                                     <div className="mt-1">
                                         <SearchableSelect
@@ -1308,10 +1364,10 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                             placeholder="Seleccione un asesor..."
                                             searchPlaceholder="Buscar asesor por nombre..."
                                             emptyText="No se encontraron asesores disponibles."
-                                            disabled={!!selectedAccount}
+                                            disabled={!isAdmin && !!selectedAccount && !!selectedAccount.owner_user_id}
                                             triggerClassName={cn(
                                                 "border-blue-300 font-medium text-slate-800",
-                                                selectedAccount && "bg-slate-100 text-slate-500 cursor-not-allowed"
+                                                (!isAdmin && !!selectedAccount && !!selectedAccount.owner_user_id) && "bg-slate-100 text-slate-500 cursor-not-allowed"
                                             )}
                                         />
                                     </div>
@@ -1328,11 +1384,11 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                 <div>
                                     <label className="text-sm font-medium text-slate-700 flex items-center justify-between">
                                         <span>Dirección (Opcional)</span>
-                                        {selectedAccount && <Lock className="w-3 h-3 text-slate-400" />}
+                                        {selectedAccount && !isAdmin && !!selectedAccount.direccion && <Lock className="w-3 h-3 text-slate-400" />}
                                     </label>
                                     <input 
                                         {...register("direccion")} 
-                                        disabled={!!selectedAccount}
+                                        disabled={!isAdmin && !!selectedAccount && !!selectedAccount.direccion}
                                         className="w-full mt-1 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed" 
                                         placeholder="Calle/Carrera" 
                                     />

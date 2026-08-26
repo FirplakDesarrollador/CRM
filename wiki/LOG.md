@@ -3,6 +3,15 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-08-26 - Ingest: Desbloqueo y Edición de Cuentas Vinculadas para Administradores (/tiendas)
+
+- **Permisos de Administrador en Formulario Tiendas-Ferias (`CreateStoreSaleForm.tsx`):**
+  - Los usuarios con rol `ADMIN` (como Mayerly Marín) ahora tienen desbloqueo y edición total de todos los campos al vincular cuentas existentes (NIT, Teléfono, Email, Canal, Subclasificación, Ubicación y Asesor).
+  - Se eliminó el enmascaramiento con `*****` para administradores, cargando los datos legibles reales.
+  - Se implementó fallback inteligente de subclasificación por canal y desbloqueo de campos vacíos en cuentas incompletas para evitar bloqueos por validación ("Subclasificación requerida").
+  - Sincronización automática de cambios sobre la cuenta vinculada al enviar el formulario si es admin o si se completaron datos faltantes.
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
 ## 2026-08-26 - Ingest: Robustez y Corrección en Módulo Inventarios (/inventarios)
 
 - **Corrección de Render y Manejo Defensivo (`InventoryManager.tsx`):**
