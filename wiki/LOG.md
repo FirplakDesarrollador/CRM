@@ -33,6 +33,15 @@
   - **Actividad Programada:** Bloque colapsable con Clasificación, Prioridad, Vencimiento y Comentarios.
 - **Páginas actualizadas:** `wiki/LOG.md`.
 
+## 2026-08-26 - Ingest: Catálogo de Productos - Filtro Completo y Eliminación de Límites Arbitrarios
+
+- **Catálogo de Productos (`/catalogo`, `CatalogPage.tsx`):**
+  - Se eliminó el truncamiento a 300 productos cuando se aplican filtros de disponibilidad o búsqueda.
+  - El filtro "Solo disponibles" ahora consulta la totalidad de registros con existencia/disponibilidad en `CRM_InventarioDisponible` (`disponible > 0`) y carga la lista completa de productos disponibles sin cortes arbitrarios.
+  - Se optimizó `useProductSearch` (`lib/hooks/useProducts.ts`) agregando soporte para opciones avanzadas (`onlyFeria`, `productIds`, `limit: 10000`) para consultas del catálogo completo y filtros por planta, familia y feria.
+  - Se optimizó `fetchInventorySummary` (`lib/hooks/useInventory.ts`) para consultar selectivamente los registros con movimientos o disponibilidad activa.
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
 ## 2026-08-25 - Ingest: Optimización Responsive Móvil y Selección de Fila en Listados (Oportunidades, Cuentas, Contactos, Usuarios)
 
 - **Módulos Cuentas, Contactos y Oportunidades:**
