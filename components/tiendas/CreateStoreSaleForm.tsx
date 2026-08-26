@@ -806,7 +806,8 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             if (selectedAccount) {
                 accountId = selectedAccount.id;
                 // Si es admin o completó datos faltantes en la cuenta vinculada, actualizarla
-                const hasUpdates = isAdmin || !selectedAccount.subclasificacion_id || !selectedAccount.telefono || !selectedAccount.email || !selectedAccount.departamento_id;
+                const hasUpdates = isAdmin || !selectedAccount.subclasificacion_id || !selectedAccount.telefono || !selectedAccount.email || !selectedAccount.departamento_id
+                    || (!!data.origen_oportunidad && selectedAccount.origen_cuenta !== data.origen_oportunidad);
                 if (hasUpdates) {
                     await updateAccount(accountId, {
                         ...selectedAccount,
@@ -822,6 +823,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                         ciudad: data.ciudad_id ? displayCities.find(c => String(c.id) === data.ciudad_id)?.nombre : selectedAccount.ciudad,
                         direccion: data.direccion || selectedAccount.direccion,
                         owner_user_id: data.asesor_id || selectedAccount.owner_user_id,
+                        origen_cuenta: data.origen_oportunidad || selectedAccount.origen_cuenta,
                     });
                 }
                 console.log("Usando cuenta existente seleccionada:", accountId);
@@ -847,6 +849,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                         ...matchedAccount,
                         canal_id: data.canal_id || matchedAccount.canal_id || "PROPIO",
                         subclasificacion_id: matchedSubId,
+                        origen_cuenta: data.origen_oportunidad || matchedAccount.origen_cuenta,
                     });
                     console.log("Cliente ya existe por NIT/teléfono/email, usando ID existente:", accountId);
                 } else {
