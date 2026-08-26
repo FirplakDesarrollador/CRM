@@ -45,7 +45,7 @@ const schema = z.object({
     comentarios: z.string().optional().nullable(),
     direccion_entrega: z.string().optional().nullable(),
     contactos_ids: z.array(z.string()).optional().default([]),
-    clientes_atendidos: z.coerce.number().min(0).optional().default(0),
+    clientes_atendidos: z.coerce.number().min(0).optional().default(1),
     items: z.array(z.object({
         product_id: z.string(),
         cantidad: z.number().min(1),
@@ -197,7 +197,7 @@ export default function CreateOpportunityWizard() {
             comentarios: '',
             direccion_entrega: '',
             contactos_ids: [],
-            clientes_atendidos: 0,
+            clientes_atendidos: 1,
             items: [],
             owner_user_id: ''
         },
@@ -863,7 +863,7 @@ export default function CreateOpportunityWizard() {
                                     selected={watch("contactos_ids") || []}
                                     onChange={(vals) => {
                                         setValue("contactos_ids", vals);
-                                        setValue("clientes_atendidos", vals.length);
+                                        setValue("clientes_atendidos", vals.length > 0 ? vals.length : 1);
                                     }}
                                     placeholder="Seleccionar contactos de la cuenta..."
                                     className="mt-1"
@@ -878,7 +878,7 @@ export default function CreateOpportunityWizard() {
                                 min="0" 
                                 {...register("clientes_atendidos")} 
                                 className="w-full p-2 border rounded-lg mt-1" 
-                                placeholder="0" 
+                                placeholder="1" 
                             />
                             <p className="text-[10px] text-slate-500 mt-0.5">
                                 Contabiliza cuántos clientes o personas se atendieron en esta oportunidad.

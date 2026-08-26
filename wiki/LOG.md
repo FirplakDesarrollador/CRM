@@ -3,6 +3,22 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-08-26 - Ingest: Blindaje de Calidad y Robustez del Formulario de Tiendas (/tiendas)
+
+- **Asignación de Propietario (`useAccounts.ts` & `CreateStoreSaleForm.tsx`):** `createAccount` ahora respeta `owner_user_id` pasado en el payload, asignando el cliente nuevo directamente al asesor seleccionado (evitando que quede asignado al usuario logueado en caso de registro por coordinadores/administradores). Para cuentas existentes sin asesor, se actualiza el propietario en Dexie/Supabase.
+- **Sincronización Dinámica de Precios e Inventario:** El efecto reactivo de recálculo al alternar la casilla "Venta de Feria" ahora actualiza tanto precios como `inventario_disponible` en tiempo real desde el mapa de inventario.
+- **Edición de Cantidades Fluida:** Se corrigió el comportamiento del input de cantidad permitiendo borrar dígitos con retroceso sin forzar `NaN` o `1` prematuro antes del `onBlur`.
+- **Resumen Visual de Valor Total:** Se añadió una tarjeta en la sección de productos que muestra el conteo total de unidades y el monto total en COP (`watch("amount")`) con distintivo de precios de feria si aplica.
+- **Reserva de Feria Defensiva:** Llamada a `reserveFairInventory` envuelta en bloque `try/catch` defensivo para no interrumpir el registro ni la creación de la actividad en caso de intermitencia de red.
+- **Reseteo de Fase al Cambiar Canal:** Al cambiar el canal de venta, se resetea la fase a la primera fase válida del nuevo canal.
+- **Corrección de Arreglos en RPC (`public.process_field_updates`):**
+  - **Causa Raíz:** Al enviar `contactos_ids: []` (arreglo de UUIDs) en mutaciones snapshot (`_complete_snapshot_`), PostgreSQL intentaba castear el texto `($2->>'contactos_ids')::_uuid`, el cual generaba el string `"[]"` con corchetes en lugar de llaves `{}` de PostgreSQL, arrojando el error `malformed array literal: "[]"`.
+  - **Solución y Refinamiento:** Se actualizó la función `public.process_field_updates` en Supabase/PostgreSQL para detectar columnas de tipo arreglo usando `LEFT(v_col_type, 1) = '_'` (evitando el comodín de SQL `LIKE '_%'` que capturaba `varchar` como `archar`) y construir el arreglo nativo mediante `jsonb_array_elements_text()` y `array_agg(elem::base_type)` con fallback seguro a `ARRAY[]::base_type[]`.
+  - **Efecto Cascada:** Al desbloquearse la inserción de la oportunidad y la actualización de cuentas, se resuelve automáticamente el fallo en `CRM_Cuentas` y `CRM_Actividades`.
+  - **Migración creada:** `supabase/migrations/20260826_fix_process_field_updates_array_types.sql`.
+- **Incremento de versión a `1.1.2.8`.**
+- **Páginas actualizadas:** `wiki/LOG.md`, `package.json`.
+
 ## 2026-08-26 - Ingest: Blindaje Integral y Fallbacks Universales en Formulario Tiendas (/tiendas)
 
 - **Auditoría Completa y Prevención Permanente (`CreateStoreSaleForm.tsx`, `bugs-knowhow.md`):**
@@ -68,6 +84,16 @@
   - Manejo seguro de arrays o joins simples devueltos por PostgREST para `producto:CRM_ListaDePrecios`.
   - Carga optimizada de existencias activas globales (`useInventorySummary`) con feedback visual de carga independiente (`isLoadingMovements`).
   - Depuración de precios de feria en Supabase (99 productos oficiales).
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
+## 2026-08-26 - Ingest: Corrección de Guardado de Clientes Existentes, Subclasificación Opcional y Clientes Atendidos por Defecto (= 1) en /tiendas
+
+- **Selección de Cuenta Existente y Defaults (`CreateStoreSaleForm.tsx` & `CreateOpportunityWizard.tsx`):**
+  - **Clientes Atendidos por Defecto (= 1):** Se fijó el valor por defecto de `clientes_atendidos` en `1` (en lugar de `0`) en la inicialización, reseteo, vinculación de cuentas y selección de contactos (mínimo 1) en `/tiendas` y en el wizard de oportunidades.
+  - **Subclasificación 100% Opcional:** Se flexibilizó el esquema Zod a opcional/nullable (`subclasificacion_id: z.string().optional().nullable()`), se agregó opción vacía por defecto (`Seleccionar (Opcional)...`), se eliminó la auto-asignación forzada y se desbloquea el campo si la cuenta seleccionada carece de subclasificación.
+  - **Asesor por Defecto (Luis Guillermo Escobar):** Si la cuenta existente no tiene asesor asignado (`owner_user_id` nulo/vacío), se asigna por defecto a Luis Guillermo Escobar (`bc4209dd-cf19-4a97-b4c5-ed8d11d94965` / `luis.escobar@firplak.com`), permitiendo además seleccionarlo o modificarlo en la interfaz en lugar de bloquearlo.
+  - **Captura de Errores de Validación (`onInvalid`):** Se agregó callback a `handleSubmit(onSubmit, onInvalid)` para mostrar feedback explícito al usuario en caso de que algún campo obligatorio no esté completo.
+- **Páginas actualizadas:** `wiki/LOG.md`.
 - **Páginas actualizadas:** `wiki/LOG.md`.
 
 ## 2026-08-26 - Ingest: Optimización Móvil y Desplegables con Búsqueda en Tiendas-Ferias (/tiendas)
