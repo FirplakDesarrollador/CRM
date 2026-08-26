@@ -3,6 +3,13 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-08-26 - Ingest: Nombre de Oportunidad Opcional con Autogeneración (/tiendas)
+
+- **Desbloqueo de Campo Nombre de Oportunidad (`CreateStoreSaleForm.tsx`):**
+  - Se eliminó la obligatoriedad de `nombre_oportunidad` en el esquema Zod y en la interfaz de usuario.
+  - Si el asesor o usuario deja el campo vacío, el sistema genera automáticamente el nombre en formato `Venta - [Nombre de la Cuenta]` (o `Venta en Tienda` si es cliente genérico), permitiendo guardar registros sin interrupciones.
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
 ## 2026-08-26 - Ingest: Corrección Definitiva Validación Subclasificación (/tiendas)
 
 - **Eliminación de Error Falso "Subclasificación requerida" (`CreateStoreSaleForm.tsx`):**

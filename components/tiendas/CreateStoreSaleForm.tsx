@@ -52,15 +52,15 @@ const storeSaleSchema = z.object({
     contacto_telefono: z.string().optional(),
     contacto_comentarios: z.string().optional(),
 
-    // Oportunidad
-    nombre_oportunidad: z.string().min(1, "Nombre de la oportunidad requerido"),
-    fase_id: z.string().min(1, "Fase requerida"),
-    amount: z.number(),
-    comentarios: z.string().min(1, "Comentario requerido"),
-    origen_oportunidad: z.string().min(1, "Origen requerido"),
-    venta_feria: z.boolean(),
+    // Oportunidad (Opcional - con autogeneración)
+    nombre_oportunidad: z.string().optional().nullable(),
+    fase_id: z.string().optional().nullable(),
+    amount: z.number().optional().nullable(),
+    comentarios: z.string().optional().nullable(),
+    origen_oportunidad: z.string().optional().nullable(),
+    venta_feria: z.boolean().optional(),
     categoria_oportunidad: z.union([z.array(z.string()), z.string()]).optional().nullable(),
-    asesor_id: z.string().min(1, "El asesor es obligatorio"),
+    asesor_id: z.string().optional().nullable(),
     items: z.array(z.object({
         product_id: z.string(),
         cantidad: z.number().min(1),
@@ -908,20 +908,27 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
 
             // 3. Crear Oportunidad
             const formattedCategories = formatOpportunityCategories(data.categoria_oportunidad);
+            const commentsText = data.comentarios?.trim() || "";
             const combinedComentarios = formattedCategories ? 
-                `Categorías: ${formattedCategories}\n\n${data.comentarios}` : data.comentarios;
+                (commentsText ? `Categorías: ${formattedCategories}\n\n${commentsText}` : `Categorías: ${formattedCategories}`) 
+                : (commentsText || "Registro desde feria/tienda");
+
+            const defaultOppName = data.nombre_cuenta ? `Venta - ${data.nombre_cuenta}` : "Venta en Tienda";
+            const oppName = data.nombre_oportunidad?.trim() || defaultOppName;
+            const finalFaseId = data.fase_id ? Number(data.fase_id) : (phasesList[0]?.id ? Number(phasesList[0].id) : 1);
+            const finalOrigen = data.origen_oportunidad || (origins[0]?.codigo || "visita");
 
             const opportunityData = {
                 account_id: accountId,
-                nombre: data.nombre_oportunidad?.trim() || `Venta - ${data.nombre_cuenta}`,
-                amount: data.amount,
-                fase_id: Number(data.fase_id),
+                nombre: oppName,
+                amount: data.amount || 0,
+                fase_id: finalFaseId,
                 estado_id: 1, // OPEN
                 currency_id: "COP",
-                origen_oportunidad: data.origen_oportunidad,
+                origen_oportunidad: finalOrigen,
                 categoria_oportunidad: formattedCategories || undefined,
                 comentarios: combinedComentarios,
-                items: data.items,
+                items: data.items || [],
                 owner_user_id: selectedAccount?.owner_user_id || data.asesor_id || user?.id,
                 contactos_ids: finalContactosIds,
                 clientes_atendidos: attendedCount,
@@ -1562,11 +1569,14 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                             
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div className="md:col-span-2">
-                                    <label className="text-sm font-medium text-slate-700">Nombre de la Oportunidad *</label>
+                                    <label className="text-sm font-medium text-slate-700 flex items-center justify-between">
+                                        <span>Nombre de la Oportunidad</span>
+                                        <span className="text-[11px] text-slate-400 font-normal">(Opcional · Autogenerado)</span>
+                                    </label>
                                     <input 
                                         {...register("nombre_oportunidad")} 
                                         className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-green-500 outline-none" 
-                                        placeholder={watch("nombre_cuenta") ? `Venta - ${watch("nombre_cuenta")}` : "Ej. Remodelación baño principal, Venta grifería..."} 
+                                        placeholder={watch("nombre_cuenta") ? `Venta - ${watch("nombre_cuenta")}` : "Venta en Tienda"} 
                                     />
                                     {errors.nombre_oportunidad && <p className="text-red-500 text-xs mt-1">{errors.nombre_oportunidad.message}</p>}
                                 </div>
