@@ -1278,15 +1278,13 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 rounded-xl border border-blue-100 bg-blue-50/50">
                                 <div>
-                                    <label className="text-sm font-medium text-slate-700 flex items-center justify-between">
-                                        <span>Canal de Venta *</span>
-                                        {selectedAccount && !isAdmin && <Lock className="w-3 h-3 text-slate-400" />}
+                                    <label className="text-sm font-medium text-slate-700">
+                                        Canal de Venta
                                     </label>
                                     <select 
                                         {...register("canal_id")}
                                         value={watch("canal_id") || "PROPIO"}
-                                        disabled={!isAdmin && !!selectedAccount}
-                                        className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
+                                        className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none"
                                         onChange={(e) => {
                                             register("canal_id").onChange(e);
                                             setValue("subclasificacion_id", "");
@@ -1296,20 +1294,18 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         {SALES_CHANNELS.map(channel => <option key={channel.id} value={channel.id}>{channel.nombre}</option>)}
                                     </select>
                                     <p className="text-[11px] text-slate-500 mt-1">El canal o tipo de cuenta define la lista de precios aplicada.</p>
-                                    {errors.canal_id && <p className="text-red-500 text-xs mt-1">{errors.canal_id.message}</p>}
                                 </div>
                                 <div>
                                     <label className="text-sm font-medium text-slate-700 flex items-center justify-between">
-                                        <span>Subclasificación *</span>
-                                        {selectedAccount && !isAdmin && !!selectedAccount.subclasificacion_id && <Lock className="w-3 h-3 text-slate-400" />}
+                                        <span>Subclasificación</span>
+                                        <span className="text-[11px] text-slate-400 font-normal">(Opcional)</span>
                                     </label>
                                     <select 
                                         {...register("subclasificacion_id")}
                                         value={watch("subclasificacion_id") || ""}
-                                        disabled={(!isAdmin && !!selectedAccount && !!selectedAccount.subclasificacion_id) || !selectedChannel || (channelSubclassifications.length === 0 && !selectedAccount)} 
-                                        className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed focus:ring-2 focus:ring-blue-500 outline-none"
+                                        className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none"
                                     >
-                                        {channelSubclassifications.length === 0 && !selectedAccount && <option value="">Sin opciones sincronizadas</option>}
+                                        <option value="">Seleccione subclasificación...</option>
                                         {selectedAccount && selectedAccount.subclasificacion_id && !channelSubclassifications.some(item => String(item.id) === String(selectedAccount.subclasificacion_id)) && (
                                             <option value={String(selectedAccount.subclasificacion_id)}>
                                                 {subclassifications.find(s => String(s.id) === String(selectedAccount.subclasificacion_id))?.nombre || "Subclasificación Asignada"}
@@ -1317,7 +1313,6 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         )}
                                         {channelSubclassifications.map(item => <option key={item.id} value={String(item.id)}>{item.nombre}</option>)}
                                     </select>
-                                    {errors.subclasificacion_id && <p className="text-red-500 text-xs mt-1">{errors.subclasificacion_id.message}</p>}
                                 </div>
                             </div>
 

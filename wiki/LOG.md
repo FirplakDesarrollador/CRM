@@ -3,6 +3,15 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-08-26 - Ingest: Desbloqueo y Opcionalidad Total de Subclasificación y Canal (/tiendas)
+
+- **Edición Rápida y Eliminación de Bloqueos en Subclasificación (`CreateStoreSaleForm.tsx`):**
+  - Se eliminaron todos los candados `disabled` en Subclasificación y Canal de Venta para todos los usuarios.
+  - El campo `subclasificacion_id` es completamente opcional, editable de forma instantánea y se eliminaron las alertas de error asociadas.
+  - Fallback automático determinístico en `onSubmit` si se deja vacío.
+  - Incremento de versión a `1.1.2.6`.
+- **Páginas actualizadas:** `wiki/LOG.md`, `package.json`.
+
 ## 2026-08-26 - Ingest: Filtrado Estricto de Productos de Feria Disponibles (/tiendas)
 
 - **Corrección de Búsqueda y Disponibilidad en Venta de Feria (`CreateStoreSaleForm.tsx`):**
