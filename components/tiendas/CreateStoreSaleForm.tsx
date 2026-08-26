@@ -174,14 +174,6 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             label: `${c.nombre}${c.cargo ? ` (${c.cargo})` : ''}${c.telefono ? ` - ${c.telefono}` : ''}`
         }));
     }, [accountContacts]);
-    
-    const { products: searchResults, isLoading: isSearching } = useProductSearch(searchTerm);
-    const searchProductIds = useMemo(() => searchResults.map(product => product.id), [searchResults]);
-    const { summary: inventorySummary } = useInventorySummary(searchProductIds);
-    const inventoryByProduct = useMemo(
-        () => new Map(inventorySummary.map(item => [item.producto_id, item])),
-        [inventorySummary],
-    );
 
     // Listas locales (Dexie) con Fallback de Supabase
     const countriesList = useLiveQuery(() => db.countries.toArray()) || [];
@@ -261,6 +253,32 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             asesor_id: ""
         }
     });
+
+    const isFairSale = watch("venta_feria") || false;
+    const { summary: globalInventorySummary } = useInventorySummary();
+    const inventoryByProduct = useMemo(
+        () => new Map(globalInventorySummary.map(item => [item.producto_id, item])),
+        [globalInventorySummary],
+    );
+
+    const fairProductIds = useMemo(() => {
+        if (!isFairSale) return undefined;
+        return globalInventorySummary
+            .filter(item => (item.disponible || 0) > 0)
+            .map(item => item.producto_id);
+    }, [isFairSale, globalInventorySummary]);
+
+    const { products: searchResults, isLoading: isSearching } = useProductSearch(
+        searchTerm,
+        undefined,
+        isFairSale,
+        undefined,
+        undefined,
+        {
+            onlyFeria: isFairSale,
+            productIds: isFairSale ? fairProductIds : undefined
+        }
+    );
 
     // Cerrar dropdowns (cuentas y productos) al hacer clic o tap afuera
     useEffect(() => {
@@ -526,7 +544,6 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
     }, [user?.id, selectedAccount, setValue, watch]);
 
     const selectedChannel = watch("canal_id") || "PROPIO";
-    const isFairSale = watch("venta_feria") || false;
     const phasesQuery = useLiveQuery(
         () => db.phases.where("canal_id").equals(selectedChannel).sortBy("orden"),
         [selectedChannel],
@@ -1643,10 +1660,10 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                     <input
                                         type="text"
                                         className="block w-full pl-10 pr-10 py-2.5 sm:py-2 border border-slate-300 rounded-lg bg-slate-50 focus:outline-none focus:bg-white focus:ring-2 focus:ring-green-500 text-base sm:text-sm min-h-[42px]"
-                                        placeholder="Buscar más productos para agregar..."
+                                        placeholder={isFairSale ? "Buscar productos de feria disponibles (o ver lista)..." : "Buscar más productos para agregar..."}
                                         value={searchTerm}
                                         onFocus={() => {
-                                            if (searchTerm.trim().length > 0) setIsProductDropdownOpen(true);
+                                            if (isFairSale || searchTerm.trim().length > 0) setIsProductDropdownOpen(true);
                                         }}
                                         onChange={(e) => {
                                             setSearchTerm(e.target.value);
@@ -1658,7 +1675,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                             type="button"
                                             onClick={() => {
                                                 setSearchTerm("");
-                                                setIsProductDropdownOpen(false);
+                                                if (!isFairSale) setIsProductDropdownOpen(false);
                                             }}
                                             className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-600 active:bg-slate-200 rounded-md text-xs font-bold transition-colors"
                                             title="Limpiar búsqueda de productos"
@@ -1666,14 +1683,16 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                             ✕
                                         </button>
                                     )}
-                                    {isProductDropdownOpen && searchTerm.trim().length > 0 && (
+                                    {isProductDropdownOpen && (isFairSale || searchTerm.trim().length > 0) && (
                                         <div className="absolute z-30 w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl max-h-64 overflow-y-auto overscroll-contain divide-y divide-slate-100">
                                             {isSearching ? (
                                                 <div className="p-4 text-center text-slate-500 text-sm flex items-center justify-center gap-2">
                                                     <Loader2 className="w-4 h-4 animate-spin text-green-600" /> Buscando...
                                                 </div>
                                             ) : searchResults.length === 0 ? (
-                                                <div className="p-4 text-center text-slate-500 text-xs sm:text-sm">No se encontraron productos</div>
+                                                <div className="p-4 text-center text-slate-500 text-xs sm:text-sm">
+                                                    {isFairSale ? "No se encontraron productos de feria disponibles con inventario" : "No se encontraron productos"}
+                                                </div>
                                             ) : (
                                                 searchResults.map((product: PriceListProduct) => {
                                                     const displayPrice = getProductPrice(product, selectedChannel, isFairSale);

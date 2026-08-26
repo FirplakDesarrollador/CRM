@@ -3,6 +3,14 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-08-26 - Ingest: Filtrado Estricto de Productos de Feria Disponibles (/tiendas)
+
+- **Corrección de Búsqueda y Disponibilidad en Venta de Feria (`CreateStoreSaleForm.tsx`):**
+  - Al marcar "Venta de feria", el buscador de productos ahora filtra de forma estricta únicamente aquellos ítems que tienen `precio_feria > 0` y existencia disponible positiva (`disponible > 0`) en el inventario de feria.
+  - Al abrir o enfocar el buscador con "Venta de feria" activo, despliega directamente el catálogo de productos disponibles en feria (ej. hidromasaje Mobu con existencia física/disponible), ocultando ítems sin inventario o ajenos a la feria.
+  - Incremento de versión a `1.1.2.5`.
+- **Páginas actualizadas:** `wiki/LOG.md`, `package.json`.
+
 ## 2026-08-26 - Ingest: Contacto Colapsado por Defecto y Asesor Automático (/tiendas)
 
 - **Mejoras de Usabilidad en Tiendas-Ferias (`CreateStoreSaleForm.tsx`):**
