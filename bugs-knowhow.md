@@ -972,9 +972,31 @@ Fix Applied:
 4. Se habilitó el paso de `initialContactData` en `useAccounts.createAccount` para conservar datos reales de contacto.
 
 Prevention Rule:
-**Snapshot Foreign Keys Must Be Deep-Remapped in Self-Healing**: Toda rutina de deduplicación o remapeo de identificadores debe actualizar tanto mutaciones de campos planos como el interior de payloads estructurados (`_complete_snapshot_`). Los formularios deben proveer detección temprana en tiempo real para evitar intentos de inserción duplicada desde el origen.
+## [Bug ID: 20260826-01]
+
+Context:
+`supabase/migrations/` y función RPC `process_field_updates` en Supabase/PostgreSQL.
+
+Problem:
+Al sincronizar mutaciones de tipo snapshot (`_complete_snapshot_`) o campos individuales que contienen arreglos (como `contactos_ids` en `CRM_Oportunidades`), PostgreSQL arrojaba el error:
+`malformed array literal: "[]" [Context: _complete_snapshot_ (INSERT)]`
+provocando que el registro de oportunidad cayera a `DEAD_LETTER` y, en consecuencia, la actividad vinculada fallara por violación de clave foránea `fk_crmact_opp`.
+
+Root Cause:
+En la función dinámica `process_field_updates`, la conversión de valores para la consulta SQL usaba extracción de texto simple `($2->>'col')::udt_name`.
+Cuando la columna es de tipo arreglo en PostgreSQL (ej. `uuid[]` cuyo `udt_name` es `_uuid`, `_text`, etc.), la extracción JSON a texto produce `"[]"`, el cual es un formato JSON con corchetes y NO una sintaxis de literal de arreglo de PostgreSQL (`"{}"`), causando el error `22P02: malformed array literal`.
+
+Fix Applied:
+1. Se actualizó la función `public.process_field_updates` en PostgreSQL para detectar si el tipo de columna es un arreglo usando `LEFT(v_col_type, 1) = '_'` (evitando el comodín de un solo caracter en SQL `LIKE '_%'` que accidentalmente coincidía con tipos como `varchar` y producía `type "archar" does not exist`).
+2. Se implementó una cláusula `CASE` que convierte arreglos JSONB usando `jsonb_array_elements_text()` y `array_agg(elem::base_type)` con fallback a `ARRAY[]::base_type[]`, manejando tanto `_complete_snapshot_` como actualizaciones individuales.
+3. Se generó la migración `20260826_fix_process_field_updates_array_types.sql`.
+
+Prevention Rule:
+**Never Use Unescaped SQL LIKE '_%' For Underscore Matching**: En SQL / PL/pgSQL, el caracter `_` es un comodín que coincide con cualquier caracter individual (haciendo que `varchar` coincida con `_%`). Para verificar si un string inicia con un guión bajo literal, usar siempre `LEFT(col, 1) = '_'` o `starts_with(col, '_')`.
+**JSONB Arrays Must Be Aggregated to Postgres Arrays**: En funciones RPC dinámicas en PL/pgSQL, nunca castear un JSONB array extrayendo texto plano `($2->>'col')::array_type`. Siempre usar `jsonb_array_elements_text` + `array_agg` para construir arreglos nativos de PostgreSQL.
 
 Tags:
-[sync] [self-healing] [snapshot] [contacts] [tiendas] [duplicate-detection]
+[sync] [postgres] [rpc] [array-literal] [opportunities] [dead-letter] [sql-like-wildcard]
+
 
 

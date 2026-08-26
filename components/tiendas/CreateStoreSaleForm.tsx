@@ -38,7 +38,7 @@ const storeSaleSchema = z.object({
         return z.string().email().safeParse(val).success;
     }, { message: "Email inválido" }),
     canal_id: z.string().min(1, "Canal de venta requerido"),
-    subclasificacion_id: z.string().min(1, "Subclasificación requerida"),
+    subclasificacion_id: z.string().optional().nullable(),
     
     // Contactos (para cliente nuevo o existente)
     contactos_ids: z.array(z.string()),
@@ -240,7 +240,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             canal_id: "PROPIO",
             subclasificacion_id: "",
             contactos_ids: [],
-            clientes_atendidos: 0,
+            clientes_atendidos: 1,
             contacto_nombre: "",
             contacto_cargo: "",
             contacto_email: "",
@@ -408,26 +408,38 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         setAccountSearchQuery(account.nombre);
         setIsAccountDropdownOpen(false);
 
-        setValue("nombre_cuenta", account.nombre);
+        const channel = account.canal_id || "PROPIO";
+        const subclasificacionVal = account.subclasificacion_id 
+            ? String(account.subclasificacion_id) 
+            : "";
+
+        const luisGuillermo = users?.find(u => 
+            (u.full_name && includesNormalized(u.full_name, "luis guillermo")) ||
+            (u.email && includesNormalized(u.email, "luis.escobar")) ||
+            u.id === "bc4209dd-cf19-4a97-b4c5-ed8d11d94965"
+        );
+        const defaultAdvisor = account.owner_user_id || luisGuillermo?.id || user?.id || "";
+
+        setValue("nombre_cuenta", account.nombre, { shouldValidate: true });
         setValue("nit_base", "*****");
-        setValue("telefono", "*****");
+        setValue("telefono", account.telefono || "*****", { shouldValidate: true });
         setValue("email", account.email ? "*****" : "");
-        setValue("canal_id", account.canal_id || "PROPIO");
-        setValue("subclasificacion_id", account.subclasificacion_id ? String(account.subclasificacion_id) : "");
-        setValue("pais_id", account.pais_id ? String(account.pais_id) : "1");
+        setValue("canal_id", channel, { shouldValidate: true });
+        setValue("subclasificacion_id", subclasificacionVal, { shouldValidate: true });
+        setValue("pais_id", account.pais_id ? String(account.pais_id) : "1", { shouldValidate: true });
         setValue("departamento_id", account.departamento_id ? String(account.departamento_id) : "");
         setValue("ciudad_id", account.ciudad_id ? String(account.ciudad_id) : "");
         setValue("direccion", account.direccion || "");
-        setValue("asesor_id", account.owner_user_id || "");
+        setValue("asesor_id", defaultAdvisor, { shouldValidate: true });
         setValue("contactos_ids", []);
-        setValue("clientes_atendidos", 0);
+        setValue("clientes_atendidos", 1);
         setValue("contacto_nombre", "");
         setValue("contacto_cargo", "");
         setValue("contacto_email", "");
         setValue("contacto_telefono", "");
         setValue("contacto_comentarios", "");
         if (!watch("nombre_oportunidad")) {
-            setValue("nombre_oportunidad", `Venta - ${account.nombre}`);
+            setValue("nombre_oportunidad", `Venta - ${account.nombre}`, { shouldValidate: true });
         }
     };
 
@@ -450,7 +462,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         setValue("ciudad_id", "");
         setValue("direccion", "");
         setValue("contactos_ids", []);
-        setValue("clientes_atendidos", 0);
+        setValue("clientes_atendidos", 1);
         setValue("contacto_nombre", "");
         setValue("contacto_cargo", "");
         setValue("contacto_email", "");
@@ -479,7 +491,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             setValue("ciudad_id", "");
             setValue("direccion", "");
             setValue("contactos_ids", []);
-            setValue("clientes_atendidos", 0);
+            setValue("clientes_atendidos", 1);
             setValue("contacto_nombre", "");
             setValue("contacto_cargo", "");
             setValue("contacto_email", "");
@@ -548,21 +560,53 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
 
     const advisorOptions = useMemo(() => {
         const list: { value: string; label: string }[] = [];
-        if (selectedAccount && selectedAccount.owner_user_id && !filteredAdvisors.some(u => u.id === selectedAccount.owner_user_id)) {
+        const seenIds = new Set<string>();
+
+        const currentAsesorId = watch("asesor_id");
+        if (currentAsesorId) {
+            const foundUser = users?.find(u => u.id === currentAsesorId);
+            if (foundUser) {
+                list.push({
+                    value: foundUser.id,
+                    label: foundUser.full_name || foundUser.email || `Usuario ${foundUser.id}`
+                });
+                seenIds.add(foundUser.id);
+            }
+        }
+
+        if (selectedAccount?.owner_user_id && !seenIds.has(selectedAccount.owner_user_id)) {
             const assignedUser = users?.find(u => u.id === selectedAccount.owner_user_id);
             list.push({
                 value: selectedAccount.owner_user_id,
                 label: assignedUser?.full_name || assignedUser?.email || "Asesor Asignado"
             });
+            seenIds.add(selectedAccount.owner_user_id);
         }
-        filteredAdvisors.forEach(u => {
+
+        const luisGuillermo = users?.find(u => 
+            (u.full_name && includesNormalized(u.full_name, "luis guillermo")) ||
+            (u.email && includesNormalized(u.email, "luis.escobar")) ||
+            u.id === "bc4209dd-cf19-4a97-b4c5-ed8d11d94965"
+        );
+        if (luisGuillermo && !seenIds.has(luisGuillermo.id)) {
             list.push({
-                value: u.id,
-                label: u.full_name || u.email || `Usuario ${u.id}`
+                value: luisGuillermo.id,
+                label: luisGuillermo.full_name || luisGuillermo.email
             });
+            seenIds.add(luisGuillermo.id);
+        }
+
+        filteredAdvisors.forEach(u => {
+            if (!seenIds.has(u.id)) {
+                list.push({
+                    value: u.id,
+                    label: u.full_name || u.email || `Usuario ${u.id}`
+                });
+                seenIds.add(u.id);
+            }
         });
         return list;
-    }, [filteredAdvisors, selectedAccount, users]);
+    }, [filteredAdvisors, selectedAccount, users, watch("asesor_id")]);
 
     // Garantizar que Colombia quede seleccionado automáticamente cuando los países terminen de cargar (solo si no hay cuenta seleccionada)
     useEffect(() => {
@@ -600,7 +644,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             canal_id: "PROPIO",
             subclasificacion_id: "",
             contactos_ids: [],
-            clientes_atendidos: 0,
+            clientes_atendidos: 1,
             contacto_nombre: "",
             contacto_cargo: "",
             contacto_email: "",
@@ -638,13 +682,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         }
     }, [phasesList, setValue, watch]);
 
-    useEffect(() => {
-        if (selectedAccount) return;
-        const currentSubclass = watch("subclasificacion_id");
-        if (channelSubclassifications.length > 0 && !channelSubclassifications.some(item => String(item.id) === currentSubclass)) {
-            setValue("subclasificacion_id", String(channelSubclassifications[0].id));
-        }
-    }, [channelSubclassifications, setValue, watch, selectedAccount]);
+
 
     useEffect(() => {
         const currentOrigin = watch("origen_oportunidad");
@@ -674,11 +712,20 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
 
     // Recalcular los productos ya elegidos al cambiar canal o venta de feria.
     useEffect(() => {
-        const repriced = items.map(item => ({ ...item, precio: getProductPrice(item, selectedChannel, isFairSale) }));
-        if (repriced.some((item, index) => item.precio !== items[index].precio)) {
+        const repriced = items.map(item => {
+            const newPrice = getProductPrice(item, selectedChannel, isFairSale);
+            const inv = inventoryByProduct.get(item.product_id);
+            const available = inv?.disponible !== undefined ? inv.disponible : item.inventario_disponible;
+            return {
+                ...item,
+                precio: newPrice,
+                inventario_disponible: available
+            };
+        });
+        if (repriced.some((item, index) => item.precio !== items[index].precio || item.inventario_disponible !== items[index].inventario_disponible)) {
             setValue("items", repriced);
         }
-    }, [selectedChannel, isFairSale, items, setValue]);
+    }, [selectedChannel, isFairSale, items, setValue, inventoryByProduct]);
 
     const addProduct = (product: PriceListProduct) => {
         const price = getProductPrice(product, selectedChannel, isFairSale);
@@ -719,9 +766,14 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         setSearchTerm("");
     };
 
-    const updateQuantity = (productId: string, qty: number) => {
+    const updateQuantity = (productId: string, qty: number | string) => {
+        const num = typeof qty === "number" ? qty : parseInt(qty);
+        if (isNaN(num)) {
+            setValue("items", items.map(current => current.product_id === productId ? { ...current, cantidad: 0 } : current));
+            return;
+        }
+        let validQty = Math.max(1, num);
         const item = items.find(current => current.product_id === productId);
-        let validQty = isNaN(qty) ? 1 : Math.max(1, qty);
         if (isFairSale && item?.inventario_disponible !== undefined) {
             validQty = Math.min(validQty, item.inventario_disponible);
         }
@@ -756,9 +808,19 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
 
             let accountId = "";
 
+            const luisGuillermoUser = users?.find(u => 
+                (u.full_name && includesNormalized(u.full_name, "luis guillermo")) ||
+                (u.email && includesNormalized(u.email, "luis.escobar")) ||
+                u.id === "bc4209dd-cf19-4a97-b4c5-ed8d11d94965"
+            );
+            const resolvedAdvisorId = selectedAccount?.owner_user_id || data.asesor_id || luisGuillermoUser?.id || user?.id;
+
             if (selectedAccount) {
                 // Usar directamente la cuenta existente seleccionada sin sobreescribir datos sensibles
                 accountId = selectedAccount.id;
+                if (!selectedAccount.owner_user_id && resolvedAdvisorId) {
+                    await updateAccount(accountId, { owner_user_id: resolvedAdvisorId });
+                }
                 console.log("Usando cuenta existente seleccionada:", accountId);
             } else {
                 // VALIDACIÓN DE DUPLICADOS LOCALES Y REMOTOS (NIT, Teléfono o Email)
@@ -780,7 +842,8 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                     await updateAccount(accountId, {
                         ...matchedAccount,
                         canal_id: data.canal_id,
-                        subclasificacion_id: Number(data.subclasificacion_id),
+                        subclasificacion_id: data.subclasificacion_id ? Number(data.subclasificacion_id) : (matchedAccount.subclasificacion_id || null),
+                        owner_user_id: matchedAccount.owner_user_id || resolvedAdvisorId
                     });
                     console.log("Cliente ya existe por NIT/teléfono/email, usando ID existente:", accountId);
                 } else {
@@ -789,17 +852,18 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                         nombre: data.nombre_cuenta,
                         nit_base: data.nit_base?.trim() || undefined,
                         canal_id: data.canal_id,
-                        subclasificacion_id: Number(data.subclasificacion_id),
+                        subclasificacion_id: data.subclasificacion_id ? Number(data.subclasificacion_id) : null,
                         telefono: data.telefono,
                         email: data.email || undefined,
                         direccion: data.direccion || undefined,
                         pais_id: data.pais_id ? Number(data.pais_id) : null,
                         departamento_id: data.departamento_id ? Number(data.departamento_id) : null,
                         ciudad_id: data.ciudad_id ? Number(data.ciudad_id) : null,
-                        // Conservamos compatibilidad string con DB
-                        ciudad: data.ciudad_id ? citiesList.find(c => String(c.id) === data.ciudad_id)?.nombre : undefined,
+                        // Conservamos compatibilidad string con DB usando displayCities
+                        ciudad: data.ciudad_id ? (displayCities.find(c => String(c.id) === data.ciudad_id)?.nombre || undefined) : undefined,
                         es_premium: false,
-                        origen_cuenta: data.origen_oportunidad || undefined
+                        origen_cuenta: data.origen_oportunidad || undefined,
+                        owner_user_id: resolvedAdvisorId
                     };
 
                     const initialContact = data.contacto_nombre?.trim() ? {
@@ -858,9 +922,9 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                 }
             }
 
-            const attendedCount = typeof data.clientes_atendidos === 'number' && !isNaN(data.clientes_atendidos)
+            const attendedCount = typeof data.clientes_atendidos === 'number' && !isNaN(data.clientes_atendidos) && data.clientes_atendidos >= 1
                 ? data.clientes_atendidos
-                : finalContactosIds.length;
+                : (finalContactosIds.length > 0 ? finalContactosIds.length : 1);
 
             // 3. Crear Oportunidad
             const formattedCategories = formatOpportunityCategories(data.categoria_oportunidad);
@@ -878,7 +942,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                 categoria_oportunidad: formattedCategories || undefined,
                 comentarios: combinedComentarios,
                 items: data.items,
-                owner_user_id: selectedAccount?.owner_user_id || data.asesor_id || user?.id,
+                owner_user_id: resolvedAdvisorId,
                 contactos_ids: finalContactosIds,
                 clientes_atendidos: attendedCount,
             };
@@ -889,7 +953,11 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             }
 
             if (data.venta_feria && data.items.length > 0) {
-                await reserveFairInventory(data.items, opportunityId);
+                try {
+                    await reserveFairInventory(data.items, opportunityId);
+                } catch (invErr) {
+                    console.warn("Aviso al reservar inventario de feria (se reintentará en sync):", invErr);
+                }
             }
 
             // 3. Crear Actividad
@@ -902,7 +970,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                 fecha_inicio: data.fecha_fin,
                 fecha_fin: data.fecha_fin,
                 prioridad: data.prioridad,
-                user_id: selectedAccount?.owner_user_id || data.asesor_id || user?.id,
+                user_id: resolvedAdvisorId,
             } satisfies Partial<LocalActivity>;
             await createActivity(activityData);
 
@@ -917,6 +985,16 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         }
     };
 
+    const onInvalid = (formErrors: any) => {
+        console.warn("[CreateStoreSaleForm] Errores de validación:", formErrors);
+        const errorKeys = Object.keys(formErrors);
+        if (errorKeys.length > 0) {
+            const firstKey = errorKeys[0];
+            const firstMsg = formErrors[firstKey]?.message || "Por favor verifica los campos obligatorios.";
+            alert(`No se puede guardar: ${firstMsg}`);
+        }
+    };
+
     return (
         <div className="w-full flex flex-col">
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 w-full flex flex-col overflow-hidden">
@@ -926,7 +1004,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                 </div>
 
                 <div className="p-6 flex-1">
-                    <form id="store-sale-form" onSubmit={handleSubmit(onSubmit)} className="space-y-8">
+                    <form id="store-sale-form" onSubmit={handleSubmit(onSubmit, onInvalid)} className="space-y-8">
                         
                         {/* SECCIÓN 1: DATOS PRINCIPALES (CLIENTE Y OPORTUNIDAD) */}
                         <section className="space-y-4">
@@ -1192,9 +1270,14 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         disabled={!!selectedAccount}
                                         className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                                         onChange={(e) => {
+                                            const newChannel = e.target.value;
                                             register("canal_id").onChange(e);
                                             setValue("subclasificacion_id", "");
                                             setValue("asesor_id", "");
+                                            const firstPhase = phasesList.find(p => p.canal_id === newChannel);
+                                            if (firstPhase) {
+                                                setValue("fase_id", String(firstPhase.id));
+                                            }
                                         }}
                                     >
                                         {SALES_CHANNELS.map(channel => <option key={channel.id} value={channel.id}>{channel.nombre}</option>)}
@@ -1204,16 +1287,16 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                 </div>
                                 <div>
                                     <label className="text-sm font-medium text-slate-700 flex items-center justify-between">
-                                        <span>Subclasificación *</span>
-                                        {selectedAccount && <Lock className="w-3 h-3 text-slate-400" />}
+                                        <span>Subclasificación (Opcional)</span>
+                                        {selectedAccount && selectedAccount.subclasificacion_id && <Lock className="w-3 h-3 text-slate-400" />}
                                     </label>
                                     <select 
                                         {...register("subclasificacion_id")}
                                         value={watch("subclasificacion_id") || ""}
-                                        disabled={!!selectedAccount || !selectedChannel || (channelSubclassifications.length === 0 && !selectedAccount)} 
+                                        disabled={!!(selectedAccount && selectedAccount.subclasificacion_id) || !selectedChannel} 
                                         className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed focus:ring-2 focus:ring-blue-500 outline-none"
                                     >
-                                        {channelSubclassifications.length === 0 && !selectedAccount && <option value="">Sin opciones sincronizadas</option>}
+                                        <option value="">Seleccionar (Opcional)...</option>
                                         {selectedAccount && selectedAccount.subclasificacion_id && !channelSubclassifications.some(item => String(item.id) === String(selectedAccount.subclasificacion_id)) && (
                                             <option value={String(selectedAccount.subclasificacion_id)}>
                                                 {subclassifications.find(s => String(s.id) === String(selectedAccount.subclasificacion_id))?.nombre || "Subclasificación Asignada"}
@@ -1298,7 +1381,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                 <div>
                                     <label className="text-sm font-semibold text-blue-900 flex items-center justify-between">
                                         <span>Asesor Encargado del Cliente *</span>
-                                        {selectedAccount && <Lock className="w-3 h-3 text-slate-400" />}
+                                        {selectedAccount && selectedAccount.owner_user_id && <Lock className="w-3 h-3 text-slate-400" />}
                                     </label>
                                     <div className="mt-1">
                                         <SearchableSelect
@@ -1308,10 +1391,10 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                             placeholder="Seleccione un asesor..."
                                             searchPlaceholder="Buscar asesor por nombre..."
                                             emptyText="No se encontraron asesores disponibles."
-                                            disabled={!!selectedAccount}
+                                            disabled={!!(selectedAccount && selectedAccount.owner_user_id)}
                                             triggerClassName={cn(
                                                 "border-blue-300 font-medium text-slate-800",
-                                                selectedAccount && "bg-slate-100 text-slate-500 cursor-not-allowed"
+                                                (selectedAccount && selectedAccount.owner_user_id) && "bg-slate-100 text-slate-500 cursor-not-allowed"
                                             )}
                                         />
                                     </div>
@@ -1391,8 +1474,8 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                                     selected={watch("contactos_ids") || []}
                                                     onChange={(vals) => {
                                                         setValue("contactos_ids", vals);
-                                                        // Auto-actualizar clientes atendidos con el conteo de contactos seleccionados
-                                                        setValue("clientes_atendidos", vals.length);
+                                                        // Auto-actualizar clientes atendidos con el conteo de contactos seleccionados (mínimo 1)
+                                                        setValue("clientes_atendidos", vals.length > 0 ? vals.length : 1);
                                                     }}
                                                     placeholder="Seleccionar uno o más contactos de la cuenta..."
                                                 />
@@ -1421,7 +1504,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                                 min="0"
                                                 {...register("clientes_atendidos", { valueAsNumber: true })}
                                                 className="w-32 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none text-base font-semibold text-slate-800"
-                                                placeholder="0" 
+                                                placeholder="1" 
                                             />
                                             <span className="text-xs text-slate-500">
                                                 Contabiliza cuántas personas o clientes se atendieron en esta oportunidad.
@@ -1642,9 +1725,15 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                                 <div className="flex items-center gap-2">
                                                     <input
                                                         type="number"
-                                                        className="w-16 p-1 border rounded text-center text-sm"
-                                                        value={isNaN(item.cantidad) ? "" : item.cantidad}
-                                                        onChange={(e) => updateQuantity(item.product_id, parseInt(e.target.value))}
+                                                        min="1"
+                                                        className="w-16 p-1 border rounded text-center text-sm font-semibold focus:ring-2 focus:ring-green-500 outline-none"
+                                                        value={item.cantidad === 0 ? "" : item.cantidad}
+                                                        onChange={(e) => updateQuantity(item.product_id, e.target.value === "" ? "" : parseInt(e.target.value))}
+                                                        onBlur={() => {
+                                                            if (!item.cantidad || item.cantidad < 1) {
+                                                                updateQuantity(item.product_id, 1);
+                                                            }
+                                                        }}
                                                     />
                                                     <button
                                                         type="button"
@@ -1656,6 +1745,26 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                                 </div>
                                             </div>
                                         ))
+                                    )}
+
+                                    {/* Resumen Total de Productos y Valor */}
+                                    {items.length > 0 && (
+                                        <div className="mt-3 p-3 bg-green-50/80 border border-green-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-xs">
+                                            <div className="text-xs text-green-800 font-medium">
+                                                <span>Total productos: <strong className="text-green-900">{items.reduce((acc, curr) => acc + (curr.cantidad || 0), 0)}</strong> unidad(es)</span>
+                                                {isFairSale && (
+                                                    <span className="block text-[11px] text-amber-700 font-semibold mt-0.5">
+                                                        ✨ Precios especiales de feria aplicados
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div className="flex items-baseline gap-1.5 self-end sm:self-auto">
+                                                <span className="text-xs text-green-700 font-medium">Total:</span>
+                                                <span className="text-base font-bold text-green-900">
+                                                    COP $ {new Intl.NumberFormat().format(watch("amount") || 0)}
+                                                </span>
+                                            </div>
+                                        </div>
                                     )}
                                 </div>
                             </div>
