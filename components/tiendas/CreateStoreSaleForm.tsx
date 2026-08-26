@@ -20,6 +20,7 @@ import { reserveFairInventory, useInventorySummary } from "@/lib/hooks/useInvent
 import { getProductPrice, SALES_CHANNELS } from "@/lib/salesChannels";
 import { cn, includesNormalized, matchesSearchTokens, removeAccents } from "@/lib/utils";
 import { MultiSelect } from "@/components/ui/MultiSelect";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 import { OPPORTUNITY_CATEGORIES, formatOpportunityCategories, parseOpportunityCategories } from "@/lib/opportunityCategories";
 
 // Eschema de validación combinado
@@ -113,6 +114,8 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
     const { origins, isLoading: isLoadingOrigins } = useOpportunityOrigins();
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [searchTerm, setSearchTerm] = useState("");
+    const [isProductDropdownOpen, setIsProductDropdownOpen] = useState(false);
+    const productDropdownRef = useRef<HTMLDivElement>(null);
     const [isActivityExpanded, setIsActivityExpanded] = useState(false);
     const [isContactExpanded, setIsContactExpanded] = useState(true);
 
@@ -259,15 +262,23 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         }
     });
 
-    // Cerrar dropdown de cuentas al hacer clic afuera
+    // Cerrar dropdowns (cuentas y productos) al hacer clic o tap afuera
     useEffect(() => {
-        function handleClickOutside(event: MouseEvent) {
-            if (accountDropdownRef.current && !accountDropdownRef.current.contains(event.target as Node)) {
+        function handleClickOutside(event: MouseEvent | TouchEvent) {
+            const target = event.target as Node;
+            if (accountDropdownRef.current && !accountDropdownRef.current.contains(target)) {
                 setIsAccountDropdownOpen(false);
+            }
+            if (productDropdownRef.current && !productDropdownRef.current.contains(target)) {
+                setIsProductDropdownOpen(false);
             }
         }
         document.addEventListener("mousedown", handleClickOutside);
-        return () => document.removeEventListener("mousedown", handleClickOutside);
+        document.addEventListener("touchstart", handleClickOutside);
+        return () => {
+            document.removeEventListener("mousedown", handleClickOutside);
+            document.removeEventListener("touchstart", handleClickOutside);
+        };
     }, []);
 
     // Búsqueda remota complementaria en Supabase si está online
@@ -534,6 +545,24 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             return true;
         });
     }, [users, selectedPais, selectedDept, selectedChannel]);
+
+    const advisorOptions = useMemo(() => {
+        const list: { value: string; label: string }[] = [];
+        if (selectedAccount && selectedAccount.owner_user_id && !filteredAdvisors.some(u => u.id === selectedAccount.owner_user_id)) {
+            const assignedUser = users?.find(u => u.id === selectedAccount.owner_user_id);
+            list.push({
+                value: selectedAccount.owner_user_id,
+                label: assignedUser?.full_name || assignedUser?.email || "Asesor Asignado"
+            });
+        }
+        filteredAdvisors.forEach(u => {
+            list.push({
+                value: u.id,
+                label: u.full_name || u.email || `Usuario ${u.id}`
+            });
+        });
+        return list;
+    }, [filteredAdvisors, selectedAccount, users]);
 
     // Garantizar que Colombia quede seleccionado automáticamente cuando los países terminen de cargar (solo si no hay cuenta seleccionada)
     useEffect(() => {
@@ -899,11 +928,11 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                 <div className="p-6 flex-1">
                     <form id="store-sale-form" onSubmit={handleSubmit(onSubmit)} className="space-y-8">
                         
-                        {/* SECCIÓN CUENTA */}
+                        {/* SECCIÓN 1: DATOS PRINCIPALES (CLIENTE Y OPORTUNIDAD) */}
                         <section className="space-y-4">
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b pb-2 gap-2">
                                 <h3 className="text-lg font-semibold flex items-center gap-2 text-blue-800">
-                                    <Store className="w-5 h-5" /> Datos del Cliente
+                                    <Store className="w-5 h-5" /> Datos Principales
                                 </h3>
                                 {selectedAccount && (
                                     <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 text-blue-800 px-3 py-1 rounded-full text-xs font-medium">
@@ -921,6 +950,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                {/* 1. Nombre de la Cuenta / Cliente * */}
                                 <div className="relative" ref={accountDropdownRef}>
                                     <label className="text-sm font-medium text-slate-700 flex items-center justify-between">
                                         <span>Nombre de la Cuenta / Cliente *</span>
@@ -940,7 +970,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                                 }
                                             }}
                                             className={cn(
-                                                "w-full border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none pr-10",
+                                                "w-full border p-2.5 sm:p-2 text-base sm:text-sm rounded-lg border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none pr-10 min-h-[42px]",
                                                 selectedAccount && "bg-blue-50/50 border-blue-300 font-semibold text-slate-900"
                                             )} 
                                             placeholder="Buscar cuenta existente o escribir nombre..."
@@ -951,8 +981,21 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                                 <button
                                                     type="button"
                                                     onClick={handleDeselectAccount}
-                                                    className="p-1 text-slate-400 hover:text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-md transition-colors text-xs font-bold"
+                                                    className="p-1.5 text-slate-400 hover:text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-md transition-colors text-xs font-bold"
                                                     title="Desvincular cuenta y volver a editar"
+                                                >
+                                                    ✕
+                                                </button>
+                                            ) : accountSearchQuery.length > 0 ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setAccountSearchQuery("");
+                                                        setValue("nombre_cuenta", "");
+                                                        setIsAccountDropdownOpen(false);
+                                                    }}
+                                                    className="p-1.5 text-slate-400 hover:text-slate-600 active:bg-slate-100 rounded-md transition-colors text-xs font-bold"
+                                                    title="Limpiar búsqueda"
                                                 >
                                                     ✕
                                                 </button>
@@ -963,76 +1006,57 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                     </div>
 
                                     {/* Menú flotante de resultados de búsqueda */}
-                                    {isAccountDropdownOpen && filteredAccounts.length > 0 && !selectedAccount && (
-                                        <div className="absolute z-30 w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl max-h-60 overflow-y-auto divide-y divide-slate-100">
-                                            <div className="px-3 py-1.5 bg-slate-50 text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center justify-between">
-                                                <span>Cuentas existentes encontradas</span>
-                                                <span className="bg-slate-200 text-slate-700 px-1.5 py-0.2 rounded-full text-[10px]">
-                                                    {filteredAccounts.length}
-                                                </span>
-                                            </div>
-                                            {filteredAccounts.map(account => (
-                                                <button
-                                                    key={account.id}
-                                                    type="button"
-                                                    onClick={() => handleSelectAccount(account)}
-                                                    className="w-full text-left px-3.5 py-2.5 hover:bg-blue-50/80 transition-colors flex items-center justify-between group"
-                                                >
-                                                    <div className="overflow-hidden pr-2">
-                                                        <div className="font-semibold text-sm text-slate-800 group-hover:text-blue-900 truncate">
-                                                            {account.nombre}
-                                                        </div>
-                                                        <div className="text-xs text-slate-500 flex items-center gap-2 mt-0.5">
-                                                            <span className="font-medium text-blue-600 bg-blue-50 border border-blue-100 px-1.5 py-0.2 rounded">
-                                                                {account.canal_id}
-                                                            </span>
-                                                            {account.nit_base && (
-                                                                <span className="text-slate-400">NIT: *****</span>
-                                                            )}
-                                                            {account.ciudad && (
-                                                                <span className="text-slate-400 truncate">· {account.ciudad}</span>
-                                                            )}
-                                                        </div>
+                                    {isAccountDropdownOpen && !selectedAccount && accountSearchQuery.trim().length >= 2 && (
+                                        <div className="absolute z-30 w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl max-h-60 overflow-y-auto divide-y divide-slate-100 overscroll-contain">
+                                            {filteredAccounts.length > 0 ? (
+                                                <>
+                                                    <div className="px-3 py-1.5 bg-slate-50 text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center justify-between sticky top-0 z-10 border-b border-slate-100">
+                                                        <span>Cuentas existentes encontradas</span>
+                                                        <span className="bg-slate-200 text-slate-700 px-1.5 py-0.2 rounded-full text-[10px] font-bold">
+                                                            {filteredAccounts.length}
+                                                        </span>
                                                     </div>
-                                                    <span className="shrink-0 text-xs font-semibold text-blue-600 bg-blue-50 group-hover:bg-blue-600 group-hover:text-white border border-blue-200 px-2 py-1 rounded-md transition-colors">
-                                                        Seleccionar
-                                                    </span>
-                                                </button>
-                                            ))}
+                                                    {filteredAccounts.map(account => (
+                                                        <button
+                                                            key={account.id}
+                                                            type="button"
+                                                            onClick={() => handleSelectAccount(account)}
+                                                            className="w-full text-left px-3.5 py-3 sm:py-2.5 hover:bg-blue-50/80 active:bg-blue-100 transition-colors flex items-center justify-between group cursor-pointer"
+                                                        >
+                                                            <div className="overflow-hidden pr-2 flex-1">
+                                                                <div className="font-semibold text-sm text-slate-800 group-hover:text-blue-900 truncate">
+                                                                    {account.nombre}
+                                                                </div>
+                                                                <div className="text-xs text-slate-500 flex items-center gap-2 mt-0.5">
+                                                                    <span className="font-medium text-blue-600 bg-blue-50 border border-blue-100 px-1.5 py-0.2 rounded shrink-0">
+                                                                        {account.canal_id}
+                                                                    </span>
+                                                                    {account.nit_base && (
+                                                                        <span className="text-slate-400 shrink-0">NIT: *****</span>
+                                                                    )}
+                                                                    {account.ciudad && (
+                                                                        <span className="text-slate-400 truncate">· {account.ciudad}</span>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                            <span className="shrink-0 text-xs font-semibold text-blue-600 bg-blue-50 group-hover:bg-blue-600 group-hover:text-white border border-blue-200 px-2 py-1 rounded-md transition-colors">
+                                                                Seleccionar
+                                                            </span>
+                                                        </button>
+                                                    ))}
+                                                </>
+                                            ) : (
+                                                <div className="p-3 text-center text-xs text-slate-500 bg-slate-50">
+                                                    No se encontraron cuentas existentes. Se creará como cliente nuevo.
+                                                </div>
+                                            )}
                                         </div>
                                     )}
 
                                     {errors.nombre_cuenta && <p className="text-red-500 text-xs mt-1">{errors.nombre_cuenta.message}</p>}
                                 </div>
 
-                                <div>
-                                    <label className="text-sm font-medium text-slate-700 flex items-center justify-between">
-                                        <span>Cédula / NIT</span>
-                                        {selectedAccount && <Lock className="w-3 h-3 text-slate-400" />}
-                                    </label>
-                                    <input 
-                                        {...register("nit_base")} 
-                                        disabled={!!selectedAccount}
-                                        className="w-full mt-1 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed" 
-                                        placeholder="123456789" 
-                                    />
-                                    {duplicateAccountByNit && (
-                                        <div className="mt-1.5 p-2 bg-amber-50 border border-amber-200 rounded-lg flex items-center justify-between gap-2 text-xs">
-                                            <div className="text-amber-800 font-medium flex items-center gap-1.5 truncate">
-                                                <span>⚠️ Ya existe:</span>
-                                                <span className="font-bold truncate">{duplicateAccountByNit.nombre}</span>
-                                            </div>
-                                            <button
-                                                type="button"
-                                                onClick={() => handleSelectAccount(duplicateAccountByNit)}
-                                                className="shrink-0 bg-amber-600 hover:bg-amber-700 text-white font-semibold px-2 py-0.5 rounded text-[11px] shadow-sm transition-colors flex items-center gap-1"
-                                            >
-                                                ⚡ Vincular
-                                            </button>
-                                        </div>
-                                    )}
-                                    {errors.nit_base && <p className="text-red-500 text-xs mt-1">{errors.nit_base.message}</p>}
-                                </div>
+                                {/* 2. Teléfono * */}
                                 <div>
                                     <label className="text-sm font-medium text-slate-700 flex items-center justify-between">
                                         <span>Teléfono *</span>
@@ -1061,6 +1085,8 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                     )}
                                     {errors.telefono && <p className="text-red-500 text-xs mt-1">{errors.telefono.message}</p>}
                                 </div>
+
+                                {/* 3. Email (Opcional) */}
                                 <div>
                                     <label className="text-sm font-medium text-slate-700 flex items-center justify-between">
                                         <span>Email (Opcional)</span>
@@ -1089,6 +1115,68 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         </div>
                                     )}
                                     {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email.message}</p>}
+                                </div>
+
+                                {/* 4. Categorías de Interés (Opcional) */}
+                                <div>
+                                    <label className="text-sm font-medium text-slate-700">Categorías de Interés (Opcional)</label>
+                                    <MultiSelect
+                                        options={OPPORTUNITY_CATEGORIES}
+                                        selected={parseOpportunityCategories(watch("categoria_oportunidad"))}
+                                        onChange={(vals) => setValue("categoria_oportunidad", vals, { shouldValidate: true })}
+                                        placeholder="Seleccionar categorías..."
+                                        className="mt-1"
+                                    />
+                                </div>
+
+                                {/* 5. Comentarios * - de la oportunidad */}
+                                <div className="md:col-span-2">
+                                    <label className="text-sm font-medium text-slate-700">Comentarios * (Oportunidad)</label>
+                                    <textarea 
+                                        {...register("comentarios")} 
+                                        rows={3}
+                                        className="w-full mt-1 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none resize-none" 
+                                        placeholder="Detalles sobre el negocio o productos interesados..." 
+                                    />
+                                    {errors.comentarios && <p className="text-red-500 text-xs mt-1">{errors.comentarios.message}</p>}
+                                </div>
+                            </div>
+                        </section>
+
+                        {/* SECCIÓN 2: DATOS DE UBICACIÓN Y CUENTA */}
+                        <section className="space-y-4 pt-2">
+                            <h3 className="text-lg font-semibold flex items-center gap-2 text-slate-800 border-b pb-2">
+                                Datos de Ubicación y Cuenta
+                            </h3>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="text-sm font-medium text-slate-700 flex items-center justify-between">
+                                        <span>Cédula / NIT</span>
+                                        {selectedAccount && <Lock className="w-3 h-3 text-slate-400" />}
+                                    </label>
+                                    <input 
+                                        {...register("nit_base")} 
+                                        disabled={!!selectedAccount}
+                                        className="w-full mt-1 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed" 
+                                        placeholder="123456789" 
+                                    />
+                                    {duplicateAccountByNit && (
+                                        <div className="mt-1.5 p-2 bg-amber-50 border border-amber-200 rounded-lg flex items-center justify-between gap-2 text-xs">
+                                            <div className="text-amber-800 font-medium flex items-center gap-1.5 truncate">
+                                                <span>⚠️ Ya existe:</span>
+                                                <span className="font-bold truncate">{duplicateAccountByNit.nombre}</span>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() => handleSelectAccount(duplicateAccountByNit)}
+                                                className="shrink-0 bg-amber-600 hover:bg-amber-700 text-white font-semibold px-2 py-0.5 rounded text-[11px] shadow-sm transition-colors flex items-center gap-1"
+                                            >
+                                                ⚡ Vincular
+                                            </button>
+                                        </div>
+                                    )}
+                                    {errors.nit_base && <p className="text-red-500 text-xs mt-1">{errors.nit_base.message}</p>}
                                 </div>
                             </div>
 
@@ -1212,24 +1300,21 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         <span>Asesor Encargado del Cliente *</span>
                                         {selectedAccount && <Lock className="w-3 h-3 text-slate-400" />}
                                     </label>
-                                    <select 
-                                        {...register("asesor_id")} 
-                                        value={watch("asesor_id") || ""}
-                                        disabled={!!selectedAccount}
-                                        className="w-full mt-1 border p-2 rounded-lg bg-white border-blue-300 focus:ring-2 focus:ring-blue-500 outline-none font-medium text-slate-800 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
-                                    >
-                                        <option value="">Seleccione un asesor...</option>
-                                        {selectedAccount && selectedAccount.owner_user_id && !filteredAdvisors.some(u => u.id === selectedAccount.owner_user_id) && (
-                                            <option value={selectedAccount.owner_user_id}>
-                                                {users?.find(u => u.id === selectedAccount.owner_user_id)?.full_name || users?.find(u => u.id === selectedAccount.owner_user_id)?.email || "Asesor Asignado"}
-                                            </option>
-                                        )}
-                                        {filteredAdvisors.map(u => (
-                                            <option key={u.id} value={u.id}>
-                                                {u.full_name || u.email}
-                                            </option>
-                                        ))}
-                                    </select>
+                                    <div className="mt-1">
+                                        <SearchableSelect
+                                            options={advisorOptions}
+                                            value={watch("asesor_id") || ""}
+                                            onChange={(val) => setValue("asesor_id", val, { shouldValidate: true })}
+                                            placeholder="Seleccione un asesor..."
+                                            searchPlaceholder="Buscar asesor por nombre..."
+                                            emptyText="No se encontraron asesores disponibles."
+                                            disabled={!!selectedAccount}
+                                            triggerClassName={cn(
+                                                "border-blue-300 font-medium text-slate-800",
+                                                selectedAccount && "bg-slate-100 text-slate-500 cursor-not-allowed"
+                                            )}
+                                        />
+                                    </div>
                                     <p className="text-[11px] text-slate-500 mt-1">El cliente queda anclado primariamente a este asesor desde su creación.</p>
                                     {filteredAdvisors.length === 0 && !selectedAccount && (
                                         <p className="text-[11px] text-amber-600 font-medium mt-1">
@@ -1455,17 +1540,6 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                     </select>
                                     {errors.origen_oportunidad && <p className="text-red-500 text-xs mt-1">{errors.origen_oportunidad.message}</p>}
                                 </div>
-
-                                <div>
-                                    <label className="text-sm font-medium text-slate-700">Categorías de Interés (Opcional)</label>
-                                    <MultiSelect
-                                        options={OPPORTUNITY_CATEGORIES}
-                                        selected={parseOpportunityCategories(watch("categoria_oportunidad"))}
-                                        onChange={(vals) => setValue("categoria_oportunidad", vals, { shouldValidate: true })}
-                                        placeholder="Seleccionar categorías..."
-                                        className="mt-1"
-                                    />
-                                </div>
                             </div>
 
                             <label className="flex items-start gap-3 p-4 rounded-xl border-2 border-amber-200 bg-amber-50 cursor-pointer">
@@ -1480,25 +1554,44 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                             {/* BUSCADOR DE PRODUCTOS */}
                             <div className="pt-2">
                                 <label className="text-sm font-medium text-slate-700">Productos de la Oportunidad</label>
-                                <div className="relative mt-1 mb-3">
+                                <div className="relative mt-1 mb-3" ref={productDropdownRef}>
                                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                                         <Search className="w-4 h-4 text-slate-400" />
                                     </div>
                                     <input
                                         type="text"
-                                        className="block w-full pl-10 pr-3 py-2 border border-slate-300 rounded-lg bg-slate-50 focus:outline-none focus:bg-white focus:ring-2 focus:ring-green-500 sm:text-sm"
+                                        className="block w-full pl-10 pr-10 py-2.5 sm:py-2 border border-slate-300 rounded-lg bg-slate-50 focus:outline-none focus:bg-white focus:ring-2 focus:ring-green-500 text-base sm:text-sm min-h-[42px]"
                                         placeholder="Buscar más productos para agregar..."
                                         value={searchTerm}
-                                        onChange={(e) => setSearchTerm(e.target.value)}
+                                        onFocus={() => {
+                                            if (searchTerm.trim().length > 0) setIsProductDropdownOpen(true);
+                                        }}
+                                        onChange={(e) => {
+                                            setSearchTerm(e.target.value);
+                                            setIsProductDropdownOpen(true);
+                                        }}
                                     />
-                                    {searchTerm && (
-                                        <div className="absolute z-10 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-xl max-h-60 overflow-y-auto">
+                                    {searchTerm.length > 0 && (
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                setSearchTerm("");
+                                                setIsProductDropdownOpen(false);
+                                            }}
+                                            className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-600 active:bg-slate-200 rounded-md text-xs font-bold transition-colors"
+                                            title="Limpiar búsqueda de productos"
+                                        >
+                                            ✕
+                                        </button>
+                                    )}
+                                    {isProductDropdownOpen && searchTerm.trim().length > 0 && (
+                                        <div className="absolute z-30 w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl max-h-64 overflow-y-auto overscroll-contain divide-y divide-slate-100">
                                             {isSearching ? (
                                                 <div className="p-4 text-center text-slate-500 text-sm flex items-center justify-center gap-2">
-                                                    <Loader2 className="w-4 h-4 animate-spin" /> Buscando...
+                                                    <Loader2 className="w-4 h-4 animate-spin text-green-600" /> Buscando...
                                                 </div>
                                             ) : searchResults.length === 0 ? (
-                                                <div className="p-4 text-center text-slate-500 text-sm">No se encontraron productos</div>
+                                                <div className="p-4 text-center text-slate-500 text-xs sm:text-sm">No se encontraron productos</div>
                                             ) : (
                                                 searchResults.map((product: PriceListProduct) => {
                                                     const displayPrice = getProductPrice(product, selectedChannel, isFairSale);
@@ -1509,15 +1602,20 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                                         <button
                                                             key={product.id}
                                                             type="button"
-                                                            onClick={() => addProduct(product)}
+                                                            onClick={() => {
+                                                                addProduct(product);
+                                                                setIsProductDropdownOpen(false);
+                                                            }}
                                                             disabled={unavailable}
-                                                            className="w-full text-left px-4 py-2 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-between border-b last:border-0"
+                                                            className="w-full text-left px-3.5 py-3 sm:py-2.5 hover:bg-slate-50 active:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-between gap-2 border-b last:border-0 transition-colors cursor-pointer"
                                                         >
-                                                            <div>
-                                                                <div className="font-medium text-slate-900">{product.descripcion}</div>
-                                                                <div className="text-xs text-slate-500">{product.numero_articulo} · Disponible: {inventory?.disponible || 0}</div>
+                                                            <div className="min-w-0 flex-1 pr-2">
+                                                                <div className="font-medium text-sm text-slate-900 truncate">{product.descripcion}</div>
+                                                                <div className="text-xs text-slate-500 truncate mt-0.5">
+                                                                    {product.numero_articulo} · {inventory?.disponible !== undefined ? `Disponible: ${inventory.disponible}` : "Sin inventario"}
+                                                                </div>
                                                             </div>
-                                                            <div className="text-sm font-bold text-blue-600">
+                                                            <div className="text-sm font-bold text-blue-600 shrink-0">
                                                                 COP $ {new Intl.NumberFormat().format(displayPrice)}
                                                             </div>
                                                         </button>
@@ -1560,17 +1658,6 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         ))
                                     )}
                                 </div>
-                            </div>
-
-                            <div>
-                                <label className="text-sm font-medium text-slate-700">Comentarios *</label>
-                                <textarea 
-                                    {...register("comentarios")} 
-                                    rows={3}
-                                    className="w-full mt-1 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-green-500 outline-none resize-none" 
-                                    placeholder="Detalles sobre el negocio o productos interesados..." 
-                                />
-                                {errors.comentarios && <p className="text-red-500 text-xs mt-1">{errors.comentarios.message}</p>}
                             </div>
                         </section>
 

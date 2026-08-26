@@ -3,6 +3,36 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-08-26 - Ingest: Optimización Móvil y Desplegables con Búsqueda en Tiendas-Ferias (/tiendas)
+
+- **Desplegable de Asesor con Búsqueda (`SearchableSelect.tsx` & `CreateStoreSaleForm.tsx`):**
+  - Se sustituyó el `<select>` tradicional de "Asesor Encargado del Cliente *" por el componente `SearchableSelect`.
+  - Permite buscar asesores en tiempo real por nombre/correo, con soporte móvil, bloqueo visual al vincular cuentas existentes (`Lock`), y filtrado reactivo por canal, país y departamento.
+- **Desplegables `MultiSelect` (Categorías y Contactos):**
+  - Ajuste de anchura dinámica en móviles (`w-[var(--radix-popover-trigger-width)] max-w-[calc(100vw-2rem)] min-w-[260px]`), evitando desbordamientos de pantalla.
+  - Filtro por etiqueta textual exacta (`value={option.label}`) en `CommandItem`, resolviendo búsquedas en español.
+  - Altura táctil (`min-h-[42px]`), tamaño de texto preventivo contra zoom automático en iOS (`text-base sm:text-sm`) y `overscroll-contain`.
+- **Buscador de Cuentas y Buscador de Productos (`CreateStoreSaleForm.tsx`):**
+  - Cierre reactivo al tocar/hacer clic afuera soportando eventos táctiles (`touchstart` y `mousedown`).
+  - Botones de acción rápida `✕` para limpiar texto de búsqueda en un solo toque.
+  - Manejo de estados vacíos y feedback visual táctil (`active:bg-slate-100`, `cursor-pointer`).
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
+## 2026-08-26 - Ingest: Reorganización de Campos y Flujo de Captura en Formulario Tiendas-Ferias (/tiendas)
+
+- **Reordenamiento de Campos Prioritarios:** Se reestructuró `CreateStoreSaleForm.tsx` para colocar al inicio de la interfaz los 5 campos de captura rápida esenciales para atención en mostrador o feria:
+  1. `nombre_cuenta` (Nombre de la Cuenta / Cliente *) con autocompletado y vinculación.
+  2. `telefono` (Teléfono *) con detección preventiva de duplicados.
+  3. `email` (Email Opcional) con detección preventiva de duplicados.
+  4. `categoria_oportunidad` (Categorías de Interés Opcional) con `MultiSelect`.
+  5. `comentarios` (Comentarios * de la oportunidad).
+- **Secciones Reorganizadas:**
+  - **Datos de Ubicación y Cuenta:** Cédula/NIT, Canal de Venta, Subclasificación, País, Departamento, Ciudad, Asesor Encargado del Cliente y Dirección.
+  - **Contacto del Cliente:** Bloque colapsable con selección múltiple de contactos existentes, clientes atendidos y datos opcionales de nuevo contacto.
+  - **Datos del Negocio (Oportunidad):** Nombre de Oportunidad, Fase, Origen, Checkbox de Venta de Feria y Buscador/Lista de Productos.
+  - **Actividad Programada:** Bloque colapsable con Clasificación, Prioridad, Vencimiento y Comentarios.
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
 ## 2026-08-25 - Ingest: Optimización Responsive Móvil y Selección de Fila en Listados (Oportunidades, Cuentas, Contactos, Usuarios)
 
 - **Módulos Cuentas, Contactos y Oportunidades:**
