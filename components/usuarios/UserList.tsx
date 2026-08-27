@@ -37,6 +37,7 @@ export function UserList() {
     // Filter users
     const filteredUsers = users.filter(user => {
         const matchesSearch =
+            !searchTerm.trim() ||
             includesNormalized(user.email, searchTerm) ||
             includesNormalized(user.full_name, searchTerm);
 

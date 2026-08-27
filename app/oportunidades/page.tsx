@@ -200,6 +200,8 @@ function OpportunitiesContent() {
         const initialSubclass = searchParams.get('subclass') || (selectedSubclass ? String(selectedSubclass) : null);
         const initialSegment = searchParams.get('segment') || (selectedSegment ? String(selectedSegment) : null);
         const initialPhase = searchParams.get('phase') || (selectedPhase ? String(selectedPhase) : null);
+        const initialSort = searchParams.get('sort');
+        const initialDirection = searchParams.get('dir');
 
         // Apply tab, search, owner and restored hierarchical filters to hook
         if (initialSearch) setSearchTerm(initialSearch);
@@ -208,6 +210,8 @@ function OpportunitiesContent() {
         if (initialSubclass) setSubclassificationFilter(Number(initialSubclass));
         if (initialSegment) setSegmentFilter(Number(initialSegment));
         if (initialPhase) setPhaseFilter(Number(initialPhase));
+        if (initialSort) setSortField(initialSort);
+        if (initialDirection) setSortAsc(initialDirection === 'asc');
         const initialOrigin = searchParams.get('origin') || selectedOrigin;
         if (initialOrigin) setOriginFilter(initialOrigin);
         setUserFilter(initialTab);
@@ -253,6 +257,25 @@ function OpportunitiesContent() {
         return () => clearTimeout(timer);
     }, [inputValue, setSearchTerm]);
 
+    // A search is committed after the same short pause used for the server query.
+    // This keeps the URL shareable without replacing history on every keystroke.
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            const params = new URLSearchParams(Array.from(searchParams.entries()));
+            if (inputValue) params.set('search', inputValue);
+            else params.delete('search');
+            const next = new URLSearchParams(params.toString());
+            const current = new URLSearchParams(searchParams.toString());
+            next.sort(); current.sort();
+            if (next.toString() === current.toString()) return;
+            const queryString = params.toString();
+            if (queryString) sessionStorage.setItem('crm_oportunidades_state', queryString);
+            else sessionStorage.removeItem('crm_oportunidades_state');
+            router.replace(queryString ? `${window.location.pathname}?${queryString}` : window.location.pathname, { scroll: false });
+        }, 350);
+        return () => clearTimeout(timer);
+    }, [inputValue, searchParams, router]);
+
     // Sync all filters to URL and SessionStorage (immediate for non-search filters)
     useEffect(() => {
         const params = new URLSearchParams(Array.from(searchParams.entries()));
@@ -295,6 +318,11 @@ function OpportunitiesContent() {
         
         if (endClosingDate) params.set('endClose', endClosingDate);
         else params.delete('endClose');
+
+        if (sortField !== 'updated_at') params.set('sort', sortField);
+        else params.delete('sort');
+        if (sortAsc) params.set('dir', 'asc');
+        else params.delete('dir');
         
         const queryString = params.toString();
         
@@ -315,7 +343,7 @@ function OpportunitiesContent() {
         
         const query = queryString ? `?${queryString}` : window.location.pathname;
         router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
-    }, [tab, selectedAccountOwnerIds, selectedChannel, selectedSubclass, selectedSegment, selectedPhase, selectedOrigin, statusFilter, startDate, endDate, startClosingDate, endClosingDate, searchParams, router]); // Notice inputValue is NOT in deps here to avoid URL churn during typing
+    }, [tab, selectedAccountOwnerIds, selectedChannel, selectedSubclass, selectedSegment, selectedPhase, selectedOrigin, statusFilter, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc, searchParams, router]); // Search is handled by the debounced effect above.
 
 
     const handleFilterChange = useCallback(({ 
@@ -565,8 +593,17 @@ function OpportunitiesContent() {
 
     const getInitials = (name: string) => name ? name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : '??';
 
-    const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+    const [showAdvancedFilters, setShowAdvancedFilters] = useState(() => Boolean(
+        searchParams.get('channel') || searchParams.get('subclass') || searchParams.get('segment') ||
+        searchParams.get('phase') || searchParams.get('origin') || searchParams.get('start') ||
+        searchParams.get('end') || searchParams.get('startClose') || searchParams.get('endClose') ||
+        (searchParams.get('status') && searchParams.get('status') !== 'open')
+    ));
     const [showColumnPicker, setShowColumnPicker] = useState(false);
+    const activeFilterCount = selectedAccountOwnerIds.length + (selectedChannel ? 1 : 0) + (selectedSubclass ? 1 : 0) +
+        (selectedSegment ? 1 : 0) + (selectedPhase ? 1 : 0) + (selectedOrigin ? 1 : 0) +
+        (statusFilter !== 'open' ? 1 : 0) + (startDate ? 1 : 0) + (endDate ? 1 : 0) +
+        (startClosingDate ? 1 : 0) + (endClosingDate ? 1 : 0);
 
     return (
         <div data-testid="opportunities-page" className="space-y-4 md:space-y-6 max-w-[1600px] mx-auto pb-12 animate-in fade-in duration-300">
@@ -652,6 +689,8 @@ function OpportunitiesContent() {
                         title="Filtros Avanzados"
                     >
                         <Filter className={cn("w-5 h-5 sm:w-4 sm:h-4 transition-transform duration-300", showAdvancedFilters && "fill-blue-100")} />
+                        <span className="hidden sm:inline">Filtros</span>
+                        {activeFilterCount > 0 && <span className="-ml-1 rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">{activeFilterCount}</span>}
                     </button>
 
                     {/* Botón selector de columnas */}
@@ -979,6 +1018,11 @@ function OpportunitiesContent() {
                                     renderAllRows={false}
                                     licenseKey="non-commercial-and-evaluation"
                                     afterOnCellMouseDown={(event: any, coords: any, td: any) => {
+                                        if (coords.row === -1) {
+                                            const fields: Record<number, string> = { 1: 'nombre', 5: 'created_at', 6: 'amount', 7: 'fecha_cierre_estimada' };
+                                            if (fields[coords.col]) handleSort(fields[coords.col]);
+                                            return;
+                                        }
                                         if (coords.row >= 0) {
                                             const opp = hotData[coords.row];
                                             if (opp && opp.id) {
@@ -987,6 +1031,16 @@ function OpportunitiesContent() {
                                                 sessionStorage.setItem('crm_oportunidades_state', params.toString());
                                                 router.push(`/oportunidades/${opp.id}`);
                                             }
+                                        }
+                                    }}
+                                    afterGetColHeader={(column: number, TH: HTMLTableCellElement) => {
+                                        const fields: Record<number, string> = { 1: 'nombre', 5: 'created_at', 6: 'amount', 7: 'fecha_cierre_estimada' };
+                                        const labels: Record<number, string> = { 1: 'Nombre', 5: 'Creada', 6: 'Valor', 7: 'Cierre' };
+                                        if (fields[column]) {
+                                            TH.style.cursor = 'pointer';
+                                            TH.title = 'Clic para ordenar ascendente o descendente';
+                                            const header = TH.querySelector('.colHeader');
+                                            if (header) header.textContent = `${labels[column]} ${sortField === fields[column] ? (sortAsc ? '↑' : '↓') : '↕'}`;
                                         }
                                     }}
                                     stretchH="all"

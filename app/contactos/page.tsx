@@ -14,6 +14,9 @@ import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { supabase } from "@/lib/supabase";
 import dynamic from 'next/dynamic';
+import { AccountCombobox } from "@/components/accounts/AccountCombobox";
+import { ArrowUpDown, ChevronDown, ChevronUp, X } from "lucide-react";
+import { DataListToolbar } from "@/components/ui/DataListToolbar";
 
 const HotTable = dynamic(() => import('@/components/HotTableWrapper'), { ssr: false });
 
@@ -27,6 +30,12 @@ function ContactsContent() {
         hasMore,
         loadMore,
         setSearchTerm,
+        setAccountFilter,
+        setPrincipalFilter,
+        setSortField,
+        setSortAsc,
+        sortField,
+        sortAsc,
         refresh
     } = useContactsServer({ pageSize: 50 });
 
@@ -45,6 +54,9 @@ function ContactsContent() {
         return "";
     });
     const [isCreating, setIsCreating] = useState(false);
+    const [selectedAccountFilter, setSelectedAccountFilter] = useState<string>(() => searchParams.get('account') || (typeof window !== 'undefined' ? new URLSearchParams(sessionStorage.getItem('crm_contactos_state') || '').get('account') || '' : ''));
+    const [principalFilter, setPrincipalFilterState] = useState<'all' | 'principal' | 'secondary'>(() => (searchParams.get('principal') as any) || 'all');
+    const [showFilters, setShowFilters] = useState(() => Boolean(searchParams.get('account') || searchParams.get('principal')));
     const [selectedAccountIdForCreate, setSelectedAccountIdForCreate] = useState<string>("");
     const [accountSearchTerm, setAccountSearchTerm] = useState("");
     const [editingContact, setEditingContact] = useState<any>(undefined);
@@ -112,6 +124,14 @@ function ContactsContent() {
         }
     }, [searchParams, router]);
 
+    const handleSort = (field: 'updated_at' | 'nombre' | 'email') => {
+        if (sortField === field) setSortAsc(!sortAsc);
+        else {
+            setSortField(field);
+            setSortAsc(true);
+        }
+    };
+
     // Modal State
     const [contactToDelete, setContactToDelete] = useState<any | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
@@ -146,6 +166,10 @@ function ContactsContent() {
             const params = new URLSearchParams(Array.from(searchParams.entries()));
             if (inputValue) params.set('search', inputValue);
             else params.delete('search');
+            if (selectedAccountFilter) params.set('account', selectedAccountFilter); else params.delete('account');
+            if (principalFilter !== 'all') params.set('principal', principalFilter); else params.delete('principal');
+            if (sortField !== 'updated_at') params.set('sort', sortField); else params.delete('sort');
+            if (sortAsc) params.set('dir', 'asc'); else params.delete('dir');
             
             const queryString = params.toString();
             
@@ -168,7 +192,20 @@ function ContactsContent() {
             router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
         }, 500);
         return () => clearTimeout(timer);
-    }, [inputValue, searchParams, setSearchTerm, router]);
+    }, [inputValue, selectedAccountFilter, principalFilter, sortField, sortAsc, searchParams, setSearchTerm, router]);
+
+    useEffect(() => {
+        const saved = new URLSearchParams(typeof window !== 'undefined' ? sessionStorage.getItem('crm_contactos_state') || '' : '');
+        const account = searchParams.get('account') || saved.get('account') || '';
+        const principal = (searchParams.get('principal') || saved.get('principal') || 'all') as 'all' | 'principal' | 'secondary';
+        const sort = (searchParams.get('sort') || saved.get('sort')) as 'updated_at' | 'nombre' | 'email' | null;
+        const direction = searchParams.get('dir') || saved.get('dir');
+        setAccountFilter(account || null);
+        setPrincipalFilter(principal);
+        if (sort) setSortField(sort);
+        if (direction) setSortAsc(direction === 'asc');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     // Handle Edit
     const handleEdit = (contact: any) => {
@@ -419,17 +456,38 @@ function ContactsContent() {
                 </button>
             </div>
 
-            <div className="relative group rounded-xl border border-slate-200 bg-white shadow-sm">
-                <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400 group-focus-within:text-[#254153] transition-colors" size={18} />
-                <input
-                    type="text"
-                    data-testid="contacts-search"
-                    placeholder="Buscar por nombre, cuenta o email..."
-                    value={inputValue}
-                    onChange={(e) => setInputValue(e.target.value)}
-                    className="w-full pl-11 pr-4 py-3 rounded-xl bg-transparent transition-all outline-none text-slate-700 font-medium placeholder:text-slate-400 focus:ring-2 focus:ring-[#254153]/10"
-                />
-            </div>
+            <DataListToolbar
+                searchValue={inputValue}
+                onSearchChange={setInputValue}
+                searchPlaceholder="Buscar por nombre, cuenta, email o teléfono…"
+                searchTestId="contacts-search"
+                filtersOpen={showFilters}
+                onFiltersOpenChange={setShowFilters}
+                activeFilterCount={(selectedAccountFilter ? 1 : 0) + (principalFilter !== 'all' ? 1 : 0)}
+                onClear={() => { setInputValue(''); setSelectedAccountFilter(''); setAccountFilter(null); setPrincipalFilterState('all'); setPrincipalFilter('all'); }}
+                filters={<div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <div className="min-w-0 flex-1 sm:max-w-sm">
+                    <AccountCombobox
+                        value={selectedAccountFilter}
+                        onChange={(id) => { setSelectedAccountFilter(id); setAccountFilter(id || null); }}
+                        initialLabel={selectedAccountFilter ? accountMap.get(selectedAccountFilter) : undefined}
+                    />
+                </div>
+                <div className="flex items-center gap-1 rounded-lg bg-white p-1 ring-1 ring-slate-200">
+                    {([['all', 'Todos'], ['principal', 'Principales'], ['secondary', 'Secundarios']] as const).map(([value, label]) => (
+                        <button key={value} onClick={() => { setPrincipalFilterState(value); setPrincipalFilter(value); }} className={`rounded-md px-2.5 py-1.5 text-xs font-semibold transition-colors ${principalFilter === value ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}>{label}</button>
+                    ))}
+                </div>
+                <div className="flex items-center gap-1 sm:ml-auto">
+                    <span className="text-xs font-semibold text-slate-500">Ordenar:</span>
+                    {([['updated_at', 'Recientes'], ['nombre', 'Nombre'], ['email', 'Email']] as const).map(([field, label]) => (
+                        <button key={field} onClick={() => handleSort(field)} className={`flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-semibold ${sortField === field ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-white'}`}>
+                            {label}{sortField === field ? (sortAsc ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />) : <ArrowUpDown className="h-3 w-3 opacity-50" />}
+                        </button>
+                    ))}
+                </div>
+                </div>}
+            />
 
             {/* List */}
             {(!loading || contacts.length > 0) && (
@@ -651,11 +709,26 @@ function ContactsContent() {
                                 renderAllRows={false}
                                 licenseKey="non-commercial-and-evaluation"
                                 afterOnCellMouseDown={(event: any, coords: any, td: any) => {
+                                    if (coords.row === -1) {
+                                        const fields: Record<number, 'nombre' | 'email'> = { 0: 'nombre', 4: 'email' };
+                                        if (fields[coords.col]) handleSort(fields[coords.col]);
+                                        return;
+                                    }
                                     if (coords.row >= 0) {
                                         const contact = hotData[coords.row]?._original;
                                         if (contact) {
                                             handleEdit(contact);
                                         }
+                                    }
+                                }}
+                                afterGetColHeader={(column: number, TH: HTMLTableCellElement) => {
+                                    const fields: Record<number, 'nombre' | 'email'> = { 0: 'nombre', 4: 'email' };
+                                    const labels: Record<number, string> = { 0: 'Contacto', 4: 'Email' };
+                                    if (fields[column]) {
+                                        TH.style.cursor = 'pointer';
+                                        TH.title = 'Clic para ordenar A–Z o Z–A';
+                                        const header = TH.querySelector('.colHeader');
+                                        if (header) header.textContent = `${labels[column]} ${sortField === fields[column] ? (sortAsc ? '↑' : '↓') : '↕'}`;
                                     }
                                 }}
                                 stretchH="all"

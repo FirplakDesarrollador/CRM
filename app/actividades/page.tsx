@@ -167,6 +167,23 @@ function ActivitiesContent() {
         }
         return "";
     });
+    const [sortOrder, setSortOrder] = useState<'soonest' | 'latest' | 'title' | 'title_desc'>(() => {
+        const fromUrl = searchParams.get('order');
+        if (fromUrl === 'latest' || fromUrl === 'title' || fromUrl === 'title_desc' || fromUrl === 'soonest') return fromUrl;
+        if (typeof window !== 'undefined') {
+            const saved = new URLSearchParams(sessionStorage.getItem('crm_actividades_state') || '').get('order');
+            if (saved === 'latest' || saved === 'title' || saved === 'title_desc' || saved === 'soonest') return saved;
+        }
+        return 'soonest';
+    });
+    const [showFilters, setShowFilters] = useState(() => Boolean(
+        searchParams.get('type') || searchParams.get('classification') || searchParams.get('subclassification') ||
+        searchParams.get('user') || searchParams.get('status') || searchParams.get('channel') ||
+        searchParams.get('dateFrom') || searchParams.get('dateTo') || searchParams.get('order')
+    ));
+    const activeFilterCount = (filterType ? 1 : 0) + (filterClassification ? 1 : 0) +
+        (filterSubclassification ? 1 : 0) + (filterUser ? 1 : 0) + (filterStatus !== 'all' ? 1 : 0) +
+        (filterChannel ? 1 : 0) + (filterDateFrom ? 1 : 0) + (filterDateTo ? 1 : 0) + (sortOrder !== 'soonest' ? 1 : 0);
 
     // Restore state from sessionStorage if navigating from sidebar (empty query)
     useEffect(() => {
@@ -213,6 +230,9 @@ function ActivitiesContent() {
             if (filterDateTo) params.set('dateTo', filterDateTo);
             else params.delete('dateTo');
 
+            if (sortOrder !== 'soonest') params.set('order', sortOrder);
+            else params.delete('order');
+
             const queryString = params.toString();
             
             // Save to sessionStorage for cross-module persistence
@@ -234,7 +254,7 @@ function ActivitiesContent() {
             }
         }, 500);
         return () => clearTimeout(timer);
-    }, [view, searchQuery, filterType, filterClassification, filterSubclassification, filterUser, filterStatus, filterChannel, searchParams, router]);
+    }, [view, searchQuery, filterType, filterClassification, filterSubclassification, filterUser, filterStatus, filterChannel, filterDateFrom, filterDateTo, sortOrder, searchParams, router]);
 
     // Performance: Display limit for pagination
     const [displayLimit, setDisplayLimit] = useState(20);
@@ -421,8 +441,15 @@ function ActivitiesContent() {
                 return actDate.getDate() === sd && actDate.getMonth() === sm && actDate.getFullYear() === sy;
             });
         }
-        return result.sort((a, b) => new Date(a.fecha_inicio).getTime() - new Date(b.fecha_inicio).getTime());
-    }, [globallyFilteredActivities, view, selectedDate]);
+        return [...result].sort((a, b) => {
+            if (sortOrder === 'title' || sortOrder === 'title_desc') {
+                const comparison = (a.asunto || '').localeCompare(b.asunto || '', 'es', { sensitivity: 'base' });
+                return sortOrder === 'title_desc' ? -comparison : comparison;
+            }
+            const difference = new Date(a.fecha_inicio).getTime() - new Date(b.fecha_inicio).getTime();
+            return sortOrder === 'latest' ? -difference : difference;
+        });
+    }, [globallyFilteredActivities, view, selectedDate, sortOrder]);
 
     // PERF FIX: Pre-group activities by day key for month view (computed once, not 31x)
     const activitiesByDay = useMemo(() => {
@@ -500,6 +527,20 @@ function ActivitiesContent() {
                             )}
                         </button>
 
+                        <button
+                            type="button"
+                            onClick={() => setShowFilters(!showFilters)}
+                            className={cn(
+                                "flex items-center gap-1.5 rounded-xl border px-3 py-2.5 text-sm font-bold transition-all",
+                                showFilters || activeFilterCount > 0 ? "border-blue-200 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"
+                            )}
+                            aria-expanded={showFilters}
+                        >
+                            <Filter className="h-4 w-4" />
+                            <span>Filtros</span>
+                            {activeFilterCount > 0 && <span className="rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] leading-none text-white">{activeFilterCount}</span>}
+                        </button>
+
                         {/* Clear Filters Button */}
                         {(searchQuery || filterType || filterClassification || filterSubclassification || filterUser || filterStatus !== "all" || filterChannel || filterDateFrom || filterDateTo) && (
                             <button
@@ -531,8 +572,8 @@ function ActivitiesContent() {
                         </button>
                     </div>
 
-                    {/* Advanced Filters: Only visible in "All" view */}
-                    {view === 'all' && (
+                    {/* Keep active filters reachable in every view; hidden filters are a frequent source of confusion. */}
+                    {showFilters && (
                         <div className="flex flex-wrap items-center gap-2 w-full justify-end">
                             {/* Channel Selector */}
                             <div className="flex bg-slate-50 p-1 rounded-xl border border-slate-100 items-center shadow-sm">
@@ -663,6 +704,20 @@ function ActivitiesContent() {
                                     title="Fecha Hasta"
                                 />
                             </div>
+
+                            <div className="flex bg-slate-50 p-1 rounded-xl border border-slate-100 items-center shadow-sm">
+                                <select
+                                    value={sortOrder}
+                                    onChange={(e) => setSortOrder(e.target.value as 'soonest' | 'latest' | 'title' | 'title_desc')}
+                                    className="bg-transparent p-1.5 text-sm font-semibold text-slate-600 focus:outline-none"
+                                    aria-label="Orden de actividades"
+                                >
+                                    <option value="soonest">Fecha: próxima</option>
+                                    <option value="latest">Fecha: reciente</option>
+                                    <option value="title">Asunto: A–Z</option>
+                                    <option value="title_desc">Asunto: Z–A</option>
+                                </select>
+                            </div>
                         </div>
                     )}
                 </div>
@@ -779,6 +834,14 @@ function ActivitiesContent() {
                         {view === 'agenda' || view === 'all' ? (
                             filteredActivities && filteredActivities.length > 0 ? (
                                 <div data-testid="activities-list" className="space-y-4">
+                                    <div className="hidden items-center justify-end gap-6 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-500 sm:flex">
+                                        <button onClick={() => setSortOrder(sortOrder === 'title' ? 'title_desc' : 'title')} className={cn("transition-colors hover:text-blue-700", (sortOrder === 'title' || sortOrder === 'title_desc') && "text-blue-700")}>
+                                            Asunto {sortOrder === 'title' ? 'A–Z' : sortOrder === 'title_desc' ? 'Z–A' : '↕'}
+                                        </button>
+                                        <button onClick={() => setSortOrder(sortOrder === 'soonest' ? 'latest' : 'soonest')} className={cn("transition-colors hover:text-blue-700", (sortOrder === 'soonest' || sortOrder === 'latest') && "text-blue-700")}>
+                                            Fecha {sortOrder === 'soonest' ? '↑' : sortOrder === 'latest' ? '↓' : '↕'}
+                                        </button>
+                                    </div>
                                     {filteredActivities.slice(0, displayLimit).map((act) => {
                                         const opp = opportunities?.find(o => o.id === act.opportunity_id);
                                         const searchAcc = act.account_id ? accounts.find(a => a.id === act.account_id) : (opp?.account_id ? accounts.find(a => a.id === opp.account_id) : null);

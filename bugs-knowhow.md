@@ -1007,5 +1007,49 @@ Prevention Rule:
 Tags:
 [sync] [postgres] [rpc] [array-literal] [opportunities] [dead-letter] [sql-like-wildcard]
 
+---
 
+## [Bug ID: 20260826-02]
+
+Context:
+`lib/sync.ts`, `lib/hooks/useOpportunities.ts`, `lib/hooks/useAccounts.ts` y RPC `process_field_updates` en Supabase/PostgreSQL al eliminar oportunidades/cotizaciones o sincronizar snapshots de `CRM_CotizacionItems`.
+
+Problem:
+Al eliminar una oportunidad (o cotizaciones/cuentas con ítems), la mutación snapshot de `CRM_CotizacionItems` encolada en el Outbox fallaba sistemáticamente arrojando el error:
+`[FAILED] CRM_CotizacionItems (_complete_snapshot_): column "subtotal" can only be updated to DEFAULT [Context: _complete_snapshot_ (UPDATE)]`
+quedando atascada en el Outbox y bloqueando la sincronización de ítems eliminados.
+
+Root Cause:
+1. La columna `subtotal` de `CRM_CotizacionItems` es una columna generada en PostgreSQL (`is_generated = 'ALWAYS'`, expresión: `(cantidad * COALESCE(final_unit_price, precio_unitario))`). PostgreSQL prohíbe explícitamente actualizar o insertar valores en columnas generadas que no sean `DEFAULT`.
+2. Al ejecutar `deleteOpportunity` (`useOpportunities.ts`) y `deleteAccount` (`useAccounts.ts`), se encolaba la mutación `{ ...item, is_deleted: true }` conservando la propiedad `subtotal` que proviene del almacenamiento local de Dexie.
+3. El filtro en `lib/sync.ts` solo descartaba mutaciones donde `u.field === 'subtotal'`, pero omitía limpiar la clave `subtotal` contenida dentro de los objetos de modo snapshot `u.field === '_complete_snapshot_'`.
+4. El RPC `process_field_updates` en PostgreSQL no comprobaba si las columnas detectadas en `information_schema.columns` eran columnas generadas (`is_generated = 'ALWAYS'`), intentando agregarlas a las cláusulas `UPDATE` e `INSERT`.
+
+Fix Applied:
+1. Se actualizó `public.process_field_updates` en PostgreSQL para consultar `is_generated` y omitir cualquier columna donde `COALESCE(is_generated, 'NEVER') = 'ALWAYS'`. (Migración: `20260826_fix_process_field_updates_generated_columns.sql`).
+2. Se actualizó `lib/sync.ts` en `pushChanges` para limpiar la propiedad `subtotal` de los snapshots `_complete_snapshot_` de `CRM_CotizacionItems` antes de enviarlos al RPC, y en `queueMutation` para evitar persistir `subtotal` en la cola de salida.
+3. Se corrigió `deleteOpportunity` en `lib/hooks/useOpportunities.ts` y `deleteAccount` en `lib/hooks/useAccounts.ts` desestructurando `{ subtotal, ...itemData }` antes de encolar las mutaciones de soft-delete.
+
+## [Bug ID: 20260826-03]
+
+Context:
+`lib/utils.ts` (`includesNormalized`, `matchesSearchTokens`), `components/usuarios/UserList.tsx`, `components/cuentas/UserPickerFilter.tsx` y políticas RLS de `CRM_Usuarios` en Supabase/PostgreSQL.
+
+Problem:
+Al entrar al módulo de Gestión de Usuarios (`/usuarios`) o al abrir el selector de usuarios en filtros (`UserPickerFilter`), la lista aparecía vacía ("0 usuarios", "No se encontraron usuarios") a pesar de existir usuarios válidos en la base de datos.
+
+Root Cause:
+1. Las funciones utilitarias `includesNormalized` y `matchesSearchTokens` contenían una validación estricta `if (!text || !searchQuery) return false;`. Al cargar la interfaz con `searchTerm = ""` (cadena vacía inicial), `includesNormalized` retornaba `false`, filtrando todos los registros.
+2. La tabla `CRM_Usuarios` en Supabase tenía activado RLS pero solo contaba con políticas asignadas al rol `authenticated`. Al realizar consultas durante la inicialización o antes de que el JWT del cliente SSR estuviese completamente adjunto, PostgREST evaluaba el rol `public`/`anon` y devolvía 0 registros.
+
+Fix Applied:
+1. Se actualizaron `includesNormalized` y `matchesSearchTokens` en `lib/utils.ts` para retornar `true` cuando `!searchQuery || !searchQuery.trim()`, comportándose de forma consistente con `String.prototype.includes("")`.
+2. Se añadió de forma explícita y defensiva la condición `!searchTerm.trim() || ...` en `UserList.tsx` y `UserPickerFilter.tsx`.
+3. Se creó y aplicó la política RLS `"Allow read access to public for CRM_Usuarios"` para permitir lectura de usuarios a nivel general en directorios y selectores (Migración: `20260826_allow_public_read_crm_usuarios.sql`).
+
+Prevention Rule:
+**Empty Search Queries Must Match Everything & User Directory Read Access**: Toda función de coincidencia de texto debe retornar `true` ante un query vacío. Tablas transversales de lectura como `CRM_Usuarios` deben tener políticas `FOR SELECT TO public` para evitar listas vacías durante la carga y refresco de tokens.
+
+Tags:
+[ui] [search] [filtering] [users] [utils] [rls] [supabase]
 

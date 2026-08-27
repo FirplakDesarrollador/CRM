@@ -12,6 +12,7 @@ import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { cn } from "@/components/ui/utils";
 import { AccountDeleteModal } from "@/components/cuentas/AccountDeleteModal";
+import { DataListToolbar } from "@/components/ui/DataListToolbar";
 import dynamic from 'next/dynamic';
 
 const HotTable = dynamic(() => import('@/components/HotTableWrapper'), { ssr: false });
@@ -56,6 +57,7 @@ function AccountsContent() {
     const [editingAccount, setEditingAccount] = useState<any>(null);
     const lastProcessedUrlIdRef = useRef<string | null>(null);
     const [accountToDelete, setAccountToDelete] = useState<any>(null);
+    const [showFilters, setShowFilters] = useState(() => Boolean(searchParams.get('channel') || searchParams.get('subclass') || searchParams.get('nivel') || searchParams.get('start') || searchParams.get('end')));
     const [inputValue, setInputValue] = useState(() => {
         const fromUrl = searchParams.get('search');
         if (fromUrl) return fromUrl;
@@ -77,12 +79,19 @@ function AccountsContent() {
     });
 
     const [currentChannel, setCurrentChannel] = useState<string | null>(() => {
-        return searchParams.get('channel') || null;
+        return searchParams.get('channel') || (typeof window !== 'undefined' ? new URLSearchParams(sessionStorage.getItem('crm_cuentas_state') || '').get('channel') : null);
+    });
+
+    const [currentSubclass, setCurrentSubclass] = useState<number | null>(() => {
+        const value = searchParams.get('subclass') || (typeof window !== 'undefined' ? new URLSearchParams(sessionStorage.getItem('crm_cuentas_state') || '').get('subclass') : null);
+        return value ? Number(value) : null;
     });
 
     const [currentNivel, setCurrentNivel] = useState<string | null>(() => {
-        return searchParams.get('nivel') || null;
+        return searchParams.get('nivel') || (typeof window !== 'undefined' ? new URLSearchParams(sessionStorage.getItem('crm_cuentas_state') || '').get('nivel') : null);
     });
+    const [currentStartDate, setCurrentStartDate] = useState<string | null>(() => searchParams.get('start') || (typeof window !== 'undefined' ? new URLSearchParams(sessionStorage.getItem('crm_cuentas_state') || '').get('start') : null));
+    const [currentEndDate, setCurrentEndDate] = useState<string | null>(() => searchParams.get('end') || (typeof window !== 'undefined' ? new URLSearchParams(sessionStorage.getItem('crm_cuentas_state') || '').get('end') : null));
 
     // Handle Sort
     const handleSort = (field: string) => {
@@ -110,7 +119,10 @@ function AccountsContent() {
         setEndDate(endDate);
 
         setCurrentChannel(channelId);
+        setCurrentSubclass(subclassificationId);
         setCurrentNivel(nivelPremium);
+        setCurrentStartDate(startDate);
+        setCurrentEndDate(endDate);
     }, [setChannelFilter, setSubclassificationFilter, setNivelPremiumFilter, setStartDate, setEndDate]);
 
     const handleUserSelect = useCallback((userId: string | null) => {
@@ -120,12 +132,40 @@ function AccountsContent() {
 
     // Initial Sync from URL
     useEffect(() => {
-        const query = searchParams.get('search') || '';
-        const userQuery = searchParams.get('user') || null;
+        const saved = new URLSearchParams(typeof window !== 'undefined' ? sessionStorage.getItem('crm_cuentas_state') || '' : '');
+        const query = searchParams.get('search') || saved.get('search') || '';
+        const userQuery = searchParams.get('user') || saved.get('user') || null;
+        const channel = searchParams.get('channel') || saved.get('channel') || null;
+        const subclass = searchParams.get('subclass') || saved.get('subclass');
+        const nivel = searchParams.get('nivel') || saved.get('nivel') || null;
+        const start = searchParams.get('start') || saved.get('start') || null;
+        const end = searchParams.get('end') || saved.get('end') || null;
+        const source = searchParams.get('source') || saved.get('source');
+        const sort = searchParams.get('sort') || saved.get('sort');
+        const direction = searchParams.get('dir') || saved.get('dir');
         if (query) setSearchTerm(query);
         if (userQuery) setAssignedUserId(userQuery);
+        if (channel) setChannelFilter(channel);
+        if (subclass) setSubclassificationFilter(Number(subclass));
+        if (nivel) setNivelPremiumFilter(nivel);
+        if (start) setStartDate(start);
+        if (end) setEndDate(end);
+        if (source === 'web') setWebFilter(true);
+        if (sort) setSortField(sort);
+        if (direction) setSortAsc(direction === 'asc');
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+
+    // Restore the last list context when returning from navigation, but never reopen a record.
+    useEffect(() => {
+        if (typeof window === 'undefined' || searchParams.toString() !== '') return;
+        const savedState = sessionStorage.getItem('crm_cuentas_state');
+        if (!savedState) return;
+        const params = new URLSearchParams(savedState);
+        params.delete('id');
+        const restored = params.toString();
+        if (restored) router.replace(`/cuentas?${restored}`, { scroll: false });
+    }, [searchParams, router]);
 
     // Deep linking: Automatically fetch and open account by ID from URL
     useEffect(() => {
@@ -182,7 +222,13 @@ function AccountsContent() {
             if (inputValue) params.set('search', inputValue); else params.delete('search');
             if (selectedUserId) params.set('user', selectedUserId); else params.delete('user');
             if (currentChannel) params.set('channel', currentChannel); else params.delete('channel');
+            if (currentSubclass) params.set('subclass', String(currentSubclass)); else params.delete('subclass');
             if (currentNivel) params.set('nivel', currentNivel); else params.delete('nivel');
+            if (currentStartDate) params.set('start', currentStartDate); else params.delete('start');
+            if (currentEndDate) params.set('end', currentEndDate); else params.delete('end');
+            if (webFilter) params.set('source', 'web'); else params.delete('source');
+            if (sortField !== 'updated_at') params.set('sort', sortField); else params.delete('sort');
+            if (sortAsc) params.set('dir', 'asc'); else params.delete('dir');
 
             if (editingAccount?.id) params.set('id', editingAccount.id); else params.delete('id');
 
@@ -196,7 +242,7 @@ function AccountsContent() {
             router.replace(queryLink.startsWith('?') ? `${window.location.pathname}${queryLink}` : queryLink, { scroll: false });
         }, 500);
         return () => clearTimeout(timer);
-    }, [inputValue, selectedUserId, currentChannel, currentNivel, editingAccount?.id, searchParams, setSearchTerm, router]);
+    }, [inputValue, selectedUserId, currentChannel, currentSubclass, currentNivel, currentStartDate, currentEndDate, webFilter, sortField, sortAsc, editingAccount?.id, searchParams, setSearchTerm, router]);
 
     const handleEdit = async (acc: any) => {
         setEditingAccount(acc);
@@ -332,23 +378,6 @@ function AccountsContent() {
                 </div>
 
                 <div className="flex flex-wrap md:flex-nowrap gap-2 w-full md:w-auto items-center">
-                    {hasCoordinatorAccess && (
-                        <UserPickerFilter
-                            selectedUserId={selectedUserId}
-                            onUserSelect={handleUserSelect}
-                        />
-                    )}
-
-                    <div className="relative flex-1 md:w-64">
-                        <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-                        <input
-                            data-testid="accounts-search"
-                            className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                            placeholder="Buscar por nombre o NIT..."
-                            value={inputValue}
-                            onChange={(e) => setInputValue(e.target.value)}
-                        />
-                    </div>
                     <button
                         data-testid="accounts-create-button"
                         onClick={() => {
@@ -362,34 +391,31 @@ function AccountsContent() {
                 </div>
             </div>
 
-            <div className="flex gap-4 border-b border-slate-200 mt-2 mb-4">
-                <button
-                    onClick={() => setWebFilter(false)}
-                    className={cn(
-                        "pb-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
-                        !webFilter ? "border-blue-600 text-blue-600" : "border-transparent text-slate-500 hover:text-slate-800"
-                    )}
-                >
-                    Todas
-                </button>
-                <button
-                    onClick={() => setWebFilter(true)}
-                    className={cn(
-                        "pb-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
-                        webFilter ? "border-blue-600 text-blue-600" : "border-transparent text-slate-500 hover:text-slate-800"
-                    )}
-                >
-                    Cuentas desde página {webFilter && !loading && `(${count})`}
-                </button>
-            </div>
-
-            <div className="pb-2 border-b border-slate-200">
-                <AccountFilters
+            <DataListToolbar
+                searchValue={inputValue}
+                onSearchChange={setInputValue}
+                searchPlaceholder="Buscar por nombre o NIT…"
+                searchTestId="accounts-search"
+                filtersOpen={showFilters}
+                onFiltersOpenChange={setShowFilters}
+                activeFilterCount={(selectedUserId ? 1 : 0) + (webFilter ? 1 : 0) + (currentChannel ? 1 : 0) + (currentSubclass ? 1 : 0) + (currentNivel ? 1 : 0) + (currentStartDate ? 1 : 0) + (currentEndDate ? 1 : 0)}
+                quickFilters={<>
+                    {hasCoordinatorAccess && <UserPickerFilter selectedUserId={selectedUserId} onUserSelect={handleUserSelect} />}
+                    <div className="flex rounded-lg bg-slate-100 p-1">
+                        <button onClick={() => setWebFilter(false)} className={cn("rounded-md px-2.5 py-1.5 text-xs font-semibold", !webFilter ? "bg-white text-blue-700 shadow-sm" : "text-slate-500")}>Todas</button>
+                        <button onClick={() => setWebFilter(true)} className={cn("rounded-md px-2.5 py-1.5 text-xs font-semibold", webFilter ? "bg-white text-blue-700 shadow-sm" : "text-slate-500")}>Web{webFilter && !loading ? ` (${count})` : ''}</button>
+                    </div>
+                </>}
+                sortControl={<select value={`${sortField}:${sortAsc ? 'asc' : 'desc'}`} onChange={(e) => { const [field, direction] = e.target.value.split(':'); setSortField(field); setSortAsc(direction === 'asc'); }} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-600 outline-none focus:border-blue-500" aria-label="Ordenar cuentas"><option value="updated_at:desc">Actualizadas</option><option value="nombre:asc">Nombre A–Z</option><option value="potencial_venta:desc">Mayor potencial</option></select>}
+                onClear={() => { setInputValue(''); handleUserSelect(null); setWebFilter(false); handleFilterChange({ channelId: null, subclassificationId: null, nivelPremium: null, startDate: null, endDate: null }); }}
+                filters={<AccountFilters
                     onFilterChange={handleFilterChange}
                     initialChannelId={currentChannel}
+                    initialSubclassId={currentSubclass}
                     initialNivelPremium={currentNivel}
-                />
-            </div>
+                    initialDates={{ startDate: currentStartDate, endDate: currentEndDate }}
+                />}
+            />
 
             {(showCreate || editingAccount) && (
                 <div data-testid="accounts-form-panel" className="mb-6 border border-blue-100 rounded-xl shadow-md overflow-hidden animate-in slide-in-from-top-2">
@@ -631,11 +657,26 @@ function AccountsContent() {
                             renderAllRows={false}
                             licenseKey="non-commercial-and-evaluation"
                             afterOnCellMouseDown={(event: any, coords: any, td: any) => {
+                                if (coords.row === -1) {
+                                    const fields: Record<number, string> = { 0: 'nombre', 1: 'ciudad', 2: 'canal_id', 4: 'potencial_venta', 7: 'created_at', 8: 'updated_at' };
+                                    if (fields[coords.col]) handleSort(fields[coords.col]);
+                                    return;
+                                }
                                 if (coords.row >= 0) {
                                     const acc = hotData[coords.row]?._original;
                                     if (acc) {
                                         handleEdit(acc);
                                     }
+                                }
+                            }}
+                            afterGetColHeader={(column: number, TH: HTMLTableCellElement) => {
+                                const fields: Record<number, string> = { 0: 'nombre', 1: 'ciudad', 2: 'canal_id', 4: 'potencial_venta', 7: 'created_at', 8: 'updated_at' };
+                                const labels: Record<number, string> = { 0: 'Cuenta', 1: 'Ubicación', 2: 'Canal', 4: 'Potencial Venta', 7: 'Creación', 8: 'Actualizado' };
+                                if (fields[column]) {
+                                    TH.style.cursor = 'pointer';
+                                    TH.title = 'Clic para ordenar ascendente o descendente';
+                                    const header = TH.querySelector('.colHeader');
+                                    if (header) header.textContent = `${labels[column]} ${sortField === fields[column] ? (sortAsc ? '↑' : '↓') : '↕'}`;
                                 }
                             }}
                             stretchH="all"

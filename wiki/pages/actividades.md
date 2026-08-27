@@ -20,6 +20,11 @@ visitas y eventos del equipo comercial. Pueden asociarse a [[oportunidades]] y a
 
 - Creación rápida vía `CreateActivityModal` desde varios módulos (también desde tiendas
   con `CreateStoreActivityModal`). La creación se estructura como un Wizard de 3 pasos (Tipo & Asunto, Clasificación & Fechas, Detalles).
+- **Validaciones y obligatoriedad de campos:**
+  - `clasificacion_id`: Obligatorio.
+  - `fecha_inicio`: Obligatorio únicamente para tareas (Fecha de Vencimiento). Opcional para eventos.
+  - `subclasificacion_id`: Opcional en todos los casos.
+  - `asunto`: Se autogenera automáticamente si el usuario lo deja vacío con el formato `[Clasificación] - [Oportunidad o Cuenta]`.
 - En edición, se eliminan los botones de guardado manual y se implementa guardado automático (auto-save) debounced (1.5 segundos) con indicador visual (`AutoSaveIndicator`) integrado vía `useFormAutoSave`.
 - Vencimiento: las actividades no completadas después de su fecha generan
   [[notificaciones]] de tipo `ACTIVITY_OVERDUE` (Edge Function

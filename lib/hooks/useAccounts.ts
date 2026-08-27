@@ -202,7 +202,8 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
             await syncEngine.queueMutation('CRM_Cotizaciones', quote.id, { ...quote, is_deleted: true }, { isSnapshot: true });
         }
         for (const item of quoteItems) {
-            await syncEngine.queueMutation('CRM_CotizacionItems', item.id, { ...item, is_deleted: true }, { isSnapshot: true });
+            const { subtotal, ...itemData } = item;
+            await syncEngine.queueMutation('CRM_CotizacionItems', item.id, { ...itemData, is_deleted: true }, { isSnapshot: true });
         }
         for (const act of activities) {
             await syncEngine.queueMutation('CRM_Actividades', act.id, { ...act, is_deleted: true }, { isSnapshot: true });

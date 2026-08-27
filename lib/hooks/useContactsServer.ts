@@ -34,6 +34,10 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
 
     // Filters
     const [searchTerm, setSearchTerm] = useState<string>("");
+    const [accountFilter, setAccountFilter] = useState<string | null>(null);
+    const [principalFilter, setPrincipalFilter] = useState<'all' | 'principal' | 'secondary'>('all');
+    const [sortField, setSortField] = useState<'updated_at' | 'nombre' | 'email'>('updated_at');
+    const [sortAsc, setSortAsc] = useState(false);
 
     // User Context
     const { user, role: userRole, isVendedor } = useCurrentUser();
@@ -99,11 +103,17 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
                     );
                 }
 
+                if (accountFilter) localContacts = localContacts.filter(c => c.account_id === accountFilter);
+                if (principalFilter === 'principal') localContacts = localContacts.filter(c => c.es_principal);
+                if (principalFilter === 'secondary') localContacts = localContacts.filter(c => !c.es_principal);
+
                 // Sorting
                 localContacts.sort((a, b) => {
-                    const dateA = a.updated_at ? new Date(a.updated_at).getTime() : 0;
-                    const dateB = b.updated_at ? new Date(b.updated_at).getTime() : 0;
-                    return dateB - dateA; // DESC
+                    const valueA = sortField === 'updated_at' ? (a.updated_at ? new Date(a.updated_at).getTime() : 0) : ((a as any)[sortField] || '').toLocaleLowerCase();
+                    const valueB = sortField === 'updated_at' ? (b.updated_at ? new Date(b.updated_at).getTime() : 0) : ((b as any)[sortField] || '').toLocaleLowerCase();
+                    if (valueA < valueB) return sortAsc ? -1 : 1;
+                    if (valueA > valueB) return sortAsc ? 1 : -1;
+                    return 0;
                 });
 
                 const totalCount = localContacts.length;
@@ -178,12 +188,16 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
                 query = query.eq('account_id', accountId);
             }
 
+            if (accountFilter) query = query.eq('account_id', accountFilter);
+            if (principalFilter === 'principal') query = query.eq('es_principal', true);
+            if (principalFilter === 'secondary') query = query.eq('es_principal', false);
+
             if (searchTerm) {
                 query = query.or(`nombre.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%,telefono.ilike.%${searchTerm}%`);
             }
 
             // Order
-            query = query.order('updated_at', { ascending: false }).order('id', { ascending: false });
+            query = query.order(sortField, { ascending: sortAsc }).order('id', { ascending: false });
 
             // Paging
             query = query.range(from, to);
@@ -304,7 +318,7 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
             setLoading(false);
             useSyncStore.getState().setIsLoadingData(false);
         }
-    }, [pageSize, searchTerm, accountId, isVendedor, userRole, currentUserId, subordinateIds]);
+    }, [pageSize, searchTerm, accountId, accountFilter, principalFilter, sortField, sortAsc, isVendedor, userRole, currentUserId, subordinateIds]);
 
     // Initial Fetch & Filter Fetch
     useEffect(() => {
@@ -345,6 +359,12 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
         hasMore,
         loadMore,
         setSearchTerm,
+        setAccountFilter,
+        setPrincipalFilter,
+        setSortField,
+        setSortAsc,
+        sortField,
+        sortAsc,
         refresh: () => fetchContacts(false)
     };
 }

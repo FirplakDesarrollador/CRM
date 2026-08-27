@@ -60,6 +60,7 @@ export function UserPickerFilter({
     }, [users, role, currentUser]);
 
     const filteredUsers = availableUsers.filter(u =>
+        !search.trim() ||
         includesNormalized(u.full_name, search) ||
         includesNormalized(u.email, search)
     );

@@ -24,20 +24,24 @@ export function removeAccents(str: string | null | undefined): string {
 
 /**
  * Verifica si `text` contiene `searchQuery` ignorando tildes y mayúsculas/minúsculas.
+ * Si no hay término de búsqueda o está vacío, retorna true.
  */
 export function includesNormalized(text: string | null | undefined, searchQuery: string | null | undefined): boolean {
-    if (!text || !searchQuery) return false;
-    return removeAccents(text).includes(removeAccents(searchQuery));
+    if (!searchQuery || !searchQuery.trim()) return true;
+    if (!text) return false;
+    return removeAccents(text).includes(removeAccents(searchQuery).trim());
 }
 
 /**
  * Verifica si `text` contiene todas las palabras de `searchQuery` en cualquier orden, ignorando tildes y mayúsculas.
+ * Si no hay término de búsqueda o está vacío, retorna true.
  */
 export function matchesSearchTokens(text: string | null | undefined, searchQuery: string | null | undefined): boolean {
-    if (!text || !searchQuery) return false;
+    if (!searchQuery || !searchQuery.trim()) return true;
+    if (!text) return false;
     const normalizedText = removeAccents(text);
     const tokens = removeAccents(searchQuery).trim().split(/\s+/).filter(Boolean);
-    if (tokens.length === 0) return false;
+    if (tokens.length === 0) return true;
     return tokens.every(token => normalizedText.includes(token));
 }
 

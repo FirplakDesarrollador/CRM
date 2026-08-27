@@ -44,6 +44,7 @@ Los estados posibles son `PENDING`, `SYNCING`, `FAILED`, `DEAD_LETTER` y `COMPLE
 
 - En modo granular aplica el valor únicamente si el timestamp nuevo es mayor y persiste el timestamp aceptado para ese campo.
 - En modo snapshot inserta el registro completo si no existe o compara campo por campo cuando ya existe.
+- Las columnas generadas (`is_generated = 'ALWAYS'`) como `CRM_CotizacionItems.subtotal` se filtran y omiten automáticamente tanto en el cliente (`lib/sync.ts`, `queueMutation`) como en el RPC PostgreSQL (`process_field_updates`), evitando rechazos SQL `column "subtotal" can only be updated to DEFAULT`.
 - `CRM_Cuentas.nit` se valida contra el límite de `int32`; `nit_base` conserva el valor textual completo.
 
 La migración `20260821230051_harden_sync_engine.sql` mueve la implementación heredada a un esquema privado, usa `SECURITY INVOKER`, verifica que `p_user_id = auth.uid()`, limita las tablas permitidas y deja las políticas RLS como autoridad de acceso.

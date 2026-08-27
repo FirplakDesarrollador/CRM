@@ -71,46 +71,12 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
 
     const { register, handleSubmit, watch, setValue, getValues, reset, formState: { dirtyFields } } = form;
 
-    const onAutoSave = async (data: any) => {
-        if (!isEditing || !initialData?.id) return;
-        const payload: any = {
-            asunto: data.asunto,
-            descripcion: data.descripcion || null,
-            tipo_actividad: data.tipo_actividad,
-            clasificacion_id: data.clasificacion_id ? Number(data.clasificacion_id) : null,
-            subclasificacion_id: data.subclasificacion_id ? Number(data.subclasificacion_id) : null,
-            fecha_inicio: data.fecha_inicio ? new Date(data.fecha_inicio).toISOString() : null,
-            fecha_fin: data.fecha_fin ? new Date(data.fecha_fin).toISOString() : null,
-            opportunity_id: data.opportunity_id || null,
-            account_id: data.account_id || null,
-            is_completed: !!data.is_completed,
-            prioridad: data.prioridad || 'Media'
-        };
-        await updateActivity(initialData.id, payload);
-    };
-
-    const { status: autoSaveStatus } = useFormAutoSave({
-        form,
-        onSave: onAutoSave,
-        isEnabled: isEditing
-    });
-
     const watchedAccountId = watch('account_id');
     const watchedOpportunityId = watch('opportunity_id');
 
-    useEffect(() => {
-        if (isEditing || wizardStep !== ACTIVITY_WIZARD_LAST_STEP) {
-            setCanSubmitFinalStep(false);
-            return;
-        }
-
-        setCanSubmitFinalStep(false);
-        const timer = window.setTimeout(() => {
-            setCanSubmitFinalStep(true);
-        }, 500);
-
-        return () => window.clearTimeout(timer);
-    }, [isEditing, wizardStep]);
+    // Load Catalogs
+    const classifications = useLiveQuery(() => db.activityClassifications.toArray().then(arr => arr.filter(c => !c.is_deleted)), []) || [];
+    const subclassifications = useLiveQuery(() => db.activitySubclassifications.toArray().then(arr => arr.filter(s => !s.is_deleted)), []) || [];
 
     const relatedOpportunity = useLiveQuery(
         () => watchedOpportunityId ? db.opportunities.get(watchedOpportunityId) : undefined,
@@ -133,6 +99,79 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
 
     const [resolvedAccountName, setResolvedAccountName] = useState<string>("");
     const opportunityAccountRef = useRef<string | null>(null);
+
+    const { updateActivity, deleteActivity } = useActivities({ opportunity_id: initialOpportunityId });
+
+    const getAutoAsunto = useCallback((clasifId?: string | number | null, oppId?: string | null, accId?: string | null) => {
+        const cId = clasifId !== undefined ? clasifId : getValues('clasificacion_id');
+        const clasif = classifications.find(c => String(c.id) === String(cId));
+        const clasifName = clasif?.nombre || '';
+
+        const currentOppId = oppId !== undefined ? oppId : getValues('opportunity_id');
+        const currentAccId = accId !== undefined ? accId : getValues('account_id');
+
+        let targetName = '';
+        if (currentOppId && relatedOpportunity?.nombre) {
+            targetName = relatedOpportunity.nombre;
+        } else if (currentAccId) {
+            targetName = relatedAccount?.nombre || resolvedAccountName || '';
+        }
+
+        if (clasifName && targetName) {
+            return `${clasifName} - ${targetName}`;
+        }
+        if (clasifName) {
+            return clasifName;
+        }
+        if (targetName) {
+            const currentTipo = getValues('tipo_actividad') || 'EVENTO';
+            return `${currentTipo === 'TAREA' ? 'Tarea' : 'Evento'} - ${targetName}`;
+        }
+        const currentTipo = getValues('tipo_actividad') || 'EVENTO';
+        return currentTipo === 'TAREA' ? 'Nueva Tarea' : 'Nuevo Evento';
+    }, [classifications, getValues, relatedOpportunity, relatedAccount, resolvedAccountName]);
+
+    const onAutoSave = async (data: any) => {
+        if (!isEditing || !initialData?.id) return;
+        const autoAsunto = data.asunto?.trim() || getAutoAsunto(data.clasificacion_id, data.opportunity_id, data.account_id);
+        if (!data.asunto?.trim()) {
+            setValue('asunto', autoAsunto);
+        }
+        const payload: any = {
+            asunto: autoAsunto,
+            descripcion: data.descripcion || null,
+            tipo_actividad: data.tipo_actividad,
+            clasificacion_id: data.clasificacion_id ? Number(data.clasificacion_id) : null,
+            subclasificacion_id: data.subclasificacion_id ? Number(data.subclasificacion_id) : null,
+            fecha_inicio: data.fecha_inicio ? new Date(data.fecha_inicio).toISOString() : null,
+            fecha_fin: data.fecha_fin ? new Date(data.fecha_fin).toISOString() : null,
+            opportunity_id: data.opportunity_id || null,
+            account_id: data.account_id || null,
+            is_completed: !!data.is_completed,
+            prioridad: data.prioridad || 'Media'
+        };
+        await updateActivity(initialData.id, payload);
+    };
+
+    const { status: autoSaveStatus } = useFormAutoSave({
+        form,
+        onSave: onAutoSave,
+        isEnabled: isEditing
+    });
+
+    useEffect(() => {
+        if (isEditing || wizardStep !== ACTIVITY_WIZARD_LAST_STEP) {
+            setCanSubmitFinalStep(false);
+            return;
+        }
+
+        setCanSubmitFinalStep(false);
+        const timer = window.setTimeout(() => {
+            setCanSubmitFinalStep(true);
+        }, 500);
+
+        return () => window.clearTimeout(timer);
+    }, [isEditing, wizardStep]);
 
     useEffect(() => {
         const fillAccount = async () => {
@@ -245,7 +284,6 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
     // Deletion State
     const [isDeleting, setIsDeleting] = useState(false);
     const [showMenu, setShowMenu] = useState(false);
-    const { updateActivity, deleteActivity } = useActivities({ opportunity_id: initialOpportunityId });
 
     // Planner Status Sync State
     const [isSyncingPlanner, setIsSyncingPlanner] = useState<boolean>(false);
@@ -619,10 +657,6 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         }
     }, [initialData, setValue, onSubmit]); // Fixed dependencies
 
-    // Load Catalogs
-    const classifications = useLiveQuery(() => db.activityClassifications.toArray().then(arr => arr.filter(c => !c.is_deleted)), []) || [];
-    const subclassifications = useLiveQuery(() => db.activitySubclassifications.toArray().then(arr => arr.filter(s => !s.is_deleted)), []) || [];
-
     // PROACTIVE SYNC: If catalogs are empty, trigger a pull
     useEffect(() => {
         if (classifications.length === 0 && navigator.onLine) {
@@ -914,6 +948,10 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         setIsSubmitting(true);
         setSyncFeedback({}); // Reset feedback
         try {
+            const currentAsunto = data.asunto?.trim() || getAutoAsunto(data.clasificacion_id, data.opportunity_id, data.account_id);
+            data.asunto = currentAsunto;
+            setValue('asunto', currentAsunto);
+
             console.log("[CreateActivityModal] Raw Submit Data:", data);
 
             // 1. Create or Update Calendar Event
@@ -922,13 +960,15 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
             let calendarSuccess = false;
 
             const tipo = data.tipo_actividad;
-            if (msConnected && tipo === 'EVENTO') {
+            if (msConnected && tipo === 'EVENTO' && data.fecha_inicio) {
                 try {
+                    const startIso = new Date(data.fecha_inicio).toISOString();
+                    const endIso = data.fecha_fin ? new Date(data.fecha_fin).toISOString() : new Date(new Date(data.fecha_inicio).getTime() + 3600000).toISOString();
                     const eventPayload = {
                         subject: data.asunto,
                         description: data.descripcion,
-                        start: new Date(data.fecha_inicio).toISOString(),
-                        end: new Date(data.fecha_fin).toISOString(),
+                        start: startIso,
+                        end: endIso,
                         attendees: attendees,
                         isOnlineMeeting: isTeamsMeeting
                     };
@@ -962,7 +1002,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                     } else {
                         // CREATE NEW EVENT - but check for duplicates first to be safe
                         console.log("[CreateActivityModal] Checking for duplicates in Outlook before creating...");
-                        const searchRes = await fetch(`/api/microsoft/calendar/search-event?subject=${encodeURIComponent(data.asunto.trim())}&startTime=${encodeURIComponent(new Date(data.fecha_inicio).toISOString())}`, { credentials: 'include' });
+                        const searchRes = await fetch(`/api/microsoft/calendar/search-event?subject=${encodeURIComponent(data.asunto.trim())}&startTime=${encodeURIComponent(startIso)}`, { credentials: 'include' });
 
                         let duplicateEvent = null;
                         if (searchRes.ok) {
@@ -1167,8 +1207,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
             }
 
             // If Calendar sync was requested but failed/offline, queue it
-            // If Calendar sync was requested but failed/offline, queue it
-            if (data.tipo_actividad === 'EVENTO' && !eventId) {
+            if (data.tipo_actividad === 'EVENTO' && !eventId && data.fecha_inicio) {
                 processed._sync_metadata.pending_calendar = true;
                 processed._sync_metadata.assigneeIds = attendees.map(a => a.id);
                 processed._sync_metadata.isOnlineMeeting = isTeamsMeeting;
@@ -1495,6 +1534,10 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                             onChange: (e) => {
                                                 console.log("[CreateActivityModal] Classification Selected:", e.target.value);
                                                 setValue('subclasificacion_id', "");
+                                                if (!getValues('asunto')?.trim()) {
+                                                    const auto = getAutoAsunto(e.target.value);
+                                                    setValue('asunto', auto, { shouldDirty: true, shouldValidate: true });
+                                                }
                                             }
                                         })}
                                         className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all appearance-none"
@@ -1528,13 +1571,13 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                             {filteredSubclassifications.length > 0 && (
                                 <div className="space-y-1 animate-in fade-in slide-in-from-left-2 duration-200">
                                     <label className="text-xs font-bold text-slate-500 uppercase">
-                                        Subclasificación <span className="text-red-500">*</span>
+                                        Subclasificación
                                     </label>
                                     <select
-                                        {...register('subclasificacion_id', { required: "La subclasificación es requerida" })}
+                                        {...register('subclasificacion_id')}
                                         className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all appearance-none"
                                     >
-                                        <option value="">Seleccione...</option>
+                                        <option value="">Seleccione (opcional)...</option>
                                         {filteredSubclassifications.map(s => (
                                             <option key={s.id} value={String(s.id)}>{s.nombre}</option>
                                         ))}
@@ -1572,11 +1615,14 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
 
                     {(isEditing || wizardStep === 0) && (
                         <div className="space-y-1">
-                            <label className="text-xs font-bold text-slate-500 uppercase">Asunto <span className="text-red-500">*</span></label>
+                            <label className="text-xs font-bold text-slate-500 uppercase flex items-center justify-between">
+                                <span>Asunto <span className="text-red-500">*</span></span>
+                                <span className="text-[10px] text-slate-400 font-normal lowercase">(automático si se deja vacío)</span>
+                            </label>
                             <input
-                                {...register('asunto', { required: true })}
+                                {...register('asunto')}
                                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
-                                placeholder={tipo === 'TAREA' ? "Ej. Llamar a seguimiento" : "Ej. Reunión de presentación"}
+                                placeholder={tipo === 'TAREA' ? "Ej. Llamar a seguimiento (o autogenerar)" : "Ej. Reunión de presentación (o autogenerar)"}
                             />
                         </div>
                     )}
@@ -1807,7 +1853,6 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                         value={fechaInicio || ''}
                                         onChange={(val) => setValue('fecha_inicio', val)}
                                         label="Fecha Inicio"
-                                        required
                                         minDate={new Date()}
                                         showTime={true}
                                     />
@@ -1830,7 +1875,12 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                 <OpportunityCombobox
                                     value={watch('opportunity_id')}
                                     accountId={watch('account_id')}
-                                    onChange={(val) => setValue('opportunity_id', val, { shouldDirty: true, shouldValidate: true })}
+                                    onChange={(val) => {
+                                        setValue('opportunity_id', val, { shouldDirty: true, shouldValidate: true });
+                                        if (!getValues('asunto')?.trim() && getValues('clasificacion_id')) {
+                                            setValue('asunto', getAutoAsunto(undefined, val), { shouldDirty: true, shouldValidate: true });
+                                        }
+                                    }}
                                     disabled={!!initialOpportunityId}
                                 />
                             </div>
@@ -1847,6 +1897,9 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                         if (currentOppId && opportunityAccountRef.current !== val) {
                                             setValue('opportunity_id', '', { shouldDirty: true });
                                             opportunityAccountRef.current = null;
+                                        }
+                                        if (!getValues('asunto')?.trim() && getValues('clasificacion_id')) {
+                                            setValue('asunto', getAutoAsunto(undefined, undefined, val), { shouldDirty: true, shouldValidate: true });
                                         }
                                     }}
                                 />
@@ -1932,13 +1985,23 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                         type="button"
                                         onClick={async () => {
                                             let fields: any[] = [];
-                                            if (wizardStep === 0) fields = ["asunto"];
-                                            else if (wizardStep === 1) {
-                                                fields = ["clasificacion_id", "fecha_inicio"];
-                                                if (tipo === 'EVENTO') fields.push("fecha_fin");
+                                            if (wizardStep === 0) {
+                                                const currentAsunto = getValues('asunto')?.trim();
+                                                if (currentAsunto) {
+                                                    fields = ["asunto"];
+                                                }
+                                            } else if (wizardStep === 1) {
+                                                fields = ["clasificacion_id"];
+                                                if (tipo === 'TAREA') fields.push("fecha_inicio");
                                             }
-                                            const isValid = await form.trigger(fields as any);
-                                            if (isValid) setWizardStep(prev => Math.min(ACTIVITY_WIZARD_LAST_STEP, prev + 1));
+                                            const isValid = fields.length === 0 || await form.trigger(fields as any);
+                                            if (isValid) {
+                                                if (wizardStep === 1 && !getValues('asunto')?.trim()) {
+                                                    const auto = getAutoAsunto();
+                                                    setValue('asunto', auto, { shouldDirty: true, shouldValidate: true });
+                                                }
+                                                setWizardStep(prev => Math.min(ACTIVITY_WIZARD_LAST_STEP, prev + 1));
+                                            }
                                         }}
                                         className="px-6 py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition text-sm"
                                     >

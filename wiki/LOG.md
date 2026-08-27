@@ -3,6 +3,42 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-08-26 - Fix: Normalización y Búsqueda Inclusiva para Listados (Gestión de Usuarios y Selectores)
+
+- **Corrección de Filtrado Inicial en Gestión de Usuarios (`/usuarios`):**
+  - La función `includesNormalized` en `lib/utils.ts` retornaba `false` cuando el query de búsqueda estaba vacío (`!searchQuery`).
+  - Al iniciar `UserList` y `UserPickerFilter` con `searchTerm = ""`, todos los usuarios eran descartados por el predicado de búsqueda, mostrando `0 usuarios` en pantalla.
+  - La tabla `CRM_Usuarios` carecía de política SELECT para rol `public`, retornando `[]` en consultas del cliente antes o durante la hidratación de sesión auth.
+- **Solución:**
+  - Se actualizaron `includesNormalized` y `matchesSearchTokens` en `lib/utils.ts` para retornar `true` ante consultas vacías o con espacios en blanco.
+  - Se reforzó `UserList.tsx` y `UserPickerFilter.tsx` con evaluación explícita `!searchTerm.trim() || ...`.
+  - Se creó y aplicó la política RLS `"Allow read access to public for CRM_Usuarios"` (migración `20260826_allow_public_read_crm_usuarios.sql`).
+- **Páginas actualizadas:** `wiki/LOG.md`, `bugs-knowhow.md`.
+
+## 2026-08-26 - Ingest: Filtrado de Columnas Generadas en Sincronización (CRM_CotizacionItems.subtotal)
+
+- **Corrección de Error en Sincronización al Eliminar Oportunidades:**
+  - Al eliminar oportunidades o cotizaciones, las mutaciones de soft-delete (`_complete_snapshot_`) de `CRM_CotizacionItems` encoladas incluían la propiedad `subtotal`.
+  - Como `subtotal` es una columna generada en PostgreSQL (`is_generated = 'ALWAYS'`), el motor SQL rechazaba la operación con `column "subtotal" can only be updated to DEFAULT`.
+- **Solución a Nivel Base de Datos y Cliente:**
+  - Se actualizó el RPC `public.process_field_updates` en Supabase/PostgreSQL para comprobar `is_generated` en `information_schema.columns` y omitir cualquier columna con `is_generated = 'ALWAYS'` en inserciones y actualizaciones.
+  - Se actualizó `lib/sync.ts` para sanitizar payloads snapshot de `CRM_CotizacionItems` en `pushChanges` y `queueMutation`.
+  - Se limpió el encolado de soft-delete en `deleteOpportunity` (`lib/hooks/useOpportunities.ts`) y `deleteAccount` (`lib/hooks/useAccounts.ts`).
+  - Migración aplicada: `supabase/migrations/20260826_fix_process_field_updates_generated_columns.sql`.
+- **Páginas actualizadas:** `wiki/pages/sincronizacion-offline.md`, `wiki/LOG.md`, `bugs-knowhow.md`.
+
+## 2026-08-26 - Ingest: Flexibilización de Campos y Autogeneración de Asunto en Actividades
+
+- **Obligatoriedad de Fechas:**
+  - `fecha_inicio` es obligatoria únicamente para actividades de tipo `TAREA` (Fecha de Vencimiento).
+  - Para `EVENTO`, tanto `fecha_inicio` como `fecha_fin` pasan a ser opcionales en creación y edición.
+- **Subclasificación Opcional:** Se retiró el requisito obligatorio de `subclasificacion_id` para permitir guardar actividades sin necesidad de seleccionar un subnivel.
+- **Autogeneración Dinámica de Asunto (`asunto`):**
+  - Si el usuario deja el campo vacío o en blanco, se genera automáticamente con la estructura `[Clasificación] - [Oportunidad o Cuenta]`.
+  - Si no hay oportunidad ni cuenta asociada, usa solo la clasificación.
+  - Se vinculó a los cambios de selección en clasificación, oportunidad y cuenta, y como fallback garantizado en `handleActualSubmit` y `onAutoSave`.
+- **Páginas actualizadas:** `wiki/pages/actividades.md`, `wiki/LOG.md`.
+
 ## 2026-08-26 - Ingest: Blindaje de Calidad y Robustez del Formulario de Tiendas (/tiendas)
 
 - **Asignación de Propietario (`useAccounts.ts` & `CreateStoreSaleForm.tsx`):** `createAccount` ahora respeta `owner_user_id` pasado en el payload, asignando el cliente nuevo directamente al asesor seleccionado (evitando que quede asignado al usuario logueado en caso de registro por coordinadores/administradores). Para cuentas existentes sin asesor, se actualiza el propietario en Dexie/Supabase.

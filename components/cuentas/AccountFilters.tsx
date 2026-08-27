@@ -23,6 +23,7 @@ interface AccountFiltersProps {
         endDate: string | null;
     }) => void;
     initialChannelId?: string | null;
+    initialSubclassId?: number | null;
     initialNivelPremium?: string | null;
     initialDates?: {
         startDate: string | null;
@@ -30,12 +31,12 @@ interface AccountFiltersProps {
     };
 }
 
-export function AccountFilters({ onFilterChange, initialChannelId, initialNivelPremium, initialDates }: AccountFiltersProps) {
+export function AccountFilters({ onFilterChange, initialChannelId, initialSubclassId, initialNivelPremium, initialDates }: AccountFiltersProps) {
     const [channels, setChannels] = useState<Channel[]>([]);
     const [subclasses, setSubclasses] = useState<Subclasificacion[]>([]);
 
     const [selectedChannel, setSelectedChannel] = useState<string | null>(initialChannelId || null);
-    const [selectedSubclass, setSelectedSubclass] = useState<number | null>(null);
+    const [selectedSubclass, setSelectedSubclass] = useState<number | null>(initialSubclassId || null);
     const [selectedNivel, setSelectedNivel] = useState<string | null>(initialNivelPremium || null);
 
     const [startDate, setStartDate] = useState<string | null>(initialDates?.startDate || null);
@@ -54,10 +55,10 @@ export function AccountFilters({ onFilterChange, initialChannelId, initialNivelP
                 if (chanRes.data) setChannels(chanRes.data);
                 if (subRes.data) setSubclasses(subRes.data);
 
-                if (initialChannelId || initialNivelPremium || initialDates) {
+                if (initialChannelId || initialSubclassId || initialNivelPremium || initialDates) {
                     onFilterChange({
                         channelId: initialChannelId || null,
-                        subclassificationId: null,
+                        subclassificationId: initialSubclassId || null,
                         nivelPremium: initialNivelPremium || null,
                         startDate: initialDates?.startDate || null,
                         endDate: initialDates?.endDate || null

@@ -888,6 +888,13 @@ export class SyncEngine {
                     if (updates.length < originalCount) {
                         console.log(`[Sync] Filtered out 'subtotal' generated column from CRM_CotizacionItems batch`);
                     }
+                    updates = updates.map(u => {
+                        if (u.field === '_complete_snapshot_' && u.value && typeof u.value === 'object') {
+                            const { subtotal, ...rest } = u.value;
+                            return { ...u, value: rest };
+                        }
+                        return u;
+                    });
                 }
 
                 // 3.7 DEFENSIVE SANITIZATION: Ensure CRM_Cuentas nit is valid 32-bit integer or null (nit_base contains text)
@@ -2345,6 +2352,12 @@ export class SyncEngine {
         options: { isSnapshot?: boolean } = {}
     ) {
         try {
+            // Strip generated columns from mutations
+            if (entityTable === 'CRM_CotizacionItems' && changes && typeof changes === 'object') {
+                const { subtotal, ...cleanChanges } = changes;
+                changes = cleanChanges;
+            }
+
             const now = Date.now();
             await db.transaction('rw', db.outbox, async () => {
                 const activeItems = await db.outbox
