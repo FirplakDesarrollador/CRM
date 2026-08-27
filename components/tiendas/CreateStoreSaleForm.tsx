@@ -417,7 +417,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             }
         }
         return combined
-            .filter(a => matchesSearchTokens(a.nombre, accountSearchQuery))
+            .filter(a => matchesSearchTokens([a.nombre, a.nit_base, a.ciudad, a.telefono], accountSearchQuery))
             .slice(0, 15);
     }, [accountSearchQuery, allLocalAccounts, remoteAccounts, selectedAccount]);
 

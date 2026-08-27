@@ -206,15 +206,11 @@ export function useProductSearch(
                     console.error('Supabase query error:', error);
                     throw error;
                 }
-                
                 let finalData = data || [];
                 
-                if (keywords.length > 0) {
+                if (searchTerm && searchTerm.trim().length > 0) {
                     finalData = finalData.filter(p => {
-                        return keywords.every(k => {
-                            return includesNormalized(p.numero_articulo, k) || 
-                                   includesNormalized(p.descripcion, k);
-                        });
+                        return matchesSearchTokens([p.numero_articulo, p.descripcion, p.planta, p.familia], searchTerm);
                     });
                 }
 

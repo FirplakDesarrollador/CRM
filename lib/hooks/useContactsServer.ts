@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase';
 import { db } from '@/lib/db';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useSyncStore } from '@/lib/stores/useSyncStore';
+import { matchesSearchTokens, getSearchTokens } from '@/lib/utils';
 
 export type ContactServer = {
     id: string;
@@ -94,12 +95,9 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
                 }
 
                 // Filtering
-                if (searchTerm) {
-                    const lowerSearch = searchTerm.toLowerCase();
+                if (searchTerm && searchTerm.trim()) {
                     localContacts = localContacts.filter(c => 
-                        c.nombre.toLowerCase().includes(lowerSearch) ||
-                        (c.email && c.email.toLowerCase().includes(lowerSearch)) ||
-                        (c.telefono && c.telefono.toLowerCase().includes(lowerSearch))
+                        matchesSearchTokens([c.nombre, c.email, c.telefono, c.cargo], searchTerm)
                     );
                 }
 
@@ -192,8 +190,11 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
             if (principalFilter === 'principal') query = query.eq('es_principal', true);
             if (principalFilter === 'secondary') query = query.eq('es_principal', false);
 
-            if (searchTerm) {
-                query = query.or(`nombre.ilike.%${searchTerm}%,email.ilike.%${searchTerm}%,telefono.ilike.%${searchTerm}%`);
+            if (searchTerm && searchTerm.trim()) {
+                const tokens = getSearchTokens(searchTerm);
+                for (const token of tokens) {
+                    query = query.or(`nombre.ilike.%${token}%,email.ilike.%${token}%,telefono.ilike.%${token}%,cargo.ilike.%${token}%`);
+                }
             }
 
             // Order
@@ -291,7 +292,12 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
             });
 
             // Combine server results with new optimistic items
-            const finalData = [...itemsToAdd, ...flattenedResults];
+            let finalData = [...itemsToAdd, ...flattenedResults];
+            if (searchTerm && searchTerm.trim()) {
+                finalData = finalData.filter(c =>
+                    matchesSearchTokens([c.nombre, c.email, c.telefono, c.cargo, c.account_name, c.account?.nombre], searchTerm)
+                );
+            }
 
             if (isLoadMore) {
                 setData(prev => {
@@ -308,7 +314,8 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
             }
 
             if (totalCount !== null) {
-                setCount(totalCount);
+                const effectiveCount = (searchTerm && searchTerm.trim()) ? finalData.length : totalCount;
+                setCount(effectiveCount);
                 setHasMore(from + (result?.length || 0) < totalCount);
             }
 

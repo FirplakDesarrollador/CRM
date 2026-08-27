@@ -23,6 +23,14 @@ export function removeAccents(str: string | null | undefined): string {
 }
 
 /**
+ * Obtiene los tokens limpios de un término de búsqueda en minúsculas y sin acentos.
+ */
+export function getSearchTokens(searchQuery: string | null | undefined): string[] {
+    if (!searchQuery || !searchQuery.trim()) return [];
+    return removeAccents(searchQuery).trim().split(/\s+/).filter(Boolean);
+}
+
+/**
  * Verifica si `text` contiene `searchQuery` ignorando tildes y mayúsculas/minúsculas.
  * Si no hay término de búsqueda o está vacío, retorna true.
  */
@@ -33,15 +41,27 @@ export function includesNormalized(text: string | null | undefined, searchQuery:
 }
 
 /**
- * Verifica si `text` contiene todas las palabras de `searchQuery` en cualquier orden, ignorando tildes y mayúsculas.
+ * Verifica si `text` o una lista de `texts` contiene todas las palabras de `searchQuery` en cualquier orden, ignorando tildes y mayúsculas.
  * Si no hay término de búsqueda o está vacío, retorna true.
  */
-export function matchesSearchTokens(text: string | null | undefined, searchQuery: string | null | undefined): boolean {
+export function matchesSearchTokens(
+    textOrTexts: string | null | undefined | (string | null | undefined)[],
+    searchQuery: string | null | undefined
+): boolean {
     if (!searchQuery || !searchQuery.trim()) return true;
-    if (!text) return false;
-    const normalizedText = removeAccents(text);
-    const tokens = removeAccents(searchQuery).trim().split(/\s+/).filter(Boolean);
+    if (!textOrTexts) return false;
+
+    const tokens = getSearchTokens(searchQuery);
     if (tokens.length === 0) return true;
+
+    const combinedText = Array.isArray(textOrTexts)
+        ? textOrTexts.filter(Boolean).join(" ")
+        : String(textOrTexts);
+
+    if (!combinedText) return false;
+    const normalizedText = removeAccents(combinedText);
+
     return tokens.every(token => normalizedText.includes(token));
 }
+
 

@@ -3,6 +3,23 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-08-27 - Feature/Fix: Normalización Universal de Búsqueda Multi-Token, Tildes y Orden en Todos los Módulos
+
+- **Motor de Búsqueda y Normalización (`lib/utils.ts`):**
+  - Se extendió `matchesSearchTokens` para soportar tanto cadenas únicas como listas/arrays de campos (`[nombre, nit, email, asesor, etc.]`), ignorando mayúsculas/minúsculas y acentos (`removeAccents`).
+  - Se añadió `getSearchTokens` para descomponer y limpiar términos de búsqueda en múltiples tokens independientes.
+- **Módulos y Hooks Actualizados:**
+  - `useAccountsServer.ts` & `/cuentas`: Búsqueda online/offline con tokenización de nombres y NITs, posfiltrado con `matchesSearchTokens`, y reducción de debounce a 250ms.
+  - `useOpportunitiesServer.ts` & `/oportunidades`: Búsqueda cruzada por nombre de oportunidad, cuenta o asesor con tokens en cualquier orden y sin problemas de acentos.
+  - `useActivitiesServer.ts` & `/actividades`: Búsqueda por asunto, descripción, oportunidad y tipo con `matchesSearchTokens`.
+  - `useContactsServer.ts` & `/contactos`: Búsqueda por nombre, email, teléfono, cargo y cuenta.
+  - `useProducts.ts`, `/catalogo` & `/inventarios`: Búsqueda por número de artículo, descripción, planta y familia.
+  - `app/pedidos/page.tsx`: Filtrado de pedidos por número, cotización, orden de compra, cliente, oportunidad y asesor con tokens y sin tildes.
+  - `SearchableSelect.tsx`: Integración de filtro personalizado con `matchesSearchTokens` en componente `<Command>`.
+  - `UserList.tsx`, `UserPickerFilter.tsx`, `CreateStoreSaleForm.tsx`, `CommissionCategoryManager.tsx`, `BonusRulesManager.tsx`, `CommissionRuleForm.tsx`: Búsquedas homogéneas multi-término.
+- **Incremento de versión a `1.1.2.9`.**
+- **Páginas actualizadas:** `wiki/LOG.md`, `bugs-knowhow.md`.
+
 ## 2026-08-27 - Ingest: Asignación de Canal por Defecto Según Primer Canal del Asesor en Tiendas
 
 - **Formulario de Tiendas (`/tiendas` - `CreateStoreSaleForm.tsx`):**

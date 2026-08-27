@@ -16,6 +16,7 @@ import {
     PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/components/ui/utils";
+import { matchesSearchTokens } from "@/lib/utils";
 
 export interface SearchableSelectOption {
     label: string;
@@ -74,7 +75,7 @@ export function SearchableSelect({
                 align="start"
                 sideOffset={4}
             >
-                <Command className="w-full">
+                <Command className="w-full" filter={(value, search) => matchesSearchTokens(value, search) ? 1 : 0}>
                     <CommandInput placeholder={searchPlaceholder} className="text-base sm:text-sm h-10" />
                     <CommandList className="max-h-60 overflow-y-auto overscroll-contain">
                         <CommandEmpty className="py-4 text-center text-xs text-slate-500">

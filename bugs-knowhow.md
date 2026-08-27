@@ -1053,3 +1053,29 @@ Prevention Rule:
 Tags:
 [ui] [search] [filtering] [users] [utils] [rls] [supabase]
 
+## [Bug ID: 20260827-02]
+
+Context:
+Búsqueda y filtrado multi-módulo (`lib/utils.ts`, `lib/hooks/useAccountsServer.ts`, `lib/hooks/useOpportunitiesServer.ts`, `lib/hooks/useActivitiesServer.ts`, `lib/hooks/useContactsServer.ts`, `lib/hooks/useProducts.ts`, `app/pedidos/page.tsx`, `components/usuarios/UserList.tsx`, `components/cuentas/UserPickerFilter.tsx`, `components/ui/SearchableSelect.tsx`, `components/tiendas/CreateStoreSaleForm.tsx`, `components/comisiones/`).
+
+Problem:
+Al buscar palabras con tildes, en orden invertido o con múltiples términos, el buscador no encontraba registros o devolvía resultados imprecisos debido a substrings rígidos en `ilike` y comparaciones `.includes()` sensibles a diacríticos. Además, en componentes de servidor (`useAccountsServer.ts`, etc.) faltaba posfiltrado estricto con tokens normalizados.
+
+Root Cause:
+1. `ilike` en SQL/PostgREST es sensible a acentos ('É' != 'e') y solo busca subcadenas contiguas exactas.
+2. Los filtros en memoria (`localAccounts`, `data.filter`, `cmdk` en `SearchableSelect`) usaban `toLowerCase().includes()`, fallando ante tildes y palabras fuera de orden.
+3. `matchesSearchTokens` no soportaba arrays de campos simultáneos.
+
+Fix Applied:
+1. Se extendió `matchesSearchTokens` en `lib/utils.ts` para soportar strings individuales o arrays de campos, normalizando acentos (`removeAccents`) y verificando que todos los tokens estén presentes en cualquier orden.
+2. Se añadió `getSearchTokens` en `lib/utils.ts` para tokenizar búsquedas en el servidor Supabase.
+3. Se integró `matchesSearchTokens` y tokenización en todos los hooks de servidor y vistas cliente (`useAccountsServer`, `useOpportunitiesServer`, `useActivitiesServer`, `useContactsServer`, `useProducts`, `app/pedidos`, `UserList`, `UserPickerFilter`, `SearchableSelect`, `CreateStoreSaleForm`, `CommissionCategoryManager`, `BonusRulesManager`, `CommissionRuleForm`).
+4. Se agregó filtro personalizado con `matchesSearchTokens` a `<Command>` en `SearchableSelect.tsx`.
+
+Prevention Rule:
+**Universal Token Search**: Toda búsqueda de usuario (servidor y cliente) debe tokenizarse, ser insensible a mayúsculas/minúsculas y acentos (`removeAccents`), y buscar en arrays de campos con `matchesSearchTokens`.
+
+Tags:
+[search] [filtering] [normalization] [accents] [tokens] [performance]
+
+

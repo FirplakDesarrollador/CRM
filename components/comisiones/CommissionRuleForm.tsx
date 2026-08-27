@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Loader2, Shield, X } from 'lucide-react';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
+import { getSearchTokens, matchesSearchTokens } from '@/lib/utils';
 
 type RuleFormProps = {
     onSubmit: (rule: {
@@ -101,16 +102,22 @@ export function CommissionRuleForm({ onSubmit, initialData, onCancel }: RuleForm
 
     // Search cuentas
     useEffect(() => {
-        if (cuentaSearch.length < 2) { setCuentas([]); return; }
+        if (cuentaSearch.trim().length < 2) { setCuentas([]); return; }
         const timer = setTimeout(async () => {
-            const { data } = await supabase
+            const tokens = getSearchTokens(cuentaSearch);
+            let q = supabase
                 .from('CRM_Cuentas')
                 .select('id, nombre, nit')
-                .eq('is_deleted', false)
-                .ilike('nombre', `%${cuentaSearch}%`)
-                .limit(10);
-            if (data) setCuentas(data);
-        }, 300);
+                .eq('is_deleted', false);
+            for (const token of tokens) {
+                q = q.or(`nombre.ilike.%${token}%,nit.ilike.%${token}%`);
+            }
+            const { data } = await q.limit(20);
+            if (data) {
+                const filtered = data.filter(c => matchesSearchTokens([c.nombre, c.nit], cuentaSearch));
+                setCuentas(filtered);
+            }
+        }, 250);
         return () => clearTimeout(timer);
     }, [cuentaSearch]);
 

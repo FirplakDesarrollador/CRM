@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { formatCurrency } from '@/lib/utils';
+import { formatCurrency, matchesSearchTokens } from '@/lib/utils';
 import { Loader2 } from 'lucide-react';
 
 export function BonusRulesManager() {
@@ -18,8 +18,7 @@ export function BonusRulesManager() {
     const [isSubmitting, setIsSubmitting] = useState(false);
 
     const filteredRules = rules.filter(r =>
-        r.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        r.vendedor?.full_name?.toLowerCase().includes(searchTerm.toLowerCase())
+        matchesSearchTokens([r.nombre, r.vendedor?.full_name], searchTerm)
     );
 
     const handleSave = async () => {

@@ -240,7 +240,7 @@ function AccountsContent() {
 
             const queryLink = queryString ? `?${queryString}` : window.location.pathname;
             router.replace(queryLink.startsWith('?') ? `${window.location.pathname}${queryLink}` : queryLink, { scroll: false });
-        }, 500);
+        }, 250);
         return () => clearTimeout(timer);
     }, [inputValue, selectedUserId, currentChannel, currentSubclass, currentNivel, currentStartDate, currentEndDate, webFilter, sortField, sortAsc, editingAccount?.id, searchParams, setSearchTerm, router]);
 

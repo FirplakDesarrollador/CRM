@@ -4,6 +4,7 @@ import { syncEngine } from '@/lib/sync';
 import { db } from '@/lib/db';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useSyncStore } from '@/lib/stores/useSyncStore';
+import { matchesSearchTokens, getSearchTokens } from '@/lib/utils';
 
 export type AccountServer = {
     id: string;
@@ -127,11 +128,9 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                 }
 
                 // Filters
-                if (searchTerm) {
-                    const lowerSearch = searchTerm.toLowerCase();
+                if (searchTerm && searchTerm.trim()) {
                     localAccounts = localAccounts.filter(a =>
-                        a.nombre.toLowerCase().includes(lowerSearch) ||
-                        (a.nit_base && a.nit_base.toLowerCase().includes(lowerSearch))
+                        matchesSearchTokens([a.nombre, a.nit_base, a.ciudad, a.direccion, a.email, a.telefono], searchTerm)
                     );
                 }
 
@@ -281,8 +280,11 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                 }
             }
 
-            if (searchTerm) {
-                query = query.or(`nombre.ilike.%${searchTerm}%,nit_base.ilike.%${searchTerm}%`);
+            if (searchTerm && searchTerm.trim()) {
+                const tokens = getSearchTokens(searchTerm);
+                for (const token of tokens) {
+                    query = query.or(`nombre.ilike.%${token}%,nit_base.ilike.%${token}%`);
+                }
             }
 
             if (assignedUserId) {
@@ -390,7 +392,12 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
             });
 
             // Combine local pending accounts and server results
-            const combinedResults = [...pendingLocalAccounts, ...flattenedResults];
+            let combinedResults = [...pendingLocalAccounts, ...flattenedResults];
+            if (searchTerm && searchTerm.trim()) {
+                combinedResults = combinedResults.filter(a =>
+                    matchesSearchTokens([a.nombre, a.nit_base, a.ciudad, a.owner_name, a.email, a.telefono], searchTerm)
+                );
+            }
 
             if (isLoadMore) {
                 setData(prev => {
@@ -405,7 +412,8 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
             }
 
             if (totalCount !== null) {
-                setCount(totalCount);
+                const effectiveCount = (searchTerm && searchTerm.trim()) ? combinedResults.length : totalCount;
+                setCount(effectiveCount);
                 setHasMore(from + (result?.length || 0) < totalCount);
             }
 
