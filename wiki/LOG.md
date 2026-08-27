@@ -3,6 +3,14 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-08-27 - Ingest: Asignación de Canal por Defecto Según Primer Canal del Asesor en Tiendas
+
+- **Formulario de Tiendas (`/tiendas` - `CreateStoreSaleForm.tsx`):**
+  - Se configuró la selección automática del canal por defecto vinculándolo al primer canal de los canales asignados al asesor (`advisor.canales[0]`).
+  - Aplica en la inicialización del formulario para el usuario actual, al cambiar manualmente el asesor en el selector, y al deseleccionar o resetear la cuenta.
+  - Se integró `canales` al store de sesión de usuario (`useUserStore.ts`).
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
 ## 2026-08-26 - Fix: Normalización y Búsqueda Inclusiva para Listados (Gestión de Usuarios y Selectores)
 
 - **Corrección de Filtrado Inicial en Gestión de Usuarios (`/usuarios`):**

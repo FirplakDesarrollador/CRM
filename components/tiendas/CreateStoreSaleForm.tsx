@@ -440,18 +440,19 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             setValue("email", account.email ? "*****" : "");
         }
 
-        const channel = account.canal_id || "PROPIO";
-        setValue("canal_id", channel);
-
-        const subclasificacionVal = account.subclasificacion_id ? String(account.subclasificacion_id) : "";
-        setValue("subclasificacion_id", subclasificacionVal);
-
         const luisGuillermo = users?.find(u => 
             (u.full_name && includesNormalized(u.full_name, "luis guillermo")) ||
             (u.email && includesNormalized(u.email, "luis.escobar")) ||
             u.id === "bc4209dd-cf19-4a97-b4c5-ed8d11d94965"
         );
         const defaultAdvisor = account.owner_user_id || luisGuillermo?.id || user?.id || "";
+        const advisorUser = users?.find(u => u.id === defaultAdvisor);
+        const advisorFirstChannel = advisorUser?.canales?.[0] || (user?.id === defaultAdvisor ? user.canales?.[0] : null) || "PROPIO";
+        const channel = account.canal_id || advisorFirstChannel;
+        setValue("canal_id", channel);
+
+        const subclasificacionVal = account.subclasificacion_id ? String(account.subclasificacion_id) : "";
+        setValue("subclasificacion_id", subclasificacionVal);
 
         setValue("pais_id", account.pais_id ? String(account.pais_id) : "1");
         setValue("departamento_id", account.departamento_id ? String(account.departamento_id) : "");
@@ -478,11 +479,15 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         const colombia = displayCountries.find(c => includesNormalized(c.nombre, "colombia")) || displayCountries.find(c => String(c.id) === "1");
         const defaultPaisId = colombia ? String(colombia.id) : "1";
 
+        const defaultAdvisorId = user?.id || "";
+        const currentUserData = users?.find(u => u.id === defaultAdvisorId);
+        const defaultChannel = currentUserData?.canales?.[0] || user?.canales?.[0] || "PROPIO";
+
         setValue("nombre_cuenta", "");
         setValue("nit_base", "");
         setValue("telefono", "");
         setValue("email", "");
-        setValue("canal_id", "PROPIO");
+        setValue("canal_id", defaultChannel);
         setValue("subclasificacion_id", "");
         setValue("pais_id", defaultPaisId);
         setValue("departamento_id", "");
@@ -496,8 +501,8 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         setValue("contacto_telefono", "");
         setValue("contacto_comentarios", "");
         setValue("nombre_oportunidad", "");
-        setValue("asesor_id", user?.id || "");
-    }, [displayCountries, setValue, user?.id]);
+        setValue("asesor_id", defaultAdvisorId);
+    }, [displayCountries, setValue, user, users]);
 
     const handleNombreCuentaChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const val = e.target.value;
@@ -512,10 +517,14 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         if (selectedAccount) {
             // Si había una cuenta seleccionada y se borra o edita el texto del nombre, resetear a valores por defecto
             setSelectedAccount(null);
+            const defaultAdvisorId = user?.id || "";
+            const currentUserData = users?.find(u => u.id === defaultAdvisorId);
+            const defaultChannel = currentUserData?.canales?.[0] || user?.canales?.[0] || "PROPIO";
+
             setValue("nit_base", "");
             setValue("telefono", "");
             setValue("email", "");
-            setValue("canal_id", "PROPIO");
+            setValue("canal_id", defaultChannel);
             setValue("subclasificacion_id", "");
             const colombia = displayCountries.find(c => includesNormalized(c.nombre, "colombia")) || displayCountries.find(c => String(c.id) === "1");
             setValue("pais_id", colombia ? String(colombia.id) : "1");
@@ -529,7 +538,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             setValue("contacto_email", "");
             setValue("contacto_telefono", "");
             setValue("contacto_comentarios", "");
-            setValue("asesor_id", user?.id || "");
+            setValue("asesor_id", defaultAdvisorId);
         }
 
         if (val.trim().length >= 2) {
@@ -539,12 +548,26 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         }
     };
 
-    // Auto-asignar el usuario actual como asesor por defecto si no hay ninguno seleccionado
+    // Auto-asignar el usuario actual como asesor por defecto y su primer canal si no hay ninguno seleccionado
+    const hasInitializedAdvisorRef = useRef(false);
     useEffect(() => {
-        if (user?.id && !watch("asesor_id") && !selectedAccount) {
-            setValue("asesor_id", user.id);
+        if (user?.id && !selectedAccount && !hasInitializedAdvisorRef.current) {
+            const currentAsesor = watch("asesor_id");
+            const targetAdvisorId = currentAsesor || user.id;
+            setValue("asesor_id", targetAdvisorId);
+
+            const advisorUser = users?.find(u => u.id === targetAdvisorId);
+            const advisorChannels = advisorUser?.canales || (user.id === targetAdvisorId ? user.canales : null);
+
+            if (advisorChannels && advisorChannels.length > 0) {
+                const firstChannel = advisorChannels[0];
+                setValue("canal_id", firstChannel);
+                hasInitializedAdvisorRef.current = true;
+            } else if (users && users.length > 0) {
+                hasInitializedAdvisorRef.current = true;
+            }
         }
-    }, [user?.id, selectedAccount, setValue, watch]);
+    }, [user, selectedAccount, setValue, watch, users]);
 
     const selectedChannel = watch("canal_id") || "PROPIO";
     const phasesQuery = useLiveQuery(
@@ -643,6 +666,18 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                 seenIds.add(u.id);
             }
         });
+
+        const activeUsers = users?.filter(u => u.is_active) || [];
+        activeUsers.forEach(u => {
+            if (!seenIds.has(u.id)) {
+                list.push({
+                    value: u.id,
+                    label: u.full_name || u.email || `Usuario ${u.id}`
+                });
+                seenIds.add(u.id);
+            }
+        });
+
         return list;
     }, [filteredAdvisors, selectedAccount, users, watch("asesor_id")]);
 
@@ -667,8 +702,13 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
 
         const colombia = displayCountries.find(c => includesNormalized(c.nombre, "colombia")) || displayCountries.find(c => String(c.id) === "1");
         const defaultPaisId = colombia ? String(colombia.id) : "1";
-        const primerContactoPhase = phasesList.find(p => includesNormalized(p.nombre, "primer contacto"));
-        const defaultPhaseId = primerContactoPhase ? String(primerContactoPhase.id) : (phasesList[0] ? String(phasesList[0].id) : "");
+
+        const defaultAdvisorId = user?.id || "";
+        const currentUserData = users?.find(u => u.id === defaultAdvisorId);
+        const defaultChannel = currentUserData?.canales?.[0] || user?.canales?.[0] || "PROPIO";
+
+        const primerContactoPhase = phasesList.find(p => p.canal_id === defaultChannel && includesNormalized(p.nombre, "primer contacto"));
+        const defaultPhaseId = primerContactoPhase ? String(primerContactoPhase.id) : (phasesList.find(p => p.canal_id === defaultChannel) ? String(phasesList.find(p => p.canal_id === defaultChannel)!.id) : "");
 
         reset({
             nombre_cuenta: "",
@@ -679,7 +719,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             ciudad_id: "",
             direccion: "",
             email: "",
-            canal_id: "PROPIO",
+            canal_id: defaultChannel,
             subclasificacion_id: "",
             contactos_ids: [],
             clientes_atendidos: 1,
@@ -700,9 +740,9 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             prioridad: "Media",
             actividad_descripcion: "",
             items: [],
-            asesor_id: ""
+            asesor_id: defaultAdvisorId
         });
-    }, [reset, displayCountries, phasesList, origins]);
+    }, [reset, displayCountries, phasesList, origins, user, users]);
 
     const watchedItems = watch("items");
     const items = useMemo(() => watchedItems || [], [watchedItems]);
@@ -1472,7 +1512,18 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         <SearchableSelect
                                             options={advisorOptions}
                                             value={watch("asesor_id") || ""}
-                                            onChange={(val) => setValue("asesor_id", val, { shouldValidate: true })}
+                                            onChange={(val) => {
+                                                setValue("asesor_id", val, { shouldValidate: true });
+                                                if (val) {
+                                                    const selectedAdvisor = users?.find(u => u.id === val);
+                                                    const advisorChannels = selectedAdvisor?.canales || (user?.id === val ? user.canales : null);
+                                                    if (advisorChannels && advisorChannels.length > 0) {
+                                                        const defaultChannel = advisorChannels[0];
+                                                        setValue("canal_id", defaultChannel);
+                                                        setValue("subclasificacion_id", "");
+                                                    }
+                                                }
+                                            }}
                                             placeholder="Seleccione un asesor..."
                                             searchPlaceholder="Buscar asesor por nombre..."
                                             emptyText="No se encontraron asesores disponibles."
