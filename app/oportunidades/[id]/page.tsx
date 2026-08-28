@@ -1149,7 +1149,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">NIT</label>
-                                    <p className="text-slate-700">{effectiveAccount.nit || 'No registrado'}</p>
+                                    <p className="text-slate-700">{(effectiveAccount as any).nit_base || effectiveAccount.nit || 'No registrado'}</p>
                                 </div>
                                 <div>
                                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Teléfono</label>

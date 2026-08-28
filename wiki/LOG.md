@@ -3,6 +3,21 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-08-28 - Feature/UI: Optimización Responsive de Buscadores de Productos y Supresión de Decimales en Oportunidades y Cotizaciones
+
+- **Selector de Productos en Oportunidades (`/oportunidades/nueva` - `CreateOpportunityWizard.tsx`):**
+  - Se optimizó el dropdown de búsqueda y listado de productos para pantallas móviles, asignando mayor ancho y prioridad a la descripción del artículo (`flex-1 min-w-0 pr-2 line-clamp-2`).
+  - Se ajustó la jerarquía tipográfica (`text-xs sm:text-sm`) y se redujo el tamaño de los códigos de artículo (`text-[11px]`).
+  - Se eliminaron los decimales en el formateo de precios (`maximumFractionDigits: 0`, `minimumFractionDigits: 0`) para reducir la carga visual y evitar truncamiento en celulares.
+  - Se reorganizaron los controles de cantidad, descuento y eliminación en vista móvil en los ítems seleccionados.
+- **Buscador de Productos en Cotizaciones (`/oportunidades/[id]/cotizaciones/[quoteId]`):**
+  - Formateo limpio sin decimales y badge compacto para la moneda y precio.
+  - Mayor espacio y legibilidad para descripciones largas de productos en dispositivos móviles.
+- **Buscador de Productos en Tiendas (`CreateStoreSaleForm.tsx`):**
+  - Homogeneización de formato sin decimales y layout adaptable a teclado virtual móvil.
+- **Incremento de versión a `1.1.3.0`.**
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
 ## 2026-08-27 - Feature/Fix: Normalización Universal de Búsqueda Multi-Token, Tildes y Orden en Todos los Módulos
 
 - **Motor de Búsqueda y Normalización (`lib/utils.ts`):**

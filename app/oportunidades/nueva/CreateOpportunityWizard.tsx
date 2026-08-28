@@ -913,7 +913,9 @@ export default function CreateOpportunityWizard() {
                     <div className="space-y-6">
                         <div className="flex justify-between items-center">
                             <h2 className="text-lg font-semibold">Productos del Negocio</h2>
-                            <span className="text-sm font-bold text-blue-600">Total: {watch("currency_id")} {new Intl.NumberFormat().format((amount as number) || 0)}</span>
+                            <span className="text-xs sm:text-sm font-bold text-blue-600">
+                                Total: {watch("currency_id")} {new Intl.NumberFormat('es-CO', { maximumFractionDigits: 0 }).format(Math.round((amount as number) || 0))}
+                            </span>
                         </div>
 
                         {/* Product Search */}
@@ -923,20 +925,20 @@ export default function CreateOpportunityWizard() {
                             </div>
                             <input
                                 type="text"
-                                className="block w-full pl-10 pr-3 py-2 border border-slate-200 rounded-lg leading-5 bg-slate-50 placeholder-slate-400 focus:outline-none focus:bg-white focus:ring-1 focus:ring-blue-500 sm:text-sm"
+                                className="block w-full pl-10 pr-3 py-2 border border-slate-200 rounded-lg leading-5 bg-slate-50 placeholder-slate-400 focus:outline-none focus:bg-white focus:ring-1 focus:ring-blue-500 text-xs sm:text-sm"
                                 placeholder="Buscar productos por nombre o código..."
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
                             />
                             {searchTerm && (
-                                <div className="absolute z-10 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-xl max-h-60 overflow-y-auto">
+                                <div className="absolute z-20 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-xl max-h-60 overflow-y-auto divide-y divide-slate-100">
                                     {isSearching ? (
-                                        <div className="p-4 text-center text-slate-500 text-sm flex items-center justify-center gap-2">
+                                        <div className="p-4 text-center text-slate-500 text-xs sm:text-sm flex items-center justify-center gap-2">
                                             <Loader2 className="w-4 h-4 animate-spin" />
                                             Buscando...
                                         </div>
                                     ) : searchResults.length === 0 ? (
-                                        <div className="p-4 text-center text-slate-500 text-sm">No se encontraron productos</div>
+                                        <div className="p-4 text-center text-slate-500 text-xs sm:text-sm">No se encontraron productos</div>
                                     ) : (
                                         searchResults.map((product: PriceListProduct) => {
                                             const channel = selectedAccount?.canal_id || 'DIST_NAC';
@@ -950,19 +952,30 @@ export default function CreateOpportunityWizard() {
                                             }
                                             if (Number(displayPrice) === 0) displayPrice = Number(product.lista_base_cop) || Number(product.pvp_sin_iva) || 0;
 
+                                            const formattedPrice = new Intl.NumberFormat('es-CO', {
+                                                maximumFractionDigits: 0,
+                                                minimumFractionDigits: 0
+                                            }).format(Math.round(displayPrice));
+
                                             return (
                                                 <button
                                                     key={product.id}
                                                     type="button"
                                                     onClick={() => addProduct(product)}
-                                                    className="w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center justify-between border-b last:border-0"
+                                                    className="w-full text-left px-3 py-2 sm:px-4 sm:py-2.5 hover:bg-blue-50/70 flex items-center justify-between gap-2 border-b last:border-0 transition-colors group cursor-pointer"
                                                 >
-                                                    <div>
-                                                        <div className="font-medium text-slate-900">{product.descripcion}</div>
-                                                        <div className="text-xs text-slate-500">{product.numero_articulo}</div>
+                                                    <div className="flex-1 min-w-0 pr-2">
+                                                        <div className="font-medium text-xs sm:text-sm text-slate-900 line-clamp-2 leading-snug group-hover:text-blue-700">
+                                                            {product.descripcion}
+                                                        </div>
+                                                        <div className="text-[11px] text-slate-400 mt-0.5">
+                                                            {product.numero_articulo}
+                                                        </div>
                                                     </div>
-                                                    <div className="text-sm font-bold text-blue-600">
-                                                        {currencyId} {new Intl.NumberFormat().format(displayPrice)}
+                                                    <div className="shrink-0 text-right">
+                                                        <span className="inline-block text-[11px] sm:text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100 whitespace-nowrap">
+                                                            {currencyId} {formattedPrice}
+                                                        </span>
                                                     </div>
                                                 </button>
                                             );
@@ -980,50 +993,57 @@ export default function CreateOpportunityWizard() {
                                     <div className="text-xs text-slate-400">Usa la búsqueda para agregar productos desde la primera fase.</div>
                                 </div>
                             ) : (
-                                items.map((item: any, idx: number) => (
-                                    <div key={item.product_id} className="flex items-center gap-4 p-3 bg-white border border-slate-200 rounded-xl shadow-sm">
-                                        <div className="flex-1">
-                                            <div className="font-medium text-sm text-slate-800">{item.nombre}</div>
-                                            <div className="text-xs text-slate-500">{currencyId} {new Intl.NumberFormat().format(item.precio || 0)} c/u base</div>
-                                            {(Number(item.descuento_porcentaje) || 0) > 0 && (
-                                                <div className="text-xs text-emerald-600 font-medium mt-0.5">
-                                                    Precio con desc: {currencyId} {new Intl.NumberFormat().format((item.precio || 0) * (1 - (Number(item.descuento_porcentaje) || 0) / 100))} c/u
+                                items.map((item: any, idx: number) => {
+                                    const basePriceFormatted = new Intl.NumberFormat('es-CO', { maximumFractionDigits: 0 }).format(Math.round(item.precio || 0));
+                                    const discountedPrice = (item.precio || 0) * (1 - (Number(item.descuento_porcentaje) || 0) / 100);
+                                    const discountedPriceFormatted = new Intl.NumberFormat('es-CO', { maximumFractionDigits: 0 }).format(Math.round(discountedPrice));
+
+                                    return (
+                                        <div key={item.product_id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-white border border-slate-200 rounded-xl shadow-sm">
+                                            <div className="flex-1 min-w-0">
+                                                <div className="font-medium text-xs sm:text-sm text-slate-800 line-clamp-2 leading-snug">{item.nombre}</div>
+                                                <div className="text-[11px] sm:text-xs text-slate-500 mt-0.5">{currencyId} {basePriceFormatted} c/u base</div>
+                                                {(Number(item.descuento_porcentaje) || 0) > 0 && (
+                                                    <div className="text-[11px] sm:text-xs text-emerald-600 font-medium mt-0.5">
+                                                        Precio con desc: {currencyId} {discountedPriceFormatted} c/u
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <div className="flex items-center justify-between sm:justify-end gap-2 border-t sm:border-t-0 pt-2 sm:pt-0">
+                                                <div className="flex flex-col items-center">
+                                                    <span className="text-[10px] text-slate-500 uppercase font-semibold mb-1">Cant.</span>
+                                                    <input
+                                                        type="number"
+                                                        className="w-16 p-1 border rounded text-center text-xs sm:text-sm"
+                                                        value={isNaN(item.cantidad) ? "" : item.cantidad}
+                                                        onChange={(e) => updateQuantity(item.product_id, parseInt(e.target.value))}
+                                                    />
                                                 </div>
-                                            )}
-                                        </div>
-                                        <div className="flex items-center gap-2 mt-2 sm:mt-0">
-                                            <div className="flex flex-col items-center">
-                                                <span className="text-[10px] text-slate-500 uppercase font-semibold mb-1">Cant.</span>
-                                                <input
-                                                    type="number"
-                                                    className="w-16 p-1 border rounded text-center text-sm"
-                                                    value={isNaN(item.cantidad) ? "" : item.cantidad}
-                                                    onChange={(e) => updateQuantity(item.product_id, parseInt(e.target.value))}
-                                                />
-                                            </div>
-                                            <div className="flex flex-col items-center">
-                                                <span className="text-[10px] text-slate-500 uppercase font-semibold mb-1">Desc %</span>
-                                                <input
-                                                    type="number"
-                                                    min="0"
-                                                    max="100"
-                                                    className="w-16 p-1 border rounded text-center text-sm"
-                                                    value={item.descuento_porcentaje === "" ? "" : (item.descuento_porcentaje ?? 0)}
-                                                    onChange={(e) => updateDiscount(item.product_id, e.target.value)}
-                                                />
-                                            </div>
-                                            <div className="flex flex-col items-center justify-end h-full mt-4">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => removeProduct(item.product_id)}
-                                                    className="p-1.5 text-red-500 hover:bg-red-50 rounded"
-                                                >
-                                                    <Trash2 className="w-5 h-5" />
-                                                </button>
+                                                <div className="flex flex-col items-center">
+                                                    <span className="text-[10px] text-slate-500 uppercase font-semibold mb-1">Desc %</span>
+                                                    <input
+                                                        type="number"
+                                                        min="0"
+                                                        max="100"
+                                                        className="w-16 p-1 border rounded text-center text-xs sm:text-sm"
+                                                        value={item.descuento_porcentaje === "" ? "" : (item.descuento_porcentaje ?? 0)}
+                                                        onChange={(e) => updateDiscount(item.product_id, e.target.value)}
+                                                    />
+                                                </div>
+                                                <div className="flex flex-col items-center justify-end h-full mt-3">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => removeProduct(item.product_id)}
+                                                        className="p-1.5 text-red-500 hover:bg-red-50 rounded"
+                                                        title="Eliminar producto"
+                                                    >
+                                                        <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
+                                                    </button>
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
-                                ))
+                                    );
+                                })
                             )}
                         </div>
                     </div>

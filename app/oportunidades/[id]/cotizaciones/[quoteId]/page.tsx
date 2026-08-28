@@ -341,25 +341,27 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
                                             }
                                         }
 
-                                        // Fallback final robusto si no hay precio en el canal
-                                        if (Number(displayPrice) === 0) displayPrice = Number(product.lista_base_cop) || Number(product.pvp_sin_iva) || 0;
+                                        const formattedPrice = new Intl.NumberFormat(quote.currency_id === 'USD' ? 'en-US' : 'es-CO', {
+                                            maximumFractionDigits: 0,
+                                            minimumFractionDigits: 0
+                                        }).format(Math.round(displayPrice || 0));
 
                                         return (
                                             <button
                                                 key={product.id}
                                                 onClick={() => handleAddProduct(product)}
-                                                className="w-full text-left px-5 py-4 hover:bg-blue-50 flex items-center justify-between border-b border-slate-50 last:border-0 transition-colors"
+                                                className="w-full text-left px-3.5 py-3 sm:px-5 sm:py-3.5 hover:bg-blue-50/70 flex items-center justify-between gap-3 border-b border-slate-100 last:border-0 transition-colors group cursor-pointer"
                                             >
-                                                <div className="max-w-[70%]">
-                                                    <div className="font-semibold text-slate-900 line-clamp-2 leading-tight">{product.descripcion}</div>
-                                                    <div className="text-xs text-slate-500 mt-1">{product.numero_articulo}</div>
+                                                <div className="flex-1 min-w-0 pr-2">
+                                                    <div className="font-medium text-xs sm:text-sm text-slate-900 line-clamp-2 leading-snug group-hover:text-blue-700">{product.descripcion}</div>
+                                                    <div className="text-[11px] text-slate-400 mt-0.5">{product.numero_articulo}</div>
                                                 </div>
-                                                <div className="flex items-center gap-4">
-                                                    <div className="text-sm font-bold text-slate-900 whitespace-nowrap">
-                                                        {quote.currency_id} {new Intl.NumberFormat(quote.currency_id === 'USD' ? 'en-US' : 'es-CO', { style: 'currency', currency: quote.currency_id || 'COP' }).format(displayPrice || 0)}
-                                                    </div>
-                                                    <div className="p-2 bg-blue-100 text-blue-700 rounded-full group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                                                        <Plus className="w-4 h-4" />
+                                                <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+                                                    <span className="text-[11px] sm:text-xs font-semibold text-slate-800 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 whitespace-nowrap">
+                                                        {quote.currency_id || 'COP'} {formattedPrice}
+                                                    </span>
+                                                    <div className="p-1.5 sm:p-2 bg-blue-100 text-blue-700 rounded-full group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                                                        <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                                                     </div>
                                                 </div>
                                             </button>
