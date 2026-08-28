@@ -580,7 +580,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         [subclassifications, selectedChannel],
     );
 
-    // Filtrado estricto de asesores: Valida que el asesor pertenezca al canal, país y departamento seleccionados.
+    // Filtrado de asesores: Valida canal, país y departamento. Si el usuario no tiene restricciones (arrays vacíos), aplica globalmente.
     const selectedPais = watch("pais_id");
     const selectedDept = watch("departamento_id");
 
@@ -588,29 +588,24 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         const activeUsers = users?.filter(u => u.is_active) || [];
         
         return activeUsers.filter(u => {
-            // 1. Verificar Canal de Venta: El vendedor debe tener asignado el canal seleccionado
+            // 1. Verificar Canal de Venta: Si el vendedor tiene canales asignados específicos, verificar que incluya el seleccionado
             const userChannels = u.canales || [];
-            if (userChannels.length === 0 || !userChannels.includes(selectedChannel)) {
+            if (userChannels.length > 0 && !userChannels.includes(selectedChannel)) {
                 return false;
             }
 
-            // 2. Verificar País: El vendedor debe tener asignado el país seleccionado
+            // 2. Verificar País: Si el vendedor tiene países asignados específicos, verificar que incluya el seleccionado
             if (selectedPais) {
-                const userPaises = u.paises && u.paises.length > 0 ? u.paises : (u.pais ? [String(u.pais)] : ["1"]);
-                if (!userPaises.includes(String(selectedPais))) {
+                const userPaises = u.paises && u.paises.length > 0 ? u.paises : (u.pais ? [String(u.pais)] : []);
+                if (userPaises.length > 0 && !userPaises.includes(String(selectedPais))) {
                     return false;
                 }
             }
 
-            // 3. Verificar Departamento (si se seleccionó departamento en el formulario):
+            // 3. Verificar Departamento: Si el vendedor tiene departamentos asignados específicos, verificar que incluya el seleccionado
             if (selectedDept) {
                 const userDepts = u.departamentos && u.departamentos.length > 0 ? u.departamentos : (u.departamento ? [String(u.departamento)] : []);
-                // En Canal Propio, si el asesor no tiene restricción de departamento, opera a nivel general de tienda
-                if (selectedChannel === "PROPIO" && userDepts.length === 0) {
-                    return true;
-                }
-                // En canales OBRAS y DISTRIBUCIÓN, la asignación de departamento es estricta por zona
-                if (userDepts.length === 0 || !userDepts.includes(String(selectedDept))) {
+                if (userDepts.length > 0 && !userDepts.includes(String(selectedDept))) {
                     return false;
                 }
             }

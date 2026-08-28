@@ -3,6 +3,14 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-08-28 - Fix/UI: Corrección de Filtrado de Asesores sin Restricción Zonal en Creación de Cuentas y Ventas (`CreateStoreSaleForm.tsx`)
+
+- **Formulario de Creación de Cliente / Venta (`CreateStoreSaleForm.tsx`):**
+  - Se corrigió la condición de validación en `filteredAdvisors`: cuando un usuario no tiene restricciones explícitas configuradas en sus arreglos de `canales`, `paises` o `departamentos` (arreglos vacíos `[]`), la aplicación lo considera disponible para todos los canales, países y departamentos.
+  - Se eliminó la falsa alarma naranja *"No hay asesores asignados para el país, departamento y canal seleccionado."* que aparecía al seleccionar ubicaciones como Antioquia/Medellín o canales como Obras.
+- **Incremento de versión a `1.1.3.2`.**
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
 ## 2026-08-28 - Feature/UI: Botones de Eliminación Directa y Borrado en Cascada en Cuentas, Oportunidades y Contactos (Restringido a ADMIN)
 
 - **Control de Acceso por Rol (`isAdmin` / `userRole === 'ADMIN'`):**
