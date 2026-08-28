@@ -3,6 +3,14 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-08-28 - Fix/UI: Eliminación de Validación HTML5 Nativa Estricta de Correo en Móviles (`CreateStoreSaleForm.tsx`, `UserForm.tsx`)
+
+- **Remoción de `type="email"` nativo:**
+  - Se sustituyó el atributo `type="email"` por `type="text" inputMode="email"` en los campos de entrada de correo electrónico.
+  - Esto evita que los motores nativos HTML5 de navegadores móviles (iOS Safari, Android Chrome) rechacen caracteres unicode en español como la `ñ` o tildes (ej. `danna.londoño2488@gmail.com`).
+- **Incremento de versión a `1.1.3.4`.**
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
 ## 2026-08-28 - Fix/UI: Soporte para Correos con Caracteres Hispanos (ñ, tildes) en Formularios (`CreateStoreSaleForm.tsx`, `AccountForm.tsx`, `CreateAccountWizard.tsx`, `CreateContactWizard.tsx`)
 
 - **Validación de Correo Electrónico Flexible:**

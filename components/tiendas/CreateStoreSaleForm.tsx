@@ -1297,7 +1297,8 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                     </label>
                                     <input 
                                         {...register("email")} 
-                                        type={selectedAccount && !isAdmin && !!selectedAccount.email ? "text" : "email"}
+                                        type="text"
+                                        inputMode="email"
                                         disabled={!isAdmin && !!selectedAccount && !!selectedAccount.email}
                                         className="w-full mt-1 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed" 
                                         placeholder="correo@ejemplo.com" 
@@ -1673,7 +1674,8 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                                 <label className="text-sm font-medium text-slate-700">Correo Electrónico (Opcional)</label>
                                                 <input 
                                                     {...register("contacto_email")} 
-                                                    type="email"
+                                                    type="text"
+                                                    inputMode="email"
                                                     className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none" 
                                                     placeholder="contacto@ejemplo.com" 
                                                 />

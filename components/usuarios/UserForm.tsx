@@ -13,7 +13,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
 
 const userSchema = z.object({
-    email: z.string().email('Email inválido'),
+    email: z.string().refine(val => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((val || "").trim()), { message: "Email inválido" }),
     password: z.string().min(6, 'La contraseña debe tener al menos 6 caracteres').optional(),
     full_name: z.string().min(2, 'El nombre debe tener al menos 2 caracteres'),
     role: z.enum(['ADMIN', 'COORDINADOR', 'VENDEDOR']),
