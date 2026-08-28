@@ -1,25 +1,32 @@
 import { useContacts } from "@/lib/hooks/useContacts";
 import { db, LocalContact } from "@/lib/db";
 import { useForm } from "react-hook-form";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useFormDraft } from "@/lib/hooks/useFormDraft";
 import { ContactImportButton } from "./ContactImportButton";
 import { ParsedContact } from "@/lib/vcard";
 import { AccountSelector } from "./AccountSelector";
-import { Building } from "lucide-react";
+import { Building, Trash2 } from "lucide-react";
 import { useFormAutoSave } from "@/lib/hooks/useFormAutoSave";
 import { AutoSaveIndicator } from "@/components/ui/AutoSaveIndicator";
+import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
+
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 
 interface ContactFormProps {
     accountId: string;
     existingContact?: LocalContact;
     onSuccess: () => void;
     onCancel: () => void;
+    onDelete?: (contact: LocalContact) => void;
 }
 
-export function ContactForm({ accountId, existingContact, onSuccess, onCancel }: ContactFormProps) {
-    const { createContact, updateContact, contacts } = useContacts(accountId);
+export function ContactForm({ accountId, existingContact, onSuccess, onCancel, onDelete }: ContactFormProps) {
+    const { createContact, updateContact, deleteContact, contacts } = useContacts(accountId);
+    const { isAdmin } = useCurrentUser();
+    const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+    const [isDeleting, setIsDeleting] = useState(false);
 
     const defaultValues: Partial<LocalContact> = {
         nombre: existingContact?.nombre || "",
@@ -189,6 +196,25 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel }:
         }
     };
 
+    const handleDeleteContact = async () => {
+        if (!existingContact?.id) return;
+        setIsDeleting(true);
+        try {
+            if (onDelete) {
+                await onDelete(existingContact);
+            } else {
+                await deleteContact(existingContact.id);
+                onSuccess();
+            }
+            setIsDeleteModalOpen(false);
+        } catch (error) {
+            console.error("Error al eliminar contacto:", error);
+            alert("No se pudo eliminar el contacto.");
+        } finally {
+            setIsDeleting(false);
+        }
+    };
+
     return (
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-6 p-8 border border-slate-200 bg-white rounded-3xl shadow-xl shadow-slate-200/50">
             <div className="flex justify-between items-center border-b border-slate-100 pb-4">
@@ -276,37 +302,68 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel }:
                 </label>
             </div>
 
-            <div className="flex justify-end items-center gap-3 pt-6 border-t border-slate-100">
+            <div className="flex justify-between items-center gap-3 pt-6 border-t border-slate-100">
                 {existingContact ? (
                     <>
-                        <AutoSaveIndicator status={autoSaveStatus} />
-                        <button
-                            type="button"
-                            onClick={onCancel}
-                            className="px-6 py-3 text-sm font-bold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all active:scale-95"
-                        >
-                            Cerrar
-                        </button>
+                        {isAdmin ? (
+                            <button
+                                type="button"
+                                onClick={() => setIsDeleteModalOpen(true)}
+                                className="px-4 py-2.5 text-sm font-bold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-xl flex items-center gap-2 transition-all active:scale-95"
+                                title="Eliminar este contacto"
+                            >
+                                <Trash2 size={16} />
+                                <span>Eliminar Contacto</span>
+                            </button>
+                        ) : (
+                            <div />
+                        )}
+                        <div className="flex items-center gap-3">
+                            <AutoSaveIndicator status={autoSaveStatus} />
+                            <button
+                                type="button"
+                                onClick={onCancel}
+                                className="px-6 py-3 text-sm font-bold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all active:scale-95"
+                            >
+                                Cerrar
+                            </button>
+                        </div>
                     </>
                 ) : (
                     <>
-                        <button
-                            type="button"
-                            onClick={onCancel}
-                            className="px-6 py-3 text-sm font-bold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all active:scale-95"
-                        >
-                            Cancelar
-                        </button>
-                        <button
-                            type="submit"
-                            disabled={isSubmitting}
-                            className="px-8 py-3 text-sm font-extrabold text-white bg-[#254153] border border-transparent rounded-xl hover:bg-[#1a2f3d] shadow-lg shadow-[#254153]/20 disabled:opacity-50 transition-all hover:scale-[1.02] active:scale-[0.98]"
-                        >
-                            {isSubmitting ? 'Guardando...' : 'Guardar Contacto'}
-                        </button>
+                        <div />
+                        <div className="flex items-center gap-3">
+                            <button
+                                type="button"
+                                onClick={onCancel}
+                                className="px-6 py-3 text-sm font-bold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all active:scale-95"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                type="submit"
+                                disabled={isSubmitting}
+                                className="px-8 py-3 text-sm font-extrabold text-white bg-[#254153] border border-transparent rounded-xl hover:bg-[#1a2f3d] shadow-lg shadow-[#254153]/20 disabled:opacity-50 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                            >
+                                {isSubmitting ? 'Guardando...' : 'Guardar Contacto'}
+                            </button>
+                        </div>
                     </>
                 )}
             </div>
+
+            {existingContact && (
+                <ConfirmationModal
+                    isOpen={isDeleteModalOpen}
+                    onClose={() => setIsDeleteModalOpen(false)}
+                    onConfirm={handleDeleteContact}
+                    title="Eliminar Contacto"
+                    message={`¿Estás seguro de que deseas eliminar el contacto "${existingContact.nombre}"? Esta acción no se puede deshacer.`}
+                    confirmLabel="Eliminar Contacto"
+                    variant="danger"
+                    isLoading={isDeleting}
+                />
+            )}
         </form>
     );
 }

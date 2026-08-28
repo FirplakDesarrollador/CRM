@@ -48,8 +48,6 @@ export function AccountDeleteModal({ account, onClose, onConfirm }: AccountDelet
     };
 
     const handleConfirm = async () => {
-        if (accountOpportunities.length > 0 || accountContacts.length > 0) return;
-        
         try {
             setIsDeleting(true);
             await onConfirm(account.id);
@@ -89,9 +87,14 @@ export function AccountDeleteModal({ account, onClose, onConfirm }: AccountDelet
                 <div className="p-6 overflow-y-auto flex-1">
                     {hasRelations ? (
                         <div className="space-y-6">
-                            <div className="bg-amber-50 border border-amber-200 text-amber-800 p-4 rounded-xl text-sm flex gap-3">
+                            <div className="bg-amber-50 border border-amber-200 text-amber-900 p-4 rounded-xl text-sm flex gap-3">
                                 <AlertTriangle className="w-5 h-5 shrink-0 text-amber-600" />
-                                <p>Esta cuenta tiene registros asociados. <strong>Debes eliminarlos individualmente</strong> antes de poder eliminar la cuenta.</p>
+                                <div>
+                                    <p className="font-semibold">Esta cuenta tiene registros asociados.</p>
+                                    <p className="mt-0.5 text-xs text-amber-800">
+                                        Al eliminar la cuenta, se eliminarán automáticamente todas sus oportunidades ({accountOpportunities.length}) y contactos ({accountContacts.length}) asociados en cascada.
+                                    </p>
+                                </div>
                             </div>
 
                             {/* Oportunidades */}
@@ -101,7 +104,7 @@ export function AccountDeleteModal({ account, onClose, onConfirm }: AccountDelet
                                         <Briefcase className="w-4 h-4 text-slate-400" /> 
                                         Oportunidades ({accountOpportunities.length})
                                     </h3>
-                                    <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100">
+                                    <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100 max-h-48 overflow-y-auto">
                                         {accountOpportunities.map(opp => (
                                             <div key={opp.id} className="flex items-center justify-between p-3 hover:bg-slate-50 transition-colors group">
                                                 <div className="flex flex-col">
@@ -114,7 +117,7 @@ export function AccountDeleteModal({ account, onClose, onConfirm }: AccountDelet
                                                     disabled={deletingItemId === opp.id}
                                                     onClick={() => handleDeleteOpportunity(opp.id)}
                                                     className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
-                                                    title="Eliminar Oportunidad"
+                                                    title="Eliminar Oportunidad individualmente"
                                                 >
                                                     {deletingItemId === opp.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                                                 </button>
@@ -131,7 +134,7 @@ export function AccountDeleteModal({ account, onClose, onConfirm }: AccountDelet
                                         <Users className="w-4 h-4 text-slate-400" /> 
                                         Contactos ({accountContacts.length})
                                     </h3>
-                                    <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100">
+                                    <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-100 max-h-48 overflow-y-auto">
                                         {accountContacts.map(contact => (
                                             <div key={contact.id} className="flex items-center justify-between p-3 hover:bg-slate-50 transition-colors group">
                                                 <div className="flex flex-col">
@@ -145,7 +148,7 @@ export function AccountDeleteModal({ account, onClose, onConfirm }: AccountDelet
                                                     disabled={deletingItemId === contact.id}
                                                     onClick={() => handleDeleteContact(contact.id)}
                                                     className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
-                                                    title="Eliminar Contacto"
+                                                    title="Eliminar Contacto individualmente"
                                                 >
                                                     {deletingItemId === contact.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
                                                 </button>
@@ -175,16 +178,16 @@ export function AccountDeleteModal({ account, onClose, onConfirm }: AccountDelet
                     </button>
                     <button
                         onClick={handleConfirm}
-                        disabled={hasRelations || isDeleting}
+                        disabled={isDeleting}
                         className={cn(
                             "px-5 py-2.5 text-sm font-semibold text-white rounded-xl shadow-sm flex items-center gap-2 transition-all",
-                            hasRelations || isDeleting 
+                            isDeleting 
                                 ? "bg-slate-300 cursor-not-allowed" 
                                 : "bg-red-600 hover:bg-red-700 active:scale-95"
                         )}
                     >
                         {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-                        {isDeleting ? 'Eliminando...' : 'Eliminar Cuenta'}
+                        {isDeleting ? 'Eliminando...' : hasRelations ? 'Eliminar Cuenta y Registros' : 'Eliminar Cuenta'}
                     </button>
                 </div>
             </div>

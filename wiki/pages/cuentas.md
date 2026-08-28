@@ -31,9 +31,9 @@ que determina su lista de precios.
 - Detalle con pestañas: contactos, oportunidades, actividades, sucursales (branches) y
   asignados (`components/cuentas/Account*Tab.tsx`).
 - Formulario `AccountForm` con pestañas (usa `shouldUnregister: false` — ver
-  `bugs-knowhow.md` §1).
+  `bugs-knowhow.md` §1) y botón de eliminación visible en el encabezado y en los footers de todas las pestañas.
 - Carga masiva de cuentas: `BulkAccountUploader` + API `app/api/bulk-accounts`.
-- Borrado solo ADMIN (`delete_account`), con modal de confirmación `AccountDeleteModal`.
+- Borrado (`delete_account` / `AccountDeleteModal`): funcionalidad restringida estrictamente a usuarios con rol `ADMIN` (`isAdmin`), con modal de confirmación que permite borrado en cascada de la cuenta junto con sus contactos y oportunidades asociadas (además de permitir borrado individual de registros relacionados).
 
 ## Auditoría
 

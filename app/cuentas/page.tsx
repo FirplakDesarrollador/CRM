@@ -423,13 +423,26 @@ function AccountsContent() {
                         <h3 className="font-semibold text-blue-900">
                             {editingAccount ? `Editando: ${editingAccount.nombre}` : 'Crear Nueva Cuenta'}
                         </h3>
-                        <button onClick={() => { setShowCreate(false); setEditingAccount(null); }} className="text-blue-400 hover:text-blue-700 transition-colors">✕</button>
+                        <div className="flex items-center gap-2">
+                            {isAdmin && editingAccount && (
+                                <button
+                                    onClick={() => setAccountToDelete(editingAccount)}
+                                    className="px-2.5 py-1 text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg transition-colors flex items-center gap-1 text-xs font-semibold"
+                                    title="Eliminar esta cuenta y sus registros asociados"
+                                >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    <span>Eliminar Cuenta</span>
+                                </button>
+                            )}
+                            <button onClick={() => { setShowCreate(false); setEditingAccount(null); }} className="text-blue-400 hover:text-blue-700 transition-colors p-1" title="Cerrar">✕</button>
+                        </div>
                     </div>
                     <AccountForm
                         key={editingAccount?.id || 'new'}
                         account={editingAccount}
                         onSuccess={handleSuccess}
                         onCancel={() => { setShowCreate(false); setEditingAccount(null); }}
+                        onDelete={(acc) => setAccountToDelete(acc)}
                     />
                 </div>
             )}

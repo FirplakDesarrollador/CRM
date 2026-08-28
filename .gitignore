@@ -102,6 +102,13 @@ temp_*.txt
 !/tests/opportunityCategories.test.ts
 
 
+# Scripts and export dumps
+/scripts/
+*.xml
+export_cuentas.js
+resolve*.py
+scratch_*.js
+
 # n8n-as-code AI helpers
 n8nac-skills
 # AI generated or reserved names

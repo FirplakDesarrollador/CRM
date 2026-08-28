@@ -38,7 +38,7 @@ export default function OpportunityDetailPage() {
     const router = useRouter();
     const id = params.id as string;
     const { opportunities, deleteOpportunity } = useOpportunities();
-    const { user: currentUser, role: userRole } = useCurrentUser();
+    const { user: currentUser, role: userRole, isAdmin } = useCurrentUser();
     const setIsLoadingData = useSyncStore(state => state.setIsLoadingData);
 
     const phases = useLiveQuery(() => db.phases.toArray());
@@ -182,7 +182,7 @@ export default function OpportunityDetailPage() {
                 }
                 backHref="/oportunidades?view=list"
                 actions={[
-                    ...(userRole === 'ADMIN' || userRole === 'COORDINADOR' || opportunity.owner_user_id === currentUser?.id || opportunity.created_by === currentUser?.id ? [{
+                    ...(userRole === 'ADMIN' || isAdmin ? [{
                         label: "Eliminar Oportunidad",
                         icon: Trash2,
                         variant: 'danger' as const,

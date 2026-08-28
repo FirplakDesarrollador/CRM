@@ -3,6 +3,22 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-08-28 - Feature/UI: Botones de Eliminación Directa y Borrado en Cascada en Cuentas, Oportunidades y Contactos (Restringido a ADMIN)
+
+- **Control de Acceso por Rol (`isAdmin` / `userRole === 'ADMIN'`):**
+  - Todas las acciones, botones y modales de eliminación en Cuentas, Oportunidades y Contactos quedaron condicionados de forma estricta para que **únicamente los usuarios con rol de Administrador (`ADMIN`)** puedan visualizarlos y ejecutarlos.
+- **Módulo de Cuentas (`AccountForm.tsx`, `AccountDeleteModal.tsx`, `app/cuentas/page.tsx`):**
+  - Se añadió el botón `Eliminar Cuenta` directamente en el encabezado de edición y en el pie de página (footer) de todas las pestañas del formulario de cuentas (`Información General`, `Contactos`, `Oportunidades`, `Asignado`, `Actividades`, `Sucursales`), visible solo para `ADMIN`.
+  - Se actualizó `AccountDeleteModal.tsx` para permitir la eliminación directa en cascada de la cuenta junto con sus oportunidades y contactos asociados (eliminando el bloqueo artificial que exigía eliminarlos uno por uno previamente).
+- **Pestaña de Oportunidades en Cuentas (`AccountOpportunitiesTab.tsx`):**
+  - Se añadió botón de eliminación individual (icono de papelera) protegido por `isAdmin` para cada oportunidad listada dentro de la cuenta.
+- **Módulo de Contactos (`ContactForm.tsx`):**
+  - Se integró el botón `Eliminar Contacto` con `ConfirmationModal` en la barra de acciones de edición del formulario de contacto, visible solo para `ADMIN`.
+- **Detalle de Oportunidades (`/oportunidades/[id]`):**
+  - Se ajustó el permiso de la acción `Eliminar Oportunidad` para restringirse exclusivamente a `ADMIN`.
+- **Incremento de versión a `1.1.3.1`.**
+- **Páginas actualizadas:** `wiki/pages/cuentas.md`, `wiki/LOG.md`.
+
 ## 2026-08-28 - Feature/UI: Optimización Responsive de Buscadores de Productos y Supresión de Decimales en Oportunidades y Cotizaciones
 
 - **Selector de Productos en Oportunidades (`/oportunidades/nueva` - `CreateOpportunityWizard.tsx`):**

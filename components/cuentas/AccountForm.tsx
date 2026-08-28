@@ -7,11 +7,12 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, LocalCuenta } from "@/lib/db";
 import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useState, useEffect } from "react";
-import { Loader2, User, Building2, Medal } from "lucide-react";
+import { Loader2, User, Building2, Medal, Trash2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useFormDraft } from "@/lib/hooks/useFormDraft";
 import AccountContactsTab from "./AccountContactsTab";
 import AccountOpportunitiesTab from "./AccountOpportunitiesTab";
+import { AccountDeleteModal } from "./AccountDeleteModal";
 import { Briefcase } from "lucide-react";
 import { cn } from "@/components/ui/utils";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
@@ -49,15 +50,17 @@ type AccountFormData = z.infer<typeof accountSchema>;
 interface AccountFormProps {
     onSuccess: () => void;
     onCancel: () => void;
+    onDelete?: (account: any) => void;
     account?: LocalCuenta; // Existing account to edit
 }
 
-export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) {
-    const { createAccount, updateAccount } = useAccounts();
+export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountFormProps) {
+    const { createAccount, updateAccount, deleteAccount } = useAccounts();
     const { role: userRole, isAdmin } = useCurrentUser();
     const [parents, setParents] = useState<any[]>([]);
     const [activeTab, setActiveTab] = useState<'info' | 'contacts' | 'opportunities' | 'branches' | 'assigned' | 'activities'>('info');
     const [hasBranches, setHasBranches] = useState(false);
+    const [showDeleteModal, setShowDeleteModal] = useState(false);
 
     // Live Query for Subclassifications from local DB
     const subclassifications = useLiveQuery(() => db.subclasificaciones.toArray()) || [];
@@ -830,28 +833,46 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                         </div>
                     )}
 
-                    <div className="flex justify-end items-center gap-4 pt-4 border-t border-slate-100">
+                    <div className="flex justify-between items-center gap-4 pt-4 border-t border-slate-100">
                         {account?.id ? (
                             <>
-                                <AutoSaveIndicator status={autoSaveStatus} />
-                                <button data-testid="accounts-form-cancel" type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">
-                                    Cerrar
-                                </button>
+                                {isAdmin ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowDeleteModal(true)}
+                                        className="px-3.5 py-2 text-sm font-semibold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg flex items-center gap-2 transition-all active:scale-95"
+                                        title="Eliminar esta cuenta y sus registros vinculados"
+                                    >
+                                        <Trash2 size={16} />
+                                        <span>Eliminar Cuenta</span>
+                                    </button>
+                                ) : (
+                                    <div />
+                                )}
+                                <div className="flex items-center gap-4">
+                                    <AutoSaveIndicator status={autoSaveStatus} />
+                                    <button data-testid="accounts-form-cancel" type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded font-medium">
+                                        Cerrar
+                                    </button>
+                                </div>
                             </>
                         ) : (
                             <>
-                                <button data-testid="accounts-form-cancel" type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">
-                                    Cancelar
-                                </button>
-                                <button
-                                    data-testid="accounts-form-save"
-                                    type="submit"
-                                    disabled={isSubmitting}
-                                    className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center"
-                                >
-                                    {isSubmitting && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
-                                    Guardar Cuenta
-                                </button>
+                                <div />
+                                <div className="flex items-center gap-3">
+                                    <button data-testid="accounts-form-cancel" type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded font-medium">
+                                        Cancelar
+                                    </button>
+                                    <button
+                                        data-testid="accounts-form-save"
+                                        type="submit"
+                                        disabled={isSubmitting}
+                                        className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center font-medium"
+                                    >
+                                        {isSubmitting && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
+                                        Guardar Cuenta
+                                    </button>
+                                </div>
                             </>
                         )}
                     </div>
@@ -860,8 +881,19 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             ) : activeTab === 'contacts' ? (
                 <div className="p-4">
                     {account?.id && <AccountContactsTab accountId={account.id} />}
-                    <div className="flex justify-end pt-4 border-t mt-4">
-                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">
+                    <div className="flex justify-between items-center pt-4 border-t mt-4">
+                        {isAdmin && account?.id ? (
+                            <button
+                                type="button"
+                                onClick={() => setShowDeleteModal(true)}
+                                className="px-3.5 py-2 text-sm font-semibold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg flex items-center gap-2 transition-all active:scale-95"
+                                title="Eliminar esta cuenta y sus registros vinculados"
+                            >
+                                <Trash2 size={16} />
+                                <span>Eliminar Cuenta</span>
+                            </button>
+                        ) : <div />}
+                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded font-medium">
                             Cerrar
                         </button>
                     </div>
@@ -869,8 +901,19 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             ) : activeTab === 'assigned' ? (
                 <div className="p-4">
                     {account?.id && <AccountAssignedTab accountId={account.id} currentOwnerId={(account as any).owner_user_id || account.created_by || null} />}
-                    <div className="flex justify-end pt-4 border-t mt-4">
-                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">
+                    <div className="flex justify-between items-center pt-4 border-t mt-4">
+                        {isAdmin && account?.id ? (
+                            <button
+                                type="button"
+                                onClick={() => setShowDeleteModal(true)}
+                                className="px-3.5 py-2 text-sm font-semibold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg flex items-center gap-2 transition-all active:scale-95"
+                                title="Eliminar esta cuenta y sus registros vinculados"
+                            >
+                                <Trash2 size={16} />
+                                <span>Eliminar Cuenta</span>
+                            </button>
+                        ) : <div />}
+                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded font-medium">
                             Cerrar
                         </button>
                     </div>
@@ -878,11 +921,21 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             ) : activeTab === 'branches' ? (
                 <div className="p-4">
                     {account?.id && <AccountBranchesTab accountId={account.id} onSelectAccount={(branch) => {
-                        // Logic to open branch account - In this CRM context, we can reuse the handleEdit if it's available in props or similar
-                        // For now, it will just show the information.
+                        // Logic to open branch account
                     }} />}
-                    <div className="flex justify-end pt-4 border-t mt-4">
-                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">
+                    <div className="flex justify-between items-center pt-4 border-t mt-4">
+                        {isAdmin && account?.id ? (
+                            <button
+                                type="button"
+                                onClick={() => setShowDeleteModal(true)}
+                                className="px-3.5 py-2 text-sm font-semibold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg flex items-center gap-2 transition-all active:scale-95"
+                                title="Eliminar esta cuenta y sus registros vinculados"
+                            >
+                                <Trash2 size={16} />
+                                <span>Eliminar Cuenta</span>
+                            </button>
+                        ) : <div />}
+                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded font-medium">
                             Cerrar
                         </button>
                     </div>
@@ -890,8 +943,19 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             ) : activeTab === 'activities' ? (
                 <div className="p-4">
                     {account?.id && <AccountActivitiesTab accountId={account.id} />}
-                    <div className="flex justify-end pt-4 border-t mt-4">
-                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">
+                    <div className="flex justify-between items-center pt-4 border-t mt-4">
+                        {isAdmin && account?.id ? (
+                            <button
+                                type="button"
+                                onClick={() => setShowDeleteModal(true)}
+                                className="px-3.5 py-2 text-sm font-semibold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg flex items-center gap-2 transition-all active:scale-95"
+                                title="Eliminar esta cuenta y sus registros vinculados"
+                            >
+                                <Trash2 size={16} />
+                                <span>Eliminar Cuenta</span>
+                            </button>
+                        ) : <div />}
+                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded font-medium">
                             Cerrar
                         </button>
                     </div>
@@ -899,12 +963,39 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             ) : (
                 <div className="p-4">
                     {account?.id && <AccountOpportunitiesTab accountId={account.id} />}
-                    <div className="flex justify-end pt-4 border-t mt-4">
-                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">
+                    <div className="flex justify-between items-center pt-4 border-t mt-4">
+                        {isAdmin && account?.id ? (
+                            <button
+                                type="button"
+                                onClick={() => setShowDeleteModal(true)}
+                                className="px-3.5 py-2 text-sm font-semibold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg flex items-center gap-2 transition-all active:scale-95"
+                                title="Eliminar esta cuenta y sus registros vinculados"
+                            >
+                                <Trash2 size={16} />
+                                <span>Eliminar Cuenta</span>
+                            </button>
+                        ) : <div />}
+                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded font-medium">
                             Cerrar
                         </button>
                     </div>
                 </div>
+            )}
+
+            {showDeleteModal && account && (
+                <AccountDeleteModal
+                    account={account}
+                    onClose={() => setShowDeleteModal(false)}
+                    onConfirm={async (id) => {
+                        if (onDelete) {
+                            await onDelete(account);
+                        } else {
+                            await deleteAccount(id);
+                            onSuccess();
+                        }
+                        setShowDeleteModal(false);
+                    }}
+                />
             )}
         </div>
     );
