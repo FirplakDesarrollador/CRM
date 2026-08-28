@@ -3,6 +3,27 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-08-28 - Ingest: Soporte Offline Completo y Caché SWR de Catálogos (Usuarios, Orígenes y Lista de Precios)
+
+- **Patrón Stale-While-Revalidate (SWR):**
+  - `useUsers.ts`: Persistencia local en `crm_cached_users` para carga instantánea (0ms) en render inicial y revalidación en segundo plano.
+  - `useOpportunityOrigins.ts`: Caché local en `crm_cached_opportunity_origins` que asegura que los orígenes y sus defaults estén disponibles 100% offline.
+  - `useProducts.ts`: Almacenamiento persistente del catálogo completo de precios en IndexedDB (`crm_products_cache_db`), permitiendo búsquedas tokenizadas sin conexión y eliminando descargas de red repetidas.
+- **Formulario de Tiendas (`CreateStoreSaleForm.tsx`):**
+  - Alineación de validaciones en `storeSaleSchema` (teléfono mínimo 7 dígitos / enmascarado, comentarios requeridos, asesor obligatorio).
+- **Incremento de versión a `1.1.3.0`.**
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
+## 2026-08-28 - Ingest: Restauración de Prefiltro Estricto de Asesores por Canal/Zona y Deselección en Tiendas
+
+- **Formulario de Tiendas (`CreateStoreSaleForm.tsx`):**
+  - Se restauró el prefiltrado estricto en `advisorOptions`, eliminando la inyección de todos los usuarios activos como fallback. El selector ahora muestra exclusivamente los asesores asignados al canal, país y departamento elegidos (o el asesor dueño si la cuenta ya existe).
+  - Al cambiar canal, país o departamento, si el asesor actualmente seleccionado deja de pertenecer a los filtros elegidos, se deselecciona automáticamente (`asesor_id: ""`).
+  - Se eliminó la sobreescritura de canal al seleccionar asesor, manteniendo la jerarquía determinista Canal ➔ Asesores disponibles.
+- **Componente `SearchableSelect.tsx`:**
+  - Se habilitó botón de limpieza rápido `✕` y toggle de deselección al re-seleccionar la opción activa (`allowClear: true`), permitiendo regresar cualquier campo a su estado sin selección.
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
 ## 2026-08-27 - Feature/Fix: Normalización Universal de Búsqueda Multi-Token, Tildes y Orden en Todos los Módulos
 
 - **Motor de Búsqueda y Normalización (`lib/utils.ts`):**
