@@ -34,8 +34,8 @@ const storeSaleSchema = z.object({
     ciudad_id: z.string().optional().nullable(),
     direccion: z.string().optional().nullable(),
     email: z.string().optional().nullable().refine(val => {
-        if (!val || val === "" || val === "*****") return true;
-        return z.string().email().safeParse(val).success;
+        if (!val || val.trim() === "" || val === "*****") return true;
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val.trim());
     }, { message: "Email inválido" }),
     canal_id: z.string().optional().nullable(),
     subclasificacion_id: z.string().optional().nullable(),
@@ -47,7 +47,7 @@ const storeSaleSchema = z.object({
     contacto_cargo: z.string().optional(),
     contacto_email: z.string().optional().nullable().refine(val => {
         if (!val || val.trim() === "") return true;
-        return z.string().email().safeParse(val).success;
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val.trim());
     }, { message: "Email de contacto inválido" }),
     contacto_telefono: z.string().optional(),
     contacto_comentarios: z.string().optional(),

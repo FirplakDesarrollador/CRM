@@ -20,7 +20,10 @@ const accountSchema = z.object({
     canal_id: z.string().min(1, "Canal de venta requerido"),
     subclasificacion_id: z.string().optional().nullable(),
     telefono: z.string().nullable().optional(),
-    email: z.string().email("Email inválido").nullable().optional().or(z.literal("")),
+    email: z.string().optional().nullable().refine(val => {
+        if (!val || val.trim() === "" || val === "*****") return true;
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val.trim());
+    }, { message: "Email inválido" }),
     direccion: z.string().nullable().optional(),
     pais_id: z.string().nullable().optional(),
     departamento_id: z.string().nullable().optional(),

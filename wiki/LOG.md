@@ -3,6 +3,14 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-08-28 - Fix/UI: Soporte para Correos con Caracteres Hispanos (ñ, tildes) en Formularios (`CreateStoreSaleForm.tsx`, `AccountForm.tsx`, `CreateAccountWizard.tsx`, `CreateContactWizard.tsx`)
+
+- **Validación de Correo Electrónico Flexible:**
+  - Se reemplazó la validación estricta ASCII de Zod por una expresión regular flexible `/^[^\s@]+@[^\s@]+\.[^\s@]+$/` con `.trim()`.
+  - Se habilitó soporte completo para correos electrónicos con caracteres hispanos (como `danna.londoño2488@gmail.com`) y tildes, eliminando el error *"Email inválido"*.
+- **Incremento de versión a `1.1.3.3`.**
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
 ## 2026-08-28 - Fix/UI: Corrección de Filtrado de Asesores sin Restricción Zonal en Creación de Cuentas y Ventas (`CreateStoreSaleForm.tsx`)
 
 - **Formulario de Creación de Cliente / Venta (`CreateStoreSaleForm.tsx`):**
