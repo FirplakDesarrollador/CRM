@@ -20,12 +20,80 @@ let catalogCache: PriceListProduct[] | null = null;
 let filterOptionsCache: { plants: string[]; families: string[] } | null = null;
 let fetchCatalogPromise: Promise<PriceListProduct[]> | null = null;
 
+const PRODUCTS_IDB_NAME = 'crm_products_cache_db';
+const PRODUCTS_STORE_NAME = 'products_store';
+
+async function getStoredCatalogIDB(): Promise<{ products: PriceListProduct[]; plants: string[]; families: string[] } | null> {
+    if (typeof window === 'undefined' || !window.indexedDB) return null;
+    return new Promise((resolve) => {
+        try {
+            const req = indexedDB.open(PRODUCTS_IDB_NAME, 1);
+            req.onupgradeneeded = () => {
+                req.result.createObjectStore(PRODUCTS_STORE_NAME);
+            };
+            req.onsuccess = () => {
+                const db = req.result;
+                const tx = db.transaction(PRODUCTS_STORE_NAME, 'readonly');
+                const store = tx.objectStore(PRODUCTS_STORE_NAME);
+                const getReq = store.get('catalog');
+                getReq.onsuccess = () => resolve(getReq.result || null);
+                getReq.onerror = () => resolve(null);
+            };
+            req.onerror = () => resolve(null);
+        } catch {
+            resolve(null);
+        }
+    });
+}
+
+async function setStoredCatalogIDB(data: { products: PriceListProduct[]; plants: string[]; families: string[] }) {
+    if (typeof window === 'undefined' || !window.indexedDB) return;
+    try {
+        const req = indexedDB.open(PRODUCTS_IDB_NAME, 1);
+        req.onupgradeneeded = () => {
+            req.result.createObjectStore(PRODUCTS_STORE_NAME);
+        };
+        req.onsuccess = () => {
+            const db = req.result;
+            const tx = db.transaction(PRODUCTS_STORE_NAME, 'readwrite');
+            const store = tx.objectStore(PRODUCTS_STORE_NAME);
+            store.put(data, 'catalog');
+        };
+    } catch (e) {
+        console.warn('[useProducts] Error caching catalog in IndexedDB:', e);
+    }
+}
+
+// Inicializar caché local desde IndexedDB al arrancar en el cliente
+if (typeof window !== 'undefined') {
+    getStoredCatalogIDB().then(stored => {
+        if (stored && !catalogCache) {
+            catalogCache = stored.products;
+            filterOptionsCache = { plants: stored.plants, families: stored.families };
+        }
+    });
+}
+
 export async function fetchFullCatalog(forceRefresh = false): Promise<PriceListProduct[]> {
-    if (!forceRefresh && catalogCache) {
+    if (!forceRefresh && catalogCache && catalogCache.length > 0) {
         return catalogCache;
     }
     if (fetchCatalogPromise && !forceRefresh) {
         return fetchCatalogPromise;
+    }
+
+    // Si la memoria RAM está vacía y no es forzado, intentar cargar de IndexedDB primero
+    if (!forceRefresh && !catalogCache) {
+        const stored = await getStoredCatalogIDB();
+        if (stored && stored.products.length > 0) {
+            catalogCache = stored.products;
+            filterOptionsCache = { plants: stored.plants, families: stored.families };
+            // Si está online, refrescar en segundo plano sin bloquear
+            if (typeof navigator !== 'undefined' && navigator.onLine) {
+                setTimeout(() => void fetchFullCatalog(true), 1500);
+            }
+            return catalogCache;
+        }
     }
 
     fetchCatalogPromise = (async () => {
@@ -36,7 +104,10 @@ export async function fetchFullCatalog(forceRefresh = false): Promise<PriceListP
                 .order('numero_articulo', { ascending: true })
                 .limit(10000);
 
-            if (error) throw error;
+            if (error) {
+                if (catalogCache) return catalogCache;
+                throw error;
+            }
             catalogCache = data || [];
 
             // Extraer y cachear plantas y familias
@@ -44,7 +115,18 @@ export async function fetchFullCatalog(forceRefresh = false): Promise<PriceListP
             const uniqueFamilies = Array.from(new Set(catalogCache.map(p => p.familia).filter(Boolean))).sort() as string[];
             filterOptionsCache = { plants: uniquePlants, families: uniqueFamilies };
 
+            void setStoredCatalogIDB({ products: catalogCache, plants: uniquePlants, families: uniqueFamilies });
+
             return catalogCache;
+        } catch (err) {
+            if (catalogCache) return catalogCache;
+            const stored = await getStoredCatalogIDB();
+            if (stored) {
+                catalogCache = stored.products;
+                filterOptionsCache = { plants: stored.plants, families: stored.families };
+                return catalogCache;
+            }
+            throw err;
         } finally {
             fetchCatalogPromise = null;
         }

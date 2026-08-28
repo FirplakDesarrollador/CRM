@@ -31,6 +31,7 @@ interface SearchableSelectProps {
     searchPlaceholder?: string;
     emptyText?: string;
     disabled?: boolean;
+    allowClear?: boolean;
     className?: string;
     triggerClassName?: string;
 }
@@ -43,6 +44,7 @@ export function SearchableSelect({
     searchPlaceholder = "Buscar...",
     emptyText = "No se encontraron resultados.",
     disabled = false,
+    allowClear = true,
     className,
     triggerClassName,
 }: SearchableSelectProps) {
@@ -64,7 +66,29 @@ export function SearchableSelect({
                     <span className={cn("truncate flex-1 mr-2", !selectedOption && "text-slate-400 font-normal")}>
                         {selectedOption ? selectedOption.label : placeholder}
                     </span>
-                    <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50 text-slate-500" />
+                    <div className="flex items-center gap-1 shrink-0">
+                        {allowClear && !!value && !disabled && (
+                            <span
+                                role="button"
+                                tabIndex={0}
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onChange("");
+                                }}
+                                onKeyDown={(e) => {
+                                    if (e.key === "Enter" || e.key === " ") {
+                                        e.stopPropagation();
+                                        onChange("");
+                                    }
+                                }}
+                                className="p-1 text-slate-400 hover:text-slate-600 rounded hover:bg-slate-100 transition-colors cursor-pointer text-xs font-bold"
+                                title="Limpiar selección"
+                            >
+                                ✕
+                            </span>
+                        )}
+                        <ChevronsUpDown className="h-4 w-4 opacity-50 text-slate-500" />
+                    </div>
                 </button>
             </PopoverTrigger>
             <PopoverContent 
@@ -87,7 +111,7 @@ export function SearchableSelect({
                                     key={option.value}
                                     value={option.label}
                                     onSelect={() => {
-                                        onChange(option.value);
+                                        onChange(allowClear && value === option.value ? "" : option.value);
                                         setOpen(false);
                                     }}
                                     className="flex items-center justify-between px-3 py-2.5 sm:py-2 text-sm rounded-lg cursor-pointer hover:bg-slate-100/80 active:bg-slate-200/80 transition-colors"

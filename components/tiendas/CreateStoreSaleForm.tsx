@@ -28,7 +28,11 @@ const storeSaleSchema = z.object({
     // Cuenta
     nombre_cuenta: z.string().min(2, "Nombre requerido"),
     nit_base: z.string().optional().nullable(),
-    telefono: z.string().optional().nullable(),
+    telefono: z.string().min(1, "Teléfono requerido").refine(val => {
+        if (!val || val.trim() === "") return false;
+        if (val === "*****") return true;
+        return val.replace(/\D/g, "").length >= 7;
+    }, { message: "Teléfono inválido (mínimo 7 dígitos)" }),
     pais_id: z.string().optional().nullable(),
     departamento_id: z.string().optional().nullable(),
     ciudad_id: z.string().optional().nullable(),
@@ -56,11 +60,11 @@ const storeSaleSchema = z.object({
     nombre_oportunidad: z.string().optional().nullable(),
     fase_id: z.string().optional().nullable(),
     amount: z.number().optional().nullable(),
-    comentarios: z.string().optional().nullable(),
+    comentarios: z.string().min(1, "Comentarios de oportunidad requeridos"),
     origen_oportunidad: z.string().optional().nullable(),
     venta_feria: z.boolean().optional(),
     categoria_oportunidad: z.union([z.array(z.string()), z.string()]).optional().nullable(),
-    asesor_id: z.string().optional().nullable(),
+    asesor_id: z.string().min(1, "Asesor encargado requerido"),
     items: z.array(z.object({
         product_id: z.string(),
         cantidad: z.number().min(1),
@@ -618,40 +622,17 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         const list: { value: string; label: string }[] = [];
         const seenIds = new Set<string>();
 
-        const currentAsesorId = watch("asesor_id");
-        if (currentAsesorId) {
-            const foundUser = users?.find(u => u.id === currentAsesorId);
-            if (foundUser) {
-                list.push({
-                    value: foundUser.id,
-                    label: foundUser.full_name || foundUser.email || `Usuario ${foundUser.id}`
-                });
-                seenIds.add(foundUser.id);
-            }
-        }
-
-        if (selectedAccount?.owner_user_id && !seenIds.has(selectedAccount.owner_user_id)) {
+        // 1. Si hay una cuenta vinculada con asesor dueño asignado, incluirlo prioritariamente
+        if (selectedAccount?.owner_user_id) {
             const assignedUser = users?.find(u => u.id === selectedAccount.owner_user_id);
             list.push({
                 value: selectedAccount.owner_user_id,
-                label: assignedUser?.full_name || assignedUser?.email || "Asesor Asignado"
+                label: assignedUser?.full_name || assignedUser?.email || "Asesor Asignado a la Cuenta"
             });
             seenIds.add(selectedAccount.owner_user_id);
         }
 
-        const luisGuillermo = users?.find(u => 
-            (u.full_name && includesNormalized(u.full_name, "luis guillermo")) ||
-            (u.email && includesNormalized(u.email, "luis.escobar")) ||
-            u.id === "bc4209dd-cf19-4a97-b4c5-ed8d11d94965"
-        );
-        if (luisGuillermo && !seenIds.has(luisGuillermo.id)) {
-            list.push({
-                value: luisGuillermo.id,
-                label: luisGuillermo.full_name || luisGuillermo.email
-            });
-            seenIds.add(luisGuillermo.id);
-        }
-
+        // 2. Incluir únicamente los asesores que cumplen con el filtro de canal, país y departamento
         filteredAdvisors.forEach(u => {
             if (!seenIds.has(u.id)) {
                 list.push({
@@ -662,19 +643,8 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             }
         });
 
-        const activeUsers = users?.filter(u => u.is_active) || [];
-        activeUsers.forEach(u => {
-            if (!seenIds.has(u.id)) {
-                list.push({
-                    value: u.id,
-                    label: u.full_name || u.email || `Usuario ${u.id}`
-                });
-                seenIds.add(u.id);
-            }
-        });
-
         return list;
-    }, [filteredAdvisors, selectedAccount, users, watch("asesor_id")]);
+    }, [filteredAdvisors, selectedAccount, users]);
 
     // Garantizar que Colombia quede seleccionado automáticamente cuando los países terminen de cargar (solo si no hay cuenta seleccionada)
     useEffect(() => {
@@ -1397,7 +1367,16 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                             const newChannel = e.target.value;
                                             register("canal_id").onChange(e);
                                             setValue("subclasificacion_id", "");
-                                            setValue("asesor_id", "");
+                                            
+                                            // Si el asesor actual no tiene este nuevo canal y no es cuenta existente asignada, resetear asesor
+                                            const currentAsesorId = watch("asesor_id");
+                                            if (currentAsesorId && !selectedAccount?.owner_user_id) {
+                                                const currentAsesor = users?.find(u => u.id === currentAsesorId);
+                                                if (currentAsesor && (!currentAsesor.canales || !currentAsesor.canales.includes(newChannel))) {
+                                                    setValue("asesor_id", "");
+                                                }
+                                            }
+
                                             const firstPhase = phasesList.find(p => p.canal_id === newChannel);
                                             if (firstPhase) {
                                                 setValue("fase_id", String(firstPhase.id));
@@ -1441,10 +1420,23 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         disabled={!isAdmin && !!selectedAccount && !!selectedAccount.pais_id}
                                         className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                                         onChange={(e) => {
+                                            const newPais = e.target.value;
                                             register("pais_id").onChange(e);
                                             setValue("departamento_id", "");
                                             setValue("ciudad_id", "");
-                                            setValue("asesor_id", "");
+
+                                            const currentAsesorId = watch("asesor_id");
+                                            if (currentAsesorId && !selectedAccount?.owner_user_id) {
+                                                const currentAsesor = users?.find(u => u.id === currentAsesorId);
+                                                if (currentAsesor && newPais) {
+                                                    const userPaises = currentAsesor.paises && currentAsesor.paises.length > 0 
+                                                        ? currentAsesor.paises 
+                                                        : (currentAsesor.pais ? [String(currentAsesor.pais)] : ["1"]);
+                                                    if (!userPaises.includes(String(newPais))) {
+                                                        setValue("asesor_id", "");
+                                                    }
+                                                }
+                                            }
                                         }}
                                     >
                                         <option value="">Seleccione...</option>
@@ -1464,9 +1456,23 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                                         disabled={(!isAdmin && !!selectedAccount && !!selectedAccount.departamento_id) || !watch("pais_id")}
                                         onChange={(e) => {
+                                            const newDept = e.target.value;
                                             register("departamento_id").onChange(e);
                                             setValue("ciudad_id", "");
-                                            setValue("asesor_id", "");
+
+                                            const currentAsesorId = watch("asesor_id");
+                                            if (currentAsesorId && !selectedAccount?.owner_user_id) {
+                                                const currentAsesor = users?.find(u => u.id === currentAsesorId);
+                                                if (currentAsesor) {
+                                                    const userDepts = currentAsesor.departamentos && currentAsesor.departamentos.length > 0 
+                                                        ? currentAsesor.departamentos 
+                                                        : (currentAsesor.departamento ? [String(currentAsesor.departamento)] : []);
+                                                    const isPropioGeneral = selectedChannel === "PROPIO" && userDepts.length === 0;
+                                                    if (newDept && !isPropioGeneral && !userDepts.includes(String(newDept))) {
+                                                        setValue("asesor_id", "");
+                                                    }
+                                                }
+                                            }
                                         }}
                                     >
                                         <option value="">Seleccione...</option>
@@ -1510,19 +1516,10 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                             value={watch("asesor_id") || ""}
                                             onChange={(val) => {
                                                 setValue("asesor_id", val, { shouldValidate: true });
-                                                if (val) {
-                                                    const selectedAdvisor = users?.find(u => u.id === val);
-                                                    const advisorChannels = selectedAdvisor?.canales || (user?.id === val ? user.canales : null);
-                                                    if (advisorChannels && advisorChannels.length > 0) {
-                                                        const defaultChannel = advisorChannels[0];
-                                                        setValue("canal_id", defaultChannel);
-                                                        setValue("subclasificacion_id", "");
-                                                    }
-                                                }
                                             }}
                                             placeholder="Seleccione un asesor..."
                                             searchPlaceholder="Buscar asesor por nombre..."
-                                            emptyText="No se encontraron asesores disponibles."
+                                            emptyText="No se encontraron asesores disponibles para los filtros seleccionados."
                                             disabled={!isAdmin && !!selectedAccount && !!selectedAccount.owner_user_id}
                                             triggerClassName={cn(
                                                 "border-blue-300 font-medium text-slate-800",

@@ -46,19 +46,42 @@ export interface UpdateUserData {
     canales?: string[] | null;
 }
 
+const USERS_CACHE_KEY = 'crm_cached_users';
+
+function getCachedUsers(): User[] {
+    if (typeof window === 'undefined') return [];
+    try {
+        const raw = localStorage.getItem(USERS_CACHE_KEY);
+        return raw ? JSON.parse(raw) : [];
+    } catch {
+        return [];
+    }
+}
+
+function setCachedUsers(users: User[]) {
+    if (typeof window === 'undefined') return;
+    try {
+        localStorage.setItem(USERS_CACHE_KEY, JSON.stringify(users));
+    } catch (e) {
+        console.warn('[useUsers] Failed to cache users:', e);
+    }
+}
+
 /**
  * Hook to manage users in the CRM system
  * Only accessible by ADMIN users
  */
 export function useUsers() {
-    const [users, setUsers] = useState<User[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
+    const [users, setUsers] = useState<User[]>(() => getCachedUsers());
+    const [isLoading, setIsLoading] = useState(() => getCachedUsers().length === 0);
     const [error, setError] = useState<string | null>(null);
 
     // Fetch all users
     const fetchUsers = async () => {
         try {
-            setIsLoading(true);
+            if (users.length === 0) {
+                setIsLoading(true);
+            }
             setError(null);
 
             const { data, error: fetchError } = await supabase
@@ -68,10 +91,15 @@ export function useUsers() {
 
             if (fetchError) throw fetchError;
 
-            setUsers(data || []);
+            if (data) {
+                setUsers(data);
+                setCachedUsers(data);
+            }
         } catch (err: any) {
             console.error('[useUsers] Error fetching users:', err);
-            setError(err.message || 'Error al cargar usuarios');
+            if (getCachedUsers().length === 0) {
+                setError(err.message || 'Error al cargar usuarios');
+            }
         } finally {
             setIsLoading(false);
         }
