@@ -12,19 +12,48 @@ vi.mock('./supabase', () => ({
     }
 }));
 
-import { db } from './db';
+import { activateLocalDatabase, db } from './db';
 import { SyncEngine } from './sync';
 import { supabase } from './supabase';
+
+interface RpcUpdate {
+    mutation_id: string;
+    id: string;
+    field: string;
+}
+
+interface RpcArguments {
+    p_updates: RpcUpdate[];
+}
 
 describe('SyncEngine outbox invariants', () => {
     let engine: SyncEngine;
 
     beforeEach(async () => {
         vi.spyOn(window.navigator, 'onLine', 'get').mockReturnValue(false);
+        await activateLocalDatabase('test-user');
         db.close();
         await db.delete();
         await db.open();
         engine = new SyncEngine();
+    });
+
+    it('rolls back the local entity when writing its outbox mutation fails', async () => {
+        vi.spyOn(db.outbox, 'add').mockRejectedValueOnce(new Error('outbox unavailable'));
+
+        await expect(engine.commitLocalChanges([db.accounts], async () => {
+            const account = { id: 'atomic-account', nombre: 'Atómica', nit: '1', canal_id: 'PROPIO' };
+            await db.accounts.add(account);
+            return [{
+                entityTable: 'CRM_Cuentas',
+                entityId: account.id,
+                changes: account,
+                options: { isSnapshot: true }
+            }];
+        })).rejects.toThrow('outbox unavailable');
+
+        expect(await db.accounts.get('atomic-account')).toBeUndefined();
+        expect(await db.outbox.count()).toBe(0);
     });
 
     it('keeps one latest snapshot under concurrent autosaves', async () => {
@@ -98,9 +127,9 @@ describe('SyncEngine outbox invariants', () => {
         const queued = await db.outbox.toArray();
 
         vi.spyOn(window.navigator, 'onLine', 'get').mockReturnValue(true);
-        vi.mocked(supabase.auth.getUser).mockResolvedValue({ data: { user: { id: 'user-1' } } } as any);
-        vi.mocked(supabase.rpc).mockImplementation((async (_name: string, args: any) => ({
-            data: args.p_updates.map((update: any) => ({
+        vi.mocked(supabase.auth.getUser).mockResolvedValue({ data: { user: { id: 'test-user' } } } as never);
+        vi.mocked(supabase.rpc).mockImplementation((async (_name: string, args: RpcArguments) => ({
+            data: args.p_updates.map((update) => ({
                 mutation_id: update.mutation_id,
                 id: update.id,
                 field: update.field,
@@ -108,7 +137,7 @@ describe('SyncEngine outbox invariants', () => {
                 message: 'Updated'
             })),
             error: null
-        })) as any);
+        })) as never);
 
         await engine.triggerPush();
 
@@ -126,5 +155,38 @@ describe('SyncEngine outbox invariants', () => {
             pending_after: 0
         });
         expect(run?.duration_ms).toBeGreaterThanOrEqual(0);
+    });
+
+    it('retries with the same mutation identity instead of creating a duplicate operation', async () => {
+        await engine.queueMutation('CRM_Cuentas', 'account-retry', { nombre: 'Una sola vez' }, { isSnapshot: true });
+        const mutationId = (await db.outbox.toArray())[0].id;
+
+        vi.spyOn(window.navigator, 'onLine', 'get').mockReturnValue(true);
+        vi.mocked(supabase.auth.getUser).mockResolvedValue({ data: { user: { id: 'test-user' } } } as never);
+        vi.mocked(supabase.rpc)
+            .mockResolvedValueOnce({ data: null, error: { message: 'network' } } as never)
+            .mockImplementationOnce((async (_name: string, args: RpcArguments) => ({
+                data: args.p_updates.map((update) => ({
+                    mutation_id: update.mutation_id,
+                    id: update.id,
+                    field: update.field,
+                    success: true,
+                    message: 'Updated'
+                })),
+                error: null
+            })) as never);
+
+        await engine.triggerPush('first-attempt');
+        await db.outbox.update(mutationId, { next_attempt_at: 0 });
+        await engine.triggerPush('retry-attempt');
+
+        const rpcCalls = vi.mocked(supabase.rpc).mock.calls as unknown as Array<[string, RpcArguments]>;
+        const sentMutationIds = rpcCalls.flatMap(([, args]) =>
+            args.p_updates
+                .filter((update) => update.id === 'account-retry')
+                .map((update) => update.mutation_id)
+        );
+        expect(sentMutationIds).toEqual([mutationId, mutationId]);
+        expect(await db.outbox.count()).toBe(0);
     });
 });

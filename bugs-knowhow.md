@@ -1078,4 +1078,24 @@ Prevention Rule:
 Tags:
 [search] [filtering] [normalization] [accents] [tokens] [performance]
 
+## [Bug ID: 20260828-01]
+
+Context:
+`lib/db.ts`, `lib/sync.ts`, hooks CRUD offline y layout autenticado.
+
+Problem:
+Una sesion podia reutilizar datos IndexedDB de otro usuario y un cierre entre guardar la entidad y crear su mutacion de outbox podia producir un cambio local imposible de sincronizar.
+
+Root Cause:
+La base Dexie era un singleton compartido y la identidad local no era una frontera de almacenamiento. Entidades y outbox se confirmaban en transacciones separadas.
+
+Fix Applied:
+Se activo una base fisica por `user.id`; la migracion legado se reclama una sola vez y conserva el origen. Se introdujo `commitLocalChanges()` para confirmar datos y outbox en la misma transaccion y se migraron los hooks activos. Los reintentos reutilizan el `mutation_id` persistido y la UI muestra `Guardado`, `Pendiente` o `Requiere atencion`.
+
+Prevention Rule:
+**Authenticated Local Storage Boundary + Transactional Outbox**: Ningun modulo protegido puede leer Dexie antes de activar la base del usuario autenticado. Toda escritura local sincronizable debe confirmar la entidad y su outbox dentro de una unica transaccion; nunca reconstruir la identidad de una mutacion durante el reintento.
+
+Tags:
+[offline] [indexeddb] [dexie] [user-isolation] [transactional-outbox] [idempotency]
+
 

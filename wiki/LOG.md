@@ -3,6 +3,38 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-08-28 - Ingest: Quality Gate Offline-First y Versionado de Migraciones
+
+- **Hardening de Calidad y Gate Completo (`quality/`, `qa:gate`):**
+  - Validación 100% VERIFIED en las 10 etapas requeridas del QA Gate: `harness-tests`, `drift`, `safe-change-policy`, `type-ratchet`, `lint-ratchet`, `product-tests`, `migration-static`, `e2e-chromium`, `production-build`, `pwa-offline-e2e`.
+  - Versionado y registro de 95 archivos de migración en `supabase/migrations/` con regla `.gitignore`.
+  - Validación completa offline-first: aislamiento Dexie por usuario, rollback atómico de outbox, persistencia de cola tras desconexión e idempotencia con `mutation_id`.
+- **Incremento de versión a `1.1.3.6`.**
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
+## 2026-08-28 - Ingest: Vinculación Interactiva de Inventario con Oportunidades (`/inventarios`)
+
+- **Resolución y Enlaces a Oportunidades (`InventoryManager.tsx`, `useInventory.ts`):**
+  - Se implementó la resolución automática de nombres y enlaces a `CRM_Oportunidades` a partir de `referencia_id` en los movimientos de inventario (`CRM_InventarioMovimientos`).
+  - **Log de Movimientos:** Cada fila con oportunidad asociada muestra un badge interactivo con icono de maletín y enlace directo a `/oportunidades/[id]`.
+  - **Tarjetas de Productos Activos:** Cada producto con movimientos/reservas muestra las oportunidades asociadas con links directos y cantidades vinculadas.
+  - **Formulario de Registro:** Se añadió un selector con autocompletado y búsqueda en tiempo real de oportunidades para asociar opcionalmente oportunidades al registrar entradas, salidas o reservas.
+  - **Buscador/Filtro de Movimientos:** Se incorporó un filtro de búsqueda rápida por nombre de oportunidad, producto o notas.
+- **Páginas actualizadas:** `wiki/pages/modelo-de-datos.md`, `wiki/LOG.md`.
+- **Pruebas:** `tests/inventoryOpportunityLink.test.ts`.
+
+## 2026-08-28 - Ingest: Indicador de Conexión en Tiempo Real (NetworkStatusLine)
+
+- **Línea Luminosa de Red (`components/layout/NetworkStatusLine.tsx`):**
+  - Implementación de barra luminosa de 2.5px con gradientes y resplandor neón (*glow*) entre el header (`TopBar`) y el contenido de los módulos (`AppLayout.tsx`).
+  - Tres estados en tiempo real:
+    - 🔵 **Azul Firplak / Cian:** Conexión activa y óptima.
+    - 🟡 **Amarillo / Ámbar:** Conexión inestable o red lenta (`2g`, `slow-2g`, latencia > 1200ms).
+    - 🔴 **Rojo:** Desconectado / Modo offline.
+- **Hook `useNetworkQuality.ts` & Endpoint `/api/health`:**
+  - Detección reactiva mediante `online`/`offline`, `navigator.connection` (Network Information API) y *heartbeat* pasivo ultraligero con `AbortController`.
+- **Páginas actualizadas:** `wiki/pages/sincronizacion-offline.md`, `wiki/LOG.md`.
+
 ## 2026-08-28 - Ingest: Soporte Offline Completo y Caché SWR de Catálogos (Usuarios, Orígenes y Lista de Precios)
 
 - **Patrón Stale-While-Revalidate (SWR):**

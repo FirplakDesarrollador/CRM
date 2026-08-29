@@ -47,15 +47,23 @@ export function useContacts(accountId?: string) {
             updated_at: new Date().toISOString()
         };
 
-        // If principal, unset others for this account locally first (optional logic)
-        if (newContact.es_principal) {
-            await db.contacts
-                .where('account_id').equals(newContact.account_id)
-                .modify({ es_principal: false });
-        }
-
-        await db.contacts.add(newContact);
-        await syncEngine.queueMutation('CRM_Contactos', id, newContact, { isSnapshot: true });
+        await syncEngine.commitLocalChanges([db.contacts], async () => {
+            const requests = [];
+            if (newContact.es_principal) {
+                const previousPrincipals = await db.contacts
+                    .where('account_id').equals(newContact.account_id)
+                    .filter(contact => contact.es_principal === true)
+                    .toArray();
+                for (const contact of previousPrincipals) {
+                    const updated = { ...contact, es_principal: false, updated_at: new Date().toISOString() };
+                    await db.contacts.put(updated);
+                    requests.push({ entityTable: 'CRM_Contactos', entityId: contact.id, changes: updated, options: { isSnapshot: true } });
+                }
+            }
+            await db.contacts.add(newContact);
+            requests.push({ entityTable: 'CRM_Contactos', entityId: id, changes: newContact, options: { isSnapshot: true } });
+            return requests;
+        });
         return id;
     };
 
@@ -63,37 +71,44 @@ export function useContacts(accountId?: string) {
         const fullUpdates = { ...updates, updated_at: new Date().toISOString() };
         
         // Use db.contacts.get to check local existence, but if not found, we'll still proceed with a PUT
-        const currentLocal = await db.contacts.get(id);
+        await syncEngine.commitLocalChanges([db.contacts], async () => {
+            const currentLocal = await db.contacts.get(id);
+            const record = currentLocal
+                ? { ...currentLocal, ...fullUpdates }
+                : { id, ...fullUpdates } as LocalContact;
+            const requests = [];
 
-        if (fullUpdates.es_principal) {
-            // Priority: use provided account_id, fallback to current local, then to initial hook accountId
-            const targetAccountId = fullUpdates.account_id || currentLocal?.account_id || accountId;
-            if (targetAccountId) {
-                await db.contacts
-                    .where('account_id').equals(targetAccountId)
-                    .modify({ es_principal: false });
+            if (fullUpdates.es_principal) {
+                const targetAccountId = fullUpdates.account_id || currentLocal?.account_id || accountId;
+                if (targetAccountId) {
+                    const previousPrincipals = await db.contacts
+                        .where('account_id').equals(targetAccountId)
+                        .filter(contact => contact.id !== id && contact.es_principal === true)
+                        .toArray();
+                    for (const contact of previousPrincipals) {
+                        const updated = { ...contact, es_principal: false, updated_at: new Date().toISOString() };
+                        await db.contacts.put(updated);
+                        requests.push({ entityTable: 'CRM_Contactos', entityId: contact.id, changes: updated, options: { isSnapshot: true } });
+                    }
+                }
             }
-        }
 
-        // --- THE FIX ---
-        // Instead of .update (which fails if ID doesn't exist), use .put for Upsert-safety.
-        // We merge with current local state if it exists, otherwise we rely on updates + required fields.
-        if (currentLocal) {
-            const merged = { ...currentLocal, ...fullUpdates };
-            await db.contacts.put(merged);
-            // ATENCIÓN: Usamos isSnapshot: true para asegurar que si el contacto no existe en el servidor
-            // (por ejemplo, si falló la creación inicial), se inserte con todos los campos obligatorios.
-            await syncEngine.queueMutation('CRM_Contactos', id, merged, { isSnapshot: true });
-        } else {
-            const newRecord = { id, ...fullUpdates } as LocalContact;
-            await db.contacts.put(newRecord);
-            await syncEngine.queueMutation('CRM_Contactos', id, newRecord, { isSnapshot: true });
-        }
+            await db.contacts.put(record);
+            requests.push({ entityTable: 'CRM_Contactos', entityId: id, changes: record, options: { isSnapshot: true } });
+            return requests;
+        });
     };
 
     const deleteContact = async (id: string) => {
-        await db.contacts.delete(id);
-        await syncEngine.queueMutation('CRM_Contactos', id, { is_deleted: true });
+        const current = await db.contacts.get(id);
+        if (!current) return;
+        await syncEngine.commitLocalChanges([db.contacts], async () => {
+            await db.contacts.delete(id);
+            return [{
+                entityTable: 'CRM_Contactos', entityId: id,
+                changes: { ...current, is_deleted: true }, options: { isSnapshot: true }
+            }];
+        });
     };
 
     return { contacts, createContact, updateContact, deleteContact };

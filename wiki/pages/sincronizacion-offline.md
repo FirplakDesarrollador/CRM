@@ -136,7 +136,8 @@ npm run build
 
 - `lib/sync.ts`, `lib/sync-runtime.ts`, `lib/db.ts`
 - `lib/hooks/useFormAutoSave.ts`, `lib/hooks/useActivityClassifications.ts`
-- `components/layout/AppLayout.tsx`, `app/configuracion/page.tsx`
+- `components/layout/AppLayout.tsx`, `components/layout/NetworkStatusLine.tsx`, `app/configuracion/page.tsx`
+- `lib/hooks/useNetworkQuality.ts`, `app/api/health/route.ts`
 - `supabase/migrations/20260821230051_harden_sync_engine.sql`
 - `lib/sync-runtime.test.ts`, `lib/sync-engine.test.ts`, `lib/hooks/useFormAutoSave.test.tsx`
 - `bugs-knowhow.md` (diagnósticos puntuales y reglas preventivas)

@@ -146,6 +146,6 @@ export const config = {
          * - manifest.json (PWA manifest)
          * Feel free to modify this pattern to include more paths.
          */
-        '/((?!_next/static|_next/image|favicon.ico|icons|manifest.json|sw.js|workbox|worker-|.*\\.svg).*)',
+        '/((?!_next/static|_next/image|favicon.ico|icons|manifest.json|sw(?:\\.js|-.*\\.js)|workbox-|fallback-|swe-worker-|worker-|.*\\.svg).*)',
     ],
 }

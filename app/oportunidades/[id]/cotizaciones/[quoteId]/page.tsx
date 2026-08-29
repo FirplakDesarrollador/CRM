@@ -75,6 +75,7 @@ export default function QuoteEditorPage() {
                     <QuoteItemsEditor
                         quote={quote}
                         onItemsChange={() => updateQuoteTotal(quoteId)}
+                        onSaveQuote={(updates) => updateQuote(quoteId, updates)}
                     />
                 )}
 
@@ -87,7 +88,11 @@ export default function QuoteEditorPage() {
     );
 }
 
-function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItemsChange: () => void }) {
+function QuoteItemsEditor({ quote, onItemsChange, onSaveQuote }: {
+    quote: LocalQuote;
+    onItemsChange: () => void;
+    onSaveQuote: (updates: Partial<LocalQuote>) => Promise<void>;
+}) {
     const { items, addItem, updateItem, removeItem } = useQuoteItems(quote.id);
     const [searchTerm, setSearchTerm] = useState("");
     const [selectedPrefix, setSelectedPrefix] = useState<string>("");
@@ -104,12 +109,7 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
         if (comentarios === quote.comentarios) return;
         setIsSaving(true);
         try {
-            // Nota: El hook useQuotes ya está instanciado en el padre, pero aquí no tenemos acceso a sus setters.
-            // Usamos db directamente para asegurar persistencia y disparar sync.
-            await db.quotes.update(quote.id, { 
-                comentarios,
-                updated_at: new Date().toISOString()
-            });
+            await onSaveQuote({ comentarios });
         } catch (error) {
             console.error("Error saving quote comments:", error);
         } finally {

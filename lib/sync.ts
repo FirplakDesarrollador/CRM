@@ -1,4 +1,5 @@
-import { db, OutboxItem } from './db';
+import { activateLocalDatabase, db, getActiveLocalUserId, OutboxItem } from './db';
+import type { Table } from 'dexie';
 import { supabase } from './supabase';
 import { v4 as uuidv4 } from 'uuid';
 import { useSyncStore } from './stores/useSyncStore';
@@ -46,6 +47,13 @@ const SAP_MAPPING: Record<string, string> = {
     'oc_cot': 'EXTRA_OC/COT'
 };
 
+export interface LocalMutationRequest {
+    entityTable: string;
+    entityId: string;
+    changes: object;
+    options?: { isSnapshot?: boolean };
+}
+
 export class SyncEngine {
     private isSyncing = false;
     private retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -59,6 +67,14 @@ export class SyncEngine {
         }
     }
 
+    public async initializeForUser(userId: string): Promise<void> {
+        await activateLocalDatabase(userId);
+        await db.outbox.where('status').equals('COMPLETED').delete();
+        await this.updatePendingCount();
+        const cursor = await db.syncCursors.get(syncCursorId(userId, '__global__'));
+        useSyncStore.getState().setLastSyncTime(cursor?.cursor || null);
+    }
+
     /**
      * PUSH-ONLY Trigger: For local edits and mutations
      * Immediately pushes local changes to Supabase without triggering heavy table pulls
@@ -70,7 +86,7 @@ export class SyncEngine {
         this.isSyncing = true;
         useSyncStore.getState().setSyncing(true);
         useSyncStore.getState().setError(null);
-        const runId = await this.startSyncRun('PUSH', reason);
+        let runId: string | null = null;
         let runError: string | undefined;
 
         try {
@@ -82,6 +98,9 @@ export class SyncEngine {
                 return;
             }
             if (!user) return;
+
+            await this.initializeForUser(user.id);
+            runId = await this.startSyncRun('PUSH', reason);
 
             await this.resetStuckItems();
             await this.yield();
@@ -134,10 +153,9 @@ export class SyncEngine {
         if (this.isSyncing || !navigator.onLine || isPaused) return;
 
         this.isSyncing = true;
-        db.isPulling = true;
         useSyncStore.getState().setSyncing(true);
         useSyncStore.getState().setError(null);
-        const runId = await this.startSyncRun('FULL_SYNC', reason);
+        let runId: string | null = null;
         let runError: string | undefined;
 
         try {
@@ -156,6 +174,10 @@ export class SyncEngine {
                 console.warn("[Sync] No authenticated user, skipping sync.");
                 return;
             }
+
+            await this.initializeForUser(user.id);
+            db.isPulling = true;
+            runId = await this.startSyncRun('FULL_SYNC', reason);
 
             const syncUpperBound = new Date().toISOString();
             await this.resetStuckItems(); // Unlock items stuck in 'SYNCING'
@@ -362,12 +384,15 @@ export class SyncEngine {
     private async updatePendingCount() {
         // Count everything that isn't successfully synced yet, but IGNORE technical metadata items
         // to prevent "ghost" pending counts in the UI.
-        const count = await db.outbox
+        const items = await db.outbox
             .where('status').anyOf(['PENDING', 'SYNCING', 'FAILED', 'DEAD_LETTER'])
             .filter(item => item.field_name !== '_sync_metadata')
-            .count();
-            
-        useSyncStore.getState().setPendingCount(count);
+            .toArray();
+
+        useSyncStore.getState().setQueueCounts(
+            items.length,
+            items.filter(item => item.status === 'DEAD_LETTER').length
+        );
     }
 
     /**
@@ -2345,115 +2370,138 @@ export class SyncEngine {
     /**
      * QUEUE MUTATION: App calls this to save data
      */
+    private requireLocalUser(): string {
+        const userId = getActiveLocalUserId();
+        if (!userId) throw new Error('Los datos locales todavía no están asociados a una sesión.');
+        return userId;
+    }
+
+    private sanitizeMutationChanges(entityTable: string, changes: object): Record<string, unknown> {
+        const normalizedChanges = { ...changes } as Record<string, unknown>;
+        if (entityTable === 'CRM_CotizacionItems') {
+            const { subtotal, ...cleanChanges } = normalizedChanges;
+            return cleanChanges;
+        }
+        return normalizedChanges;
+    }
+
+    private async enqueueMutation(
+        request: LocalMutationRequest,
+        userId: string,
+        now = Date.now()
+    ): Promise<void> {
+        const { entityTable, entityId, options = {} } = request;
+        const changes = this.sanitizeMutationChanges(entityTable, request.changes);
+        const activeItems = await db.outbox
+            .where('entity_type').equals(entityTable)
+            .and(item => item.entity_id === entityId && ['PENDING', 'FAILED', 'DEAD_LETTER'].includes(item.status))
+            .toArray();
+
+        const resetForNewEdit = {
+            user_id: userId,
+            field_timestamp: now,
+            status: 'PENDING' as const,
+            retry_count: 0,
+            error: undefined,
+            next_attempt_at: undefined,
+            last_attempt_at: undefined
+        };
+
+        if (options.isSnapshot) {
+            const [primary, ...duplicates] = activeItems;
+            if (primary) {
+                await db.outbox.update(primary.id, {
+                    ...resetForNewEdit,
+                    field_name: '_complete_snapshot_',
+                    new_value: changes
+                });
+                if (duplicates.length > 0) await db.outbox.bulkDelete(duplicates.map(item => item.id));
+            } else {
+                await db.outbox.add({
+                    id: uuidv4(), entity_type: entityTable, entity_id: entityId,
+                    field_name: '_complete_snapshot_', old_value: null, new_value: changes,
+                    ...resetForNewEdit
+                });
+            }
+            return;
+        }
+
+        const pendingSnapshot = activeItems.find(item => item.field_name === '_complete_snapshot_');
+        if (pendingSnapshot) {
+            const mergedSnapshot = { ...(pendingSnapshot.new_value || {}) };
+            for (const [field, value] of Object.entries(changes)) {
+                if (value === undefined || field === 'id' || field === '_sync_metadata') continue;
+                mergedSnapshot[field] = value;
+            }
+            await db.outbox.update(pendingSnapshot.id, {
+                ...resetForNewEdit,
+                new_value: mergedSnapshot
+            });
+            const duplicates = activeItems.filter(item => item.id !== pendingSnapshot.id);
+            if (duplicates.length > 0) await db.outbox.bulkDelete(duplicates.map(item => item.id));
+            return;
+        }
+
+        for (const [field, value] of Object.entries(changes)) {
+            if (value === undefined || field === 'id' || field === '_sync_metadata') continue;
+            const existingItem = activeItems.find(item => item.field_name === field);
+            if (existingItem) {
+                await db.outbox.update(existingItem.id, { ...resetForNewEdit, new_value: value });
+            } else {
+                await db.outbox.add({
+                    id: uuidv4(), entity_type: entityTable, entity_id: entityId,
+                    field_name: field, old_value: null, new_value: value,
+                    ...resetForNewEdit
+                });
+            }
+        }
+    }
+
+    private async finalizeLocalMutations(requests: LocalMutationRequest[]): Promise<void> {
+        await this.updatePendingCount();
+        if (typeof window !== 'undefined') {
+            for (const request of requests) {
+                window.dispatchEvent(new CustomEvent('crm-optimistic-update', {
+                    detail: {
+                        entityType: request.entityTable,
+                        entityId: request.entityId,
+                        updates: request.changes
+                    }
+                }));
+            }
+        }
+        this.triggerPush('mutation').catch(err => {
+            console.warn('[Sync] Background push triggered from mutation failed:', err);
+        });
+    }
+
+    public async commitLocalChanges(
+        localTables: Table[],
+        write: () => Promise<LocalMutationRequest[]>
+    ): Promise<void> {
+        const userId = this.requireLocalUser();
+        let requests: LocalMutationRequest[] = [];
+        const transactionTables = Array.from(new Set([db.outbox, ...localTables]));
+
+        await db.transaction('rw', transactionTables, async () => {
+            requests = await write();
+            const now = Date.now();
+            for (const request of requests) await this.enqueueMutation(request, userId, now);
+        });
+        await this.finalizeLocalMutations(requests);
+    }
+
     async queueMutation(
         entityTable: string,
         entityId: string,
-        changes: Record<string, any>,
+        changes: object,
         options: { isSnapshot?: boolean } = {}
     ) {
+        const userId = this.requireLocalUser();
+        const request = { entityTable, entityId, changes, options };
         try {
-            // Strip generated columns from mutations
-            if (entityTable === 'CRM_CotizacionItems' && changes && typeof changes === 'object') {
-                const { subtotal, ...cleanChanges } = changes;
-                changes = cleanChanges;
-            }
-
-            const now = Date.now();
-            await db.transaction('rw', db.outbox, async () => {
-                const activeItems = await db.outbox
-                    .where('entity_type').equals(entityTable)
-                    .and(item => item.entity_id === entityId && ['PENDING', 'FAILED', 'DEAD_LETTER'].includes(item.status))
-                    .toArray();
-
-                const resetForNewEdit = {
-                    field_timestamp: now,
-                    status: 'PENDING' as const,
-                    retry_count: 0,
-                    error: undefined,
-                    next_attempt_at: undefined,
-                    last_attempt_at: undefined
-                };
-
-                if (options.isSnapshot) {
-                    const [primary, ...duplicates] = activeItems;
-                    if (primary) {
-                        await db.outbox.update(primary.id, {
-                            ...resetForNewEdit,
-                            field_name: '_complete_snapshot_',
-                            new_value: changes
-                        });
-                        if (duplicates.length > 0) {
-                            await db.outbox.bulkDelete(duplicates.map(item => item.id));
-                        }
-                    } else {
-                        await db.outbox.add({
-                            id: uuidv4(),
-                            entity_type: entityTable,
-                            entity_id: entityId,
-                            field_name: '_complete_snapshot_',
-                            old_value: null,
-                            new_value: changes,
-                            ...resetForNewEdit
-                        });
-                    }
-                    return;
-                }
-
-                // If a snapshot is already waiting, merge field edits into it. Otherwise
-                // later compaction could keep the older snapshot and discard the newer field.
-                const pendingSnapshot = activeItems.find(item => item.field_name === '_complete_snapshot_');
-                if (pendingSnapshot) {
-                    const mergedSnapshot = { ...(pendingSnapshot.new_value || {}) };
-                    for (const [field, value] of Object.entries(changes)) {
-                        if (value === undefined || field === 'id' || field === '_sync_metadata') continue;
-                        mergedSnapshot[field] = value;
-                    }
-                    await db.outbox.update(pendingSnapshot.id, {
-                        ...resetForNewEdit,
-                        new_value: mergedSnapshot
-                    });
-                    const duplicates = activeItems.filter(item => item.id !== pendingSnapshot.id);
-                    if (duplicates.length > 0) {
-                        await db.outbox.bulkDelete(duplicates.map(item => item.id));
-                    }
-                    return;
-                }
-
-                for (const [field, value] of Object.entries(changes)) {
-                    if (value === undefined || field === 'id' || field === '_sync_metadata') continue;
-                    const existingItem = activeItems.find(item => item.field_name === field);
-
-                    if (existingItem) {
-                        await db.outbox.update(existingItem.id, {
-                            ...resetForNewEdit,
-                            new_value: value
-                        });
-                    } else {
-                        await db.outbox.add({
-                            id: uuidv4(),
-                            entity_type: entityTable,
-                            entity_id: entityId,
-                            field_name: field,
-                            old_value: null,
-                            new_value: value,
-                            ...resetForNewEdit
-                        });
-                    }
-                }
-            });
-            await this.updatePendingCount();
-
-            // Despachar evento global para Optimistic UI
-            if (typeof window !== 'undefined') {
-                window.dispatchEvent(new CustomEvent('crm-optimistic-update', {
-                    detail: { entityType: entityTable, entityId, updates: changes }
-                }));
-            }
-
-            // Trigger immediate push in background (without downloading all tables)
-            this.triggerPush('mutation').catch(err => {
-                console.warn('[Sync] Background push triggered from mutation failed:', err);
-            });
+            await db.transaction('rw', db.outbox, () => this.enqueueMutation(request, userId));
+            await this.finalizeLocalMutations([request]);
         } catch (err) {
             console.error('[Sync] Failed to queue mutation:', err);
             throw err;
