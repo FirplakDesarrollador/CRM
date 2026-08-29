@@ -123,7 +123,7 @@ test('CI invoca el mismo gate local', async () => {
 });
 
 test('documentacion y registro de etapas no divergen', async () => {
-  const docs = await readFile(path.join(root, 'docs', 'quality', 'procedure-registry.md'), 'utf8');
+  const docs = (await readFile(path.join(root, 'docs', 'quality', 'procedure-registry.md'), 'utf8')).replaceAll('\r\n', '\n');
   assert.ok(docs.includes(renderRegistryMarkdown()));
 });
 

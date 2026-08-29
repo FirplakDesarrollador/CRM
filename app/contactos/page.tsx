@@ -64,7 +64,10 @@ function ContactsContent() {
     // Deep linking for edit: Automatically fetch and open contact by ID from URL
     useEffect(() => {
         const id = searchParams.get('id');
-        if (!id) return;
+        if (!id) {
+            setEditingContact((prev: unknown) => (prev ? undefined : prev));
+            return;
+        }
 
         const findAndOpen = async () => {
             // 1. Check if already in current list
@@ -181,9 +184,12 @@ function ContactsContent() {
             
             if (paramsForCompare.toString() === currentParamsForCompare.toString()) return;
             
-            // Save to sessionStorage for cross-module persistence
-            if (queryString) {
-                sessionStorage.setItem('crm_contactos_state', queryString);
+            // Save to sessionStorage without ID for cross-module persistence
+            const storageParams = new URLSearchParams(params);
+            storageParams.delete('id');
+            const storageQuery = storageParams.toString();
+            if (storageQuery) {
+                sessionStorage.setItem('crm_contactos_state', storageQuery);
             } else if (searchParams.toString() !== '') {
                 sessionStorage.removeItem('crm_contactos_state');
             }
@@ -215,7 +221,6 @@ function ContactsContent() {
         const params = new URLSearchParams(Array.from(searchParams.entries()));
         params.set('id', contact.id);
         const queryString = params.toString();
-        sessionStorage.setItem('crm_contactos_state', queryString);
         router.replace(`${window.location.pathname}?${queryString}`, { scroll: false });
 
         document.getElementById('main-content')?.scrollTo({ top: 0, behavior: 'smooth' });
@@ -232,8 +237,11 @@ function ContactsContent() {
         const params = new URLSearchParams(Array.from(searchParams.entries()));
         params.delete('id');
         const queryString = params.toString();
-        if (queryString) {
-            sessionStorage.setItem('crm_contactos_state', queryString);
+        const storageParams = new URLSearchParams(params);
+        storageParams.delete('id');
+        const storageQuery = storageParams.toString();
+        if (storageQuery) {
+            sessionStorage.setItem('crm_contactos_state', storageQuery);
         } else {
             sessionStorage.removeItem('crm_contactos_state');
         }
