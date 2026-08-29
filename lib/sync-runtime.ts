@@ -4,6 +4,25 @@ export const MAX_SYNC_RETRIES = 5;
 export const CATALOG_REFRESH_TTL_MS = 24 * 60 * 60 * 1000;
 export const SYNCING_LEASE_TIMEOUT_MS = 2 * 60 * 1000;
 
+export type SaveStatus =
+    | { kind: 'saved'; label: 'Guardado' }
+    | { kind: 'pending'; label: 'Pendiente' }
+    | { kind: 'attention'; label: 'Requiere atención' };
+
+export function resolveSaveStatus(input: {
+    pendingCount: number;
+    attentionCount: number;
+    error: string | null;
+}): SaveStatus {
+    if (input.attentionCount > 0 || input.error) {
+        return { kind: 'attention', label: 'Requiere atención' };
+    }
+    if (input.pendingCount > 0) {
+        return { kind: 'pending', label: 'Pendiente' };
+    }
+    return { kind: 'saved', label: 'Guardado' };
+}
+
 export function getSyncBackoffDelay(retryCount: number): number {
     return Math.min(1000 * Math.pow(2, Math.max(0, retryCount)), 30000);
 }

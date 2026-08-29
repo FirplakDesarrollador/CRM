@@ -29,6 +29,7 @@ export interface InventoryMovement {
     created_at: string;
     updated_at: string;
     producto?: { numero_articulo: string; descripcion: string } | null;
+    oportunidad?: { id: string; nombre: string; canal?: string | null } | null;
 }
 
 export interface InventoryMovementInput {
@@ -39,6 +40,53 @@ export interface InventoryMovementInput {
     referencia_tipo?: string | null;
     referencia_id?: string | null;
     notas?: string | null;
+}
+
+export function extractOpportunityIdsFromMovements(movements: InventoryMovement[]): string[] {
+    const ids = new Set<string>();
+    for (const m of movements) {
+        if (m.referencia_id) {
+            ids.add(m.referencia_id);
+        }
+    }
+    return Array.from(ids);
+}
+
+export function enrichMovementsWithOpportunities(
+    movements: InventoryMovement[],
+    opportunitiesMap: Map<string, { id: string; nombre: string; canal?: string | null }>
+): InventoryMovement[] {
+    return movements.map(m => {
+        const opp = m.referencia_id ? opportunitiesMap.get(m.referencia_id) || null : null;
+        return {
+            ...m,
+            oportunidad: opp,
+        };
+    });
+}
+
+export async function fetchOpportunitiesForMovements(
+    opportunityIds: string[]
+): Promise<Map<string, { id: string; nombre: string; canal?: string | null }>> {
+    if (opportunityIds.length === 0) return new Map();
+    try {
+        const { data, error } = await supabase
+            .from("CRM_Oportunidades")
+            .select("id, nombre, canal_id")
+            .in("id", opportunityIds);
+        if (error) {
+            console.warn("Error consultando oportunidades para inventario:", error.message);
+            return new Map();
+        }
+        const map = new Map<string, { id: string; nombre: string; canal?: string | null }>();
+        for (const row of data || []) {
+            map.set(row.id, { id: row.id, nombre: row.nombre || "Oportunidad sin nombre", canal: row.canal_id });
+        }
+        return map;
+    } catch (err) {
+        console.warn("Excepcion consultando oportunidades para inventario:", err);
+        return new Map();
+    }
 }
 
 export async function fetchInventorySummary(productIds?: string[]) {

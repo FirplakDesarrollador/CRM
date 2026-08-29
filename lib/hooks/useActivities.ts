@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, LocalActivity } from '../db';
+import { db, getActiveLocalUserId, LocalActivity } from '../db';
 import { syncEngine } from '../sync';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../supabase';
@@ -68,31 +68,15 @@ export function useActivities(filters?: { opportunity_id?: string, advisor_id?: 
     ]);
 
     const createActivity = async (data: Partial<LocalActivity>) => {
-        let userId: string | null = null;
+        const userId = getActiveLocalUserId();
+        if (!userId) throw new Error('Los datos locales todavía no están asociados a una sesión.');
 
-        try {
-            if (!navigator.onLine) {
-                // Instantly fallback to cache if offline
-                userId = localStorage.getItem('cachedUserId');
-            } else {
-                const { data: { user }, error } = await supabase.auth.getUser();
-                if (error || !user) {
-                    userId = localStorage.getItem('cachedUserId');
-                } else {
-                    userId = user.id;
-                    localStorage.setItem('cachedUserId', user.id); // Refresh cache
-                }
+        if (navigator.onLine) {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user && user.id !== userId) {
+                throw new Error('La sesión cambió; vuelva a intentar cuando sus datos terminen de prepararse.');
             }
-        } catch {
-            // Offline - try to get cached user ID from localStorage
-            userId = localStorage.getItem('cachedUserId');
         }
-
-        if (!userId) {
-            userId = localStorage.getItem('cachedUserId');
-        }
-
-        if (!userId) throw new Error("No authenticated user (even offline)");
 
         // Debounce / Prevención de duplicación por clics rápidos
         const now = Date.now();
@@ -113,17 +97,6 @@ export function useActivities(filters?: { opportunity_id?: string, advisor_id?: 
         }
 
         const id = uuidv4();
-
-        // Registrar esta creación como la más reciente
-        lastCreatedActivity = {
-            userId,
-            asunto: asuntoTrimmed,
-            accountId: data.account_id,
-            opportunityId: data.opportunity_id,
-            fechaInicio: startIso,
-            timestamp: now,
-            id
-        };
 
         const newActivity: LocalActivity = {
             id,
@@ -157,11 +130,22 @@ export function useActivities(filters?: { opportunity_id?: string, advisor_id?: 
             delete cleanActivity._sync_metadata;
         }
 
-        console.log("[useActivities] Creating Activity in Dexie:", cleanActivity);
-        await db.activities.add(cleanActivity as LocalActivity);
-
-        console.log("[useActivities] Queueing Mutation for Sync:", id);
-        await syncEngine.queueMutation('CRM_Actividades', id, cleanActivity, { isSnapshot: true });
+        await syncEngine.commitLocalChanges([db.activities], async () => {
+            await db.activities.add(cleanActivity as LocalActivity);
+            return [{
+                entityTable: 'CRM_Actividades', entityId: id, changes: cleanActivity,
+                options: { isSnapshot: true }
+            }];
+        });
+        lastCreatedActivity = {
+            userId,
+            asunto: asuntoTrimmed,
+            accountId: data.account_id,
+            opportunityId: data.opportunity_id,
+            fechaInicio: startIso,
+            timestamp: now,
+            id
+        };
         return id;
     };
 
@@ -189,24 +173,30 @@ export function useActivities(filters?: { opportunity_id?: string, advisor_id?: 
 
         console.log("[useActivities] Sanitized changes for sync:", changes);
 
-        await db.activities.update(id, changes);
-        
-        // For snapshots, we MUST send the full object from Dexie to ensure all required fields (like user_id) 
-        // are present and we don't accidentally nullify other fields on the server.
-        const fullActivity = await db.activities.get(id);
-        if (fullActivity) {
-            await syncEngine.queueMutation('CRM_Actividades', id, fullActivity, { isSnapshot: true });
-        }
+        await syncEngine.commitLocalChanges([db.activities], async () => {
+            const current = await db.activities.get(id);
+            if (!current) return [];
+            const fullActivity = { ...current, ...changes };
+            await db.activities.put(fullActivity);
+            return [{
+                entityTable: 'CRM_Actividades', entityId: id, changes: fullActivity,
+                options: { isSnapshot: true }
+            }];
+        });
     };
 
     const toggleComplete = async (id: string, isCompleted: boolean) => {
         const updated_at = new Date().toISOString();
-        await db.activities.update(id, { is_completed: isCompleted, updated_at });
-        
-        const fullActivity = await db.activities.get(id);
-        if (fullActivity) {
-            await syncEngine.queueMutation('CRM_Actividades', id, fullActivity, { isSnapshot: true });
-        }
+        await syncEngine.commitLocalChanges([db.activities], async () => {
+            const current = await db.activities.get(id);
+            if (!current) return [];
+            const fullActivity = { ...current, is_completed: isCompleted, updated_at };
+            await db.activities.put(fullActivity);
+            return [{
+                entityTable: 'CRM_Actividades', entityId: id, changes: fullActivity,
+                options: { isSnapshot: true }
+            }];
+        });
 
         // If completed, also mark related notifications as read in the background
         if (isCompleted) {
@@ -225,8 +215,13 @@ export function useActivities(filters?: { opportunity_id?: string, advisor_id?: 
         const current = await db.activities.get(id);
         if (!current) return;
 
-        await db.activities.delete(id);
-        await syncEngine.queueMutation('CRM_Actividades', id, { ...current, is_deleted: true });
+        await syncEngine.commitLocalChanges([db.activities], async () => {
+            await db.activities.delete(id);
+            return [{
+                entityTable: 'CRM_Actividades', entityId: id,
+                changes: { ...current, is_deleted: true }, options: { isSnapshot: true }
+            }];
+        });
     };
 
     return {

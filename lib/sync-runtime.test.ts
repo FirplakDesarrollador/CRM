@@ -5,6 +5,7 @@ import {
     getSyncBackoffDelay,
     isRetryDue,
     isSyncLeaseExpired,
+    resolveSaveStatus,
     shouldRefreshCatalogs,
     syncCursorId
 } from './sync-runtime';
@@ -51,5 +52,17 @@ describe('sync runtime policy', () => {
         expect(shouldRefreshCatalogs('invalid', now)).toBe(true);
         expect(shouldRefreshCatalogs('2026-08-21T11:00:00.000Z', now)).toBe(false);
         expect(shouldRefreshCatalogs('2026-08-20T11:00:00.000Z', now)).toBe(true);
+    });
+
+    it('exposes only the three discreet save states', () => {
+        expect(resolveSaveStatus({ pendingCount: 0, attentionCount: 0, error: null })).toEqual({
+            kind: 'saved', label: 'Guardado'
+        });
+        expect(resolveSaveStatus({ pendingCount: 2, attentionCount: 0, error: null })).toEqual({
+            kind: 'pending', label: 'Pendiente'
+        });
+        expect(resolveSaveStatus({ pendingCount: 2, attentionCount: 1, error: null })).toEqual({
+            kind: 'attention', label: 'Requiere atención'
+        });
     });
 });

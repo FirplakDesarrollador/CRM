@@ -4,4 +4,5 @@ import { defineConfig } from '@playwright/test';
 export default defineConfig({
   ...baseConfig,
   testDir: './e2e',
+  testIgnore: '**/pwa/**',
 });

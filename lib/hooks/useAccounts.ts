@@ -1,5 +1,5 @@
 import { useLiveQuery } from "dexie-react-hooks";
-import { db, LocalCuenta } from "@/lib/db";
+import { db, LocalContact, LocalCuenta } from "@/lib/db";
 import { syncEngine } from "@/lib/sync";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
@@ -73,29 +73,41 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
             owner_user_id: data.owner_user_id || user?.id,
             updated_at: new Date().toISOString()
         };
-        await db.accounts.add(newAccount as LocalCuenta);
-        await syncEngine.queueMutation('CRM_Cuentas', id, newAccount, { isSnapshot: true });
 
         // AUTO-CREATE CONTACT FOR 'PROPIO' CHANNEL
+        let contactData: LocalContact | null = null;
         if (sanitizedData.canal_id === 'PROPIO') {
             const contactId = crypto.randomUUID();
-            const contactData = {
+            contactData = {
                 id: contactId,
                 account_id: id,
                 nombre: initialContactData?.nombre?.trim() || sanitizedData.nombre || 'Cliente',
                 cargo: initialContactData?.cargo?.trim() || 'Cliente final',
-                telefono: initialContactData?.telefono?.trim() || sanitizedData.telefono || null,
-                email: initialContactData?.email?.trim() || (sanitizedData as any).email || null,
+                telefono: initialContactData?.telefono?.trim() || sanitizedData.telefono || undefined,
+                email: initialContactData?.email?.trim() || (sanitizedData as Partial<LocalCuenta> & { email?: string }).email || undefined,
                 comentarios: initialContactData?.comentarios?.trim() || undefined,
                 es_principal: true,
                 created_by: user?.id,
                 updated_by: user?.id,
                 updated_at: new Date().toISOString()
             };
-            await db.contacts.add(contactData as any);
-            await syncEngine.queueMutation('CRM_Contactos', contactId, contactData, { isSnapshot: true });
-            console.log('[useAccounts] Auto-created contact for PROPIO account:', contactId);
         }
+
+        await syncEngine.commitLocalChanges([db.accounts, db.contacts], async () => {
+            await db.accounts.add(newAccount as LocalCuenta);
+            if (contactData) await db.contacts.add(contactData);
+
+            return [
+                {
+                    entityTable: 'CRM_Cuentas', entityId: id, changes: newAccount,
+                    options: { isSnapshot: true }
+                },
+                ...(contactData ? [{
+                    entityTable: 'CRM_Contactos', entityId: contactData.id, changes: contactData,
+                    options: { isSnapshot: true }
+                }] : [])
+            ];
+        });
 
         return id;
     };
@@ -122,13 +134,17 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
 
         console.log('[useAccounts] DEBUG - sanitizedUpdates result:', JSON.stringify(sanitizedUpdates));
         
-        const currentLocal = await db.accounts.get(id);
         const fullUpdates = { ...sanitizedUpdates, updated_at: new Date().toISOString() };
-        await db.accounts.update(id, fullUpdates);
-        
-        const mergedRecord = { ...currentLocal, ...fullUpdates } as LocalCuenta;
-        console.log('[useAccounts] DEBUG - Queuing mutation for sync (Atomic Snapshot):', mergedRecord);
-        await syncEngine.queueMutation('CRM_Cuentas', id, mergedRecord, { isSnapshot: true });
+        await syncEngine.commitLocalChanges([db.accounts], async () => {
+            const currentLocal = await db.accounts.get(id);
+            if (!currentLocal) throw new Error('La cuenta ya no existe en los datos locales.');
+            await db.accounts.update(id, fullUpdates);
+            const mergedRecord = { ...currentLocal, ...fullUpdates } as LocalCuenta;
+            return [{
+                entityTable: 'CRM_Cuentas', entityId: id, changes: mergedRecord,
+                options: { isSnapshot: true }
+            }];
+        });
     };
 
     const deleteAccount = async (id: string) => {
@@ -162,8 +178,8 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
             }
         }
 
-        // 2. Perform atomic local deletion in Dexie
-        await db.transaction('rw', [
+        // 2. Delete local records and queue every server tombstone atomically.
+        await syncEngine.commitLocalChanges([
             db.accounts,
             db.contacts,
             db.opportunities,
@@ -185,35 +201,21 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
                 const pedidoUuids = pedidos.map(p => p.uuid_generado).filter(Boolean);
                 if (pedidoUuids.length > 0) await db.pedidoItems.where('pedido_uuid').anyOf(pedidoUuids).delete();
             }
+
+            return [
+                { entityTable: 'CRM_Cuentas', entityId: id, changes: { ...currentAccount, is_deleted: true }, options: { isSnapshot: true } },
+                ...contacts.map(contact => ({ entityTable: 'CRM_Contactos', entityId: contact.id, changes: { ...contact, is_deleted: true }, options: { isSnapshot: true } })),
+                ...opportunities.map(opp => ({ entityTable: 'CRM_Oportunidades', entityId: opp.id, changes: { ...opp, is_deleted: true }, options: { isSnapshot: true } })),
+                ...quotes.map(quote => ({ entityTable: 'CRM_Cotizaciones', entityId: quote.id, changes: { ...quote, is_deleted: true }, options: { isSnapshot: true } })),
+                ...quoteItems.map(item => {
+                    const { subtotal, ...itemData } = item;
+                    return { entityTable: 'CRM_CotizacionItems', entityId: item.id, changes: { ...itemData, is_deleted: true }, options: { isSnapshot: true } };
+                }),
+                ...activities.map(act => ({ entityTable: 'CRM_Actividades', entityId: act.id, changes: { ...act, is_deleted: true }, options: { isSnapshot: true } })),
+                ...pedidos.map(ped => ({ entityTable: 'CRM_Pedidos', entityId: ped.uuid_generado, changes: { ...ped, is_deleted: true }, options: { isSnapshot: true } })),
+                ...pedidoItems.map(pItem => ({ entityTable: 'CRM_PedidoItems', entityId: pItem.id, changes: { ...pItem, is_deleted: true }, options: { isSnapshot: true } }))
+            ];
         });
-
-        console.log('[useAccounts] Local Dexie delete complete. Queueing outbox mutations...');
-
-        // 3. Queue Soft Delete mutations for server sync
-        await syncEngine.queueMutation('CRM_Cuentas', id, { ...currentAccount, is_deleted: true }, { isSnapshot: true });
-
-        for (const contact of contacts) {
-            await syncEngine.queueMutation('CRM_Contactos', contact.id, { ...contact, is_deleted: true }, { isSnapshot: true });
-        }
-        for (const opp of opportunities) {
-            await syncEngine.queueMutation('CRM_Oportunidades', opp.id, { ...opp, is_deleted: true }, { isSnapshot: true });
-        }
-        for (const quote of quotes) {
-            await syncEngine.queueMutation('CRM_Cotizaciones', quote.id, { ...quote, is_deleted: true }, { isSnapshot: true });
-        }
-        for (const item of quoteItems) {
-            const { subtotal, ...itemData } = item;
-            await syncEngine.queueMutation('CRM_CotizacionItems', item.id, { ...itemData, is_deleted: true }, { isSnapshot: true });
-        }
-        for (const act of activities) {
-            await syncEngine.queueMutation('CRM_Actividades', act.id, { ...act, is_deleted: true }, { isSnapshot: true });
-        }
-        for (const ped of pedidos) {
-            await syncEngine.queueMutation('CRM_Pedidos', ped.uuid_generado, { ...ped, is_deleted: true }, { isSnapshot: true });
-        }
-        for (const pItem of pedidoItems) {
-            await syncEngine.queueMutation('CRM_PedidoItems', pItem.id, { ...pItem, is_deleted: true }, { isSnapshot: true });
-        }
 
         console.log('[useAccounts] All server mutations queued successfully for offline delete.');
     };

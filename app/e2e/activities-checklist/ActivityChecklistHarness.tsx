@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { CreateActivityModal } from "@/components/activities/CreateActivityModal";
-import { db } from "@/lib/db";
+import { activateLocalDatabase, db } from "@/lib/db";
 
 const ACTIVITY_ID = "activity-checklist-e2e";
 
@@ -16,6 +16,7 @@ export default function ActivityChecklistHarness() {
 
     useEffect(() => {
         const seedActivity = async () => {
+            await activateLocalDatabase('e2e-user');
             await db.activities.put({
                 id: ACTIVITY_ID,
                 user_id: "e2e-user",

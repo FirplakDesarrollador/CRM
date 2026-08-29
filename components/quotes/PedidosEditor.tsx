@@ -9,6 +9,7 @@ import { useForm } from "react-hook-form";
 import { cn } from "@/components/ui/utils";
 import { useFormAutoSave } from "@/lib/hooks/useFormAutoSave";
 import { AutoSaveIndicator } from "@/components/ui/AutoSaveIndicator";
+import { syncEngine } from "@/lib/sync";
 import { SendQuoteModal } from "@/components/quotes/SendQuoteModal";
 import { generateQuotePdf } from "@/lib/pdfGenerator";
 import {
@@ -19,6 +20,19 @@ import {
 } from "@/lib/pedidoFormalization";
 
 const PEDIDO_WIZARD_LAST_STEP = 2;
+
+async function persistQuotePedidoFields(quoteId: string, updates: Partial<LocalQuote>) {
+    await syncEngine.commitLocalChanges([db.quotes], async () => {
+        const current = await db.quotes.get(quoteId);
+        if (!current) throw new Error('La cotización ya no existe en los datos locales.');
+        const merged = { ...current, ...updates, updated_at: new Date().toISOString() };
+        await db.quotes.put(merged);
+        return [{
+            entityTable: 'CRM_Cotizaciones', entityId: quoteId, changes: merged,
+            options: { isSnapshot: true }
+        }];
+    });
+}
 
 interface PedidoFormalizationContext {
     quote: LocalQuote;
@@ -437,7 +451,7 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
         };
         await updatePedido(pedidoUuid, pedData);
         await updatePedidoItems(pedidoUuid, itemsToSave);
-        await db.quotes.update(quote.id, {
+        await persistQuotePedidoFields(quote.id, {
             cierre_facturacion: pedData.cierre_facturacion,
             es_muestra: pedData.es_muestra,
             cliente_final: pedData.cliente_final,
@@ -625,7 +639,7 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
         }
 
         // Sincronizar estos mismos campos en la Cotización principal para el PDF F-V-29
-        await db.quotes.update(quote.id, {
+        await persistQuotePedidoFields(quote.id, {
             cierre_facturacion: pedData.cierre_facturacion,
             es_muestra: pedData.es_muestra,
             cliente_final: pedData.cliente_final,

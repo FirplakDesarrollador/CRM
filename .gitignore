@@ -55,6 +55,7 @@ token.json
 node_modules/
 /test-results/
 /playwright-report/
+/playwright-report-pwa/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
@@ -72,15 +73,14 @@ node_modules/
 !package-lock.json
 !tsconfig.json
 !phases.json
+!quality/*.json
 !*.config.json
 !deno.json
 !deno.jsonc
 
 # SQL Dumps and temporary scripts
 *.sql
-!supabase/migrations/20260716_stores_fairs_catalog_inventory.sql
-!supabase/migrations/20260722143000_propagate_account_owner_to_opportunities.sql
-!supabase/migrations/20260821230051_harden_sync_engine.sql
+!supabase/migrations/*.sql
 temp_*.ts
 temp_*.tsx
 temp_*.txt
@@ -94,6 +94,7 @@ temp_*.txt
 # Directories
 /execution/
 /test-results/
+/test-results-pwa/
 /tests/
 !/tests/
 /tests/*

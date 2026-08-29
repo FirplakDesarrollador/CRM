@@ -6,6 +6,7 @@ interface SyncState {
     isSyncing: boolean;
     isProcessing: boolean;
     pendingCount: number;
+    attentionCount: number;
     lastSyncTime: string | null;
     error: string | null;
     isPaused: boolean;
@@ -19,6 +20,7 @@ interface SyncState {
     setProcessing: (isProcessing: boolean) => void;
     setPaused: (isPaused: boolean) => void;
     setPendingCount: (count: number) => void;
+    setQueueCounts: (pendingCount: number, attentionCount: number) => void;
     setLastSyncTime: (time: string | null) => void;
     setError: (error: string | null) => void;
     setNavigating: (isNavigating: boolean) => void;
@@ -33,6 +35,7 @@ export const useSyncStore = create<SyncState>()(
             isSyncing: false,
             isProcessing: false,
             pendingCount: 0,
+            attentionCount: 0,
             lastSyncTime: null,
             error: null,
             isPaused: false,
@@ -46,6 +49,7 @@ export const useSyncStore = create<SyncState>()(
             setProcessing: (isProcessing) => set({ isProcessing }),
             setPaused: (isPaused) => set({ isPaused }),
             setPendingCount: (pendingCount) => set({ pendingCount }),
+            setQueueCounts: (pendingCount, attentionCount) => set({ pendingCount, attentionCount }),
             setLastSyncTime: (lastSyncTime) => set({ lastSyncTime }),
             setError: (error) => set({ error }),
             setNavigating: (isNavigating) => set({ isNavigating }),
