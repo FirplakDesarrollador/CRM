@@ -1,17 +1,17 @@
 import { useSyncStore } from "@/lib/stores/useSyncStore";
 import { cn } from "@/components/ui/utils";
-import { Bell, RefreshCw, AlertCircle, CheckCircle2 } from "lucide-react";
+import { RefreshCw, AlertCircle, CheckCircle2 } from "lucide-react";
 import { useMemo } from "react";
 // Re-export NotificationList to ensure HMR picks it up
 import { Notifications } from "./Notifications";
 import { GlobalSearch } from "./GlobalSearch";
 import { FirplakIsotipo } from "./FirplakLogo";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { resolveSaveStatus } from "@/lib/sync-runtime";
 
 export function TopBar() {
-    const isSyncing = useSyncStore((state) => state.isSyncing);
-    const isLoadingData = useSyncStore((state) => state.isLoadingData);
     const pendingCount = useSyncStore((state) => state.pendingCount);
+    const attentionCount = useSyncStore((state) => state.attentionCount);
     const syncError = useSyncStore((state) => state.error);
     const { user } = useCurrentUser();
 
@@ -27,6 +27,7 @@ export function TopBar() {
         }
         return "??";
     }, [user]);
+    const saveStatus = resolveSaveStatus({ pendingCount, attentionCount, error: syncError });
 
     return (
         <header data-testid="topbar" className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 sticky top-0 z-30">
@@ -44,25 +45,20 @@ export function TopBar() {
             <div className="flex items-center gap-4">
                 {/* Sync Status Badge */}
                 <div data-testid="topbar-sync-status" className="flex items-center gap-2 text-xs font-medium">
-                    {isSyncing || isLoadingData ? (
-                        <span className="flex items-center text-blue-600 gap-1 bg-blue-50 px-2 py-1 rounded-full">
-                            <RefreshCw className="w-3 h-3 animate-spin" />
-                            {isSyncing ? "Sincronizando..." : "Cargando..."}
-                        </span>
-                    ) : syncError ? (
-                        <span className="flex items-center text-red-600 gap-1 bg-red-50 px-2 py-1 rounded-full cursor-pointer" title={syncError}>
+                    {saveStatus.kind === 'attention' ? (
+                        <span className="flex items-center text-red-600 gap-1 bg-red-50 px-2 py-1 rounded-full cursor-pointer" title={syncError || `${attentionCount} cambios requieren atención`}>
                             <AlertCircle className="w-3 h-3" />
-                            Error
+                            Requiere atención
                         </span>
-                    ) : pendingCount > 0 ? (
-                        <span className="flex items-center text-orange-600 gap-1 bg-orange-50 px-2 py-1 rounded-full">
-                            <AlertCircle className="w-3 h-3" />
-                            {pendingCount} Pendientes
+                    ) : saveStatus.kind === 'pending' ? (
+                        <span className="flex items-center text-amber-700 gap-1 bg-amber-50 px-2 py-1 rounded-full" title={`${pendingCount} cambios pendientes de sincronización`}>
+                            <RefreshCw className="w-3 h-3" />
+                            Pendiente
                         </span>
                     ) : (
-                        <span className="hidden md:flex items-center text-green-600 gap-1 bg-green-50 px-2 py-1 rounded-full">
+                        <span className="flex items-center text-green-600 gap-1 bg-green-50 px-2 py-1 rounded-full">
                             <CheckCircle2 className="w-3 h-3" />
-                            Al día
+                            Guardado
                         </span>
                     )}
                 </div>

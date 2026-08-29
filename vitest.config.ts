@@ -5,6 +5,11 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
+    include: [
+      'tests/**/*.test.{ts,tsx}',
+      'pruebas unitarias/**/*.test.{ts,tsx}',
+      'lib/**/*.test.{ts,tsx}',
+    ],
   },
   resolve: {
     alias: {

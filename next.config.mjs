@@ -18,9 +18,11 @@ const nextConfig = {
 
 const withPWA = withPWAInit({
     dest: "public",
-    cacheOnFrontEndNav: true,
-    aggressiveFrontEndNavCaching: true,
-    reloadOnOnline: true,
+    cacheStartUrl: false,
+    dynamicStartUrl: false,
+    cacheOnFrontEndNav: false,
+    aggressiveFrontEndNavCaching: false,
+    reloadOnOnline: false,
     swMinify: true,
     disable: process.env.NODE_ENV === "development",
     fallbacks: {
@@ -30,14 +32,7 @@ const withPWA = withPWAInit({
         disableDevLogs: true,
         additionalManifestEntries: [
             { url: "/offline", revision: Date.now().toString() },
-            { url: "/", revision: Date.now().toString() },
             { url: "/login", revision: Date.now().toString() },
-            { url: "/contactos", revision: Date.now().toString() },
-            { url: "/actividades", revision: Date.now().toString() },
-            { url: "/cuentas", revision: Date.now().toString() },
-            { url: "/oportunidades", revision: Date.now().toString() },
-            { url: "/pedidos", revision: Date.now().toString() },
-            { url: "/configuracion", revision: Date.now().toString() },
         ],
         runtimeCaching: [
             {
@@ -122,33 +117,6 @@ const withPWA = withPWAInit({
                 handler: "StaleWhileRevalidate",
                 options: {
                     cacheName: "next-data",
-                    expiration: {
-                        maxEntries: 32,
-                        maxAgeSeconds: 24 * 60 * 60, // 24 hours
-                    },
-                },
-            },
-            {
-                urlPattern: /\/api\/.*$/i,
-                handler: "NetworkFirst",
-                options: {
-                    cacheName: "apis",
-                    networkTimeoutSeconds: 10,
-                    expiration: {
-                        maxEntries: 16,
-                        maxAgeSeconds: 24 * 60 * 60, // 24 hours
-                    },
-                    cacheableResponse: {
-                        statuses: [0, 200],
-                    },
-                },
-            },
-            {
-                // Excluir blob: URLs para que las descargas de PDF (y otros blobs) funcionen correctamente
-                urlPattern: /^(?!blob:).*/i,
-                handler: "StaleWhileRevalidate",
-                options: {
-                    cacheName: "others",
                     expiration: {
                         maxEntries: 32,
                         maxAgeSeconds: 24 * 60 * 60, // 24 hours

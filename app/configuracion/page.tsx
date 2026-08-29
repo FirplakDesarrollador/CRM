@@ -109,7 +109,6 @@ function ConfigPageContent() {
         setModalConfig(prev => ({ ...prev, isLoading: true }));
 
         // Clear ALL local data FIRST
-        localStorage.removeItem('cachedUserId');
         sessionStorage.removeItem('crm_initialSyncDone');
 
         // Also clear view mode

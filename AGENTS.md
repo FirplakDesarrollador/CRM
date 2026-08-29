@@ -360,3 +360,20 @@ export class MyWorkflow {
 
 **When in doubt**: `./n8nac-skills get <nodeName>`
 <!-- n8n-as-code-end -->
+
+## Safe Change Protocol (CRM FIRPLAK)
+
+For every product, database, workflow, test, build, or CI change:
+
+1. Read `docs/quality/critical-flows.md`, `docs/quality/known-regressions.md`, and the applicable history in `bugs-knowhow.md`.
+2. State what changes, what is preserved, and what remains out of scope.
+3. Run a related focused baseline before editing and distinguish pre-existing debt.
+4. Add a test that fails for the intended reason (RED); never add skips, `only`, ignores, exclusions, lint/type suppressions, or fake secrets to obtain GREEN.
+5. Implement the minimum change and run `npm run qa:focused -- <test-file>` until GREEN.
+6. Run related tests after every meaningful change.
+7. Ask the user for explicit authorization before `npm run qa:quick` or `npm run qa:gate`.
+8. Review the diff for deletions, weakened tests, broken contracts, non-append-only migrations, generated artifacts, and secrets.
+9. Record important regressions with `npm run qa:incident` and name the permanent detecting test.
+10. Report commands, evidence, artifacts, inherited debt, and residual risks. `SKIPPED`, `NOT_CONFIGURED`, and `NOT_RUN` are never approvals.
+
+`quality/stages.mjs` is the executable source of truth for QA stages. Do not edit `quality/baseline.json` manually; `npm run qa:baseline:update` may only reduce inherited debt and its diff requires human review.

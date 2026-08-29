@@ -45,9 +45,6 @@ export function usePedidos(cotizacionId?: string) {
             updated_at: new Date().toISOString()
         };
 
-        // Add Pedido locally
-        await db.pedidos.add(newPedido);
-        
         // Mapeo para Supabase (tablas legacy de Firplak con campos EXTRA_)
         const serverPayload: any = { 
             ...newPedido,
@@ -82,9 +79,6 @@ export function usePedidos(cotizacionId?: string) {
             }
         });
 
-        // Add to sync queue for CRM_Pedidos (Snapshot mode for new records)
-        await syncEngine.queueMutation('CRM_Pedidos', uuid_generado, serverPayload, { isSnapshot: true });
-
         // Add Items
         const itemsToSave: LocalPedidoItem[] = selectedItems.map(item => ({
             id: uuidv4(),
@@ -96,12 +90,17 @@ export function usePedidos(cotizacionId?: string) {
             created_at: new Date().toISOString()
         }));
 
-        await db.pedidoItems.bulkAdd(itemsToSave);
-        
-        // Sync items (Snapshot mode for new records)
-        for (const pdItem of itemsToSave) {
-            await syncEngine.queueMutation('CRM_PedidoItems', pdItem.id, pdItem, { isSnapshot: true });
-        }
+        await syncEngine.commitLocalChanges([db.pedidos, db.pedidoItems], async () => {
+            await db.pedidos.add(newPedido);
+            if (itemsToSave.length > 0) await db.pedidoItems.bulkAdd(itemsToSave);
+            return [
+                { entityTable: 'CRM_Pedidos', entityId: uuid_generado, changes: serverPayload, options: { isSnapshot: true } },
+                ...itemsToSave.map(pdItem => ({
+                    entityTable: 'CRM_PedidoItems', entityId: pdItem.id, changes: pdItem,
+                    options: { isSnapshot: true }
+                }))
+            ];
+        });
 
         return newPedido;
     };
@@ -111,7 +110,6 @@ export function usePedidos(cotizacionId?: string) {
         if (!current) return;
 
         const merged = { ...current, ...updates, updated_at: new Date().toISOString() };
-        await db.pedidos.put(merged);
 
         // Mapeo para Supabase (tablas legacy de Firplak con campos EXTRA_)
         const serverPayload: any = { ...merged };
@@ -147,61 +145,71 @@ export function usePedidos(cotizacionId?: string) {
             }
         });
 
-        console.log('[usePedidos] Mapped atomic payload for server:', serverPayload);
-        await syncEngine.queueMutation('CRM_Pedidos', uuid_generado, serverPayload, { isSnapshot: true });
+        await syncEngine.commitLocalChanges([db.pedidos], async () => {
+            await db.pedidos.put(merged);
+            return [{
+                entityTable: 'CRM_Pedidos', entityId: uuid_generado, changes: serverPayload,
+                options: { isSnapshot: true }
+            }];
+        });
     };
 
     const deletePedido = async (uuid_generado: string) => {
-        await db.pedidos.delete(uuid_generado);
-        // Cascades normally locally if we do it, but manually let's just delete items to be safe
+        const pedido = await db.pedidos.get(uuid_generado);
+        if (!pedido) return;
         const items = await db.pedidoItems.where('pedido_uuid').equals(uuid_generado).toArray();
-        for (const item of items) {
-            await db.pedidoItems.delete(item.id);
-            await syncEngine.queueMutation('CRM_PedidoItems', item.id, { is_deleted: true });
-        }
-        await syncEngine.queueMutation('CRM_Pedidos', uuid_generado, { is_deleted: true });
+        await syncEngine.commitLocalChanges([db.pedidos, db.pedidoItems], async () => {
+            await db.pedidos.delete(uuid_generado);
+            if (items.length > 0) await db.pedidoItems.bulkDelete(items.map(item => item.id));
+            return [
+                ...items.map(item => ({
+                    entityTable: 'CRM_PedidoItems', entityId: item.id,
+                    changes: { ...item, is_deleted: true }, options: { isSnapshot: true }
+                })),
+                {
+                    entityTable: 'CRM_Pedidos', entityId: uuid_generado,
+                    changes: { ...pedido, is_deleted: true }, options: { isSnapshot: true }
+                }
+            ];
+        });
     };
 
     const updatePedidoItems = async (uuid_generado: string, newItems: { producto_id: string; cantidad: number; precio_unitario: number; descuento?: number }[]) => {
-        const currentItems = await db.pedidoItems.where('pedido_uuid').equals(uuid_generado).toArray();
-        let remainingToSave = [...newItems];
-        
-        for (const currentItem of currentItems) {
-            const updatedItemDef = remainingToSave.find(i => i.producto_id === currentItem.producto_id);
-            if (updatedItemDef) {
-                // Si existe y cambió, lo actualizamos
-                if (currentItem.cantidad !== updatedItemDef.cantidad) {
-                    await db.pedidoItems.update(currentItem.id, { cantidad: updatedItemDef.cantidad });
-                    const updated = await db.pedidoItems.get(currentItem.id);
-                    if (updated) {
-                        await syncEngine.queueMutation('CRM_PedidoItems', currentItem.id, updated);
-                    }
-                }
-                remainingToSave = remainingToSave.filter(i => i.producto_id !== currentItem.producto_id);
-            } else {
-                // Se puso en 0, lo borramos
-                await db.pedidoItems.delete(currentItem.id);
-                await syncEngine.queueMutation('CRM_PedidoItems', currentItem.id, { is_deleted: true });
-            }
-        }
-        
-        // Agregar los nuevos que no existían
-        const itemsToInsert = remainingToSave.map(item => ({
-            id: uuidv4(),
-            pedido_uuid: uuid_generado,
-            producto_id: item.producto_id,
-            cantidad: item.cantidad,
-            precio_unitario: item.precio_unitario,
-            descuento: item.descuento || 0,
-            created_at: new Date().toISOString()
-        }));
+        await syncEngine.commitLocalChanges([db.pedidoItems], async () => {
+            const currentItems = await db.pedidoItems.where('pedido_uuid').equals(uuid_generado).toArray();
+            let remainingToSave = [...newItems];
+            const requests = [];
 
-        if (itemsToInsert.length > 0) {
-            await db.pedidoItems.bulkAdd(itemsToInsert);
-            for (const pdItem of itemsToInsert) {
-                await syncEngine.queueMutation('CRM_PedidoItems', pdItem.id, pdItem, { isSnapshot: true });
+            for (const currentItem of currentItems) {
+                const updatedItemDef = remainingToSave.find(i => i.producto_id === currentItem.producto_id);
+                if (updatedItemDef) {
+                    const hasChanged = currentItem.cantidad !== updatedItemDef.cantidad
+                        || currentItem.precio_unitario !== updatedItemDef.precio_unitario
+                        || (currentItem.descuento || 0) !== (updatedItemDef.descuento || 0);
+                    if (hasChanged) {
+                        const updated = { ...currentItem, ...updatedItemDef, updated_at: new Date().toISOString() };
+                        await db.pedidoItems.put(updated);
+                        requests.push({ entityTable: 'CRM_PedidoItems', entityId: currentItem.id, changes: updated, options: { isSnapshot: true } });
+                    }
+                    remainingToSave = remainingToSave.filter(i => i.producto_id !== currentItem.producto_id);
+                } else {
+                    await db.pedidoItems.delete(currentItem.id);
+                    requests.push({ entityTable: 'CRM_PedidoItems', entityId: currentItem.id, changes: { ...currentItem, is_deleted: true }, options: { isSnapshot: true } });
+                }
             }
-        }
+
+            const itemsToInsert = remainingToSave.map(item => ({
+                id: uuidv4(), pedido_uuid: uuid_generado, producto_id: item.producto_id,
+                cantidad: item.cantidad, precio_unitario: item.precio_unitario,
+                descuento: item.descuento || 0, created_at: new Date().toISOString()
+            }));
+            if (itemsToInsert.length > 0) await db.pedidoItems.bulkAdd(itemsToInsert);
+            requests.push(...itemsToInsert.map(pdItem => ({
+                entityTable: 'CRM_PedidoItems', entityId: pdItem.id, changes: pdItem,
+                options: { isSnapshot: true }
+            })));
+            return requests;
+        });
     };
 
     return {

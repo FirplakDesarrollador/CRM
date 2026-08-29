@@ -3,10 +3,12 @@
 import { Sidebar } from "./Sidebar";
 import { MobileNav } from "./MobileNav";
 import { TopBar } from "./TopBar";
+import { NetworkStatusLine } from "./NetworkStatusLine";
 import { OfflineBanner } from "./OfflineBanner";
 import { useSyncStore } from "@/lib/stores/useSyncStore";
 import { useEffect, useState, useCallback } from "react";
 import { syncEngine } from "@/lib/sync";
+import { deactivateLocalDatabase } from "@/lib/db";
 import { usePathname } from "next/navigation";
 
 import { supabase } from "@/lib/supabase";
@@ -17,16 +19,27 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     const isLoginPage = pathname === '/login';
     const isE2EPage = process.env.NODE_ENV !== 'production' && pathname.startsWith('/e2e');
     const isPublicPage = isLoginPage || isE2EPage;
+    const [isLocalDataReady, setIsLocalDataReady] = useState(isPublicPage);
 
     // Auth state listener - Redirect to login when signed out (critical for mobile)
     useEffect(() => {
-        if (isPublicPage) return; // Don't listen on public pages
+        if (isPublicPage) return;
+
+        let cancelled = false;
+
+        const prepareLocalData = async (userId: string) => {
+            setIsLocalDataReady(false);
+            await syncEngine.initializeForUser(userId);
+            if (!cancelled) setIsLocalDataReady(true);
+        };
 
         // Check initial session
         const checkSession = async () => {
             try {
                 const { data: { session } } = await supabase.auth.getSession();
-                if (!session && navigator.onLine) {
+                if (session?.user) {
+                    await prepareLocalData(session.user.id);
+                } else if (navigator.onLine) {
                     window.location.replace('/login');
                 }
             } catch (err) {
@@ -37,18 +50,25 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         checkSession();
 
         // Listen for auth state changes (SIGNED_OUT, etc.)
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
 
             if (event === 'SIGNED_OUT') {
+                setIsLocalDataReady(false);
+                void deactivateLocalDatabase();
                 // Clear any cached data
-                localStorage.removeItem('cachedUserId');
                 sessionStorage.removeItem('crm_initialSyncDone');
                 // Redirect to login
                 window.location.replace('/login');
+            } else if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session?.user) {
+                void prepareLocalData(session.user.id).catch((error) => {
+                    console.error('[AppLayout] No se pudo preparar la base local del usuario:', error);
+                    if (!cancelled) setIsLocalDataReady(false);
+                });
             }
         });
 
         return () => {
+            cancelled = true;
             subscription.unsubscribe();
         };
     }, [isPublicPage]);
@@ -78,7 +98,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
     // Sync: initial + periodic (5 min) + visibility change (user returns to tab)
     useEffect(() => {
-        if (isPublicPage) return;
+        if (isPublicPage || !isLocalDataReady) return;
 
         // 1. Initial sync on mount
         syncEngine.triggerSync('app-mount');
@@ -102,7 +122,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             clearInterval(intervalId);
             document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
-    }, [isPublicPage]);
+    }, [isPublicPage, isLocalDataReady]);
 
     const [isCollapsed, setIsCollapsed] = useState(false);
 
@@ -111,6 +131,14 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
     if (isPublicPage) {
         return <>{children}</>;
+    }
+
+    if (!isPublicPage && !isLocalDataReady) {
+        return (
+            <div data-testid="local-data-loading" className="flex h-screen items-center justify-center bg-slate-50 text-sm text-slate-500">
+                Preparando tus datos...
+            </div>
+        );
     }
 
     return (
@@ -123,6 +151,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             <div className="flex-1 flex flex-col relative h-full overflow-hidden">
                 <OfflineBanner />
                 <TopBar />
+                <NetworkStatusLine />
 
                 <main id="main-content" className="flex-1 overflow-y-auto p-4 md:p-6 pb-20 md:pb-6 scroll-smooth">
                     {children}

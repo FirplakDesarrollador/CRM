@@ -1,0 +1,88 @@
+name: CRM FIRPLAK - Quality Gate
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'components/**'
+      - 'lib/**'
+      - 'tests/**'
+      - 'pruebas unitarias/**'
+      - 'e2e/**'
+      - 'supabase/**'
+      - 'quality/**'
+      - 'docs/quality/**'
+      - 'docs/failures/**'
+      - '.agents/**'
+      - '.github/workflows/**'
+      - 'AGENTS.md'
+      - 'CLAUDE.md'
+      - 'GEMINI.md'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig*.json'
+      - 'vitest.config.ts'
+      - 'playwright*.config.ts'
+      - 'next.config.mjs'
+      - 'eslint.config.mjs'
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'components/**'
+      - 'lib/**'
+      - 'tests/**'
+      - 'pruebas unitarias/**'
+      - 'e2e/**'
+      - 'supabase/**'
+      - 'quality/**'
+      - '.github/workflows/**'
+      - 'package.json'
+      - 'package-lock.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-gate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality-gate:
+    name: npm run qa:gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Install Chromium runtime
+        run: npx playwright install --with-deps chromium
+
+      - name: Run the same delivery gate used locally
+        run: npm run qa:gate
+        env:
+          CI: 'true'
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crm-quality-gate-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            .tmp/qa-results/
+            playwright-report/
+            test-results/
