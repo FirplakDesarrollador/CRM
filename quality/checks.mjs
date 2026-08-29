@@ -307,7 +307,7 @@ function drift() {
   if (!existsSync(procedureFile)) {
     failures.push('Falta docs/quality/procedure-registry.md');
   } else {
-    const content = readFileSync(procedureFile, 'utf8');
+    const content = readFileSync(procedureFile, 'utf8').replaceAll('\r\n', '\n');
     const expected = `${startMarker}\n${renderRegistryMarkdown()}\n${endMarker}`;
     const start = content.indexOf(startMarker);
     const end = content.indexOf(endMarker);

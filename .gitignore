@@ -98,9 +98,14 @@ temp_*.txt
 /tests/
 !/tests/
 /tests/*
+!/tests/*.test.ts
+!/tests/**/*.test.ts
 !/tests/salesChannels.test.ts
 !/tests/opportunityCollaboratorPermissions.test.ts
 !/tests/opportunityCategories.test.ts
+!/tests/inventoryOpportunityLink.test.ts
+!/tests/networkQuality.test.ts
+!/tests/moduleNavigation.test.ts
 
 
 # Scripts and export dumps
