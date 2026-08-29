@@ -175,9 +175,8 @@ function AccountsContent() {
         lastProcessedUrlIdRef.current = id;
 
         if (!id) {
-            if (editingAccount) {
-                setEditingAccount(null);
-            }
+            setEditingAccount(null);
+            setShowCreate(false);
             return;
         }
 
@@ -230,13 +229,22 @@ function AccountsContent() {
             if (sortField !== 'updated_at') params.set('sort', sortField); else params.delete('sort');
             if (sortAsc) params.set('dir', 'asc'); else params.delete('dir');
 
-            if (editingAccount?.id) params.set('id', editingAccount.id); else params.delete('id');
+            if (editingAccount?.id && searchParams.get('id')) {
+                params.set('id', editingAccount.id);
+            } else if (!searchParams.get('id')) {
+                params.delete('id');
+            }
 
             const queryString = params.toString();
-            if (queryString === searchParams.toString()) return;
 
-            if (queryString) sessionStorage.setItem('crm_cuentas_state', queryString);
+            // Save to sessionStorage without ID to keep filters clean
+            const storageParams = new URLSearchParams(params);
+            storageParams.delete('id');
+            const storageQuery = storageParams.toString();
+            if (storageQuery) sessionStorage.setItem('crm_cuentas_state', storageQuery);
             else if (searchParams.toString() !== '') sessionStorage.removeItem('crm_cuentas_state');
+
+            if (queryString === searchParams.toString()) return;
 
             const queryLink = queryString ? `?${queryString}` : window.location.pathname;
             router.replace(queryLink.startsWith('?') ? `${window.location.pathname}${queryLink}` : queryLink, { scroll: false });
@@ -247,13 +255,25 @@ function AccountsContent() {
     const handleEdit = async (acc: any) => {
         setEditingAccount(acc);
         setShowCreate(false);
+        const params = new URLSearchParams(Array.from(searchParams.entries()));
+        params.set('id', acc.id);
+        router.replace(`/cuentas?${params.toString()}`, { scroll: false });
         document.getElementById('main-content')?.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    const handleCloseEdit = () => {
+        setShowCreate(false);
+        setEditingAccount(null);
+        lastProcessedUrlIdRef.current = null;
+        const params = new URLSearchParams(Array.from(searchParams.entries()));
+        params.delete('id');
+        const query = params.toString() ? `?${params.toString()}` : window.location.pathname;
+        router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
     };
 
     const handleSuccess = () => {
         refresh();
-        setShowCreate(false);
-        setEditingAccount(null);
+        handleCloseEdit();
     };
 
     const handleDelete = (e: React.MouseEvent, acc: any) => {
@@ -434,14 +454,14 @@ function AccountsContent() {
                                     <span>Eliminar Cuenta</span>
                                 </button>
                             )}
-                            <button onClick={() => { setShowCreate(false); setEditingAccount(null); }} className="text-blue-400 hover:text-blue-700 transition-colors p-1" title="Cerrar">✕</button>
+                            <button onClick={handleCloseEdit} className="text-blue-400 hover:text-blue-700 transition-colors p-1" title="Cerrar">✕</button>
                         </div>
                     </div>
                     <AccountForm
                         key={editingAccount?.id || 'new'}
                         account={editingAccount}
                         onSuccess={handleSuccess}
-                        onCancel={() => { setShowCreate(false); setEditingAccount(null); }}
+                        onCancel={handleCloseEdit}
                         onDelete={(acc) => setAccountToDelete(acc)}
                     />
                 </div>

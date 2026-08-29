@@ -101,7 +101,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         if (isPublicPage || !isLocalDataReady) return;
 
         // 1. Initial sync on mount
-        syncEngine.triggerSync('app-mount');
+        const timeoutId = setTimeout(() => {
+            syncEngine.triggerSync('app-mount');
+        }, 50);
 
         // 2. Periodic sync every 5 minutes
         const intervalId = setInterval(() => {
@@ -119,6 +121,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         document.addEventListener('visibilitychange', handleVisibilityChange);
 
         return () => {
+            clearTimeout(timeoutId);
             clearInterval(intervalId);
             document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
@@ -131,14 +134,6 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
     if (isPublicPage) {
         return <>{children}</>;
-    }
-
-    if (!isPublicPage && !isLocalDataReady) {
-        return (
-            <div data-testid="local-data-loading" className="flex h-screen items-center justify-center bg-slate-50 text-sm text-slate-500">
-                Preparando tus datos...
-            </div>
-        );
     }
 
     return (

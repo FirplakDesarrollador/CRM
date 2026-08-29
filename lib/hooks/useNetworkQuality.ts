@@ -29,6 +29,76 @@ export function resolveNetworkStatus(input: NetworkStatusInput): NetworkStatus {
     return "online";
 }
 
+export interface StatusLineVisuals {
+    label: string;
+    description: string;
+    bgClass: string;
+    glowStyle: React.CSSProperties;
+    pulseClass: string;
+    badgeColor: string;
+}
+
+export function resolveStatusLineVisuals(
+    status: NetworkStatus,
+    options: {
+        latency?: number | null;
+        isSyncing?: boolean;
+    } = {}
+): StatusLineVisuals {
+    const { latency = null, isSyncing = false } = options;
+
+    if (status === 'offline') {
+        return {
+            label: "Sin conexión",
+            description: "Modo offline (cambios guardados localmente)",
+            bgClass: "bg-linear-to-r from-[#991b1b] via-[#ef4444] to-[#f87171]",
+            glowStyle: {
+                boxShadow: "0 0 12px rgba(239, 68, 68, 0.85), 0 0 24px rgba(185, 28, 28, 0.5)",
+            },
+            pulseClass: "animate-pulse",
+            badgeColor: "text-rose-400 bg-rose-950/30 border-rose-500/30",
+        };
+    }
+
+    if (status === 'unstable') {
+        return {
+            label: "Conexión inestable",
+            description: latency !== null ? `Latencia alta o red lenta (${latency}ms)` : "Red inestable o lenta",
+            bgClass: "bg-linear-to-r from-[#d97706] via-[#f59e0b] to-[#fde047]",
+            glowStyle: {
+                boxShadow: "0 0 10px rgba(245, 158, 11, 0.75), 0 0 20px rgba(217, 119, 6, 0.4)",
+            },
+            pulseClass: "animate-pulse",
+            badgeColor: "text-amber-400 bg-amber-950/30 border-amber-500/30",
+        };
+    }
+
+    // Online
+    if (isSyncing) {
+        return {
+            label: "Sincronizando",
+            description: "Cargando información en segundo plano...",
+            bgClass: "bg-[linear-gradient(90deg,#0284c7_0%,#38bdf8_50%,#0284c7_100%)] animate-luminous-flow",
+            glowStyle: {
+                boxShadow: "0 0 12px rgba(56, 189, 248, 0.85), 0 0 24px rgba(2, 132, 199, 0.5)",
+            },
+            pulseClass: "",
+            badgeColor: "text-sky-300 bg-sky-950/40 border-sky-400/40",
+        };
+    }
+
+    return {
+        label: "En línea",
+        description: latency !== null ? `Conexión óptima (${latency}ms)` : "Conexión activa",
+        bgClass: "bg-linear-to-r from-[#254153] via-[#0284c7] to-[#38bdf8]",
+        glowStyle: {
+            boxShadow: "0 0 8px rgba(2, 132, 199, 0.6), 0 0 16px rgba(37, 65, 83, 0.3)",
+        },
+        pulseClass: "",
+        badgeColor: "text-sky-400 bg-sky-950/30 border-sky-500/30",
+    };
+}
+
 interface NetworkInformation extends EventTarget {
     effectiveType?: "slow-2g" | "2g" | "3g" | "4g";
     rtt?: number;

@@ -235,9 +235,12 @@ function ActivitiesContent() {
 
             const queryString = params.toString();
             
-            // Save to sessionStorage for cross-module persistence
-            if (queryString) {
-                sessionStorage.setItem('crm_actividades_state', queryString);
+            // Save to sessionStorage without ID for cross-module persistence
+            const storageParams = new URLSearchParams(params);
+            storageParams.delete('id');
+            const storageQuery = storageParams.toString();
+            if (storageQuery) {
+                sessionStorage.setItem('crm_actividades_state', storageQuery);
             } else if (searchParams.toString() !== '') {
                 sessionStorage.removeItem('crm_actividades_state');
             }
@@ -276,6 +279,9 @@ function ActivitiesContent() {
                 setSelectedActivity(act);
                 setIsModalOpen(true);
             }
+        } else if (!id) {
+            setIsModalOpen(false);
+            setSelectedActivity(null);
         }
     }, [searchParams, activities]);
 
