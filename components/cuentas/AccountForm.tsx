@@ -26,7 +26,10 @@ import { AutoSaveIndicator } from "@/components/ui/AutoSaveIndicator";
 // Schema
 const accountSchema = z.object({
     nombre: z.string().min(2, "Nombre requerido"),
-    nit_base: z.string().min(5, "NIT requerido"),
+    nit_base: z.string().optional().nullable().refine(val => {
+        if (!val || val.trim() === "") return true;
+        return val.trim().length >= 5;
+    }, { message: "NIT debe tener al menos 5 caracteres" }),
     is_child: z.boolean(),
     id_cuenta_principal: z.string().nullable().optional(),
     canal_id: z.string().min(1, "Canal de venta requerido"),
@@ -281,7 +284,8 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
                 es_premium: account.es_premium || false,
                 nivel_premium: account.nivel_premium || null,
                 ignorar_limites_descuento: account.ignorar_limites_descuento || false,
-                comentarios: account.comentarios || ""
+                comentarios: account.comentarios || "",
+                origen_cuenta: (account as any)?.origen_cuenta || ""
             }, { keepDefaultValues: true });
         }
     }, [account, reset, isDirty]);

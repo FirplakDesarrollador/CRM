@@ -83,5 +83,52 @@ describe('useFormAutoSave', () => {
         expect(statusResult).toBe('error');
         expect(errorResult).toBe('Fallo al guardar cuenta');
     });
+
+    it('extracts field validation error when form.trigger() fails', async () => {
+        let statusResult = '';
+        let errorResult: string | null = null;
+
+        function Harness() {
+            const form = useForm<TestForm>({
+                defaultValues: { nombre: '' },
+                resolver: async (values) => {
+                    if (!values.nombre || values.nombre.length < 2) {
+                        return {
+                            values: {},
+                            errors: {
+                                nombre: {
+                                    type: 'min',
+                                    message: 'Nombre requerido'
+                                }
+                            }
+                        };
+                    }
+                    return { values, errors: {} };
+                }
+            });
+            formApi = form;
+            const { status, errorMessage } = useFormAutoSave({
+                form,
+                onSave: async () => {},
+                debounceMs: 100,
+                isEnabled: true
+            });
+            statusResult = status;
+            errorResult = errorMessage ?? null;
+            return null;
+        }
+
+        await act(async () => root.render(<Harness />));
+        await act(async () => {
+            formApi?.setValue('nombre', 'a');
+        });
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(101);
+        });
+
+        expect(statusResult).toBe('error');
+        expect(errorResult).toBe('nombre: Nombre requerido');
+    });
 });
+
 
