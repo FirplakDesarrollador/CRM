@@ -3,6 +3,14 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-08-31 - Ingest: Visibilidad de Errores en Auto-Guardado (`AutoSaveIndicator`)
+
+- **Mejora en `useFormAutoSave` y `AutoSaveIndicator`:**
+  - `useFormAutoSave` ahora retorna `errorMessage` especificando la regla de validación o excepción exacta que provocó el estado de error.
+  - `AutoSaveIndicator` muestra y trunca dinámicamente el mensaje de error real (`errorMessage`) en lugar de mostrar un texto genérico `Error al guardar`.
+- **Formularios actualizados:** `AccountForm.tsx`, `ContactForm.tsx`.
+- **Pruebas:** `lib/hooks/useFormAutoSave.test.tsx`.
+
 ## 2026-08-28 - Ingest: Quality Gate Offline-First y Versionado de Migraciones
 
 - **Hardening de Calidad y Gate Completo (`quality/`, `qa:gate`):**

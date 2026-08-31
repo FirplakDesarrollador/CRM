@@ -60,7 +60,7 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel, o
         await updateContact(existingContact.id, payload);
     };
 
-    const { status: autoSaveStatus } = useFormAutoSave({
+    const { status: autoSaveStatus, errorMessage: autoSaveError } = useFormAutoSave({
         form,
         onSave: onAutoSave,
         isEnabled: !!existingContact?.id
@@ -319,7 +319,7 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel, o
                             <div />
                         )}
                         <div className="flex items-center gap-3">
-                            <AutoSaveIndicator status={autoSaveStatus} />
+                            <AutoSaveIndicator status={autoSaveStatus} errorMessage={autoSaveError} />
                             <button
                                 type="button"
                                 onClick={onCancel}

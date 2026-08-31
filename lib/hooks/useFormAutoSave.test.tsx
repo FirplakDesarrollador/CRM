@@ -51,4 +51,37 @@ describe('useFormAutoSave', () => {
 
         expect(saves).toEqual([{ nombre: 'Cuenta renombrada' }]);
     });
+
+    it('returns error status and errorMessage when onSave throws an error', async () => {
+        let statusResult = '';
+        let errorResult: string | null = null;
+
+        function Harness() {
+            const form = useForm<TestForm>({ defaultValues: { nombre: '' } });
+            formApi = form;
+            const { status, errorMessage } = useFormAutoSave({
+                form,
+                onSave: async () => {
+                    throw new Error('Fallo al guardar cuenta');
+                },
+                debounceMs: 100,
+                isEnabled: true
+            });
+            statusResult = status;
+            errorResult = errorMessage ?? null;
+            return null;
+        }
+
+        await act(async () => root.render(<Harness />));
+        await act(async () => {
+            formApi?.setValue('nombre', 'Cambio invalido');
+        });
+        await act(async () => {
+            await vi.advanceTimersByTimeAsync(101);
+        });
+
+        expect(statusResult).toBe('error');
+        expect(errorResult).toBe('Fallo al guardar cuenta');
+    });
 });
+

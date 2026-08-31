@@ -15,6 +15,7 @@ export function useFormAutoSave<T extends FieldValues>({
     isEnabled
 }: AutoSaveConfig<T>) {
     const [status, setStatus] = useState<"saved" | "saving" | "error">("saved");
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const lastSavedData = useRef<string>("");
     const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const onSaveRef = useRef(onSave);
@@ -57,12 +58,20 @@ export function useFormAutoSave<T extends FieldValues>({
                         await onSaveRef.current(currentValues);
                         lastSavedData.current = JSON.stringify(currentValues);
                         setStatus("saved");
+                        setErrorMessage(null);
                     } catch (err) {
                         console.error("[AutoSave] Error en guardado automático:", err);
                         setStatus("error");
+                        setErrorMessage(err instanceof Error ? err.message : String(err));
                     }
                 } else {
+                    const errors = form.formState.errors;
+                    const firstErrorKey = Object.keys(errors)[0];
+                    const firstErrorMessage = firstErrorKey
+                        ? (errors[firstErrorKey as keyof typeof errors]?.message as string)
+                        : "Error de validación en el formulario";
                     setStatus("error");
+                    setErrorMessage(firstErrorMessage || "Error de validación en el formulario");
                 }
             }, debounceMs);
         });
@@ -75,7 +84,8 @@ export function useFormAutoSave<T extends FieldValues>({
         };
     }, [form, debounceMs, isEnabled]);
 
-    return { status };
+    return { status, errorMessage };
 }
+
 
 export default useFormAutoSave;

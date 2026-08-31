@@ -254,7 +254,7 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
         await updateAccount(account.id, payload);
     };
 
-    const { status: autoSaveStatus } = useFormAutoSave({
+    const { status: autoSaveStatus, errorMessage: autoSaveError } = useFormAutoSave({
         form,
         onSave: onAutoSave,
         isEnabled: !!account?.id
@@ -853,7 +853,7 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
                                     <div />
                                 )}
                                 <div className="flex items-center gap-4">
-                                    <AutoSaveIndicator status={autoSaveStatus} />
+                                     <AutoSaveIndicator status={autoSaveStatus} errorMessage={autoSaveError} />
                                     <button data-testid="accounts-form-cancel" type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded font-medium">
                                         Cerrar
                                     </button>
