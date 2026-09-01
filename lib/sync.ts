@@ -3,6 +3,7 @@ import type { Table } from 'dexie';
 import { supabase } from './supabase';
 import { v4 as uuidv4 } from 'uuid';
 import { useSyncStore } from './stores/useSyncStore';
+import { generateProvisionalNit } from './nitUtils';
 import {
     MAX_SYNC_RETRIES,
     buildFailureUpdate,
@@ -922,7 +923,7 @@ export class SyncEngine {
                     });
                 }
 
-                // 3.7 DEFENSIVE SANITIZATION: Ensure CRM_Cuentas nit is valid 32-bit integer or null (nit_base contains text)
+                // 3.7 DEFENSIVE SANITIZATION: Ensure CRM_Cuentas nit is valid 32-bit integer or null, and nit_base is non-empty unique
                 if (table === 'CRM_Cuentas') {
                     const MAX_INT32 = 2147483647;
                     updates = updates.map(u => {
@@ -932,10 +933,17 @@ export class SyncEngine {
                                 const parsedNit = parseInt(String(val.nit).replace(/\D/g, ''), 10);
                                 val.nit = (!isNaN(parsedNit) && parsedNit <= MAX_INT32) ? parsedNit : null;
                             }
+                            if (val.nit_base === undefined || val.nit_base === null || String(val.nit_base).trim() === '' || val.nit_base === 'Sin NIT') {
+                                val.nit_base = generateProvisionalNit();
+                            }
                             return { ...u, value: val };
                         } else if (u.field === 'nit' && u.value !== null && u.value !== undefined) {
                             const parsedNit = parseInt(String(u.value).replace(/\D/g, ''), 10);
                             return { ...u, value: (!isNaN(parsedNit) && parsedNit <= MAX_INT32) ? parsedNit : null };
+                        } else if (u.field === 'nit_base') {
+                            if (u.value === null || u.value === undefined || String(u.value).trim() === '' || u.value === 'Sin NIT') {
+                                return { ...u, value: generateProvisionalNit() };
+                            }
                         }
                         return u;
                     });
@@ -1533,7 +1541,7 @@ export class SyncEngine {
                         id: a.id,
                         nombre: a.nombre,
                         nit: a.nit,
-                        nit_base: a.nit_base,
+                        nit_base: (a.nit_base && String(a.nit_base).trim() !== "" && a.nit_base !== "Sin NIT") ? a.nit_base : generateProvisionalNit(),
                         id_cuenta_principal: a.id_cuenta_principal,
                         canal_id: a.canal_id || 'DIST_NAC',
                         es_premium: a.es_premium ?? false,

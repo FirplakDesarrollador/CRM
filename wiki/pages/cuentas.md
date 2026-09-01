@@ -6,7 +6,7 @@ que determina su lista de precios.
 
 ## Campos clave
 
-- **Identificación:** `nombre`, `nit`, `nit_base` (para agrupar sucursales),
+- **Identificación:** `nombre`, `nit`, `nit_base` (para agrupar sucursales; si se omite al crear o editar, se autogenera un NIT alfanumérico provisional único `PROV-XXXXXXXX` mediante `lib/nitUtils.ts`),
   `id_cuenta_principal` (jerarquía casa matriz → sucursales).
 - **Canal:** `canal_id` (obligatorio) + `subclasificacion_id` opcional por canal
   (migraciones `20260119_subclassifications`, `20260212_add_propio_subclassifications`).

@@ -20,6 +20,7 @@ const completePedido: PedidoWithItems = {
     direccion_envio_factura: "Calle 1 # 2-3",
     dir_envio_factura_tipo: "OFICINA",
     cliente_final: "Cliente del pedido",
+    nit_cliente_final: "890927404-0",
     items: [{
         id: "pedido-item-1",
         pedido_uuid: "pedido-1",

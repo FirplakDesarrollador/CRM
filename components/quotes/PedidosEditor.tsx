@@ -18,6 +18,7 @@ import {
     PedidoDocumentItem,
     PedidoWithItems,
 } from "@/lib/pedidoFormalization";
+import { isValidRealNit, isProvisionalNit } from "@/lib/nitUtils";
 
 const PEDIDO_WIZARD_LAST_STEP = 2;
 
@@ -802,8 +803,29 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
                         <input {...register("cliente_final")} className="w-full mt-1 p-2 border rounded-lg" placeholder="Nombre del cliente final" />
                     </div>
                     <div>
-                        <label className="text-sm font-medium">NIT / CC Cliente Final</label>
-                        <input {...register("nit_cliente_final")} className="w-full mt-1 p-2 border rounded-lg" placeholder="NIT o Cédula" />
+                        <div className="flex items-center justify-between">
+                            <label className="text-sm font-medium">NIT / CC Cliente Final <span className="text-red-500 font-bold">*</span></label>
+                            {watch("nit_cliente_final") && isProvisionalNit(watch("nit_cliente_final")) && (
+                                <span className="text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded">
+                                    Provisional (No válido para pedido)
+                                </span>
+                            )}
+                        </div>
+                        <input
+                            {...register("nit_cliente_final")}
+                            className={cn(
+                                "w-full mt-1 p-2 border rounded-lg",
+                                watch("nit_cliente_final") && !isValidRealNit(watch("nit_cliente_final"))
+                                    ? "border-amber-400 bg-amber-50/50"
+                                    : "border-slate-200"
+                            )}
+                            placeholder="Ej. 890927404-0 o Cédula"
+                        />
+                        {watch("nit_cliente_final") && !isValidRealNit(watch("nit_cliente_final")) && (
+                            <p className="text-xs text-amber-700 mt-1 font-medium">
+                                Para formalizar el pedido se requiere el NIT real numérico (ej. 890927404-0).
+                            </p>
+                        )}
                     </div>
                     <div>
                         <label className="text-sm font-medium">Email de Contacto (OC/Cot)</label>
