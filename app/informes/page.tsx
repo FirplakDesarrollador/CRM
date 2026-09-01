@@ -4,7 +4,7 @@ import React, { useState, useMemo } from 'react';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useUsers } from '@/lib/hooks/useUsers';
 import { supabase } from '@/lib/supabase';
-import { downloadExcel, downloadCSV, downloadSopExcel, ExportColumn, SopRow } from '@/lib/utils/informes';
+import { downloadExcel, downloadCSV, downloadSopExcel, ExportColumn, SopRow, mapOpportunityReportRow } from '@/lib/utils/informes';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { FileSpreadsheet, Loader2, Download, TableProperties, Users, Briefcase, Building2, Calendar as CalendarIcon, Filter, RotateCcw, DollarSign, MapPin, Tag } from 'lucide-react';
@@ -337,7 +337,8 @@ export default function InformesPage() {
                 { data: canales },
                 { data: clasificaciones },
                 { data: subclasificaciones },
-                { data: tiposActividad }
+                { data: tiposActividad },
+                { data: countries }
             ] = await Promise.all([
                 supabase.from('CRM_Usuarios').select('id, full_name, email'),
                 supabase.from('CRM_Segmentos').select('id, nombre'),
@@ -347,7 +348,8 @@ export default function InformesPage() {
                 supabase.from('CRM_Canales').select('id, nombre'),
                 supabase.from('CRM_Activity_Clasificacion').select('id, nombre'),
                 supabase.from('CRM_Activity_Subclasificacion').select('id, nombre'),
-                supabase.from('CRM_TiposActividad').select('id, nombre')
+                supabase.from('CRM_TiposActividad').select('id, nombre'),
+                supabase.from('CRM_Paises').select('id, nombre')
             ]);
 
             const getJoinedSingle = (rel: any) => Array.isArray(rel) ? rel[0] : rel;
@@ -378,6 +380,15 @@ export default function InformesPage() {
 
             const tipoActividadMap = new Map<number, string>();
             tiposActividad?.forEach(t => tipoActividadMap.set(t.id, t.nombre));
+
+            const countryMap = new Map<number | string, string>();
+            countries?.forEach(c => {
+                countryMap.set(c.id, c.nombre);
+                countryMap.set(String(c.id), c.nombre);
+                if (typeof c.id === 'string' && !isNaN(Number(c.id))) {
+                    countryMap.set(Number(c.id), c.nombre);
+                }
+            });
 
             // Configuración de columnas y joins por entidad
             let selectStr = '*';
@@ -679,7 +690,7 @@ export default function InformesPage() {
             if (selectedEntidad === 'oportunidades') {
                 selectStr = `
                     *,
-                    cuenta:CRM_Cuentas(nombre, canal_id),
+                    cuenta:CRM_Cuentas(nombre, canal_id, pais_id),
                     fase:CRM_FasesOportunidad(nombre, canal_id),
                     estado_info:CRM_EstadosOportunidad(nombre)
                 `;
@@ -688,6 +699,7 @@ export default function InformesPage() {
                     { header: 'FECHA CREACIÓN', key: 'created_at', width: 20 },
                     { header: 'NOMBRE OPORTUNIDAD', key: 'nombre', width: 35 },
                     { header: 'CUENTA', key: 'cuenta_nombre', width: 35 },
+                    { header: 'PAÍS', key: 'pais_nombre', width: 20 },
                     { header: 'CANAL', key: 'canal_nombre' },
                     { header: 'VENDEDOR', key: 'vendedor_nombre', width: 25 },
                     { header: 'ESTADO', key: 'estado_nombre', width: 15 },
@@ -704,26 +716,15 @@ export default function InformesPage() {
                     { header: 'COMENTARIOS PÉRDIDA', key: 'comentarios_perdida', width: 40 },
                     { header: 'CREADO POR', key: 'creador_nombre', width: 25 }
                 ];
-                flattenFn = (item: any) => {
-                    const cuentaObj = getJoinedSingle(item.cuenta);
-                    const faseObj = getJoinedSingle(item.fase);
-                    const estadoObj = getJoinedSingle(item.estado_info);
-                    return {
-                        ...item,
-                        cuenta_nombre: cuentaObj?.nombre || '-',
-                        fase_nombre: faseObj?.nombre || '-',
-                        estado_nombre: estadoObj?.nombre || '-',
-                        vendedor_nombre: userMap.get(item.owner_user_id) || '-',
-                        creador_nombre: userMap.get(item.created_by) || '-',
-                        segmento_nombre: segmentMap.get(item.segmento_id) || '-',
-                        canal_nombre: canalMap.get(faseObj?.canal_id || cuentaObj?.canal_id) || '-',
-                        departamento_nombre: deptMap.get(item.departamento_id) || '-',
-                        ciudad_nombre: cityMap.get(item.ciudad_id) || '-',
-                        probabilidad: item.probabilidad ?? item.probability ?? 0,
-                        probability: item.probabilidad ?? item.probability ?? 0,
-                        razon_perdida_label: item.razon_perdida_id ? (lossReasonMap.get(item.razon_perdida_id) || item.razon_perdida) : (item.razon_perdida || '-')
-                    };
-                };
+                flattenFn = (item: any) => mapOpportunityReportRow(item, {
+                    userMap,
+                    segmentMap,
+                    lossReasonMap,
+                    deptMap,
+                    cityMap,
+                    canalMap,
+                    countryMap
+                });
             } else if (selectedEntidad === 'cuentas') {
                 selectStr = '*';
                 columns = [
