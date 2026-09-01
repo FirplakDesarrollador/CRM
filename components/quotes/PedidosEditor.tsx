@@ -405,7 +405,7 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
         }
     });
 
-    const { register, handleSubmit, setValue, getValues } = form;
+    const { register, handleSubmit, setValue, getValues, watch } = form;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const onAutoSave = async (data: any) => {
