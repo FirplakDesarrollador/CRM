@@ -64,15 +64,16 @@ Para guardar un pedido (sea parcial o total) desde el submódulo de cotizaciones
 7. **`verificacion_previa_firplak`** (`BOOLEAN`): Indica si se requiere verificación previa por parte del personal Firplak.
 8. **`direccion_envio_factura`** (`TEXT`): Dirección física exacta donde se debe enviar la factura.
 9. **`dir_envio_factura_tipo`** (`TEXT`): Tipo de dirección de factura (`OFICINA` o `TIENDA`).
+10. **`nit_cliente_final`** (`TEXT`): NIT numérico real del cliente (formato `890927404-0` o cédula). No se aceptan NITs provisionales `PROV-...`.
 
-Sin diligenciar estos 9 campos, el formulario `PedidosEditor.tsx` bloquea la creación del pedido y muestra una alerta con los campos pendientes.
+Sin diligenciar y validar estos campos, `getMissingPedidoFormalizationFields()` bloquea la formalización, el PDF y el envío del pedido.
 
 ### Precarga automática de campos (Default Values)
 
 Al crear un nuevo pedido parcial (`!pedidoUuid`), el formulario de creación recupera los datos de la Cuenta y sus Contactos mediante consultas reactivas (`useLiveQuery` de Dexie) y precarga automáticamente los siguientes campos para facilitar el diligenciamiento:
 
 - **`cliente_final`**: Nombre de la Cuenta (`LocalCuenta.nombre`).
-- **`nit_cliente_final`**: NIT de la Cuenta (`LocalCuenta.nit`).
+- **`nit_cliente_final`**: NIT de la Cuenta (`LocalCuenta.nit_base` o `LocalCuenta.nit`). Si la cuenta tiene un NIT provisional `PROV-...`, el comercial debe reemplazarlo por el NIT real antes de formalizar.
 - **`direccion_envio_factura`**: Dirección física registrada en la Cuenta (`LocalCuenta.direccion`).
 - **`email_contacto`**: Correo del Contacto Principal (`LocalContact.email` con `es_principal = true`) o el correo registrado de la Cuenta (`LocalCuenta.email`).
 - **`contacto_ventas`**, **`contacto_logistico`**, **`contacto_tesoreria`**: Se busca un contacto asociado a la Cuenta cuyo cargo o nombre coincida con el rol ("venta", "logistica", "tesoreria" / "finan"). Si no se encuentra un rol específico, se usa por defecto el Contacto Principal.

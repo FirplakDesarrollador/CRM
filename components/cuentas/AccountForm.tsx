@@ -22,11 +22,12 @@ import AccountActivitiesTab from "./AccountActivitiesTab";
 import { ListTodo } from "lucide-react";
 import { useFormAutoSave } from "@/lib/hooks/useFormAutoSave";
 import { AutoSaveIndicator } from "@/components/ui/AutoSaveIndicator";
+import { isProvisionalNit } from "@/lib/nitUtils";
 
 // Schema
 const accountSchema = z.object({
     nombre: z.string().min(2, "Nombre requerido"),
-    nit_base: z.string().min(5, "NIT requerido"),
+    nit_base: z.string().optional().nullable(),
     is_child: z.boolean(),
     id_cuenta_principal: z.string().nullable().optional(),
     canal_id: z.string().min(1, "Canal de venta requerido"),
@@ -348,28 +349,31 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
             // Excludes current account ID if editing.
 
             const checkDuplicates = async () => {
+                const filters = [`nombre.eq.${formData.nombre}`];
+                if (formData.nit_base && formData.nit_base.trim() !== "" && !isProvisionalNit(formData.nit_base)) {
+                    filters.push(`nit_base.eq.${formData.nit_base.trim()}`);
+                }
+                if (formData.telefono) {
+                    filters.push(`telefono.eq.${formData.telefono}`);
+                }
+                if (formData.email) {
+                    filters.push(`email.eq.${formData.email}`);
+                }
+
                 let query = supabase
                     .from('CRM_Cuentas')
                     .select('id, nombre, nit_base, telefono, email')
                     .eq('is_deleted', false)
-                    .or(`nombre.eq.${formData.nombre},nit_base.eq.${formData.nit_base}${formData.telefono ? `,telefono.eq.${formData.telefono}` : ''}${formData.email ? `,email.eq.${formData.email}` : ''}`);
+                    .or(filters.join(','));
 
                 if (account?.id) {
                     query = query.neq('id', account.id);
                 }
 
-                // If it's a child account, we might be less strict about NIT (inherits), 
-                // but NAME should still be unique presumably? 
-                // The requirement says "duplicates in: Account Name, NIT, Phone, Email".
-                // We'll apply it broadly.
-
                 const { data: duplicates, error: checkError } = await query;
 
                 if (checkError) {
                     console.error("Error checking duplicates:", checkError);
-                    // Decide if we block or proceed cautiously. Ideally block or warn?
-                    // Let's not block completely on network error, or alert user?
-                    // For now, allow proceed but log.
                     return null;
                 }
                 return duplicates;
@@ -380,13 +384,15 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
             if (duplicates && duplicates.length > 0) {
                 // Find specific conflicts
                 const nameConflict = duplicates.find(d => d.nombre.toLowerCase() === formData.nombre.toLowerCase());
-                const nitConflict = duplicates.find(d => d.nit_base === formData.nit_base);
+                const nitConflict = (formData.nit_base && !isProvisionalNit(formData.nit_base))
+                    ? duplicates.find(d => d.nit_base === formData.nit_base)
+                    : null;
                 const phoneConflict = formData.telefono ? duplicates.find(d => d.telefono === formData.telefono) : null;
                 const emailConflict = formData.email ? duplicates.find(d => d.email === formData.email) : null;
 
                 let errorMessage = "";
                 if (nameConflict) errorMessage += `\n- El nombre "${formData.nombre}" ya existe.`;
-                if (nitConflict && (!formData.is_child)) errorMessage += `\n- El NIT "${formData.nit_base}" ya existe.`; // Allow duplicate NIT for child accounts? Form logic below handles inheritance, but requirement says "NIT". Usually branches share NIT. If is_child, we skip NIT check or let it pass? Code below sets NIT from parent. Let's strictly block invalid NIT usage for PARENTS.
+                if (nitConflict && (!formData.is_child)) errorMessage += `\n- El NIT "${formData.nit_base}" ya existe.`;
                 if (phoneConflict) errorMessage += `\n- El teléfono "${formData.telefono}" ya existe.`;
                 if (emailConflict) errorMessage += `\n- El email "${formData.email}" ya existe.`;
 
@@ -710,12 +716,19 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
                         </div>
                     ) : (
                         <div className="space-y-1">
-                            <label className="text-sm font-medium">NIT (Sin dígito de verificación)</label>
+                            <div className="flex items-center justify-between">
+                                <label className="text-sm font-medium">NIT (Sin dígito de verificación)</label>
+                                {isProvisionalNit(watch("nit_base")) && (
+                                    <span className="text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-full">
+                                        Provisional (Requerirá NIT real para pedidos)
+                                    </span>
+                                )}
+                            </div>
                             <input
                                 data-testid="accounts-input-nit"
                                 {...register("nit_base")}
                                 className={cn("w-full border p-2 rounded", nitError ? "border-red-500 bg-red-50" : "border-slate-200")}
-                                placeholder="Ej. 890900123"
+                                placeholder="Ej. 890900123 (opcional, autogenera provisional si se omite)"
                                 onChange={(e) => {
                                     register("nit_base").onChange(e);
                                     if (nitError) setNitError(null);

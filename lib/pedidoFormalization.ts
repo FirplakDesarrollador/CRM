@@ -1,4 +1,5 @@
 import { LocalPedido, LocalPedidoItem, LocalQuote, LocalQuoteItem } from "./db";
+import { isValidRealNit } from "./nitUtils";
 
 export type PedidoWithItems = LocalPedido & { items?: LocalPedidoItem[] };
 
@@ -49,6 +50,7 @@ const PEDIDO_DOCUMENT_FIELDS: Array<keyof LocalQuote & keyof LocalPedido> = [
  * Mantiene en un solo lugar la regla que protege la emisión formal de una
  * cotización. Los booleanos deben existir explícitamente: false es una
  * respuesta válida, undefined significa que el pedido heredado está incompleto.
+ * Exige obligatoriamente un NIT numérico real del cliente.
  */
 export function getMissingPedidoFormalizationFields(pedido: PedidoWithItems): string[] {
     const missing: string[] = [];
@@ -62,6 +64,9 @@ export function getMissingPedidoFormalizationFields(pedido: PedidoWithItems): st
     if (typeof pedido.verificacion_previa_firplak !== "boolean") missing.push("Verificación Previa Firplak");
     if (!pedido.direccion_envio_factura?.trim()) missing.push("Dirección Envío Factura");
     if (!pedido.dir_envio_factura_tipo) missing.push("Tipo Dirección Factura (Oficina / Tienda)");
+    if (!pedido.nit_cliente_final || !isValidRealNit(pedido.nit_cliente_final)) {
+        missing.push("NIT real del cliente (formato numérico requerido para facturación)");
+    }
     if (!pedido.items?.some(item => Number(item.cantidad) > 0)) missing.push("Productos y cantidades del pedido");
 
     return missing;

@@ -4,6 +4,7 @@ import { syncEngine } from "@/lib/sync";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { generateProvisionalNit, isProvisionalNit } from "@/lib/nitUtils";
 
 export function useAccounts(filters?: { advisor_id?: string | null, showAll?: boolean }) {
     const { user, isVendedor } = useCurrentUser();
@@ -45,21 +46,27 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
 
         const toNum = (val: any) => (val !== undefined && val !== null && val !== "") ? Number(val) : null;
 
-        // Local duplicate check before inserting
-        if (data.nit_base) {
+        // Asegurar que toda cuenta tenga un NIT (real o provisional generado)
+        const finalNitBase = (data.nit_base && String(data.nit_base).trim() !== "" && data.nit_base !== "Sin NIT")
+            ? String(data.nit_base).trim()
+            : generateProvisionalNit();
+
+        // Local duplicate check before inserting (para NITs reales no provisionales)
+        if (finalNitBase && !isProvisionalNit(finalNitBase)) {
             const existingLocal = await db.accounts
                 .where('nit_base')
-                .equals(data.nit_base)
+                .equals(finalNitBase)
                 .toArray();
             
             // Allow child accounts (sucursales) to share NIT
             if (existingLocal.length > 0 && !data.is_child) {
-                throw new Error(`Ya existe una cuenta localmente con el NIT ${data.nit_base}`);
+                throw new Error(`Ya existe una cuenta localmente con el NIT ${finalNitBase}`);
             }
         }
 
         const sanitizedData = {
             ...data,
+            nit_base: finalNitBase,
             subclasificacion_id: toNum(data.subclasificacion_id),
             departamento_id: toNum(data.departamento_id),
             ciudad_id: toNum(data.ciudad_id),
@@ -120,10 +127,20 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
         const { _sync_metadata, ...sanitized } = updates;
         
         const toNum = (val: any) => (val !== undefined && val !== null && val !== "") ? Number(val) : null;
+
+        let updatedNitBase = sanitized.nit_base;
+        if (updates.nit_base !== undefined) {
+            if (!updates.nit_base || String(updates.nit_base).trim() === "" || updates.nit_base === "Sin NIT") {
+                updatedNitBase = generateProvisionalNit();
+            } else {
+                updatedNitBase = String(updates.nit_base).trim();
+            }
+        }
         
         // Ensure email and telefono are preserved even if they are null strings
         const sanitizedUpdates: any = {
             ...sanitized,
+            ...(updatedNitBase !== undefined ? { nit_base: updatedNitBase } : {}),
             subclasificacion_id: toNum((updates as any).subclasificacion_id),
             departamento_id: toNum((updates as any).departamento_id),
             ciudad_id: toNum((updates as any).ciudad_id),

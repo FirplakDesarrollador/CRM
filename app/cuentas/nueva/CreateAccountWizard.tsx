@@ -12,9 +12,11 @@ import { supabase } from "@/lib/supabase";
 import { cn } from "@/components/ui/utils";
 import { useRouter } from "next/navigation";
 
+import { isProvisionalNit, generateProvisionalNit } from "@/lib/nitUtils";
+
 const accountSchema = z.object({
     nombre: z.string().min(2, "Nombre requerido"),
-    nit_base: z.string().min(5, "NIT requerido"),
+    nit_base: z.string().optional().nullable(),
     is_child: z.boolean().default(false),
     id_cuenta_principal: z.string().nullable().optional(),
     canal_id: z.string().min(1, "Canal de venta requerido"),
@@ -182,8 +184,10 @@ export default function CreateAccountWizard() {
             const checkDuplicates = async () => {
                 const checks = [
                     supabase.from('CRM_Cuentas').select('id, nombre, nit_base, telefono, email').eq('is_deleted', false).eq('nombre', data.nombre),
-                    supabase.from('CRM_Cuentas').select('id, nombre, nit_base, telefono, email').eq('is_deleted', false).eq('nit_base', data.nit_base),
                 ];
+                if (data.nit_base && data.nit_base.trim() !== "" && !isProvisionalNit(data.nit_base)) {
+                    checks.push(supabase.from('CRM_Cuentas').select('id, nombre, nit_base, telefono, email').eq('is_deleted', false).eq('nit_base', data.nit_base.trim()));
+                }
                 if (data.telefono) {
                     checks.push(supabase.from('CRM_Cuentas').select('id, nombre, nit_base, telefono, email').eq('is_deleted', false).eq('telefono', data.telefono));
                 }
@@ -205,7 +209,9 @@ export default function CreateAccountWizard() {
             const duplicates = await checkDuplicates();
             if (duplicates && duplicates.length > 0) {
                 const nameConflict = duplicates.find(d => d.nombre.toLowerCase() === data.nombre.toLowerCase());
-                const nitConflict = duplicates.find(d => d.nit_base === data.nit_base);
+                const nitConflict = (data.nit_base && !isProvisionalNit(data.nit_base))
+                    ? duplicates.find(d => d.nit_base === data.nit_base)
+                    : null;
                 const phoneConflict = data.telefono ? duplicates.find(d => d.telefono === data.telefono) : null;
                 const emailConflict = data.email ? duplicates.find(d => d.email === data.email) : null;
 
@@ -227,9 +233,13 @@ export default function CreateAccountWizard() {
                 if (parent) data.nit_base = parent.nit_base || "";
             }
 
+            const finalNit = (data.nit_base && data.nit_base.trim() !== "" && data.nit_base !== "Sin NIT")
+                ? data.nit_base.trim()
+                : generateProvisionalNit();
+
             const payload: Partial<LocalCuenta> = {
                 nombre: data.nombre,
-                nit_base: data.nit_base,
+                nit_base: finalNit,
                 id_cuenta_principal: data.is_child ? data.id_cuenta_principal : null,
                 canal_id: data.canal_id,
                 subclasificacion_id: data.subclasificacion_id ? Number(data.subclasificacion_id) : null,

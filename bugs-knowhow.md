@@ -1092,10 +1092,31 @@ La base Dexie era un singleton compartido y la identidad local no era una fronte
 Fix Applied:
 Se activo una base fisica por `user.id`; la migracion legado se reclama una sola vez y conserva el origen. Se introdujo `commitLocalChanges()` para confirmar datos y outbox en la misma transaccion y se migraron los hooks activos. Los reintentos reutilizan el `mutation_id` persistido y la UI muestra `Guardado`, `Pendiente` o `Requiere atencion`.
 
+## [Bug ID: 20260831-01]
+
+Context:
+`lib/sync.ts`, `lib/hooks/useAccounts.ts`, `components/cuentas/AccountForm.tsx`, `app/cuentas/nueva/CreateAccountWizard.tsx`, `lib/pedidoFormalization.ts` y tabla `CRM_Cuentas` en Supabase/PostgreSQL.
+
+Problem:
+Al guardar o editar una cuenta sin NIT en el CRM o tiendas, la sincronización fallaba y la mutación caía en `DEAD_LETTER`:
+`duplicate key value violates unique constraint "idx_crmcuentas_nit_base_root" [Context: _complete_snapshot_ (UPDATE)]`
+
+Root Cause:
+1. El formulario/código enviaba `nit_base: ""` (cadena vacía) en lugar de un valor único o no permitía cuentas sin NIT. Para PostgreSQL, `""` es un valor de texto real (`"" = ""` en índices únicos), por lo que la segunda cuenta guardada con texto vacío violaba la restricción de unicidad de cuentas principales `idx_crmcuentas_nit_base_root`.
+2. Las cuentas creadas en tiendas o ferias sin NIT no tenían un identificador formal asignado, pero tampoco debían poder generar pedidos formales sin antes registrar el NIT real numérico del cliente.
+
+Fix Applied:
+1. Se creó `lib/nitUtils.ts` con `generateProvisionalNit()`, `isProvisionalNit()` y `isValidRealNit()`.
+2. Toda cuenta creada o modificada sin NIT recibe automáticamente un NIT alfanumérico provisional único `PROV-XXXXXXXX`.
+3. `SyncEngine` sanitiza defensivamente `CRM_Cuentas` asegurando que `nit_base` nunca viaje vacío o nulo hacia PostgreSQL.
+4. En `lib/pedidoFormalization.ts`, `getMissingPedidoFormalizationFields()` valida que `pedido.nit_cliente_final` sea un NIT real numérico (`isValidRealNit()`), bloqueando la formalización y descarga del PDF hasta que el usuario actualice el NIT provisional al NIT real.
+5. Se creó la migración `20260831_backfill_provisional_nits.sql` para actualizar cuentas históricas en la base de datos.
+
 Prevention Rule:
-**Authenticated Local Storage Boundary + Transactional Outbox**: Ningun modulo protegido puede leer Dexie antes de activar la base del usuario autenticado. Toda escritura local sincronizable debe confirmar la entidad y su outbox dentro de una unica transaccion; nunca reconstruir la identidad de una mutacion durante el reintento.
+**Provisional Unique Identifiers for Partial Domain Entities**: Nunca enviar cadenas vacías (`""`) a columnas con restricciones de unicidad en PostgreSQL. Cuando una entidad requiera identificación posterior, asignarle un identificador provisional alfanumérico único (`PROV-...`) y proteger las operaciones de orden/facturación validando estrictamente el formato real del dominio.
 
 Tags:
-[offline] [indexeddb] [dexie] [user-isolation] [transactional-outbox] [idempotency]
+[accounts] [nit] [provisional-id] [sync] [dead-letter] [unique-constraint] [pedidos] [formalization]
+
 
 

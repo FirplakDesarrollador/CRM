@@ -3,6 +3,20 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-08-31 - Ingest: NIT Alfanumérico Provisional Único y Restricción Numérica en Pedidos
+
+- **Generador y Validador de NIT (`lib/nitUtils.ts`):**
+  - Se introdujo `generateProvisionalNit()` (`PROV-XXXXXXXX`), `isProvisionalNit()` y `isValidRealNit()`.
+  - Cuentas creadas o modificadas sin NIT en `/cuentas`, `/cuentas/nueva` o tiendas/feria reciben automáticamente un NIT alfanumérico provisional único.
+  - La sincronización (`lib/sync.ts`) sanitiza `nit_base` para evitar cadenas vacías o nulas que violen el índice de unicidad `idx_crmcuentas_nit_base_root` de PostgreSQL.
+- **Validación Estricta de NIT en Pedidos (`lib/pedidoFormalization.ts`, `PedidosEditor.tsx`):**
+  - `getMissingPedidoFormalizationFields()` exige que `nit_cliente_final` sea un NIT real numérico (`/^\d{5,12}(-\d)?$/`).
+  - Si el cliente tiene un NIT provisional `PROV-...`, la formalización, PDF y envío de la orden se bloquean con aviso explícito solicitando el NIT real del cliente.
+- **Migración de Backfill (`supabase/migrations/20260831_backfill_provisional_nits.sql`):**
+  - Backfill en Supabase para asignar NITs provisionales únicos a cuentas históricas sin NIT.
+- **Páginas actualizadas:** `wiki/pages/cuentas.md`, `wiki/pages/cotizaciones-y-pedidos.md`, `wiki/LOG.md`.
+- **Pruebas:** `pruebas unitarias/nitValidation.test.ts`, `pruebas unitarias/pedidoFormalization.test.ts`.
+
 ## 2026-08-28 - Ingest: Quality Gate Offline-First y Versionado de Migraciones
 
 - **Hardening de Calidad y Gate Completo (`quality/`, `qa:gate`):**
