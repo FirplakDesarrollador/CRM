@@ -17,6 +17,15 @@
 - **Páginas actualizadas:** `wiki/pages/cuentas.md`, `wiki/pages/cotizaciones-y-pedidos.md`, `wiki/LOG.md`.
 - **Pruebas:** `pruebas unitarias/nitValidation.test.ts`, `pruebas unitarias/pedidoFormalization.test.ts`.
 
+## 2026-08-31 - Ingest: Visibilidad de Errores en Auto-Guardado (`AutoSaveIndicator`)
+
+- **Mejora en `useFormAutoSave` y `AutoSaveIndicator`:**
+  - `useFormAutoSave` ahora retorna `errorMessage` especificando la regla de validación o excepción exacta que provocó el estado de error.
+  - `AutoSaveIndicator` muestra y trunca dinámicamente el mensaje de error real (`errorMessage`) en lugar de mostrar un texto genérico `Error al guardar`.
+- **Formularios actualizados:** `AccountForm.tsx`, `ContactForm.tsx`.
+- **Pruebas:** `lib/hooks/useFormAutoSave.test.tsx`.
+>>>>>>> origin/main
+
 ## 2026-08-28 - Ingest: Quality Gate Offline-First y Versionado de Migraciones
 
 - **Hardening de Calidad y Gate Completo (`quality/`, `qa:gate`):**

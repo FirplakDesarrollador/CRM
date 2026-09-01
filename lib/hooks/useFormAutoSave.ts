@@ -15,13 +15,14 @@ export function useFormAutoSave<T extends FieldValues>({
     isEnabled
 }: AutoSaveConfig<T>) {
     const [status, setStatus] = useState<"saved" | "saving" | "error">("saved");
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const lastSavedData = useRef<string>("");
     const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const onSaveRef = useRef(onSave);
 
-    // Callers commonly pass an inline callback. Keeping the latest callback in a
-    // ref prevents every render from tearing down the watcher and cancelling a
-    // pending autosave timer.
+    // Subscribe to errors proxy so react-hook-form populates formState.errors
+    const formErrors = form.formState.errors;
+
     useEffect(() => {
         onSaveRef.current = onSave;
     }, [onSave]);
@@ -57,12 +58,25 @@ export function useFormAutoSave<T extends FieldValues>({
                         await onSaveRef.current(currentValues);
                         lastSavedData.current = JSON.stringify(currentValues);
                         setStatus("saved");
+                        setErrorMessage(null);
                     } catch (err) {
                         console.error("[AutoSave] Error en guardado automático:", err);
                         setStatus("error");
+                        setErrorMessage(err instanceof Error ? err.message : String(err));
                     }
                 } else {
+                    const currentErrors = (form as any).control?._formState?.errors || form.formState.errors || {};
+                    const errorKeys = Object.keys(currentErrors);
+                    let firstErrorMessage = "";
+                    if (errorKeys.length > 0) {
+                        const firstKey = errorKeys[0];
+                        const errObj = currentErrors[firstKey];
+                        if (errObj && typeof errObj === 'object' && 'message' in errObj && typeof errObj.message === 'string') {
+                            firstErrorMessage = `${firstKey}: ${errObj.message}`;
+                        }
+                    }
                     setStatus("error");
+                    setErrorMessage(firstErrorMessage || "Error de validación en el formulario");
                 }
             }, debounceMs);
         });
@@ -75,7 +89,8 @@ export function useFormAutoSave<T extends FieldValues>({
         };
     }, [form, debounceMs, isEnabled]);
 
-    return { status };
+    return { status, errorMessage };
 }
+
 
 export default useFormAutoSave;

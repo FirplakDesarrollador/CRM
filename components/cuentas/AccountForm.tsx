@@ -27,7 +27,10 @@ import { isProvisionalNit } from "@/lib/nitUtils";
 // Schema
 const accountSchema = z.object({
     nombre: z.string().min(2, "Nombre requerido"),
-    nit_base: z.string().optional().nullable(),
+    nit_base: z.string().optional().nullable().refine(val => {
+        if (!val || val.trim() === "") return true;
+        return val.trim().length >= 5;
+    }, { message: "NIT debe tener al menos 5 caracteres" }),
     is_child: z.boolean(),
     id_cuenta_principal: z.string().nullable().optional(),
     canal_id: z.string().min(1, "Canal de venta requerido"),
@@ -255,7 +258,7 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
         await updateAccount(account.id, payload);
     };
 
-    const { status: autoSaveStatus } = useFormAutoSave({
+    const { status: autoSaveStatus, errorMessage: autoSaveError } = useFormAutoSave({
         form,
         onSave: onAutoSave,
         isEnabled: !!account?.id
@@ -282,7 +285,8 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
                 es_premium: account.es_premium || false,
                 nivel_premium: account.nivel_premium || null,
                 ignorar_limites_descuento: account.ignorar_limites_descuento || false,
-                comentarios: account.comentarios || ""
+                comentarios: account.comentarios || "",
+                origen_cuenta: (account as any)?.origen_cuenta || ""
             }, { keepDefaultValues: true });
         }
     }, [account, reset, isDirty]);
@@ -866,7 +870,7 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
                                     <div />
                                 )}
                                 <div className="flex items-center gap-4">
-                                    <AutoSaveIndicator status={autoSaveStatus} />
+                                     <AutoSaveIndicator status={autoSaveStatus} errorMessage={autoSaveError} />
                                     <button data-testid="accounts-form-cancel" type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded font-medium">
                                         Cerrar
                                     </button>
