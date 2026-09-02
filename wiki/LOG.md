@@ -3,6 +3,37 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-09-02 - UX: Persistencia y Ejecución de Filtros entre Navegación de Módulos
+
+- **Módulos Afectados (`/oportunidades`, `/cuentas`, `/contactos`, `/actividades`):**
+  - Se corrigió el flujo de sincronización entre el estado visual de la barra superior (UserPickerFilter, búsqueda y filtros jerárquicos) y las funciones conmutadoras de las hooks de datos de servidor (`useOpportunitiesServer`, `useAccountsServer`, `useContactsServer`, `useActivities`).
+  - Se aseguró que al navegar entre módulos o al ingresar desde la barra lateral sin parámetros de URL, los filtros guardados en `sessionStorage` se inyecten dinámicamente a las hooks de consulta, garantizando que los datos de la tabla se filtren en tiempo real coincidiendo 100% con la barra superior.
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
+## 2026-09-02 - UI: Reordenamiento y Renombrado a OPORTUNIDAD en Oportunidades
+
+- **Módulo de Oportunidades (`app/oportunidades/page.tsx`):**
+  - Se configuró la columna **OPORTUNIDAD** (antiguo "NOMBRE") como la primera columna inicial de la tabla interactiva (Handsontable), seguida por **CUENTA**, **PAÍS**, **CIUDAD** y **CANAL**.
+  - Se incrementó el número de versión de la clave de columnas en `localStorage` (`crm_opp_visible_cols_v3`) para forzar el reordenamiento a todos los usuarios.
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+
+## 2026-09-02 - UI: Columnas País, Ciudad y Canal en el Módulo de Oportunidades
+
+- **Módulo de Oportunidades (`app/oportunidades/page.tsx` & `useOpportunitiesServer.ts`):**
+  - Se extendió la consulta de la cuenta vinculada (`account`) para extraer `ciudad` y `pais_id`.
+  - Se agregaron las columnas **País**, **Ciudad** y **Canal** a la vista de tabla interactiva (Handsontable), heredadas automáticamente de la cuenta a la que pertenece la oportunidad.
+  - Se activó el redimensionamiento manual de columnas (`manualColumnResize`) con soporte de cursor interactivo `col-resize` (`↔`).
+  - Se incluyeron los datos de ubicación y canal en las tarjetas móviles.
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+
+## 2026-09-02 - UI: Visualización del campo País en la Vista Inicial de Cuentas
+
+- **Módulo de Cuentas (`app/cuentas/page.tsx`):**
+  - Se agregó la columna **País** a la vista de tabla interactiva (Handsontable) resolviendo dinámicamente el nombre del país a partir de `pais_id` y los catálogos locales/remotos (`CRM_Paises`).
+  - Se integró el indicador de País con el ícono `Globe` en la vista móvil de tarjetas.
+  - Se incluyó la búsqueda por País en `matchesSearchTokens` dentro de `useAccountsServer.ts`.
+- **Páginas actualizadas:** `wiki/pages/cuentas.md`, `wiki/LOG.md`.
+
 ## 2026-08-31 - Ingest: NIT Alfanumérico Provisional Único y Restricción Numérica en Pedidos
 
 - **Generador y Validador de NIT (`lib/nitUtils.ts`):**

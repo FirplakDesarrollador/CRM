@@ -210,8 +210,7 @@ function ContactsContent() {
         setPrincipalFilter(principal);
         if (sort) setSortField(sort);
         if (direction) setSortAsc(direction === 'asc');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [searchParams]);
 
     // Handle Edit
     const handleEdit = (contact: any) => {

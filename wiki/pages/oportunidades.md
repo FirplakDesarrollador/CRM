@@ -47,8 +47,8 @@ solo COORDINADOR/ADMIN); el historial queda en `CRM_TransferenciasOportunidad`.
 
 ## Interfaz y Listado
 
-- **Vista móvil:** Tarjetas responsivas con badges de fase, estado, valor en COP, cierre estimado, avatar del vendedor y acceso directo al detalle.
-- **Vista desktop:** Tabla interactiva (Handsontable) con estilos adaptados, selección por clic de fila para navegar al detalle y persistencia de estado en `sessionStorage`/URL.
+- **Vista móvil:** Tarjetas responsivas con detalles de la cuenta (País, Ciudad, Canal), badges de fase, estado, valor en COP, cierre estimado, avatar del vendedor y acceso directo al detalle.
+- **Vista desktop:** Tabla interactiva (Handsontable) que inicia con la columna **OPORTUNIDAD** (nombre del negocio), seguida de **CUENTA**, **PAÍS**, **CIUDAD** y **CANAL**, con soporte de redimensionamiento manual (`manualColumnResize`), ordenamiento interactivo y selección por clic de fila para navegar al detalle con persistencia de estado en `sessionStorage`/URL.
 
 ## Visibilidad
 
