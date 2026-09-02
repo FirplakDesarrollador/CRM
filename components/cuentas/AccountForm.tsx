@@ -7,7 +7,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, LocalCuenta } from "@/lib/db";
 import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useState, useEffect } from "react";
-import { Loader2, User, Building2, Medal, Trash2 } from "lucide-react";
+import { Loader2, User, Building2, Medal, Trash2, Check } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useFormDraft } from "@/lib/hooks/useFormDraft";
 import AccountContactsTab from "./AccountContactsTab";
@@ -68,6 +68,7 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
     const [activeTab, setActiveTab] = useState<'info' | 'contacts' | 'opportunities' | 'branches' | 'assigned' | 'activities'>('info');
     const [hasBranches, setHasBranches] = useState(false);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
+    const [manualSaveSuccess, setManualSaveSuccess] = useState(false);
 
     // Live Query for Subclassifications from local DB
     const subclassifications = useLiveQuery(() => db.subclasificaciones.toArray()) || [];
@@ -363,19 +364,21 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
                 if (formData.email) {
                     filters.push(`email.eq.${formData.email}`);
                 }
-
-                let query = supabase
-                    .from('CRM_Cuentas')
-                    .select('id, nombre, nit_base, telefono, email')
-                    .eq('is_deleted', false)
-                    .or(filters.join(','));
+                let query = supabase.from('CRM_Cuentas').select('id, nombre, nit_base, telefono, email');
 
                 if (account?.id) {
                     query = query.neq('id', account.id);
                 }
 
-                const { data: duplicates, error: checkError } = await query;
+                const conditions: string[] = [];
+                if (formData.nombre) conditions.push(`nombre.ilike.${formData.nombre}`);
+                if (formData.nit_base && !isProvisionalNit(formData.nit_base) && !formData.is_child) conditions.push(`nit_base.eq.${formData.nit_base}`);
+                if (formData.telefono) conditions.push(`telefono.eq.${formData.telefono}`);
+                if (formData.email) conditions.push(`email.eq.${formData.email}`);
 
+                if (conditions.length === 0) return [];
+
+                const { data: duplicates, error: checkError } = await query.or(conditions.join(','));
                 if (checkError) {
                     console.error("Error checking duplicates:", checkError);
                     return null;
@@ -440,12 +443,14 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
             if (account?.id) {
                 console.log('[AccountForm] DEBUG - Calling updateAccount with id:', account.id);
                 await updateAccount(account.id, payload);
+                reset(data);
+                setManualSaveSuccess(true);
+                setTimeout(() => setManualSaveSuccess(false), 4000);
             } else {
                 await createAccount(payload);
                 clearDraft(); // Limpiar borrador si es creación exitosa
+                onSuccess();
             }
-
-            onSuccess();
         } catch (error) {
             console.error(error);
             const msg = error instanceof Error ? error.message : String(error);
@@ -458,87 +463,118 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
     return (
         <div className="bg-white rounded-lg">
             {/* Tabs Header */}
-            <div className="flex border-b border-gray-200 mb-4">
-                <button
-                    type="button"
-                    onClick={() => setActiveTab('info')}
-                    className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'info'
-                        ? "border-blue-600 text-blue-600"
-                        : "border-transparent text-gray-500 hover:text-gray-700"
-                        }`}
-                >
-                    <Building2 size={16} />
-                    Información General
-                </button>
-
-                {account?.id && (
+            <div className="flex border-b border-gray-200 mb-4 items-center justify-between gap-2 overflow-x-auto">
+                <div className="flex items-center shrink-0">
                     <button
                         type="button"
-                        onClick={() => setActiveTab('contacts')}
-                        className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'contacts'
-                            ? "border-blue-600 text-blue-600"
-                            : "border-transparent text-gray-500 hover:text-gray-700"
-                            }`}
-                    >
-                        <User size={16} />
-                        Contactos
-                    </button>
-                )}
-
-                {account?.id && (
-                    <button
-                        type="button"
-                        onClick={() => setActiveTab('opportunities')}
-                        className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'opportunities'
-                            ? "border-blue-600 text-blue-600"
-                            : "border-transparent text-gray-500 hover:text-gray-700"
-                            }`}
-                    >
-                        <Briefcase size={16} />
-                        Oportunidades
-                    </button>
-                )}
-
-                {account?.id && hasBranches && (
-                    <button
-                        type="button"
-                        onClick={() => setActiveTab('branches')}
-                        className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'branches'
+                        onClick={() => setActiveTab('info')}
+                        className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'info'
                             ? "border-blue-600 text-blue-600"
                             : "border-transparent text-gray-500 hover:text-gray-700"
                             }`}
                     >
                         <Building2 size={16} />
-                        Sucursales
+                        Información General
                     </button>
-                )}
 
-                {account?.id && (userRole === 'ADMIN' || userRole === 'COORDINADOR') && (
-                    <button
-                        type="button"
-                        onClick={() => setActiveTab('assigned')}
-                        className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'assigned'
-                            ? "border-blue-600 text-blue-600"
-                            : "border-transparent text-gray-500 hover:text-gray-700"
-                            }`}
-                    >
-                        <User size={16} />
-                        Asignado
-                    </button>
-                )}
+                    {account?.id && (
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('contacts')}
+                            className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'contacts'
+                                ? "border-blue-600 text-blue-600"
+                                : "border-transparent text-gray-500 hover:text-gray-700"
+                                }`}
+                        >
+                            <User size={16} />
+                            Contactos
+                        </button>
+                    )}
+
+                    {account?.id && (
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('opportunities')}
+                            className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'opportunities'
+                                ? "border-blue-600 text-blue-600"
+                                : "border-transparent text-gray-500 hover:text-gray-700"
+                                }`}
+                        >
+                            <Briefcase size={16} />
+                            Oportunidades
+                        </button>
+                    )}
+
+                    {account?.id && hasBranches && (
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('branches')}
+                            className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'branches'
+                                ? "border-blue-600 text-blue-600"
+                                : "border-transparent text-gray-500 hover:text-gray-700"
+                                }`}
+                        >
+                            <Building2 size={16} />
+                            Sucursales
+                        </button>
+                    )}
+
+                    {account?.id && (userRole === 'ADMIN' || userRole === 'COORDINADOR') && (
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('assigned')}
+                            className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'assigned'
+                                ? "border-blue-600 text-blue-600"
+                                : "border-transparent text-gray-500 hover:text-gray-700"
+                                }`}
+                        >
+                            <User size={16} />
+                            Asignado
+                        </button>
+                    )}
+
+                    {account?.id && (
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('activities')}
+                            className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'activities'
+                                ? "border-blue-600 text-blue-600"
+                                : "border-transparent text-gray-500 hover:text-gray-700"
+                                }`}
+                        >
+                            <ListTodo size={16} />
+                            Actividades
+                        </button>
+                    )}
+                </div>
 
                 {account?.id && (
-                    <button
-                        type="button"
-                        onClick={() => setActiveTab('activities')}
-                        className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'activities'
-                            ? "border-blue-600 text-blue-600"
-                            : "border-transparent text-gray-500 hover:text-gray-700"
-                            }`}
-                    >
-                        <ListTodo size={16} />
-                        Actividades
-                    </button>
+                    <div className="pr-3 shrink-0 py-2 flex items-center gap-3">
+                        <AutoSaveIndicator status={autoSaveStatus} errorMessage={autoSaveError} />
+                        {manualSaveSuccess && (
+                            <span className="text-xs font-bold text-green-700 bg-green-50 px-2.5 py-1 rounded-lg border border-green-200 flex items-center gap-1 animate-in fade-in">
+                                <Check size={14} /> Guardado
+                            </span>
+                        )}
+                        <button
+                            type="button"
+                            onClick={handleSubmit((data) => onSubmit(data as AccountFormData))}
+                            disabled={isSubmitting}
+                            className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold text-xs rounded-xl shadow-sm flex items-center gap-1.5 transition-all disabled:opacity-50"
+                        >
+                            {isSubmitting ? (
+                                <>
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    <span>Guardando...</span>
+                                </>
+                            ) : (
+                                <>
+                                    <Check size={14} />
+                                    <span>Guardar Cambios</span>
+                                </>
+                            )}
+                        </button>
+                    </div>
                 )}
             </div>
 
@@ -869,9 +905,32 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
                                 ) : (
                                     <div />
                                 )}
-                                <div className="flex items-center gap-4">
-                                     <AutoSaveIndicator status={autoSaveStatus} errorMessage={autoSaveError} />
-                                    <button data-testid="accounts-form-cancel" type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded font-medium">
+                                <div className="flex items-center gap-3">
+                                    <AutoSaveIndicator status={autoSaveStatus} errorMessage={autoSaveError} />
+                                    {manualSaveSuccess && (
+                                        <span className="text-xs font-bold text-green-700 bg-green-50 px-3 py-1.5 rounded-lg border border-green-200 flex items-center gap-1 animate-in fade-in">
+                                            <Check size={14} /> ¡Cambios guardados correctamente!
+                                        </span>
+                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={handleSubmit((data) => onSubmit(data as AccountFormData))}
+                                        disabled={isSubmitting}
+                                        className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold rounded-xl shadow-sm flex items-center gap-2 transition-all disabled:opacity-50"
+                                    >
+                                        {isSubmitting ? (
+                                            <>
+                                                <Loader2 className="w-4 h-4 animate-spin" />
+                                                <span>Guardando...</span>
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Check size={16} />
+                                                <span>Guardar Cambios</span>
+                                            </>
+                                        )}
+                                    </button>
+                                    <button data-testid="accounts-form-cancel" type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-xl font-medium">
                                         Cerrar
                                     </button>
                                 </div>

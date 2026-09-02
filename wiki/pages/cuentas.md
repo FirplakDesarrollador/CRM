@@ -29,7 +29,7 @@ que determina su lista de precios.
   de cookies de Supabase; en producción la ruta devuelve 404.
 - Listado con filtros (`AccountFilters`, `UserPickerFilter`): vista móvil con tarjetas responsivas y vista desktop con tabla interactiva (Handsontable) donde la columna "País" (mapeada dinámicamente desde `pais_id` / catálogos) se visualiza en la vista inicial junto a Ubicación, y la edición se activa directamente al hacer clic/seleccionar la fila.
 - Detalle con pestañas: contactos, oportunidades, actividades, sucursales (branches) y
-  asignados (`components/cuentas/Account*Tab.tsx`).
+  asignados (`components/cuentas/Account*Tab.tsx`). La reasignación de responsable desde la cuenta matriz reasigna automáticamente en cascada todas sus oportunidades vinculadas en un traspaso directo. La reasignación desde una oportunidad individual aplica únicamente a esa oportunidad.
 - Formulario `AccountForm` con pestañas (usa `shouldUnregister: false` — ver
   `bugs-knowhow.md` §1) y botón de eliminación visible en el encabezado y en los footers de todas las pestañas.
 - Carga masiva de cuentas: `BulkAccountUploader` + API `app/api/bulk-accounts`.

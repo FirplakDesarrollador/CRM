@@ -1,10 +1,11 @@
 import { useLiveQuery } from "dexie-react-hooks";
-import { db, LocalContact, LocalCuenta } from "@/lib/db";
+import { db, LocalContact, LocalCuenta, LocalOportunidad } from "@/lib/db";
 import { syncEngine } from "@/lib/sync";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { generateProvisionalNit, isProvisionalNit } from "@/lib/nitUtils";
+import { sanitizeOpportunityForSync } from "@/lib/hooks/useOpportunities";
 
 export function useAccounts(filters?: { advisor_id?: string | null, showAll?: boolean }) {
     const { user, isVendedor } = useCurrentUser();
@@ -152,15 +153,102 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
         console.log('[useAccounts] DEBUG - sanitizedUpdates result:', JSON.stringify(sanitizedUpdates));
         
         const fullUpdates = { ...sanitizedUpdates, updated_at: new Date().toISOString() };
-        await syncEngine.commitLocalChanges([db.accounts], async () => {
-            const currentLocal = await db.accounts.get(id);
-            if (!currentLocal) throw new Error('La cuenta ya no existe en los datos locales.');
+        const newOwnerId = sanitizedUpdates.owner_user_id;
+
+        let currentLocal = await db.accounts.get(id);
+        if (!currentLocal && typeof window !== 'undefined' && navigator.onLine) {
+            console.log(`[useAccounts] Account ${id} not in Dexie. Fetching from Supabase...`);
+            const { data: remoteAcc } = await supabase
+                .from('CRM_Cuentas')
+                .select('*')
+                .eq('id', id)
+                .maybeSingle();
+
+            if (remoteAcc) {
+                currentLocal = remoteAcc as LocalCuenta;
+                await db.accounts.put(remoteAcc);
+            }
+        }
+        if (!currentLocal) {
+            currentLocal = { id, owner_user_id: null } as any;
+        }
+
+        const ownerChanged = newOwnerId !== undefined && newOwnerId !== null && currentLocal?.owner_user_id !== newOwnerId;
+        let oppUpdates: LocalOportunidad[] = [];
+
+        if (typeof window !== 'undefined' && navigator.onLine) {
+            try {
+                console.log(`[useAccounts] Updating CRM_Cuentas ${id} directly in Supabase:`, fullUpdates);
+                await supabase.from('CRM_Cuentas').update(fullUpdates).eq('id', id);
+
+                if (ownerChanged) {
+                    console.log(`[useAccounts] Updating all CRM_Oportunidades in Supabase for account_id=${id} to owner=${newOwnerId}`);
+                    const { error: supErr } = await supabase
+                        .from('CRM_Oportunidades')
+                        .update({
+                            owner_user_id: newOwnerId,
+                            updated_at: fullUpdates.updated_at
+                        })
+                        .eq('account_id', id)
+                        .eq('is_deleted', false);
+
+                    if (supErr) {
+                        console.error('[useAccounts] Supabase opportunity owner update error:', supErr);
+                    }
+                }
+            } catch (err) {
+                console.error('[useAccounts] Direct Supabase update exception:', err);
+            }
+        }
+
+        if (ownerChanged) {
+            // Gather local opportunities in Dexie for local sync/commit
+            const relatedOpps = await db.opportunities.where('account_id').equals(id).toArray();
+            for (const opp of relatedOpps) {
+                if (opp.owner_user_id !== newOwnerId) {
+                    oppUpdates.push({
+                        ...opp,
+                        owner_user_id: newOwnerId,
+                        updated_at: fullUpdates.updated_at
+                    });
+                }
+            }
+        }
+
+        await syncEngine.commitLocalChanges([db.accounts, db.opportunities], async () => {
             await db.accounts.update(id, fullUpdates);
             const mergedRecord = { ...currentLocal, ...fullUpdates } as LocalCuenta;
-            return [{
-                entityTable: 'CRM_Cuentas', entityId: id, changes: mergedRecord,
-                options: { isSnapshot: true }
-            }];
+
+            if (oppUpdates.length > 0) {
+                for (const opp of oppUpdates) {
+                    await db.opportunities.update(opp.id, {
+                        owner_user_id: newOwnerId,
+                        updated_at: fullUpdates.updated_at
+                    });
+
+                    // Dispatch optimistic update event for active views
+                    if (typeof window !== 'undefined') {
+                        window.dispatchEvent(new CustomEvent('crm-optimistic-update', {
+                            detail: {
+                                entityType: 'CRM_Oportunidades',
+                                entityId: opp.id,
+                                updates: { owner_user_id: newOwnerId }
+                            }
+                        }));
+                    }
+                }
+            }
+
+            return [
+                {
+                    entityTable: 'CRM_Cuentas', entityId: id, changes: mergedRecord,
+                    options: { isSnapshot: true }
+                },
+                ...oppUpdates.map(opp => ({
+                    entityTable: 'CRM_Oportunidades', entityId: opp.id, changes: sanitizeOpportunityForSync(opp),
+                    options: { isSnapshot: true }
+                }))
+            ];
         });
     };
 
