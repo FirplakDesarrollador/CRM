@@ -52,8 +52,8 @@ solo COORDINADOR/ADMIN); el historial queda en `CRM_TransferenciasOportunidad`.
   - **Programada (Azul):** Badge azul con conteo de actividades agendadas a futuro (`!is_completed && fecha_fin >= now`).
   - **Completada (Verde):** Badge verde cuando todas las actividades asociadas están al día.
   - **Sin actividad:** Indicador tenue cuando la oportunidad no registra tareas ni eventos.
-- **Vista móvil:** Tarjetas responsivas con badges de fase, estado, indicador de actividad, valor en COP, cierre estimado, avatar del vendedor y acceso directo al detalle.
-- **Vista desktop:** Tabla interactiva (Handsontable) con selector de columnas visibles (`ALL_COLUMNS`), ordenamiento dinámico por cabecera y selección por clic de fila para navegar al detalle con persistencia de estado en `sessionStorage`/URL.
+- **Vista móvil:** Tarjetas responsivas con detalles de la cuenta (País, Ciudad, Canal), badges de fase, estado, indicador de actividad, valor en COP, cierre estimado, avatar del vendedor y acceso directo al detalle.
+- **Vista desktop:** Tabla interactiva (Handsontable) que inicia con la columna **OPORTUNIDAD** (nombre del negocio), seguida de **CUENTA**, **ACTIVIDAD**, **PAÍS**, **CIUDAD** y **CANAL**, con soporte de redimensionamiento manual (`manualColumnResize`), selector de columnas visibles (`ALL_COLUMNS`), ordenamiento dinámico por cabecera y selección por clic de fila para navegar al detalle con persistencia de estado en `sessionStorage`/URL.
 
 ## Visibilidad
 

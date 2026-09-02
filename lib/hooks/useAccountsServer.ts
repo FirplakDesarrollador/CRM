@@ -395,7 +395,7 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
             let combinedResults = [...pendingLocalAccounts, ...flattenedResults];
             if (searchTerm && searchTerm.trim()) {
                 combinedResults = combinedResults.filter(a =>
-                    matchesSearchTokens([a.nombre, a.nit_base, a.ciudad, a.owner_name, a.email, a.telefono], searchTerm)
+                    matchesSearchTokens([a.nombre, a.nit_base, a.ciudad, (a as any).pais, a.owner_name, a.email, a.telefono], searchTerm)
                 );
             }
 

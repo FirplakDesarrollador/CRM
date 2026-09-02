@@ -3,9 +3,11 @@
 import { useAccountsServer, AccountServer } from "@/lib/hooks/useAccountsServer";
 import { AccountForm } from "@/components/cuentas/AccountForm";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Suspense, useEffect, useState, useCallback, useRef } from "react";
+import React, { Suspense, useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
-import { Plus, Search, Building, User, Pencil, Medal, Trash2, ArrowUpDown, ChevronUp, ChevronDown, MapPin, Briefcase, DollarSign } from "lucide-react";
+import { useLiveQuery } from "dexie-react-hooks";
+import { db } from "@/lib/db";
+import { Plus, Search, Building, User, Pencil, Medal, Trash2, ArrowUpDown, ChevronUp, ChevronDown, MapPin, Briefcase, DollarSign, Globe } from "lucide-react";
 import { UserPickerFilter } from "@/components/cuentas/UserPickerFilter";
 import { AccountFilters } from "@/components/cuentas/AccountFilters";
 import { useAccounts } from "@/lib/hooks/useAccounts";
@@ -93,6 +95,28 @@ function AccountsContent() {
     const [currentStartDate, setCurrentStartDate] = useState<string | null>(() => searchParams.get('start') || (typeof window !== 'undefined' ? new URLSearchParams(sessionStorage.getItem('crm_cuentas_state') || '').get('start') : null));
     const [currentEndDate, setCurrentEndDate] = useState<string | null>(() => searchParams.get('end') || (typeof window !== 'undefined' ? new URLSearchParams(sessionStorage.getItem('crm_cuentas_state') || '').get('end') : null));
 
+    // Lookup countries for country column
+    const countriesList = useLiveQuery(() => db.countries.toArray()) || [];
+    const [fallbackCountries, setFallbackCountries] = useState<any[]>([]);
+
+    useEffect(() => {
+        if (countriesList.length === 0) {
+            supabase.from('CRM_Paises').select('*').then(({ data }) => {
+                if (data) setFallbackCountries(data);
+            });
+        }
+    }, [countriesList.length]);
+
+    const displayCountries = countriesList.length > 0 ? countriesList : fallbackCountries;
+
+    const countryMap = useMemo(() => {
+        const map: Record<number, string> = {};
+        displayCountries.forEach(c => {
+            map[c.id] = c.nombre;
+        });
+        return map;
+    }, [displayCountries]);
+
     // Handle Sort
     const handleSort = (field: string) => {
         if (sortField === field) {
@@ -130,7 +154,7 @@ function AccountsContent() {
         setAssignedUserId(userId);
     }, [setAssignedUserId]);
 
-    // Initial Sync from URL
+    // Initial & restored sync from URL / sessionStorage to server hook
     useEffect(() => {
         const saved = new URLSearchParams(typeof window !== 'undefined' ? sessionStorage.getItem('crm_cuentas_state') || '' : '');
         const query = searchParams.get('search') || saved.get('search') || '';
@@ -143,18 +167,18 @@ function AccountsContent() {
         const source = searchParams.get('source') || saved.get('source');
         const sort = searchParams.get('sort') || saved.get('sort');
         const direction = searchParams.get('dir') || saved.get('dir');
-        if (query) setSearchTerm(query);
-        if (userQuery) setAssignedUserId(userQuery);
-        if (channel) setChannelFilter(channel);
-        if (subclass) setSubclassificationFilter(Number(subclass));
-        if (nivel) setNivelPremiumFilter(nivel);
-        if (start) setStartDate(start);
-        if (end) setEndDate(end);
-        if (source === 'web') setWebFilter(true);
+
+        setSearchTerm(query);
+        setAssignedUserId(userQuery);
+        setChannelFilter(channel);
+        setSubclassificationFilter(subclass ? Number(subclass) : null);
+        setNivelPremiumFilter(nivel);
+        setStartDate(start);
+        setEndDate(end);
+        setWebFilter(source === 'web');
         if (sort) setSortField(sort);
         if (direction) setSortAsc(direction === 'asc');
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [searchParams]);
 
     // Restore the last list context when returning from navigation, but never reopen a record.
     useEffect(() => {
@@ -292,22 +316,26 @@ function AccountsContent() {
     };
 
     // Preparar datos para Handsontable
-    const hotData = accounts.map(acc => ({
-        id: acc.id,
-        nombre: acc.nombre,
-        ciudad: acc.ciudad || "Sin ciudad",
-        canal_id: acc.canal_id || "-",
-        tipo: acc.subclasificacion_id || "",
-        potencial_venta: acc.potencial_venta || 0,
-        vendedor: acc.owner_name || "Sin asignar",
-        nivel: acc.nivel_premium || "-",
-        creacion: acc.created_at ? new Date(acc.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) : "-",
-        actualizado: acc.updated_at ? new Date(acc.updated_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) : "-",
-        _original: acc
-    }));
+    const hotData = accounts.map(acc => {
+        const countryName = acc.pais_id ? (countryMap[acc.pais_id] || "Colombia") : ((acc as any).pais || "Colombia");
+        return {
+            id: acc.id,
+            nombre: acc.nombre,
+            pais: countryName,
+            ciudad: acc.ciudad || "Sin ciudad",
+            canal_id: acc.canal_id || "-",
+            tipo: acc.subclasificacion_id || "",
+            potencial_venta: acc.potencial_venta || 0,
+            vendedor: acc.owner_name || "Sin asignar",
+            nivel: acc.nivel_premium || "-",
+            creacion: acc.created_at ? new Date(acc.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) : "-",
+            actualizado: acc.updated_at ? new Date(acc.updated_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) : "-",
+            _original: acc
+        };
+    });
 
     const hotColumns = [
-        { data: 'nombre', title: 'Cuenta', readOnly: true, width: 220, wordWrap: false,
+        { data: 'nombre', title: 'Cuenta', readOnly: true, width: 240, wordWrap: false,
             renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 const v = value || '';
                 const safe = v.replace(/"/g, '&quot;');
@@ -316,7 +344,16 @@ function AccountsContent() {
                 return td;
             }
         },
-        { data: 'ciudad', title: 'Ubicación', readOnly: true, width: 140, wordWrap: false,
+        { data: 'pais', title: 'País', readOnly: true, width: 120, wordWrap: false,
+            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+                const v = value || 'Colombia';
+                const safe = v.replace(/"/g, '&quot;');
+                td.innerHTML = `<div style="color:#334155;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</div>`;
+                td.style.overflow = 'hidden';
+                return td;
+            }
+        },
+        { data: 'ciudad', title: 'Ciudad', readOnly: true, width: 150, wordWrap: false,
             renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 const v = value || '';
                 const safe = v.replace(/"/g, '&quot;');
@@ -325,7 +362,7 @@ function AccountsContent() {
                 return td;
             }
         },
-        { data: 'canal_id', title: 'Canal', readOnly: true, width: 120, wordWrap: false,
+        { data: 'canal_id', title: 'Canal', readOnly: true, width: 130, wordWrap: false,
             renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 td.innerHTML = `<div style="color:#475569;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;">${value || '-'}</div>`;
                 td.style.overflow = 'hidden';
@@ -339,7 +376,7 @@ function AccountsContent() {
                 return td;
             }
         },
-        { data: 'potencial_venta', title: 'Potencial Venta', readOnly: true, width: 130, wordWrap: false,
+        { data: 'potencial_venta', title: 'Potencial Venta', readOnly: true, width: 150, wordWrap: false,
             renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 const num = Number(value) || 0;
                 const fmt = new Intl.NumberFormat('es-CO', { style:'currency', currency:'COP', minimumFractionDigits:0, notation: num >= 1_000_000 ? 'compact' : 'standard', compactDisplay:'short' }).format(num);
@@ -509,9 +546,12 @@ function AccountsContent() {
                                         <div className="font-bold text-slate-900 text-sm mb-0.5 truncate">
                                             {acc.nombre || "Sin nombre"}
                                         </div>
-                                        <div className="text-slate-500 text-xs flex items-center gap-1 truncate">
-                                            <MapPin className="w-3 h-3" />
-                                            {acc.ciudad || "Sin ciudad"}
+                                        <div className="text-slate-500 text-xs flex items-center gap-1.5 truncate">
+                                            <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+                                            <span className="truncate">{acc.ciudad || "Sin ciudad"}</span>
+                                            <span className="text-slate-300">•</span>
+                                            <Globe className="w-3 h-3 text-slate-400 shrink-0" />
+                                            <span className="font-medium text-slate-600 truncate">{acc.pais_id ? (countryMap[acc.pais_id] || "Colombia") : ((acc as any).pais || "Colombia")}</span>
                                         </div>
                                     </div>
                                     <div className="shrink-0 flex items-start">
@@ -652,12 +692,17 @@ function AccountsContent() {
 
                             /* ── Column Resize Handle ── */
                             .opp-hot-wrap .handsontable .manualColumnResizer {
-                                border-right: 2px solid #3b82f6 !important;
+                                border-right: 3px solid #2563eb !important;
                                 opacity: 0;
-                                transition: opacity 0.2s ease;
+                                transition: opacity 0.15s ease;
+                                cursor: col-resize !important;
+                                width: 5px !important;
                             }
-                            .opp-hot-wrap .handsontable th:hover .manualColumnResizer {
-                                opacity: 1;
+                            .opp-hot-wrap .handsontable th:hover .manualColumnResizer,
+                            .opp-hot-wrap .handsontable .manualColumnResizer.active,
+                            .opp-hot-wrap .handsontable .manualColumnResizer:hover {
+                                opacity: 1 !important;
+                                background-color: #3b82f6 !important;
                             }
 
                             /* ── Corner Header ── */
@@ -682,6 +727,7 @@ function AccountsContent() {
                             colHeaders={true}
                             filters={true}
                             dropdownMenu={true}
+                            manualColumnResize={true}
                             width="100%"
                             height="calc(100vh - 280px)"
                             autoColumnSize={false}
@@ -691,7 +737,7 @@ function AccountsContent() {
                             licenseKey="non-commercial-and-evaluation"
                             afterOnCellMouseDown={(event: any, coords: any, td: any) => {
                                 if (coords.row === -1) {
-                                    const fields: Record<number, string> = { 0: 'nombre', 1: 'ciudad', 2: 'canal_id', 4: 'potencial_venta', 7: 'created_at', 8: 'updated_at' };
+                                    const fields: Record<number, string> = { 0: 'nombre', 1: 'pais', 2: 'ciudad', 3: 'canal_id', 5: 'potencial_venta', 8: 'created_at', 9: 'updated_at' };
                                     if (fields[coords.col]) handleSort(fields[coords.col]);
                                     return;
                                 }
@@ -703,8 +749,8 @@ function AccountsContent() {
                                 }
                             }}
                             afterGetColHeader={(column: number, TH: HTMLTableCellElement) => {
-                                const fields: Record<number, string> = { 0: 'nombre', 1: 'ciudad', 2: 'canal_id', 4: 'potencial_venta', 7: 'created_at', 8: 'updated_at' };
-                                const labels: Record<number, string> = { 0: 'Cuenta', 1: 'Ubicación', 2: 'Canal', 4: 'Potencial Venta', 7: 'Creación', 8: 'Actualizado' };
+                                const fields: Record<number, string> = { 0: 'nombre', 1: 'pais', 2: 'ciudad', 3: 'canal_id', 5: 'potencial_venta', 8: 'created_at', 9: 'updated_at' };
+                                const labels: Record<number, string> = { 0: 'Cuenta', 1: 'País', 2: 'Ciudad', 3: 'Canal', 5: 'Potencial Venta', 8: 'Creación', 9: 'Actualizado' };
                                 if (fields[column]) {
                                     TH.style.cursor = 'pointer';
                                     TH.title = 'Clic para ordenar ascendente o descendente';

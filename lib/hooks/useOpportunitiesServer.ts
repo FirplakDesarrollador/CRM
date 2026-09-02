@@ -23,7 +23,7 @@ export type OpportunityServer = {
     estado_id?: number | null;
     origen_oportunidad?: string | null;
     url_origen?: string | null;
-    account?: { nombre: string; canal_id?: string } | null; // Joined data
+    account?: { nombre: string; canal_id?: string; ciudad?: string | null; pais_id?: number | null; pais?: string | null } | null; // Joined data
     fase_data?: { nombre: string } | null; // Joined data
     estado_data?: { nombre: string } | null; // Joined data
     vendedor?: { full_name: string } | null; // Joined data
@@ -340,7 +340,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                     const itemActs = actsByOpp.get(item.id) || [];
                     return {
                         ...item,
-                        account: acc ? { nombre: acc.nombre, canal_id: acc.canal_id } : null,
+                        account: acc ? { nombre: acc.nombre, canal_id: acc.canal_id, ciudad: acc.ciudad, pais_id: acc.pais_id } : null,
                         fase_data: ph ? { nombre: ph.nombre } : null,
                         estado_data: null, // Mock offline
                         actividades: itemActs,
@@ -387,7 +387,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
 
             // Dynamically build select to support filtering on account
             const useInnerJoin = channelFilter || subclassificationFilter;
-            const accountRelation = useInnerJoin ? 'account:CRM_Cuentas!inner(nombre, canal_id, subclasificacion_id)' : 'account:CRM_Cuentas(nombre, canal_id, subclasificacion_id)';
+            const accountRelation = useInnerJoin ? 'account:CRM_Cuentas!inner(nombre, canal_id, subclasificacion_id, ciudad, pais_id)' : 'account:CRM_Cuentas(nombre, canal_id, subclasificacion_id, ciudad, pais_id)';
 
             let query = supabase
                 .from('CRM_Oportunidades')

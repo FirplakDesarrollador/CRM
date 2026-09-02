@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 
 // Helper function to check if route is public
 function isPublicRoute(pathname: string): boolean {
-    const publicRoutes = ['/login', '/auth/callback', '/update-password'];
+    const publicRoutes = ['/login', '/auth/callback', '/update-password', '/offline', '/api/health'];
     if (process.env.NODE_ENV !== 'production' && pathname.startsWith('/e2e')) {
         return true;
     }
