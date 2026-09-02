@@ -47,8 +47,13 @@ solo COORDINADOR/ADMIN); el historial queda en `CRM_TransferenciasOportunidad`.
 
 ## Interfaz y Listado
 
-- **Vista móvil:** Tarjetas responsivas con detalles de la cuenta (País, Ciudad, Canal), badges de fase, estado, valor en COP, cierre estimado, avatar del vendedor y acceso directo al detalle.
-- **Vista desktop:** Tabla interactiva (Handsontable) que inicia con la columna **OPORTUNIDAD** (nombre del negocio), seguida de **CUENTA**, **PAÍS**, **CIUDAD** y **CANAL**, con soporte de redimensionamiento manual (`manualColumnResize`), ordenamiento interactivo y selección por clic de fila para navegar al detalle con persistencia de estado en `sessionStorage`/URL.
+- **Columna de Actividades (`lib/opportunityActivities.ts`):** En la vista general (desktop y móvil), cada oportunidad muestra el estado y conteo de sus actividades vinculadas:
+  - **Atrasada (Rojo):** Badge rojo con conteo de actividades vencidas pendientes (`!is_completed && fecha_fin < now`).
+  - **Programada (Azul):** Badge azul con conteo de actividades agendadas a futuro (`!is_completed && fecha_fin >= now`).
+  - **Completada (Verde):** Badge verde cuando todas las actividades asociadas están al día.
+  - **Sin actividad:** Indicador tenue cuando la oportunidad no registra tareas ni eventos.
+- **Vista móvil:** Tarjetas responsivas con detalles de la cuenta (País, Ciudad, Canal), badges de fase, estado, indicador de actividad, valor en COP, cierre estimado, avatar del vendedor y acceso directo al detalle.
+- **Vista desktop:** Tabla interactiva (Handsontable) que inicia con la columna **OPORTUNIDAD** (nombre del negocio), seguida de **CUENTA**, **ACTIVIDAD**, **PAÍS**, **CIUDAD** y **CANAL**, con soporte de redimensionamiento manual (`manualColumnResize`), selector de columnas visibles (`ALL_COLUMNS`), ordenamiento dinámico por cabecera y selección por clic de fila para navegar al detalle con persistencia de estado en `sessionStorage`/URL.
 
 ## Visibilidad
 

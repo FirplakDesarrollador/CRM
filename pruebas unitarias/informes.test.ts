@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mapOpportunityReportRow, OpportunityFlattenLookups } from '@/lib/utils/informes';
+import { mapOpportunityReportRow, OpportunityFlattenLookups, mapActivityReportRow, ActivityFlattenLookups } from '@/lib/utils/informes';
 
 describe('Exportación de Oportunidades a Excel', () => {
     const mockLookups: OpportunityFlattenLookups = {
@@ -76,5 +76,66 @@ describe('Exportación de Oportunidades a Excel', () => {
         const result = mapOpportunityReportRow(item, mockLookups);
 
         expect(result.pais_nombre).toBe('-');
+    });
+
+    it('incluye categorias_interes formateadas o "-" si no existen', () => {
+        const itemWithCats = {
+            id: 'opp-4',
+            nombre: 'Oportunidad con Categorias',
+            categoria_oportunidad: ['Baños', 'Cocinas'],
+            cuenta: { nombre: 'Cliente Uno' }
+        };
+        const resultWithCats = mapOpportunityReportRow(itemWithCats, mockLookups);
+        expect(resultWithCats.categorias_interes).toBe('Baños, Cocinas');
+
+        const itemWithoutCats = {
+            id: 'opp-5',
+            nombre: 'Oportunidad sin Categorias',
+            categoria_oportunidad: null,
+            cuenta: { nombre: 'Cliente Dos' }
+        };
+        const resultWithoutCats = mapOpportunityReportRow(itemWithoutCats, mockLookups);
+        expect(resultWithoutCats.categorias_interes).toBe('-');
+    });
+});
+
+describe('Exportación de Actividades a Excel', () => {
+    const mockActivityLookups: ActivityFlattenLookups = {
+        userMap: new Map([['u1', 'Juan Pérez']]),
+        clasificacionMap: new Map([[10, 'Comercial']]),
+        subclasificacionMap: new Map([[100, 'Visita']]),
+        tipoActividadMap: new Map([[1, 'Reunión Presencial']])
+    };
+
+    it('extrae cuenta directa si existe en la actividad', () => {
+        const item = {
+            id: 'act-1',
+            asunto: 'Reunión Inicial',
+            cuenta: { nombre: 'Constructora Bolívar' },
+            oportunidad: { nombre: 'Torre 1', amount: 1000000 },
+            usuario: { full_name: 'Juan Pérez' }
+        };
+
+        const result = mapActivityReportRow(item, mockActivityLookups);
+        expect(result.cuenta_nombre).toBe('Constructora Bolívar');
+        expect(result.oportunidad_nombre).toBe('Torre 1');
+    });
+
+    it('usa la cuenta de la oportunidad como fallback si la actividad no tiene cuenta directa', () => {
+        const item = {
+            id: 'act-2',
+            asunto: 'Llamada de seguimiento',
+            cuenta: null,
+            oportunidad: {
+                nombre: 'Torre 2',
+                amount: 2500000,
+                cuenta: { nombre: 'Inversiones ABC' }
+            },
+            usuario: { full_name: 'Juan Pérez' }
+        };
+
+        const result = mapActivityReportRow(item, mockActivityLookups);
+        expect(result.cuenta_nombre).toBe('Inversiones ABC');
+        expect(result.oportunidad_nombre).toBe('Torre 2');
     });
 });
