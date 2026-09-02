@@ -540,14 +540,9 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                         ${accountRelation},
                         fase_data:CRM_FasesOportunidad(nombre),
                         estado_data:CRM_EstadosOportunidad(nombre),
-<<<<<<< HEAD
                         vendedor:CRM_Usuarios!owner_user_id(full_name),
                         colaboradores:CRM_Oportunidades_Colaboradores!inner(usuario_id),
                         actividades:CRM_Actividades(id, fecha_fin, is_completed, is_deleted)
-=======
-                        vendedor:CRM_Usuarios(full_name),
-                        colaboradores:CRM_Oportunidades_Colaboradores!inner(usuario_id)
->>>>>>> luis
                     `);
 
                     const ownershipConditions = [
