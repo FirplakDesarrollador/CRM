@@ -190,10 +190,41 @@ function ActivitiesContent() {
         if (typeof window !== 'undefined' && searchParams.toString() === '') {
             const savedState = sessionStorage.getItem('crm_actividades_state');
             if (savedState) {
-                router.replace(`/actividades?${savedState}`, { scroll: false });
+                const savedParams = new URLSearchParams(savedState);
+                savedParams.delete('id');
+                const restored = savedParams.toString();
+                if (restored) {
+                    router.replace(`/actividades?${restored}`, { scroll: false });
+                }
             }
         }
     }, [searchParams, router]);
+
+    // Synchronize URL or sessionStorage parameters to state
+    useEffect(() => {
+        const saved = new URLSearchParams(typeof window !== 'undefined' ? sessionStorage.getItem('crm_actividades_state') || '' : '');
+        const user = searchParams.get('user') || saved.get('user') || '';
+        const search = searchParams.get('search') || saved.get('search') || '';
+        const type = searchParams.get('type') || saved.get('type') || '';
+        const classification = searchParams.get('classification') || saved.get('classification') || '';
+        const subclassification = searchParams.get('subclassification') || saved.get('subclassification') || '';
+        const status = (searchParams.get('status') || saved.get('status') || 'all') as any;
+        const channel = searchParams.get('channel') || saved.get('channel') || '';
+        const dateFrom = searchParams.get('dateFrom') || saved.get('dateFrom') || '';
+        const dateTo = searchParams.get('dateTo') || saved.get('dateTo') || '';
+        const viewUrl = (searchParams.get('view') || saved.get('view') || 'agenda') as any;
+
+        setFilterUser(user);
+        setSearchQuery(search);
+        setFilterType(type);
+        setFilterClassification(classification);
+        setFilterSubclassification(subclassification);
+        setFilterStatus(status);
+        setFilterChannel(channel);
+        setFilterDateFrom(dateFrom);
+        setFilterDateTo(dateTo);
+        setView(viewUrl);
+    }, [searchParams]);
 
     // Sync all filters to URL to persist across "back" navigations
     useEffect(() => {

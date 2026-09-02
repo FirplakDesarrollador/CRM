@@ -18,7 +18,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     const pathname = usePathname();
     const isLoginPage = pathname === '/login';
     const isE2EPage = process.env.NODE_ENV !== 'production' && pathname.startsWith('/e2e');
-    const isPublicPage = isLoginPage || isE2EPage;
+    const isOtherPublic = pathname === '/auth/callback' || pathname === '/update-password' || pathname === '/offline';
+    const isPublicPage = isLoginPage || isE2EPage || isOtherPublic;
     const [isLocalDataReady, setIsLocalDataReady] = useState(isPublicPage);
 
     // Auth state listener - Redirect to login when signed out (critical for mobile)

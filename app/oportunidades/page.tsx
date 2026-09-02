@@ -1,16 +1,19 @@
 "use client";
 
 import { useOpportunitiesServer } from "@/lib/hooks/useOpportunitiesServer";
-import { useState, useEffect, useCallback, Suspense } from "react";
+import React, { useState, useEffect, useCallback, Suspense, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Plus, Search, Filter, Briefcase, ArrowUpDown, ChevronUp, ChevronDown, ChevronRight, Columns3, Check } from "lucide-react";
+import { Plus, Search, Filter, Briefcase, ArrowUpDown, ChevronUp, ChevronDown, ChevronRight, Columns3, Check, MapPin, Globe } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/components/ui/utils";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { UserPickerFilter } from "@/components/cuentas/UserPickerFilter";
 import { OpportunityFilters } from "@/components/oportunidades/OpportunityFilters";
 import { formatColombiaDate, isDateOverdue } from "@/lib/date-utils";
+import { computeOpportunityActivitySummary } from "@/lib/opportunityActivities";
 import { supabase } from "@/lib/supabase";
+import { useLiveQuery } from "dexie-react-hooks";
+import { db } from "@/lib/db";
 import dynamic from 'next/dynamic';
 import 'handsontable/styles/handsontable.min.css';
 import 'handsontable/styles/ht-theme-main.min.css';
@@ -21,6 +24,28 @@ function OpportunitiesContent() {
     const { role: userRole } = useCurrentUser();
     const searchParams = useSearchParams();
     const router = useRouter();
+
+    // Lookup countries for country column
+    const countriesList = useLiveQuery(() => db.countries.toArray()) || [];
+    const [fallbackCountries, setFallbackCountries] = useState<any[]>([]);
+
+    useEffect(() => {
+        if (countriesList.length === 0) {
+            supabase.from('CRM_Paises').select('*').then(({ data }) => {
+                if (data) setFallbackCountries(data);
+            });
+        }
+    }, [countriesList.length]);
+
+    const displayCountries = countriesList.length > 0 ? countriesList : fallbackCountries;
+
+    const countryMap = useMemo(() => {
+        const map: Record<number, string> = {};
+        displayCountries.forEach(c => {
+            map[c.id] = c.nombre;
+        });
+        return map;
+    }, [displayCountries]);
 
     // Server Side Hook
     const {
@@ -190,44 +215,43 @@ function OpportunitiesContent() {
         return null;
     });
 
-    // On mount: apply initial filter values from URL to the server hook
-    // This is critical for the "back button" scenario where URL has params but hook starts fresh
+    // Synchronize initial & restored filter values from URL or sessionStorage to the server hook
     useEffect(() => {
-        const initialTab = (searchParams.get('tab') as any) || 'all';
-        const initialSearch = searchParams.get('search') || '';
-        const initialOwner = searchParams.get('owner') || null;
-        const initialChannel = searchParams.get('channel') || selectedChannel;
-        const initialSubclass = searchParams.get('subclass') || (selectedSubclass ? String(selectedSubclass) : null);
-        const initialSegment = searchParams.get('segment') || (selectedSegment ? String(selectedSegment) : null);
-        const initialPhase = searchParams.get('phase') || (selectedPhase ? String(selectedPhase) : null);
-        const initialSort = searchParams.get('sort');
-        const initialDirection = searchParams.get('dir');
+        const savedState = typeof window !== 'undefined' ? sessionStorage.getItem('crm_oportunidades_state') : null;
+        const saved = new URLSearchParams(savedState || '');
 
-        // Apply tab, search, owner and restored hierarchical filters to hook
-        if (initialSearch) setSearchTerm(initialSearch);
-        if (initialOwner) setAccountOwnerIds(initialOwner.split(',').filter(Boolean));
-        if (initialChannel) setChannelFilter(initialChannel);
-        if (initialSubclass) setSubclassificationFilter(Number(initialSubclass));
-        if (initialSegment) setSegmentFilter(Number(initialSegment));
-        if (initialPhase) setPhaseFilter(Number(initialPhase));
+        const initialTab = searchParams.get('tab') || saved.get('tab') || 'all';
+        const initialSearch = searchParams.get('search') || saved.get('search') || '';
+        const initialOwner = searchParams.get('owner') || saved.get('owner') || null;
+        const initialChannel = searchParams.get('channel') || saved.get('channel') || null;
+        const initialSubclass = searchParams.get('subclass') || saved.get('subclass') || null;
+        const initialSegment = searchParams.get('segment') || saved.get('segment') || null;
+        const initialPhase = searchParams.get('phase') || saved.get('phase') || null;
+        const initialStatus = searchParams.get('status') || saved.get('status') || 'open';
+        const initialOrigin = searchParams.get('origin') || saved.get('origin') || null;
+        const initialSort = searchParams.get('sort') || saved.get('sort');
+        const initialDirection = searchParams.get('dir') || saved.get('dir');
+        const start = searchParams.get('start') || saved.get('start') || null;
+        const end = searchParams.get('end') || saved.get('end') || null;
+        const startClose = searchParams.get('startClose') || saved.get('startClose') || null;
+        const endClose = searchParams.get('endClose') || saved.get('endClose') || null;
+
+        setSearchTerm(initialSearch);
+        setAccountOwnerIds(initialOwner ? initialOwner.split(',').filter(Boolean) : []);
+        setChannelFilter(initialChannel);
+        setSubclassificationFilter(initialSubclass ? Number(initialSubclass) : null);
+        setSegmentFilter(initialSegment ? Number(initialSegment) : null);
+        setPhaseFilter(initialPhase ? Number(initialPhase) : null);
+        setStatusFilter(initialStatus as any);
+        setOriginFilter(initialOrigin);
+        setStartDate(start);
+        setEndDate(end);
+        setStartClosingDate(startClose);
+        setEndClosingDate(endClose);
         if (initialSort) setSortField(initialSort);
         if (initialDirection) setSortAsc(initialDirection === 'asc');
-        const initialOrigin = searchParams.get('origin') || selectedOrigin;
-        if (initialOrigin) setOriginFilter(initialOrigin);
-        setUserFilter(initialTab);
-        
-        // Initial dates for the hook
-        const start = searchParams.get('start') || startDate;
-        const end = searchParams.get('end') || endDate;
-        const startClose = searchParams.get('startClose') || startClosingDate;
-        const endClose = searchParams.get('endClose') || endClosingDate;
-        
-        if (start) setStartDate(start);
-        if (end) setEndDate(end);
-        if (startClose) setStartClosingDate(startClose);
-        if (endClose) setEndClosingDate(endClose);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []); // Run only on mount
+        setUserFilter(initialTab as any);
+    }, [searchParams]);
 
     // Restore state from sessionStorage if navigating from sidebar (empty query)
     useEffect(() => {
@@ -237,13 +261,9 @@ function OpportunitiesContent() {
                 const savedParams = new URLSearchParams(savedState);
                 // Evitamos redireccionar al detalle por defecto para siempre mostrar la lista inicial
                 savedParams.delete('id');
-                savedParams.delete('tab');
                 const restoredState = savedParams.toString();
                 if (restoredState !== '') {
                     router.replace(`/oportunidades?${restoredState}`, { scroll: false });
-                } else {
-                    // Ya está vacío, limpiamos la sesión para no entrar en bucle infinito
-                    sessionStorage.removeItem('crm_oportunidades_state');
                 }
             }
         }
@@ -420,50 +440,74 @@ function OpportunitiesContent() {
 
     // Columnas disponibles (excluyendo Acciones que depende del rol)
     const ALL_COLUMNS = [
-        { key: 'cuenta',   label: 'Cuenta' },
-        { key: 'nombre',   label: 'Nombre' },
-        { key: 'origen',   label: 'Origen' },
-        { key: 'fase',     label: 'Fase' },
-        { key: 'estado',   label: 'Estado' },
-        { key: 'creada',   label: 'Creada' },
-        { key: 'valor',    label: 'Valor' },
-        { key: 'cierre',   label: 'Cierre' },
-        { key: 'vendedor', label: 'Vendedor' },
+        { key: 'nombre',      label: 'Oportunidad' },
+        { key: 'cuenta',      label: 'Cuenta' },
+        { key: 'actividades', label: 'Actividad' },
+        { key: 'pais',        label: 'País' },
+        { key: 'ciudad',      label: 'Ciudad' },
+        { key: 'canal',       label: 'Canal' },
+        { key: 'origen',      label: 'Origen' },
+        { key: 'fase',        label: 'Fase' },
+        { key: 'estado',      label: 'Estado' },
+        { key: 'creada',      label: 'Creada' },
+        { key: 'valor',       label: 'Valor' },
+        { key: 'cierre',      label: 'Cierre' },
+        { key: 'vendedor',    label: 'Vendedor' },
     ];
 
     const [visibleColumns, setVisibleColumns] = useState<string[]>(() => {
+        const defaultKeys = ALL_COLUMNS.map(c => c.key);
         if (typeof window !== 'undefined') {
-            const saved = localStorage.getItem('crm_opp_visible_cols');
-            if (saved) return JSON.parse(saved);
+            const saved = localStorage.getItem('crm_opp_visible_cols_v3') || localStorage.getItem('crm_opp_visible_cols_v2') || localStorage.getItem('crm_opp_visible_cols');
+            if (saved) {
+                try {
+                    const parsed: string[] = JSON.parse(saved);
+                    if (Array.isArray(parsed)) {
+                        const savedSet = new Set(parsed);
+                        const missingKeys = defaultKeys.filter(k => !savedSet.has(k));
+                        const reordered = defaultKeys.filter(k => savedSet.has(k) || missingKeys.includes(k));
+                        localStorage.setItem('crm_opp_visible_cols_v3', JSON.stringify(reordered));
+                        return reordered;
+                    }
+                } catch (e) {}
+            }
         }
-        return ALL_COLUMNS.map(c => c.key);
+        return defaultKeys;
     });
 
     const toggleColumn = (key: string) => {
         setVisibleColumns(prev => {
             const next = prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key];
-            localStorage.setItem('crm_opp_visible_cols', JSON.stringify(next));
+            localStorage.setItem('crm_opp_visible_cols_v3', JSON.stringify(next));
             return next;
         });
     };
 
-    const hotData = opportunities.map(opp => ({
-        id: opp.id,
-        cuenta: opp.account?.nombre || "Sin cuenta",
-        nombre: opp.nombre || "Sin nombre",
-        origen: opp.origen_oportunidad || "-",
-        fase: opp.fase_data?.nombre || 'Pros.',
-        estado: opp.estado_data?.nombre || 'Abierta',
-        creada: opp.created_at ? new Date(opp.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' }) : "-",
-        valor: opp.amount || 0,
-        cierre: opp.fecha_cierre_estimada ? new Date(opp.fecha_cierre_estimada).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) : "-",
-        cierre_overdue: opp.fecha_cierre_estimada ? new Date(opp.fecha_cierre_estimada) < new Date() : false,
-        vendedor: opp.vendedor?.full_name || "Sin asignar"
-    }));
+    const hotData = opportunities.map(opp => {
+        const actSummary = opp.activity_summary || computeOpportunityActivitySummary(opp.actividades);
+        const countryName = opp.account?.pais_id ? (countryMap[opp.account.pais_id] || "Colombia") : (opp.account?.pais || "Colombia");
+        return {
+            id: opp.id,
+            nombre: opp.nombre || "Sin nombre",
+            cuenta: opp.account?.nombre || "Sin cuenta",
+            actividades: actSummary,
+            pais: countryName,
+            ciudad: opp.account?.ciudad || "Sin ciudad",
+            canal: opp.account?.canal_id || "-",
+            origen: opp.origen_oportunidad || "-",
+            fase: opp.fase_data?.nombre || 'Pros.',
+            estado: opp.estado_data?.nombre || 'Abierta',
+            creada: opp.created_at ? new Date(opp.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' }) : "-",
+            valor: opp.amount || 0,
+            cierre: opp.fecha_cierre_estimada ? new Date(opp.fecha_cierre_estimada).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) : "-",
+            cierre_overdue: opp.fecha_cierre_estimada ? new Date(opp.fecha_cierre_estimada) < new Date() : false,
+            vendedor: opp.vendedor?.full_name || "Sin asignar"
+        };
+    });
 
     const ALL_COLUMN_DEFS: Record<string, any> = {
         cuenta: {
-            data: 'cuenta', title: 'Cuenta', readOnly: true, width: 160, wordWrap: false,
+            data: 'cuenta', title: 'Cuenta', readOnly: true, width: 220, wordWrap: false,
             renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 const v = value || '';
                 const safe = v.replace(/"/g, '&quot;');
@@ -472,13 +516,77 @@ function OpportunitiesContent() {
                 return td;
             }
         },
-        nombre: {
-            data: 'nombre', title: 'Nombre', readOnly: true, width: 220, wordWrap: false,
+        pais: {
+            data: 'pais', title: 'País', readOnly: true, width: 120, wordWrap: false,
             renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
-                const v = value || '';
+                const v = value || 'Colombia';
+                const safe = v.replace(/"/g, '&quot;');
+                td.innerHTML = `<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;color:#334155;font-weight:500;" title="${safe}">${v}</div>`;
+                td.style.overflow = 'hidden';
+                return td;
+            }
+        },
+        ciudad: {
+            data: 'ciudad', title: 'Ciudad', readOnly: true, width: 150, wordWrap: false,
+            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+                const v = value || 'Sin ciudad';
                 const safe = v.replace(/"/g, '&quot;');
                 td.innerHTML = `<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;color:#334155;" title="${safe}">${v}</div>`;
                 td.style.overflow = 'hidden';
+                return td;
+            }
+        },
+        canal: {
+            data: 'canal', title: 'Canal', readOnly: true, width: 130, wordWrap: false,
+            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+                const v = value || '-';
+                const safe = v.replace(/"/g, '&quot;');
+                td.innerHTML = `<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;color:#475569;font-weight:500;" title="${safe}">${v}</div>`;
+                td.style.overflow = 'hidden';
+                return td;
+            }
+        },
+        nombre: {
+            data: 'nombre', title: 'Oportunidad', readOnly: true, width: 240, wordWrap: false,
+            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+                const v = value || '';
+                const safe = v.replace(/"/g, '&quot;');
+                td.innerHTML = `<div style="font-weight:600;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</div>`;
+                td.style.overflow = 'hidden';
+                return td;
+            }
+        },
+        actividades: {
+            data: 'actividades', title: 'Actividad', readOnly: true, width: 155, wordWrap: false,
+            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+                const summary = (value && typeof value === 'object' && 'status' in value)
+                    ? value
+                    : { status: 'none', label: 'Sin actividad', overdue: 0, scheduled: 0, completed: 0, hasActivity: false };
+
+                let bg = '#f8fafc';
+                let c = '#94a3b8';
+                let bd = '#e2e8f0';
+                let icon = '';
+
+                if (summary.status === 'overdue') {
+                    bg = '#fee2e2';
+                    c = '#b91c1c';
+                    bd = '#fca5a5';
+                    icon = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
+                } else if (summary.status === 'scheduled') {
+                    bg = '#eff6ff';
+                    c = '#1d4ed8';
+                    bd = '#bfdbfe';
+                    icon = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>`;
+                } else if (summary.status === 'completed') {
+                    bg = '#f0fdf4';
+                    c = '#15803d';
+                    bd = '#bbf7d0';
+                    icon = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><polyline points="20 6 9 17 4 12"/></svg>`;
+                }
+
+                td.innerHTML = `<div style="display:flex;align-items:center;height:100%;"><span style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:8px;font-size:11.5px;font-weight:700;white-space:nowrap;background:${bg};color:${c};border:1px solid ${bd};line-height:1.3;">${icon}<span>${summary.label || 'Sin actividad'}</span></span></div>`;
+                td.style.overflow = 'visible';
                 return td;
             }
         },
@@ -571,9 +679,10 @@ function OpportunitiesContent() {
 
     const hotColumns = [
         // Solo incluir las columnas marcadas como visibles, manteniendo el orden original
-        ...['cuenta','nombre','origen','fase','estado','creada','valor','cierre','vendedor']
+        ...['nombre','cuenta','actividades','pais','ciudad','canal','origen','fase','estado','creada','valor','cierre','vendedor']
             .filter(key => visibleColumns.includes(key))
             .map(key => ALL_COLUMN_DEFS[key])
+            .filter(Boolean)
     ];
 
     const getPhaseBadge = (fase: string) => {
@@ -713,7 +822,6 @@ function OpportunitiesContent() {
                             <>
                                 {/* Overlay para cerrar al hacer click fuera */}
                                 <div
-                                    className="fixed inset-0 z-40"
                                     onClick={() => setShowColumnPicker(false)}
                                 />
                                 <div className="absolute right-0 top-full mt-2 z-50 bg-white border border-slate-200 rounded-2xl shadow-xl shadow-slate-200/60 p-4 w-52 animate-in fade-in slide-in-from-top-2 duration-200">
@@ -721,9 +829,9 @@ function OpportunitiesContent() {
                                         <p className="text-xs font-bold text-slate-700 uppercase tracking-wide">Columnas visibles</p>
                                         <button
                                             onClick={() => {
-                                                const allKeys = ['cuenta','nombre','origen','fase','estado','creada','valor','cierre','vendedor'];
+                                                const allKeys = ['nombre','cuenta','actividades','pais','ciudad','canal','origen','fase','estado','creada','valor','cierre','vendedor'];
                                                 setVisibleColumns(allKeys);
-                                                localStorage.setItem('crm_opp_visible_cols', JSON.stringify(allKeys));
+                                                localStorage.setItem('crm_opp_visible_cols_v3', JSON.stringify(allKeys));
                                             }}
                                             className="text-[10px] text-indigo-600 hover:text-indigo-800 font-semibold transition-colors"
                                         >
@@ -763,13 +871,9 @@ function OpportunitiesContent() {
                 </div>
             </div>
 
-            {/* Filtros Avanzados (Colapsables) */}
+            {/* Advanced Filters Drawer */}
             {showAdvancedFilters && (
-                <div className="bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 shadow-sm animate-in slide-in-from-top-4 fade-in duration-300 relative z-10">
-                    <h3 className="text-sm font-bold text-slate-800 mb-5 flex items-center gap-2">
-                        <Filter className="w-4 h-4 text-blue-600" />
-                        Filtros Avanzados
-                    </h3>
+                <div className="animate-in fade-in slide-in-from-top-4 duration-300">
                     <OpportunityFilters
                         onFilterChange={handleFilterChange}
                         initialChannelId={selectedChannel}
@@ -815,14 +919,23 @@ function OpportunitiesContent() {
                     <>
                         {/* VISTA MÓVIL: Tarjetas */}
                         <div className="grid grid-cols-1 gap-3 md:hidden">
-                            {opportunities.map((opp) => (
+                            {opportunities.map((opp) => {
+                                const actSummary = opp.activity_summary || computeOpportunityActivitySummary(opp.actividades);
+                                return (
                                 <div key={opp.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col hover:border-blue-300 active:scale-[0.99] transition-all relative">
                                     <div className="p-4 border-b border-slate-100 flex justify-between items-start gap-3">
                                         <div className="flex-1 min-w-0">
                                             <div className="font-bold text-slate-900 text-sm mb-0.5 truncate">
                                                 {opp.account?.nombre || "Sin cuenta"}
                                             </div>
-                                            <div className="text-slate-500 text-xs truncate">
+                                            <div className="text-slate-500 text-[11.5px] truncate font-medium flex items-center gap-1 flex-wrap mb-0.5">
+                                                <span>{opp.account?.ciudad || "Sin ciudad"}</span>
+                                                <span className="text-slate-300">•</span>
+                                                <span>{opp.account?.pais_id ? (countryMap[opp.account.pais_id] || "Colombia") : (opp.account?.pais || "Colombia")}</span>
+                                                <span className="text-slate-300">•</span>
+                                                <span className="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded text-[10.5px] font-bold">{opp.account?.canal_id || "-"}</span>
+                                            </div>
+                                            <div className="text-slate-600 text-xs truncate font-medium">
                                                 {opp.nombre || "Sin nombre"}
                                             </div>
                                         </div>
@@ -856,6 +969,28 @@ function OpportunitiesContent() {
                                                 <span className="truncate">{opp.vendedor?.full_name || "Sin asignar"}</span>
                                             </div>
                                         </div>
+                                        <div className="col-span-2 pt-1 border-t border-slate-100 flex items-center justify-between">
+                                            <span className="text-slate-400 font-medium">Actividades:</span>
+                                            <div>
+                                                {actSummary.status === 'overdue' ? (
+                                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg text-xs font-bold bg-red-100 text-red-700 border border-red-200">
+                                                        <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+                                                        {actSummary.label}
+                                                    </span>
+                                                ) : actSummary.status === 'scheduled' ? (
+                                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg text-xs font-bold bg-blue-100 text-blue-700 border border-blue-200">
+                                                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                                                        {actSummary.label}
+                                                    </span>
+                                                ) : actSummary.status === 'completed' ? (
+                                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                                        {actSummary.label}
+                                                    </span>
+                                                ) : (
+                                                    <span className="text-slate-400 text-xs">Sin actividad</span>
+                                                )}
+                                            </div>
+                                        </div>
                                     </div>
                                     
                                     <div className="flex divide-x divide-slate-100 border-t border-slate-100 bg-white">
@@ -872,12 +1007,41 @@ function OpportunitiesContent() {
                                         </button>
                                     </div>
                                 </div>
-                            ))}
+                                );
+                            })}
                         </div>
 
                         {/* VISTA DESKTOP: Tabla Premium */}
                         <div className="hidden md:block bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden flex-1 animate-in fade-in duration-500">
                             <style>{`
+                                .handsontable th {
+                                    background: #f8fafc !important;
+                                    color: #475569 !important;
+                                    font-weight: 700 !important;
+                                    font-size: 11.5px !important;
+                                    text-transform: uppercase !important;
+                                    letter-spacing: 0.05em !important;
+                                    border-bottom: 1px solid #e2e8f0 !important;
+                                    border-right: 1px solid #f1f5f9 !important;
+                                    padding: 12px 10px !important;
+                                }
+                                .handsontable td {
+                                    font-size: 13px !important;
+                                    border-bottom: 1px solid #f1f5f9 !important;
+                                    border-right: 1px solid #f8fafc !important;
+                                    padding: 10px 10px !important;
+                                    vertical-align: middle !important;
+                                    transition: background-color 0.15s ease !important;
+                                }
+                                .handsontable tr:hover td {
+                                    background-color: #f8fafc !important;
+                                }
+                                .ht_clone_top th {
+                                    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05) !important;
+                                }
+                                .handsontable .htAutocompleteArrow {
+                                    color: #94a3b8 !important;
+                                }
                                 /* ── Scrollbar ── */
                                 .opp-hot-wrap .ht_master .wtHolder {
                                     scrollbar-width: thin;
@@ -981,12 +1145,17 @@ function OpportunitiesContent() {
 
                                 /* ── Column Resize Handle ── */
                                 .opp-hot-wrap .handsontable .manualColumnResizer {
-                                    border-right: 2px solid #3b82f6 !important;
+                                    border-right: 3px solid #2563eb !important;
                                     opacity: 0;
-                                    transition: opacity 0.2s ease;
+                                    transition: opacity 0.15s ease;
+                                    cursor: col-resize !important;
+                                    width: 5px !important;
                                 }
-                                .opp-hot-wrap .handsontable th:hover .manualColumnResizer {
-                                    opacity: 1;
+                                .opp-hot-wrap .handsontable th:hover .manualColumnResizer,
+                                .opp-hot-wrap .handsontable .manualColumnResizer.active,
+                                .opp-hot-wrap .handsontable .manualColumnResizer:hover {
+                                    opacity: 1 !important;
+                                    background-color: #3b82f6 !important;
                                 }
 
                                 /* ── Corner Header ── */
@@ -1011,6 +1180,7 @@ function OpportunitiesContent() {
                                     colHeaders={true}
                                     filters={true}
                                     dropdownMenu={true}
+                                    manualColumnResize={true}
                                     width="100%"
                                     height="calc(100vh - 280px)"
                                     autoColumnSize={false}
@@ -1019,8 +1189,18 @@ function OpportunitiesContent() {
                                     licenseKey="non-commercial-and-evaluation"
                                     afterOnCellMouseDown={(event: any, coords: any, td: any) => {
                                         if (coords.row === -1) {
-                                            const fields: Record<number, string> = { 1: 'nombre', 5: 'created_at', 6: 'amount', 7: 'fecha_cierre_estimada' };
-                                            if (fields[coords.col]) handleSort(fields[coords.col]);
+                                            const colDef = hotColumns[coords.col];
+                                            if (colDef) {
+                                                const fieldSortMap: Record<string, string> = {
+                                                    'cuenta': 'account_nombre',
+                                                    'nombre': 'nombre',
+                                                    'creada': 'created_at',
+                                                    'valor': 'amount',
+                                                    'cierre': 'fecha_cierre_estimada'
+                                                };
+                                                const sortKey = fieldSortMap[colDef.data];
+                                                if (sortKey) handleSort(sortKey);
+                                            }
                                             return;
                                         }
                                         if (coords.row >= 0) {
@@ -1034,13 +1214,22 @@ function OpportunitiesContent() {
                                         }
                                     }}
                                     afterGetColHeader={(column: number, TH: HTMLTableCellElement) => {
-                                        const fields: Record<number, string> = { 1: 'nombre', 5: 'created_at', 6: 'amount', 7: 'fecha_cierre_estimada' };
-                                        const labels: Record<number, string> = { 1: 'Nombre', 5: 'Creada', 6: 'Valor', 7: 'Cierre' };
-                                        if (fields[column]) {
-                                            TH.style.cursor = 'pointer';
-                                            TH.title = 'Clic para ordenar ascendente o descendente';
-                                            const header = TH.querySelector('.colHeader');
-                                            if (header) header.textContent = `${labels[column]} ${sortField === fields[column] ? (sortAsc ? '↑' : '↓') : '↕'}`;
+                                        const colDef = hotColumns[column];
+                                        if (colDef) {
+                                            const fieldSortMap: Record<string, string> = {
+                                                'cuenta': 'account_nombre',
+                                                'nombre': 'nombre',
+                                                'creada': 'created_at',
+                                                'valor': 'amount',
+                                                'cierre': 'fecha_cierre_estimada'
+                                            };
+                                            const sortKey = fieldSortMap[colDef.data];
+                                            if (sortKey) {
+                                                TH.style.cursor = 'pointer';
+                                                TH.title = 'Clic para ordenar ascendente o descendente';
+                                                const header = TH.querySelector('.colHeader');
+                                                if (header) header.textContent = `${colDef.title} ${sortField === sortKey ? (sortAsc ? '↑' : '↓') : '↕'}`;
+                                            }
                                         }
                                     }}
                                     stretchH="all"

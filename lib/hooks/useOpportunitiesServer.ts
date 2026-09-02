@@ -5,6 +5,7 @@ import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { db } from '@/lib/db';
 import { useSyncStore } from '@/lib/stores/useSyncStore';
 import { matchesSearchTokens, getSearchTokens } from '@/lib/utils';
+import { computeOpportunityActivitySummary, OpportunityActivitySummary } from '@/lib/opportunityActivities';
 
 export type OpportunityServer = {
     id: string;
@@ -22,10 +23,12 @@ export type OpportunityServer = {
     estado_id?: number | null;
     origen_oportunidad?: string | null;
     url_origen?: string | null;
-    account?: { nombre: string; canal_id?: string } | null; // Joined data
+    account?: { nombre: string; canal_id?: string; ciudad?: string | null; pais_id?: number | null; pais?: string | null } | null; // Joined data
     fase_data?: { nombre: string } | null; // Joined data
     estado_data?: { nombre: string } | null; // Joined data
     vendedor?: { full_name: string } | null; // Joined data
+    actividades?: Array<{ id: string; fecha_fin?: string | null; is_completed?: boolean; is_deleted?: boolean }> | null;
+    activity_summary?: OpportunityActivitySummary;
 };
 
 type StatusFilter = 'all' | 'open' | 'won' | 'lost';
@@ -319,16 +322,29 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
 
                 const totalCount = localOpps.length;
                 const paginatedOpps = localOpps.slice(from, to + 1);
+                const oppIds = paginatedOpps.map(i => i.id);
+                const localActs = await db.activities.where('opportunity_id').anyOf(oppIds).toArray();
+                const actsByOpp = new Map<string, any[]>();
+                localActs.forEach(act => {
+                    if (act.opportunity_id) {
+                        const list = actsByOpp.get(act.opportunity_id) || [];
+                        list.push(act);
+                        actsByOpp.set(act.opportunity_id, list);
+                    }
+                });
 
                 // Mapping to match server shape
                 const flattenedResults = paginatedOpps.map(item => {
                     const acc = accMap.get(item.account_id);
                     const ph = phaseMap.get(item.fase_id as number);
+                    const itemActs = actsByOpp.get(item.id) || [];
                     return {
                         ...item,
-                        account: acc ? { nombre: acc.nombre, canal_id: acc.canal_id } : null,
+                        account: acc ? { nombre: acc.nombre, canal_id: acc.canal_id, ciudad: acc.ciudad, pais_id: acc.pais_id } : null,
                         fase_data: ph ? { nombre: ph.nombre } : null,
-                        estado_data: null // Mock offline
+                        estado_data: null, // Mock offline
+                        actividades: itemActs,
+                        activity_summary: computeOpportunityActivitySummary(itemActs)
                     };
                 });
 
@@ -371,7 +387,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
 
             // Dynamically build select to support filtering on account
             const useInnerJoin = channelFilter || subclassificationFilter;
-            const accountRelation = useInnerJoin ? 'account:CRM_Cuentas!inner(nombre, canal_id, subclasificacion_id)' : 'account:CRM_Cuentas(nombre, canal_id, subclasificacion_id)';
+            const accountRelation = useInnerJoin ? 'account:CRM_Cuentas!inner(nombre, canal_id, subclasificacion_id, ciudad, pais_id)' : 'account:CRM_Cuentas(nombre, canal_id, subclasificacion_id, ciudad, pais_id)';
 
             let query = supabase
                 .from('CRM_Oportunidades')
@@ -392,7 +408,8 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                     ${accountRelation},
                     fase_data:CRM_FasesOportunidad(nombre),
                     estado_data:CRM_EstadosOportunidad(nombre),
-                    vendedor:CRM_Usuarios!owner_user_id(full_name)
+                    vendedor:CRM_Usuarios!owner_user_id(full_name),
+                    actividades:CRM_Actividades(id, fecha_fin, is_completed, is_deleted)
                 `, { count: 'exact' })
                 .eq('is_deleted', false);
 
@@ -514,7 +531,8 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                         fase_data:CRM_FasesOportunidad(nombre),
                         estado_data:CRM_EstadosOportunidad(nombre),
                         vendedor:CRM_Usuarios!owner_user_id(full_name),
-                        colaboradores:CRM_Oportunidades_Colaboradores!inner(usuario_id)
+                        colaboradores:CRM_Oportunidades_Colaboradores!inner(usuario_id),
+                        actividades:CRM_Actividades(id, fecha_fin, is_completed, is_deleted)
                     `);
 
                     // Filter: The current user is either the owner OR one of the collaborators
@@ -604,7 +622,10 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                 }));
             }
 
-            let combinedResults = [...pendingLocalOpps, ...(result as any[])];
+            let combinedResults = [...pendingLocalOpps, ...(result as any[])].map((o: any) => ({
+                ...o,
+                activity_summary: o.activity_summary || computeOpportunityActivitySummary(o.actividades)
+            }));
             if (searchTerm && searchTerm.trim()) {
                 combinedResults = combinedResults.filter(o =>
                     matchesSearchTokens([

@@ -27,7 +27,7 @@ que determina su lista de precios.
   o doble clics que intenten saltarse la clasificación.
 - Prueba E2E dev-only en `/e2e/cuentas-wizard` para validar el wizard sin depender
   de cookies de Supabase; en producción la ruta devuelve 404.
-- Listado con filtros (`AccountFilters`, `UserPickerFilter`): vista móvil con tarjetas responsivas y vista desktop con tabla interactiva (Handsontable) donde la edición se activa directamente al hacer clic/seleccionar la fila.
+- Listado con filtros (`AccountFilters`, `UserPickerFilter`): vista móvil con tarjetas responsivas y vista desktop con tabla interactiva (Handsontable) donde la columna "País" (mapeada dinámicamente desde `pais_id` / catálogos) se visualiza en la vista inicial junto a Ubicación, y la edición se activa directamente al hacer clic/seleccionar la fila.
 - Detalle con pestañas: contactos, oportunidades, actividades, sucursales (branches) y
   asignados (`components/cuentas/Account*Tab.tsx`).
 - Formulario `AccountForm` con pestañas (usa `shouldUnregister: false` — ver
