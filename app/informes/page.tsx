@@ -4,7 +4,7 @@ import React, { useState, useMemo } from 'react';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useUsers } from '@/lib/hooks/useUsers';
 import { supabase } from '@/lib/supabase';
-import { downloadExcel, downloadCSV, downloadSopExcel, ExportColumn, SopRow } from '@/lib/utils/informes';
+import { downloadExcel, downloadCSV, downloadSopExcel, ExportColumn, SopRow, mapOpportunityReportRow } from '@/lib/utils/informes';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { FileSpreadsheet, Loader2, Download, TableProperties, Users, Briefcase, Building2, Calendar as CalendarIcon, Filter, RotateCcw, DollarSign, MapPin, Tag } from 'lucide-react';
@@ -12,12 +12,12 @@ import { cn } from '@/components/ui/utils';
 
 // Constantes para filtros
 const ENTIDADES = [
-  { id: 'oportunidades', label: 'Oportunidades', icon: Briefcase, table: 'CRM_Oportunidades' },
-  { id: 'cuentas', label: 'Cuentas', icon: Building2, table: 'CRM_Cuentas' },
-  { id: 'contactos', label: 'Contactos', icon: Users, table: 'CRM_Contactos' },
-  { id: 'cotizaciones', label: 'Cotizaciones', icon: TableProperties, table: 'CRM_Cotizaciones' },
-  { id: 'actividades', label: 'Actividades', icon: CalendarIcon, table: 'CRM_Actividades' },
-  { id: 'sop', label: 'Proyección S&OP', icon: FileSpreadsheet, table: 'CRM_Oportunidades' },
+    { id: 'oportunidades', label: 'Oportunidades', icon: Briefcase, table: 'CRM_Oportunidades' },
+    { id: 'cuentas', label: 'Cuentas', icon: Building2, table: 'CRM_Cuentas' },
+    { id: 'contactos', label: 'Contactos', icon: Users, table: 'CRM_Contactos' },
+    { id: 'cotizaciones', label: 'Cotizaciones', icon: TableProperties, table: 'CRM_Cotizaciones' },
+    { id: 'actividades', label: 'Actividades', icon: CalendarIcon, table: 'CRM_Actividades' },
+    { id: 'sop', label: 'Proyección S&OP', icon: FileSpreadsheet, table: 'CRM_Oportunidades' },
 ] as const;
 
 type EntidadType = typeof ENTIDADES[number]['id'];
@@ -37,7 +37,7 @@ const SELECT_TRIGGER_CLASS = "w-full px-3 py-2.5 bg-slate-50 border border-slate
 export default function InformesPage() {
     const { role, isLoading: isLoadingUser } = useCurrentUser();
     const { users } = useUsers();
-    
+
     const [selectedEntidad, setSelectedEntidad] = useState<EntidadType>('oportunidades');
     const [isExporting, setIsExporting] = useState(false);
 
@@ -81,14 +81,14 @@ export default function InformesPage() {
 
     // Estado de Catálogos
     const [catalogs, setCatalogs] = useState<{
-        canales: {id: string, nombre: string}[];
-        fases: {id: number, nombre: string, canal_id: string}[];
-        segmentos: {id: number, nombre: string}[];
-        depts: {id: number, nombre: string}[];
-        ciudades: {id: number, nombre: string, departamento_id: number}[];
-        tiposActividad: {id: number, nombre: string}[];
-        clasificaciones: {id: number, nombre: string}[];
-        subclasificaciones: {id: number, nombre: string, clasificacion_id: number}[];
+        canales: { id: string, nombre: string }[];
+        fases: { id: number, nombre: string, canal_id: string }[];
+        segmentos: { id: number, nombre: string }[];
+        depts: { id: number, nombre: string }[];
+        ciudades: { id: number, nombre: string, departamento_id: number }[];
+        tiposActividad: { id: number, nombre: string }[];
+        clasificaciones: { id: number, nombre: string }[];
+        subclasificaciones: { id: number, nombre: string, clasificacion_id: number }[];
         familias: string[];
     }>({
         canales: [],
@@ -178,8 +178,8 @@ export default function InformesPage() {
 
     // Nombres únicos de Fases filtradas por Canal
     const uniqueFaseNombres = useMemo(() => {
-        const list = selectedCanal 
-            ? catalogs.fases.filter(f => f.canal_id === selectedCanal) 
+        const list = selectedCanal
+            ? catalogs.fases.filter(f => f.canal_id === selectedCanal)
             : catalogs.fases;
         return Array.from(new Set(list.map(f => f.nombre))).sort();
     }, [catalogs.fases, selectedCanal]);
@@ -329,25 +329,27 @@ export default function InformesPage() {
 
             // 1. Cargar Catálogos para Mapeo (Lookups)
             const [
-              { data: users },
-              { data: segments },
-              { data: lossReasons },
-              { data: departments },
-              { data: cities },
-              { data: canales },
-              { data: clasificaciones },
-              { data: subclasificaciones },
-              { data: tiposActividad }
+                { data: users },
+                { data: segments },
+                { data: lossReasons },
+                { data: departments },
+                { data: cities },
+                { data: canales },
+                { data: clasificaciones },
+                { data: subclasificaciones },
+                { data: tiposActividad },
+                { data: countries }
             ] = await Promise.all([
-              supabase.from('CRM_Usuarios').select('id, full_name, email'),
-              supabase.from('CRM_Segmentos').select('id, nombre'),
-              supabase.from('CRM_RazonesPerdida').select('id, descripcion'),
-              supabase.from('CRM_Departamentos').select('id, nombre'),
-              supabase.from('CRM_Ciudades').select('id, nombre'),
-              supabase.from('CRM_Canales').select('id, nombre'),
-              supabase.from('CRM_Activity_Clasificacion').select('id, nombre'),
-              supabase.from('CRM_Activity_Subclasificacion').select('id, nombre'),
-              supabase.from('CRM_TiposActividad').select('id, nombre')
+                supabase.from('CRM_Usuarios').select('id, full_name, email'),
+                supabase.from('CRM_Segmentos').select('id, nombre'),
+                supabase.from('CRM_RazonesPerdida').select('id, descripcion'),
+                supabase.from('CRM_Departamentos').select('id, nombre'),
+                supabase.from('CRM_Ciudades').select('id, nombre'),
+                supabase.from('CRM_Canales').select('id, nombre'),
+                supabase.from('CRM_Activity_Clasificacion').select('id, nombre'),
+                supabase.from('CRM_Activity_Subclasificacion').select('id, nombre'),
+                supabase.from('CRM_TiposActividad').select('id, nombre'),
+                supabase.from('CRM_Paises').select('id, nombre')
             ]);
 
             const getJoinedSingle = (rel: any) => Array.isArray(rel) ? rel[0] : rel;
@@ -378,6 +380,15 @@ export default function InformesPage() {
 
             const tipoActividadMap = new Map<number, string>();
             tiposActividad?.forEach(t => tipoActividadMap.set(t.id, t.nombre));
+
+            const countryMap = new Map<number | string, string>();
+            countries?.forEach(c => {
+                countryMap.set(c.id, c.nombre);
+                countryMap.set(String(c.id), c.nombre);
+                if (typeof c.id === 'string' && !isNaN(Number(c.id))) {
+                    countryMap.set(Number(c.id), c.nombre);
+                }
+            });
 
             // Configuración de columnas y joins por entidad
             let selectStr = '*';
@@ -589,7 +600,7 @@ export default function InformesPage() {
                         if (minProbabilidad && oppProb < Number(minProbabilidad)) return;
 
                         const quote = quotesData.find(q => q.opportunity_id === oppId && q.status === 'WINNER')
-                                   || quotesData.find(q => q.opportunity_id === oppId);
+                            || quotesData.find(q => q.opportunity_id === oppId);
 
                         if (!quote || !quote.items || quote.items.length === 0) return;
 
@@ -679,7 +690,7 @@ export default function InformesPage() {
             if (selectedEntidad === 'oportunidades') {
                 selectStr = `
                     *,
-                    cuenta:CRM_Cuentas(nombre, canal_id),
+                    cuenta:CRM_Cuentas(nombre, canal_id, pais_id),
                     fase:CRM_FasesOportunidad(nombre, canal_id),
                     estado_info:CRM_EstadosOportunidad(nombre)
                 `;
@@ -688,6 +699,7 @@ export default function InformesPage() {
                     { header: 'FECHA CREACIÓN', key: 'created_at', width: 20 },
                     { header: 'NOMBRE OPORTUNIDAD', key: 'nombre', width: 35 },
                     { header: 'CUENTA', key: 'cuenta_nombre', width: 35 },
+                    { header: 'PAÍS', key: 'pais_nombre', width: 20 },
                     { header: 'CANAL', key: 'canal_nombre' },
                     { header: 'VENDEDOR', key: 'vendedor_nombre', width: 25 },
                     { header: 'ESTADO', key: 'estado_nombre', width: 15 },
@@ -704,26 +716,15 @@ export default function InformesPage() {
                     { header: 'COMENTARIOS PÉRDIDA', key: 'comentarios_perdida', width: 40 },
                     { header: 'CREADO POR', key: 'creador_nombre', width: 25 }
                 ];
-                flattenFn = (item: any) => {
-                    const cuentaObj = getJoinedSingle(item.cuenta);
-                    const faseObj = getJoinedSingle(item.fase);
-                    const estadoObj = getJoinedSingle(item.estado_info);
-                    return {
-                        ...item,
-                        cuenta_nombre: cuentaObj?.nombre || '-',
-                        fase_nombre: faseObj?.nombre || '-',
-                        estado_nombre: estadoObj?.nombre || '-',
-                        vendedor_nombre: userMap.get(item.owner_user_id) || '-',
-                        creador_nombre: userMap.get(item.created_by) || '-',
-                        segmento_nombre: segmentMap.get(item.segmento_id) || '-',
-                        canal_nombre: canalMap.get(faseObj?.canal_id || cuentaObj?.canal_id) || '-',
-                        departamento_nombre: deptMap.get(item.departamento_id) || '-',
-                        ciudad_nombre: cityMap.get(item.ciudad_id) || '-',
-                        probabilidad: item.probabilidad ?? item.probability ?? 0,
-                        probability: item.probabilidad ?? item.probability ?? 0,
-                        razon_perdida_label: item.razon_perdida_id ? (lossReasonMap.get(item.razon_perdida_id) || item.razon_perdida) : (item.razon_perdida || '-')
-                    };
-                };
+                flattenFn = (item: any) => mapOpportunityReportRow(item, {
+                    userMap,
+                    segmentMap,
+                    lossReasonMap,
+                    deptMap,
+                    cityMap,
+                    canalMap,
+                    countryMap
+                });
             } else if (selectedEntidad === 'cuentas') {
                 selectStr = '*';
                 columns = [
@@ -851,12 +852,12 @@ export default function InformesPage() {
 
             if (dateFrom) query = query.gte('created_at', `${dateFrom}T00:00:00Z`);
             if (dateTo) query = query.lte('created_at', `${dateTo}T23:59:59Z`);
-            
+
             if (selectedEntidad === 'actividades') {
                 if (dueDateFrom) query = query.gte('fecha_fin', `${dueDateFrom}T00:00:00Z`);
                 if (dueDateTo) query = query.lte('fecha_fin', `${dueDateTo}T23:59:59Z`);
             }
-            
+
             if (selectedUser) {
                 if (selectedEntidad === 'oportunidades' || selectedEntidad === 'cuentas') {
                     query = query.eq('owner_user_id', selectedUser);
@@ -988,7 +989,7 @@ export default function InformesPage() {
             </header>
 
             <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-                
+
                 {/* Entidad Selection Grid */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     {ENTIDADES.map(ent => (
@@ -997,8 +998,8 @@ export default function InformesPage() {
                             onClick={() => setSelectedEntidad(ent.id)}
                             className={cn(
                                 "relative flex flex-col items-center justify-center p-6 rounded-2xl border-2 transition-all duration-200 gap-3 group text-left",
-                                selectedEntidad === ent.id 
-                                    ? "bg-blue-50 border-blue-500/50 shadow-md shadow-blue-500/10" 
+                                selectedEntidad === ent.id
+                                    ? "bg-blue-50 border-blue-500/50 shadow-md shadow-blue-500/10"
                                     : "bg-white border-transparent shadow-sm hover:shadow-md hover:border-slate-200"
                             )}
                         >
@@ -1038,7 +1039,7 @@ export default function InformesPage() {
                     </CardHeader>
 
                     <CardContent className="p-6 bg-white grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                        
+
                         {/* Rango de Fechas (Creación) */}
                         <div className="space-y-3 col-span-1 lg:col-span-2">
                             <label className="text-sm font-semibold text-slate-700 flex items-center gap-2">
@@ -1048,19 +1049,19 @@ export default function InformesPage() {
                             <div className="grid grid-cols-2 gap-3">
                                 <div className="relative">
                                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-500 font-medium">Desde</span>
-                                    <input 
-                                        type="date" 
-                                        value={dateFrom} 
-                                        onChange={e => setDateFrom(e.target.value)} 
+                                    <input
+                                        type="date"
+                                        value={dateFrom}
+                                        onChange={e => setDateFrom(e.target.value)}
                                         className="w-full pl-12 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:bg-white transition-all text-sm"
                                     />
                                 </div>
                                 <div className="relative">
                                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-500 font-medium">Hasta</span>
-                                    <input 
-                                        type="date" 
-                                        value={dateTo} 
-                                        onChange={e => setDateTo(e.target.value)} 
+                                    <input
+                                        type="date"
+                                        value={dateTo}
+                                        onChange={e => setDateTo(e.target.value)}
                                         className="w-full pl-12 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:bg-white transition-all text-sm"
                                     />
                                 </div>
@@ -1077,19 +1078,19 @@ export default function InformesPage() {
                                 <div className="grid grid-cols-2 gap-3">
                                     <div className="relative">
                                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-500 font-medium">Desde</span>
-                                        <input 
-                                            type="date" 
-                                            value={dueDateFrom} 
-                                            onChange={e => setDueDateFrom(e.target.value)} 
+                                        <input
+                                            type="date"
+                                            value={dueDateFrom}
+                                            onChange={e => setDueDateFrom(e.target.value)}
                                             className="w-full pl-12 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-amber-500 focus:border-amber-500 focus:bg-white transition-all text-sm"
                                         />
                                     </div>
                                     <div className="relative">
                                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-500 font-medium">Hasta</span>
-                                        <input 
-                                            type="date" 
-                                            value={dueDateTo} 
-                                            onChange={e => setDueDateTo(e.target.value)} 
+                                        <input
+                                            type="date"
+                                            value={dueDateTo}
+                                            onChange={e => setDueDateTo(e.target.value)}
                                             className="w-full pl-12 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-amber-500 focus:border-amber-500 focus:bg-white transition-all text-sm"
                                         />
                                     </div>
@@ -1100,7 +1101,7 @@ export default function InformesPage() {
                         {/* Asesor Comercial */}
                         <div className="space-y-3">
                             <label className="text-sm font-semibold text-slate-700">Asesor Comercial</label>
-                            <SearchableSelect 
+                            <SearchableSelect
                                 options={asesorOptions}
                                 value={selectedUser}
                                 onChange={setSelectedUser}
@@ -1113,7 +1114,7 @@ export default function InformesPage() {
                         {(selectedEntidad === 'oportunidades' || selectedEntidad === 'cuentas' || selectedEntidad === 'sop') && (
                             <div className="space-y-3">
                                 <label className="text-sm font-semibold text-slate-700">Canal de Venta</label>
-                                <SearchableSelect 
+                                <SearchableSelect
                                     options={canalOptions}
                                     value={selectedCanal}
                                     onChange={setSelectedCanal}
@@ -1127,7 +1128,7 @@ export default function InformesPage() {
                         {(selectedEntidad === 'oportunidades' || selectedEntidad === 'sop') && (
                             <div className="space-y-3">
                                 <label className="text-sm font-semibold text-slate-700">Estado Oportunidad</label>
-                                <SearchableSelect 
+                                <SearchableSelect
                                     options={estadoOppOptions}
                                     value={selectedEstado}
                                     onChange={setSelectedEstado}
@@ -1141,7 +1142,7 @@ export default function InformesPage() {
                         {selectedEntidad === 'oportunidades' && (
                             <div className="space-y-3">
                                 <label className="text-sm font-semibold text-slate-700">Fase de Oportunidad</label>
-                                <SearchableSelect 
+                                <SearchableSelect
                                     options={faseOptions}
                                     value={selectedFase}
                                     onChange={setSelectedFase}
@@ -1155,7 +1156,7 @@ export default function InformesPage() {
                         {selectedEntidad === 'oportunidades' && (
                             <div className="space-y-3">
                                 <label className="text-sm font-semibold text-slate-700">Segmento de Mercado</label>
-                                <SearchableSelect 
+                                <SearchableSelect
                                     options={segmentoOptions}
                                     value={selectedSegmento}
                                     onChange={setSelectedSegmento}
@@ -1169,10 +1170,10 @@ export default function InformesPage() {
                         {selectedEntidad === 'oportunidades' && (
                             <div className="space-y-3">
                                 <label className="text-sm font-semibold text-slate-700">Origen de Oportunidad</label>
-                                <input 
-                                    type="text" 
-                                    placeholder="Ej. Web, Feria, Referido" 
-                                    value={selectedOrigen} 
+                                <input
+                                    type="text"
+                                    placeholder="Ej. Web, Feria, Referido"
+                                    value={selectedOrigen}
                                     onChange={e => setSelectedOrigen(e.target.value)}
                                     className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-sm"
                                 />
@@ -1187,17 +1188,17 @@ export default function InformesPage() {
                                     Rango de Valor ($)
                                 </label>
                                 <div className="grid grid-cols-2 gap-3">
-                                    <input 
-                                        type="number" 
-                                        placeholder="Monto Mínimo" 
-                                        value={minAmount} 
+                                    <input
+                                        type="number"
+                                        placeholder="Monto Mínimo"
+                                        value={minAmount}
                                         onChange={e => setMinAmount(e.target.value)}
                                         className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all text-sm"
                                     />
-                                    <input 
-                                        type="number" 
-                                        placeholder="Monto Máximo" 
-                                        value={maxAmount} 
+                                    <input
+                                        type="number"
+                                        placeholder="Monto Máximo"
+                                        value={maxAmount}
                                         onChange={e => setMaxAmount(e.target.value)}
                                         className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-all text-sm"
                                     />
@@ -1213,7 +1214,7 @@ export default function InformesPage() {
                                         <MapPin className="w-4 h-4 text-slate-400" />
                                         Departamento
                                     </label>
-                                    <SearchableSelect 
+                                    <SearchableSelect
                                         options={deptOptions}
                                         value={selectedDept}
                                         onChange={val => { setSelectedDept(val); setSelectedCiudad(''); }}
@@ -1224,7 +1225,7 @@ export default function InformesPage() {
 
                                 <div className="space-y-3">
                                     <label className="text-sm font-semibold text-slate-700">Ciudad</label>
-                                    <SearchableSelect 
+                                    <SearchableSelect
                                         options={ciudadOptions}
                                         value={selectedCiudad}
                                         onChange={setSelectedCiudad}
@@ -1239,7 +1240,7 @@ export default function InformesPage() {
                         {selectedEntidad === 'cuentas' && (
                             <div className="space-y-3">
                                 <label className="text-sm font-semibold text-slate-700">Tipo de Cliente (Premium)</label>
-                                <SearchableSelect 
+                                <SearchableSelect
                                     options={premiumOptions}
                                     value={selectedEsPremium}
                                     onChange={setSelectedEsPremium}
@@ -1253,10 +1254,10 @@ export default function InformesPage() {
                         {selectedEntidad === 'contactos' && (
                             <div className="space-y-3">
                                 <label className="text-sm font-semibold text-slate-700">Cargo / Rol de Decisión</label>
-                                <input 
-                                    type="text" 
-                                    placeholder="Ej. Gerente, Director de Obra, Comprador" 
-                                    value={selectedCargo} 
+                                <input
+                                    type="text"
+                                    placeholder="Ej. Gerente, Director de Obra, Comprador"
+                                    value={selectedCargo}
                                     onChange={e => setSelectedCargo(e.target.value)}
                                     className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-sm"
                                 />
@@ -1267,7 +1268,7 @@ export default function InformesPage() {
                         {selectedEntidad === 'cotizaciones' && (
                             <div className="space-y-3">
                                 <label className="text-sm font-semibold text-slate-700">Estado de Cotización</label>
-                                <SearchableSelect 
+                                <SearchableSelect
                                     options={estadoCotizacionOptions}
                                     value={selectedEstadoCotizacion}
                                     onChange={setSelectedEstadoCotizacion}
@@ -1282,7 +1283,7 @@ export default function InformesPage() {
                             <>
                                 <div className="space-y-3">
                                     <label className="text-sm font-semibold text-slate-700">Estado de Cumplimiento</label>
-                                    <SearchableSelect 
+                                    <SearchableSelect
                                         options={cumplimientoActividadOptions}
                                         value={selectedEstadoCumplimiento}
                                         onChange={setSelectedEstadoCumplimiento}
@@ -1293,7 +1294,7 @@ export default function InformesPage() {
 
                                 <div className="space-y-3">
                                     <label className="text-sm font-semibold text-slate-700">Tipo de Actividad</label>
-                                    <SearchableSelect 
+                                    <SearchableSelect
                                         options={tipoActividadOptions}
                                         value={selectedTipoActividad}
                                         onChange={setSelectedTipoActividad}
@@ -1304,7 +1305,7 @@ export default function InformesPage() {
 
                                 <div className="space-y-3">
                                     <label className="text-sm font-semibold text-slate-700">Clasificación</label>
-                                    <SearchableSelect 
+                                    <SearchableSelect
                                         options={clasificacionActividadOptions}
                                         value={selectedClasificacion}
                                         onChange={val => { setSelectedClasificacion(val); setSelectedSubclasificacion(''); }}
@@ -1315,7 +1316,7 @@ export default function InformesPage() {
 
                                 <div className="space-y-3">
                                     <label className="text-sm font-semibold text-slate-700">Subclasificación</label>
-                                    <SearchableSelect 
+                                    <SearchableSelect
                                         options={subclasificacionActividadOptions}
                                         value={selectedSubclasificacion}
                                         onChange={setSelectedSubclasificacion}
@@ -1331,7 +1332,7 @@ export default function InformesPage() {
                             <>
                                 <div className="space-y-3">
                                     <label className="text-sm font-semibold text-slate-700">Año Facturación (S&OP)</label>
-                                    <SearchableSelect 
+                                    <SearchableSelect
                                         options={sopAnioOptions}
                                         value={selectedSopAnio}
                                         onChange={setSelectedSopAnio}
@@ -1342,7 +1343,7 @@ export default function InformesPage() {
 
                                 <div className="space-y-3">
                                     <label className="text-sm font-semibold text-slate-700">Mes Comercial (S&OP)</label>
-                                    <SearchableSelect 
+                                    <SearchableSelect
                                         options={sopMesOptions}
                                         value={selectedSopMes}
                                         onChange={setSelectedSopMes}
@@ -1353,7 +1354,7 @@ export default function InformesPage() {
 
                                 <div className="space-y-3">
                                     <label className="text-sm font-semibold text-slate-700">Planta</label>
-                                    <SearchableSelect 
+                                    <SearchableSelect
                                         options={sopPlantaOptions}
                                         value={selectedPlanta}
                                         onChange={setSelectedPlanta}
@@ -1364,7 +1365,7 @@ export default function InformesPage() {
 
                                 <div className="space-y-3">
                                     <label className="text-sm font-semibold text-slate-700">Familia de Producto</label>
-                                    <SearchableSelect 
+                                    <SearchableSelect
                                         options={sopFamiliaOptions}
                                         value={selectedFamilia}
                                         onChange={setSelectedFamilia}
@@ -1375,10 +1376,10 @@ export default function InformesPage() {
 
                                 <div className="space-y-3">
                                     <label className="text-sm font-semibold text-slate-700">Probabilidad Mínima (%)</label>
-                                    <input 
-                                        type="number" 
-                                        placeholder="Ej. 70" 
-                                        value={minProbabilidad} 
+                                    <input
+                                        type="number"
+                                        placeholder="Ej. 70"
+                                        value={minProbabilidad}
                                         onChange={e => setMinProbabilidad(e.target.value)}
                                         className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-sm"
                                     />
@@ -1386,7 +1387,7 @@ export default function InformesPage() {
 
                                 <div className="space-y-3">
                                     <label className="text-sm font-semibold text-slate-700">Quincena</label>
-                                    <SearchableSelect 
+                                    <SearchableSelect
                                         options={sopQuincenaOptions}
                                         value={selectedQuincena}
                                         onChange={setSelectedQuincena}
@@ -1397,7 +1398,7 @@ export default function InformesPage() {
 
                                 <div className="space-y-3">
                                     <label className="text-sm font-semibold text-slate-700">Tipo de Registro</label>
-                                    <SearchableSelect 
+                                    <SearchableSelect
                                         options={sopTipoRegistroOptions}
                                         value={selectedTipoSop}
                                         onChange={setSelectedTipoSop}
@@ -1409,7 +1410,7 @@ export default function InformesPage() {
                         )}
 
                     </CardContent>
-                    
+
                     {/* Botones de acción inferior */}
                     <div className="bg-slate-50/80 px-6 py-5 border-t border-slate-100 flex flex-col sm:flex-row justify-end gap-3">
                         <button

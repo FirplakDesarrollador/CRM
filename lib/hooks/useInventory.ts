@@ -29,6 +29,7 @@ export interface InventoryMovement {
     created_at: string;
     updated_at: string;
     producto?: { numero_articulo: string; descripcion: string } | null;
+    oportunidad?: { id: string; nombre: string; canal?: string | null } | null;
 }
 
 export interface InventoryMovementInput {
@@ -41,6 +42,53 @@ export interface InventoryMovementInput {
     notas?: string | null;
 }
 
+export function extractOpportunityIdsFromMovements(movements: InventoryMovement[]): string[] {
+    const ids = new Set<string>();
+    for (const m of movements) {
+        if (m.referencia_id) {
+            ids.add(m.referencia_id);
+        }
+    }
+    return Array.from(ids);
+}
+
+export function enrichMovementsWithOpportunities(
+    movements: InventoryMovement[],
+    opportunitiesMap: Map<string, { id: string; nombre: string; canal?: string | null }>
+): InventoryMovement[] {
+    return movements.map(m => {
+        const opp = m.referencia_id ? opportunitiesMap.get(m.referencia_id) || null : null;
+        return {
+            ...m,
+            oportunidad: opp,
+        };
+    });
+}
+
+export async function fetchOpportunitiesForMovements(
+    opportunityIds: string[]
+): Promise<Map<string, { id: string; nombre: string; canal?: string | null }>> {
+    if (opportunityIds.length === 0) return new Map();
+    try {
+        const { data, error } = await supabase
+            .from("CRM_Oportunidades")
+            .select("id, nombre, canal_id")
+            .in("id", opportunityIds);
+        if (error) {
+            console.warn("Error consultando oportunidades para inventario:", error.message);
+            return new Map();
+        }
+        const map = new Map<string, { id: string; nombre: string; canal?: string | null }>();
+        for (const row of data || []) {
+            map.set(row.id, { id: row.id, nombre: row.nombre || "Oportunidad sin nombre", canal: row.canal_id });
+        }
+        return map;
+    } catch (err) {
+        console.warn("Excepcion consultando oportunidades para inventario:", err);
+        return new Map();
+    }
+}
+
 export async function fetchInventorySummary(productIds?: string[]) {
     if (productIds && productIds.length === 0) return [];
     try {
@@ -49,7 +97,11 @@ export async function fetchInventorySummary(productIds?: string[]) {
             .select("producto_id, numero_articulo, descripcion, entradas, salidas, reservas, existencia_fisica, disponible")
             .order("numero_articulo");
 
-        if (productIds?.length) query = query.in("producto_id", productIds);
+        if (productIds?.length) {
+            query = query.in("producto_id", productIds);
+        } else {
+            query = query.or("entradas.gt.0,salidas.gt.0,reservas.gt.0,existencia_fisica.gt.0,disponible.gt.0").limit(10000);
+        }
         const { data, error } = await query;
         if (error) {
             console.warn("Error consultando CRM_InventarioDisponible:", error.message);
@@ -93,29 +145,69 @@ export async function reserveFairInventory(
     if (error) throw error;
 }
 
+let globalInventorySummaryCache: InventorySummary[] | null = null;
+let globalInventoryPromise: Promise<InventorySummary[]> | null = null;
+
+export async function fetchInventorySummaryCached(force = false): Promise<InventorySummary[]> {
+    if (!force && globalInventorySummaryCache) return globalInventorySummaryCache;
+    if (!force && globalInventoryPromise) return globalInventoryPromise;
+
+    globalInventoryPromise = (async () => {
+        try {
+            const data = await fetchInventorySummary();
+            globalInventorySummaryCache = data;
+            return data;
+        } finally {
+            globalInventoryPromise = null;
+        }
+    })();
+
+    return globalInventoryPromise;
+}
+
 export function useInventorySummary(productIds?: string[]) {
-    const [summary, setSummary] = useState<InventorySummary[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
     const idsKey = productIds?.join(",") || "";
     const hasProductFilter = productIds !== undefined;
+    const isGlobal = !hasProductFilter;
+
+    const [summary, setSummary] = useState<InventorySummary[]>(() => {
+        if (isGlobal && globalInventorySummaryCache) return globalInventorySummaryCache;
+        return [];
+    });
+    const [isLoading, setIsLoading] = useState(() => {
+        if (isGlobal && globalInventorySummaryCache) return false;
+        return true;
+    });
+    const [error, setError] = useState<string | null>(null);
 
     const refresh = useCallback(async () => {
         setIsLoading(true);
         setError(null);
         try {
-            setSummary(await fetchInventorySummary(idsKey ? idsKey.split(",") : hasProductFilter ? [] : undefined));
+            if (isGlobal) {
+                const data = await fetchInventorySummaryCached(true);
+                setSummary(data);
+            } else {
+                setSummary(await fetchInventorySummary(idsKey ? idsKey.split(",") : hasProductFilter ? [] : undefined));
+            }
         } catch (queryError) {
             setSummary([]);
             setError(queryError instanceof Error ? queryError.message : "No se pudo consultar el inventario");
         } finally {
             setIsLoading(false);
         }
-    }, [idsKey, hasProductFilter]);
+    }, [idsKey, hasProductFilter, isGlobal]);
 
     useEffect(() => {
+        if (isGlobal && globalInventorySummaryCache) {
+            setSummary(globalInventorySummaryCache);
+            setIsLoading(false);
+            // Re-fetch in background without showing loader
+            fetchInventorySummaryCached(true).then(data => setSummary(data)).catch(() => {});
+            return;
+        }
         void refresh();
-    }, [refresh]);
+    }, [refresh, isGlobal]);
 
     return { summary, isLoading, error, refresh };
 }

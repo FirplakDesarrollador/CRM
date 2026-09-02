@@ -6,13 +6,14 @@ que determina su lista de precios.
 
 ## Campos clave
 
-- **Identificación:** `nombre`, `nit`, `nit_base` (para agrupar sucursales),
+- **Identificación:** `nombre`, `nit`, `nit_base` (para agrupar sucursales; si se omite al crear o editar, se autogenera un NIT alfanumérico provisional único `PROV-XXXXXXXX` mediante `lib/nitUtils.ts`),
   `id_cuenta_principal` (jerarquía casa matriz → sucursales).
 - **Canal:** `canal_id` (obligatorio) + `subclasificacion_id` opcional por canal
   (migraciones `20260119_subclassifications`, `20260212_add_propio_subclassifications`).
 - **Propietario:** `owner_user_id` (`20260218_add_account_owner.sql`), usado también por RLS.
 - **Nivel premium:** `es_premium` + `nivel_premium` jerárquico
   (`PREMIUM` > `DESTACADO` > `ACTIVO`), migración `20260113_premium_clients`.
+- **Origen de la cuenta:** `origen_cuenta` (opcional de texto, ej. Referido, Feria, Publicidad, Web, etc., migración `20260820_add_origen_cuenta.sql`).
 - **Descuentos:** `ignorar_limites_descuento` permite saltar los límites de descuento por
   volumen en cotizaciones (ver [[cotizaciones-y-pedidos]]).
 - **Geografía:** `pais_id` / `departamento_id` / `ciudad_id` contra catálogos de Colombia
@@ -21,18 +22,18 @@ que determina su lista de precios.
 ## UI
 
 - Creación mediante `app/cuentas/nueva/CreateAccountWizard.tsx`: wizard de 3 pasos
-  (información base, ubicación/contacto y clasificación). La cuenta solo se crea
+  (información base, ubicación/contacto con origen_cuenta, y clasificación). La cuenta solo se crea
   desde el último paso con `Crear Cuenta`; el submit está protegido contra avances
   o doble clics que intenten saltarse la clasificación.
 - Prueba E2E dev-only en `/e2e/cuentas-wizard` para validar el wizard sin depender
   de cookies de Supabase; en producción la ruta devuelve 404.
-- Listado con filtros (`AccountFilters`, `UserPickerFilter`), vista de galería de tarjetas premium responsiva en desktop y mobile. Columna de acciones editar/eliminar solo para ADMIN.
+- Listado con filtros (`AccountFilters`, `UserPickerFilter`): vista móvil con tarjetas responsivas y vista desktop con tabla interactiva (Handsontable) donde la edición se activa directamente al hacer clic/seleccionar la fila.
 - Detalle con pestañas: contactos, oportunidades, actividades, sucursales (branches) y
   asignados (`components/cuentas/Account*Tab.tsx`).
 - Formulario `AccountForm` con pestañas (usa `shouldUnregister: false` — ver
-  `bugs-knowhow.md` §1).
+  `bugs-knowhow.md` §1) y botón de eliminación visible en el encabezado y en los footers de todas las pestañas.
 - Carga masiva de cuentas: `BulkAccountUploader` + API `app/api/bulk-accounts`.
-- Borrado solo ADMIN (`delete_account`), con modal de confirmación `AccountDeleteModal`.
+- Borrado (`delete_account` / `AccountDeleteModal`): funcionalidad restringida estrictamente a usuarios con rol `ADMIN` (`isAdmin`), con modal de confirmación que permite borrado en cascada de la cuenta junto con sus contactos y oportunidades asociadas (además de permitir borrado individual de registros relacionados).
 
 ## Auditoría
 
@@ -53,4 +54,4 @@ que determina su lista de precios.
 - `app/e2e/cuentas-wizard/page.tsx`, `e2e/create_account_wizard.spec.ts`,
   `playwright.e2e.config.ts`
 - `lib/hooks/useAccounts.ts`, `useAccountsServer.ts`, `lib/db.ts` (interfaz `LocalCuenta`)
-- Migraciones: `20260108_sales_channels`, `20260113_premium_clients`, `20260119_subclassifications`, `20260218_add_account_owner`
+- Migraciones: `20260108_sales_channels`, `20260113_premium_clients`, `20260119_subclassifications`, `20260218_add_account_owner`, `20260820_add_origen_cuenta`, `20260821_backfill_account_origin_from_opportunities`

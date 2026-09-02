@@ -5,7 +5,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { useOpportunities } from "@/lib/hooks/useOpportunities";
 import { useAccounts } from "@/lib/hooks/useAccounts";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronRight, Check } from "lucide-react";
 import { cn } from "@/components/ui/utils";
@@ -19,6 +19,8 @@ import { useConfig } from "@/lib/hooks/useConfig";
 import { CollaboratorSelector, CollaboratorEntry } from "@/components/oportunidades/CollaboratorSelector";
 import { useUsers } from "@/lib/hooks/useUsers";
 import { useFormDraft } from "@/lib/hooks/useFormDraft";
+import { MultiSelect } from "@/components/ui/MultiSelect";
+import { OPPORTUNITY_CATEGORIES, parseOpportunityCategories, formatOpportunityCategories } from "@/lib/opportunityCategories";
 
 const STEP_LABELS = ["Cuenta", "Datos del Negocio", "Productos", "Equipo"];
 const LAST_STEP_INDEX = STEP_LABELS.length - 1;
@@ -38,10 +40,12 @@ const schema = z.object({
     origen_oportunidad: z.string().optional().nullable(),
     url_origen: z.string().optional().nullable(),
     fuente_conversion: z.string().optional().nullable(),
-    categoria_oportunidad: z.string().optional().nullable(),
+    categoria_oportunidad: z.union([z.array(z.string()), z.string()]).optional().nullable(),
     probability: z.coerce.number().min(0).max(100).default(0).optional().nullable(),
     comentarios: z.string().optional().nullable(),
     direccion_entrega: z.string().optional().nullable(),
+    contactos_ids: z.array(z.string()).optional().default([]),
+    clientes_atendidos: z.coerce.number().min(0).optional().default(1),
     items: z.array(z.object({
         product_id: z.string(),
         cantidad: z.number().min(1),
@@ -73,42 +77,54 @@ export default function CreateOpportunityWizard() {
     const [fallbackDepartments, setFallbackDepartments] = useState<any[]>([]);
     const [fallbackCities, setFallbackCities] = useState<any[]>([]);
 
-    // Catalogs for cities
+    // Catalogs for cities & segments
     const countriesList = useLiveQuery(() => db.countries.toArray()) || [];
     const departmentsList = useLiveQuery(() => db.departments.toArray()) || [];
     const citiesList = useLiveQuery(() => db.cities.toArray()) || [];
+    const dbSegments = useLiveQuery(() => db.segments.toArray()) || [];
 
     const [phasesLoading, setPhasesLoading] = useState(false);
     const [phasesError, setPhasesError] = useState<string | null>(null);
     const [collaborators, setCollaborators] = useState<CollaboratorEntry[]>([]);
 
     useEffect(() => {
-        // Fetch all segments (small table, safe to fetch all)
+        // Fallback fetch for segments if local DB is empty
         const fetchSegments = async () => {
-            const { supabase } = await import("@/lib/supabase");
-            const { data } = await supabase.from('CRM_Segmentos').select('*');
-            if (data) setSegments(data);
+            if (dbSegments.length === 0) {
+                try {
+                    const { supabase } = await import("@/lib/supabase");
+                    const { data } = await supabase.from('CRM_Segmentos').select('*');
+                    if (data) setSegments(data);
+                } catch (e) {
+                    console.warn('[CreateOppWizard] Failed to fetch remote segments:', e);
+                }
+            }
         };
         fetchSegments();
 
         const fetchCatalogs = async () => {
-            const { supabase } = await import("@/lib/supabase");
-            if (countriesList.length === 0) {
-                const { data } = await supabase.from('CRM_Paises').select('*');
-                if (data) setFallbackCountries(data);
-            }
-            if (departmentsList.length === 0) {
-                const { data } = await supabase.from('CRM_Departamentos').select('*');
-                if (data) setFallbackDepartments(data);
-            }
-            if (citiesList.length === 0) {
-                const { data } = await supabase.from('CRM_Ciudades').select('*');
-                if (data) setFallbackCities(data);
+            try {
+                const { supabase } = await import("@/lib/supabase");
+                if (countriesList.length === 0) {
+                    const { data } = await supabase.from('CRM_Paises').select('*');
+                    if (data) setFallbackCountries(data);
+                }
+                if (departmentsList.length === 0) {
+                    const { data } = await supabase.from('CRM_Departamentos').select('*');
+                    if (data) setFallbackDepartments(data);
+                }
+                if (citiesList.length === 0) {
+                    const { data } = await supabase.from('CRM_Ciudades').select('*');
+                    if (data) setFallbackCities(data);
+                }
+            } catch (e) {
+                console.warn('[CreateOppWizard] Failed to fetch remote catalogs:', e);
             }
         };
         fetchCatalogs();
-    }, [countriesList.length, departmentsList.length, citiesList.length]);
+    }, [countriesList.length, departmentsList.length, citiesList.length, dbSegments.length]);
 
+    const displaySegments = dbSegments.length > 0 ? dbSegments : segments;
     const displayCountries = countriesList.length > 0 ? countriesList : fallbackCountries;
     const displayDepartments = departmentsList.length > 0 ? departmentsList : fallbackDepartments;
     const displayCities = citiesList.length > 0 ? citiesList : fallbackCities;
@@ -180,6 +196,8 @@ export default function CreateOpportunityWizard() {
             probability: 0,
             comentarios: '',
             direccion_entrega: '',
+            contactos_ids: [],
+            clientes_atendidos: 1,
             items: [],
             owner_user_id: ''
         },
@@ -195,6 +213,18 @@ export default function CreateOpportunityWizard() {
         trigger,
         reset
     } = form;
+
+    const localAccountContacts = useLiveQuery(
+        () => selectedAccount ? db.contacts.where('account_id').equals(selectedAccount.id).filter(c => !c.is_deleted).toArray() : [],
+        [selectedAccount?.id]
+    ) || [];
+
+    const contactOptions = useMemo(() => {
+        return localAccountContacts.map(c => ({
+            value: c.id,
+            label: `${c.nombre}${c.cargo ? ` (${c.cargo})` : ''}${c.telefono ? ` - ${c.telefono}` : ''}`
+        }));
+    }, [localAccountContacts]);
 
     const { hasDraft, clearDraft } = useFormDraft(form, 'crm_draft_opportunity', true);
 
@@ -500,6 +530,9 @@ export default function CreateOpportunityWizard() {
                 ciudad_id: data.ciudad_id ? Number(data.ciudad_id) : null,
                 segmento_id: data.segmento_id ? Number(data.segmento_id) : null,
                 probability: data.probability ? Number(data.probability) : 0,
+                categoria_oportunidad: formatOpportunityCategories(data.categoria_oportunidad as any) || undefined,
+                contactos_ids: data.contactos_ids || [],
+                clientes_atendidos: data.clientes_atendidos !== undefined && data.clientes_atendidos !== null && data.clientes_atendidos !== "" ? Number(data.clientes_atendidos) : 0,
                 collaborators: collaborators
             };
 
@@ -820,6 +853,48 @@ export default function CreateOpportunityWizard() {
                                 <input type="date" {...register("fecha_cierre_estimada")} className="w-full p-2 border rounded-lg" />
                             </div>
                         </div>
+
+                        {/* CONTACTOS VINCULADOS & CLIENTES ATENDIDOS */}
+                        {contactOptions.length > 0 && (
+                            <div>
+                                <label className="text-sm font-medium">Contactos vinculados (Selección múltiple)</label>
+                                <MultiSelect
+                                    options={contactOptions}
+                                    selected={watch("contactos_ids") || []}
+                                    onChange={(vals) => {
+                                        setValue("contactos_ids", vals);
+                                        setValue("clientes_atendidos", vals.length > 0 ? vals.length : 1);
+                                    }}
+                                    placeholder="Seleccionar contactos de la cuenta..."
+                                    className="mt-1"
+                                />
+                            </div>
+                        )}
+
+                        <div>
+                            <label className="text-sm font-medium">Clientes atendidos</label>
+                            <input 
+                                type="number" 
+                                min="0" 
+                                {...register("clientes_atendidos")} 
+                                className="w-full p-2 border rounded-lg mt-1" 
+                                placeholder="1" 
+                            />
+                            <p className="text-[10px] text-slate-500 mt-0.5">
+                                Contabiliza cuántos clientes o personas se atendieron en esta oportunidad.
+                            </p>
+                        </div>
+
+                        <div>
+                            <label className="text-sm font-medium">Categorías de Interés (Opcional)</label>
+                            <MultiSelect
+                                options={OPPORTUNITY_CATEGORIES}
+                                selected={parseOpportunityCategories(watch("categoria_oportunidad"))}
+                                onChange={(vals) => setValue("categoria_oportunidad", vals, { shouldValidate: true })}
+                                placeholder="Seleccionar categorías..."
+                                className="mt-1"
+                            />
+                        </div>
                         
                         <div>
                             <label className="text-sm font-medium">Comentarios / Observaciones</label>
@@ -838,7 +913,9 @@ export default function CreateOpportunityWizard() {
                     <div className="space-y-6">
                         <div className="flex justify-between items-center">
                             <h2 className="text-lg font-semibold">Productos del Negocio</h2>
-                            <span className="text-sm font-bold text-blue-600">Total: {watch("currency_id")} {new Intl.NumberFormat().format((amount as number) || 0)}</span>
+                            <span className="text-xs sm:text-sm font-bold text-blue-600">
+                                Total: {watch("currency_id")} {new Intl.NumberFormat('es-CO', { maximumFractionDigits: 0 }).format(Math.round((amount as number) || 0))}
+                            </span>
                         </div>
 
                         {/* Product Search */}
@@ -848,20 +925,20 @@ export default function CreateOpportunityWizard() {
                             </div>
                             <input
                                 type="text"
-                                className="block w-full pl-10 pr-3 py-2 border border-slate-200 rounded-lg leading-5 bg-slate-50 placeholder-slate-400 focus:outline-none focus:bg-white focus:ring-1 focus:ring-blue-500 sm:text-sm"
+                                className="block w-full pl-10 pr-3 py-2 border border-slate-200 rounded-lg leading-5 bg-slate-50 placeholder-slate-400 focus:outline-none focus:bg-white focus:ring-1 focus:ring-blue-500 text-xs sm:text-sm"
                                 placeholder="Buscar productos por nombre o código..."
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
                             />
                             {searchTerm && (
-                                <div className="absolute z-10 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-xl max-h-60 overflow-y-auto">
+                                <div className="absolute z-20 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-xl max-h-60 overflow-y-auto divide-y divide-slate-100">
                                     {isSearching ? (
-                                        <div className="p-4 text-center text-slate-500 text-sm flex items-center justify-center gap-2">
+                                        <div className="p-4 text-center text-slate-500 text-xs sm:text-sm flex items-center justify-center gap-2">
                                             <Loader2 className="w-4 h-4 animate-spin" />
                                             Buscando...
                                         </div>
                                     ) : searchResults.length === 0 ? (
-                                        <div className="p-4 text-center text-slate-500 text-sm">No se encontraron productos</div>
+                                        <div className="p-4 text-center text-slate-500 text-xs sm:text-sm">No se encontraron productos</div>
                                     ) : (
                                         searchResults.map((product: PriceListProduct) => {
                                             const channel = selectedAccount?.canal_id || 'DIST_NAC';
@@ -875,19 +952,30 @@ export default function CreateOpportunityWizard() {
                                             }
                                             if (Number(displayPrice) === 0) displayPrice = Number(product.lista_base_cop) || Number(product.pvp_sin_iva) || 0;
 
+                                            const formattedPrice = new Intl.NumberFormat('es-CO', {
+                                                maximumFractionDigits: 0,
+                                                minimumFractionDigits: 0
+                                            }).format(Math.round(displayPrice));
+
                                             return (
                                                 <button
                                                     key={product.id}
                                                     type="button"
                                                     onClick={() => addProduct(product)}
-                                                    className="w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center justify-between border-b last:border-0"
+                                                    className="w-full text-left px-3 py-2 sm:px-4 sm:py-2.5 hover:bg-blue-50/70 flex items-center justify-between gap-2 border-b last:border-0 transition-colors group cursor-pointer"
                                                 >
-                                                    <div>
-                                                        <div className="font-medium text-slate-900">{product.descripcion}</div>
-                                                        <div className="text-xs text-slate-500">{product.numero_articulo}</div>
+                                                    <div className="flex-1 min-w-0 pr-2">
+                                                        <div className="font-medium text-xs sm:text-sm text-slate-900 line-clamp-2 leading-snug group-hover:text-blue-700">
+                                                            {product.descripcion}
+                                                        </div>
+                                                        <div className="text-[11px] text-slate-400 mt-0.5">
+                                                            {product.numero_articulo}
+                                                        </div>
                                                     </div>
-                                                    <div className="text-sm font-bold text-blue-600">
-                                                        {currencyId} {new Intl.NumberFormat().format(displayPrice)}
+                                                    <div className="shrink-0 text-right">
+                                                        <span className="inline-block text-[11px] sm:text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100 whitespace-nowrap">
+                                                            {currencyId} {formattedPrice}
+                                                        </span>
                                                     </div>
                                                 </button>
                                             );
@@ -905,50 +993,57 @@ export default function CreateOpportunityWizard() {
                                     <div className="text-xs text-slate-400">Usa la búsqueda para agregar productos desde la primera fase.</div>
                                 </div>
                             ) : (
-                                items.map((item: any, idx: number) => (
-                                    <div key={item.product_id} className="flex items-center gap-4 p-3 bg-white border border-slate-200 rounded-xl shadow-sm">
-                                        <div className="flex-1">
-                                            <div className="font-medium text-sm text-slate-800">{item.nombre}</div>
-                                            <div className="text-xs text-slate-500">{currencyId} {new Intl.NumberFormat().format(item.precio || 0)} c/u base</div>
-                                            {(Number(item.descuento_porcentaje) || 0) > 0 && (
-                                                <div className="text-xs text-emerald-600 font-medium mt-0.5">
-                                                    Precio con desc: {currencyId} {new Intl.NumberFormat().format((item.precio || 0) * (1 - (Number(item.descuento_porcentaje) || 0) / 100))} c/u
+                                items.map((item: any, idx: number) => {
+                                    const basePriceFormatted = new Intl.NumberFormat('es-CO', { maximumFractionDigits: 0 }).format(Math.round(item.precio || 0));
+                                    const discountedPrice = (item.precio || 0) * (1 - (Number(item.descuento_porcentaje) || 0) / 100);
+                                    const discountedPriceFormatted = new Intl.NumberFormat('es-CO', { maximumFractionDigits: 0 }).format(Math.round(discountedPrice));
+
+                                    return (
+                                        <div key={item.product_id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-white border border-slate-200 rounded-xl shadow-sm">
+                                            <div className="flex-1 min-w-0">
+                                                <div className="font-medium text-xs sm:text-sm text-slate-800 line-clamp-2 leading-snug">{item.nombre}</div>
+                                                <div className="text-[11px] sm:text-xs text-slate-500 mt-0.5">{currencyId} {basePriceFormatted} c/u base</div>
+                                                {(Number(item.descuento_porcentaje) || 0) > 0 && (
+                                                    <div className="text-[11px] sm:text-xs text-emerald-600 font-medium mt-0.5">
+                                                        Precio con desc: {currencyId} {discountedPriceFormatted} c/u
+                                                    </div>
+                                                )}
+                                            </div>
+                                            <div className="flex items-center justify-between sm:justify-end gap-2 border-t sm:border-t-0 pt-2 sm:pt-0">
+                                                <div className="flex flex-col items-center">
+                                                    <span className="text-[10px] text-slate-500 uppercase font-semibold mb-1">Cant.</span>
+                                                    <input
+                                                        type="number"
+                                                        className="w-16 p-1 border rounded text-center text-xs sm:text-sm"
+                                                        value={isNaN(item.cantidad) ? "" : item.cantidad}
+                                                        onChange={(e) => updateQuantity(item.product_id, parseInt(e.target.value))}
+                                                    />
                                                 </div>
-                                            )}
-                                        </div>
-                                        <div className="flex items-center gap-2 mt-2 sm:mt-0">
-                                            <div className="flex flex-col items-center">
-                                                <span className="text-[10px] text-slate-500 uppercase font-semibold mb-1">Cant.</span>
-                                                <input
-                                                    type="number"
-                                                    className="w-16 p-1 border rounded text-center text-sm"
-                                                    value={isNaN(item.cantidad) ? "" : item.cantidad}
-                                                    onChange={(e) => updateQuantity(item.product_id, parseInt(e.target.value))}
-                                                />
-                                            </div>
-                                            <div className="flex flex-col items-center">
-                                                <span className="text-[10px] text-slate-500 uppercase font-semibold mb-1">Desc %</span>
-                                                <input
-                                                    type="number"
-                                                    min="0"
-                                                    max="100"
-                                                    className="w-16 p-1 border rounded text-center text-sm"
-                                                    value={item.descuento_porcentaje === "" ? "" : (item.descuento_porcentaje ?? 0)}
-                                                    onChange={(e) => updateDiscount(item.product_id, e.target.value)}
-                                                />
-                                            </div>
-                                            <div className="flex flex-col items-center justify-end h-full mt-4">
-                                                <button
-                                                    type="button"
-                                                    onClick={() => removeProduct(item.product_id)}
-                                                    className="p-1.5 text-red-500 hover:bg-red-50 rounded"
-                                                >
-                                                    <Trash2 className="w-5 h-5" />
-                                                </button>
+                                                <div className="flex flex-col items-center">
+                                                    <span className="text-[10px] text-slate-500 uppercase font-semibold mb-1">Desc %</span>
+                                                    <input
+                                                        type="number"
+                                                        min="0"
+                                                        max="100"
+                                                        className="w-16 p-1 border rounded text-center text-xs sm:text-sm"
+                                                        value={item.descuento_porcentaje === "" ? "" : (item.descuento_porcentaje ?? 0)}
+                                                        onChange={(e) => updateDiscount(item.product_id, e.target.value)}
+                                                    />
+                                                </div>
+                                                <div className="flex flex-col items-center justify-end h-full mt-3">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => removeProduct(item.product_id)}
+                                                        className="p-1.5 text-red-500 hover:bg-red-50 rounded"
+                                                        title="Eliminar producto"
+                                                    >
+                                                        <Trash2 className="w-4 h-4 sm:w-5 sm:h-5" />
+                                                    </button>
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
-                                ))
+                                    );
+                                })
                             )}
                         </div>
                     </div>

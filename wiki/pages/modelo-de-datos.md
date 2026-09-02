@@ -8,10 +8,10 @@ mantiene un espejo local en IndexedDB vía Dexie (`lib/db.ts`) con interfaces `L
 
 | Tabla | Contenido |
 |---|---|
-| `CRM_Usuarios` | Usuarios de la app, rol, `allowed_modules`, coordinadores. Ver [[roles-y-permisos]] |
+| `CRM_Usuarios` | Usuarios de la app, rol, `allowed_modules`, coordinadores, ubicación geográfica (`paises`, `departamentos`), canales asignados (`canales`). Ver [[roles-y-permisos]] |
 | `CRM_Cuentas` | Clientes/empresas: NIT, canal (`canal_id`), propietario, nivel premium, geografía. Ver [[cuentas]] |
 | `CRM_Contactos` | Personas asociadas a cuentas. Ver [[contactos]] |
-| `CRM_Oportunidades` | Negocios en curso: fase, estado, probabilidad, motivo de pérdida. Ver [[oportunidades]] |
+| `CRM_Oportunidades` | Negocios en curso: fase, estado, probabilidad, motivo de pérdida, `contactos_ids` (múltiples contactos vinculados), `clientes_atendidos`. Ver [[oportunidades]] |
 | `CRM_OportunidadColaboradores` | Colaboradores de una oportunidad (afecta reparto de [[comisiones]]) |
 | `CRM_TransferenciasOportunidad` | Historial de transferencias de oportunidades entre vendedores |
 | `CRM_Actividades` | Tareas, eventos, llamadas, visitas; con clasificación y subclasificación. Ver [[actividades]] |
@@ -20,7 +20,7 @@ mantiene un espejo local en IndexedDB vía Dexie (`lib/db.ts`) con interfaces `L
 | `CRM_Pedidos` / `CRM_PedidoItems` | Pedidos logísticos derivados de cotizaciones ganadoras (campos `EXTRA_` de SAP) |
 | `CRM_Productos` | Catálogo de productos |
 | `CRM_ListaDePrecios` | Precios por columna/canal, incluido `precio_feria`. Ver [[canales-de-venta]] |
-| `CRM_Canales` | Canales de venta y columna de precio asociada, incluido `FERIA`. Ver [[canales-de-venta]] |
+| `CRM_Canales` | Los 5 canales de venta inmutables y columna de precio asociada. Ver [[canales-de-venta]] |
 | `CRM_SapIntegrationQueue` | Cola de integración hacia SAP. Ver [[integraciones]] |
 | `CRM_Files` | Archivos adjuntos |
 | `CRM_Parameters` | Parámetros de configuración |
@@ -41,7 +41,7 @@ mantiene un espejo local en IndexedDB vía Dexie (`lib/db.ts`) con interfaces `L
 - **Subclasificaciones** (`20260119`, `20260212`): subclasificación de cuentas por canal.
 - **Auditoría**: `CRM_Audit_Cuentas` registra cambios en cuentas.
 - **S&OP** (`20260708_add_sop_columns`): campos `planta` y `familia` en `CRM_ListaDePrecios` y `CRM_Productos` para el informe de planificación.
-- **Tiendas-Ferias e inventario** (`20260716_stores_fairs_catalog_inventory`): `CRM_OrigenesOportunidad`, `CRM_InventarioMovimientos`, `CRM_InventarioMovimientoAuditoria` y la vista calculada `CRM_InventarioDisponible`. Las reservas reducen la disponibilidad para futuras salidas sin reducir la existencia física.
+- **Tiendas-Ferias e inventario** (`20260716_stores_fairs_catalog_inventory`): `CRM_OrigenesOportunidad`, `CRM_InventarioMovimientos`, `CRM_InventarioMovimientoAuditoria` y la vista calculada `CRM_InventarioDisponible`. Los movimientos (`CRM_InventarioMovimientos`) admiten vinculación directa a oportunidades vía `referencia_tipo` ('OPORTUNIDAD' / 'OPORTUNIDAD_FERIA') y `referencia_id` (`opportunity_id`), resolviéndose con enlaces interactivos en `/inventarios` tanto en el historial como en las tarjetas de productos con reservas. Las reservas reducen la disponibilidad para futuras salidas sin reducir la existencia física.
 
 ## Convenciones
 

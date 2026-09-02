@@ -700,6 +700,13 @@ export class SyncEngine {
                     if (updates.length < originalCount) {
                         console.log(`[Sync] Filtered out 'subtotal' generated column from CRM_CotizacionItems batch`);
                     }
+                    updates = updates.map(u => {
+                        if (u.field === '_complete_snapshot_' && u.value && typeof u.value === 'object') {
+                            const { subtotal, ...rest } = u.value;
+                            return { ...u, value: rest };
+                        }
+                        return u;
+                    });
                 }
 
                 // If filtering removed all updates for this table, skip it

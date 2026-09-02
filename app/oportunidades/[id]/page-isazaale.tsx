@@ -30,13 +30,15 @@ import { CollaboratorsTab } from "@/components/oportunidades/CollaboratorsTab";
 import { AssignedTab } from "@/components/oportunidades/AssignedTab";
 import { DollarSign } from "lucide-react";
 import { useSyncStore } from "@/lib/stores/useSyncStore";
+import { MultiSelect } from "@/components/ui/MultiSelect";
+import { OPPORTUNITY_CATEGORIES, parseOpportunityCategories, formatOpportunityCategories } from "@/lib/opportunityCategories";
 
 export default function OpportunityDetailPage() {
     const params = useParams();
     const router = useRouter();
     const id = params.id as string;
     const { opportunities, deleteOpportunity } = useOpportunities();
-    const { user: currentUser, role: userRole } = useCurrentUser();
+    const { user: currentUser, role: userRole, isAdmin } = useCurrentUser();
     const setIsLoadingData = useSyncStore(state => state.setIsLoadingData);
 
     const phases = useLiveQuery(() => db.phases.toArray());
@@ -180,7 +182,7 @@ export default function OpportunityDetailPage() {
                 }
                 backHref="/oportunidades?view=list"
                 actions={[
-                    ...(userRole === 'ADMIN' || userRole === 'COORDINADOR' || opportunity.owner_user_id === currentUser?.id || opportunity.created_by === currentUser?.id ? [{
+                    ...(userRole === 'ADMIN' || isAdmin ? [{
                         label: "Eliminar Oportunidad",
                         icon: Trash2,
                         variant: 'danger' as const,
@@ -259,13 +261,26 @@ export default function OpportunityDetailPage() {
 }
 
 const LOSS_REASONS = [
-    "Precio elevado",
-    "Compra en la competencia por precio",
-    "No contesta",
-    "Lo pospone",
-    "No va a comprar",
-    "Tiempos de entrega",
-    "No hay medida o color",
+    "N - No responde 1mer contacto",
+    "N- Sin información de contacto",
+    "N- Inadecuada Segmentación",
+    "N- No va a comprar",
+    "RED- Firplak Home",
+    "RED- Ser. Tecnico",
+    "RED- Distribución",
+    "RED- Obras",
+    "RED- MAC",
+    "INT - Abandona Conversación",
+    "INT - Precio Elevado",
+    "INT - Sin cobertura",
+    "INT - Tiempos de entrega",
+    "INT - No se fabrica",
+    "INT- No se tiene medida / Color",
+    "INT- Competencia diferente a precio",
+    "INT- Compro FIRPLAK",
+    "INT- Pago contraentrega",
+    "INT - Lo pospone",
+    "INT - Compra en Homcenter"
 ];
 
 function SummaryTab({ opportunity }: { opportunity: any }) {
@@ -930,25 +945,26 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
 
                             <div>
                                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                                    Categoría de Interés (Categoría Oportunidad)
+                                    Categorías de Interés (Categoría Oportunidad)
                                 </label>
                                 <div className="relative group">
-                                    <input
-                                        type="text"
-                                        value={localCategoriaOportunidad}
-                                        onChange={(e) => setLocalCategoriaOportunidad(e.target.value)}
-                                        onBlur={async () => {
-                                            if (localCategoriaOportunidad !== opportunity.categoria_oportunidad) {
+                                    <MultiSelect
+                                        options={OPPORTUNITY_CATEGORIES}
+                                        selected={parseOpportunityCategories(localCategoriaOportunidad)}
+                                        onChange={async (selected) => {
+                                            const formatted = formatOpportunityCategories(selected);
+                                            setLocalCategoriaOportunidad(formatted);
+                                            if (formatted !== (opportunity.categoria_oportunidad || "")) {
                                                 setIsSavingCategoria(true);
-                                                await updateOpportunity(opportunity.id, { categoria_oportunidad: localCategoriaOportunidad });
+                                                await updateOpportunity(opportunity.id, { categoria_oportunidad: formatted });
                                                 setIsSavingCategoria(false);
                                             }
                                         }}
-                                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none placeholder:text-slate-400"
-                                        placeholder="Ej: Cocinas, Baños..."
+                                        placeholder="Seleccionar categorías..."
+                                        className="bg-slate-50 border-slate-200 text-sm"
                                     />
                                     {isSavingCategoria && (
-                                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                        <div className="absolute right-8 top-1/2 -translate-y-1/2">
                                             <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
                                         </div>
                                     )}
@@ -1089,7 +1105,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                 </div>
 
                 {/* Account Card */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-blue-300 transition-all flex flex-col justify-between">
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-blue-300 transition-all flex flex-col justify-between h-fit">
                     <div>
                         <div className="flex items-center gap-3 mb-4">
                             <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
@@ -1109,7 +1125,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">NIT</label>
-                                    <p className="text-slate-700">{effectiveAccount.nit || 'No registrado'}</p>
+                                    <p className="text-slate-700">{(effectiveAccount as any).nit_base || effectiveAccount.nit || 'No registrado'}</p>
                                 </div>
                                 <div>
                                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Teléfono</label>

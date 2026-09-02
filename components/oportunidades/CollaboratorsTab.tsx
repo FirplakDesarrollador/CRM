@@ -104,58 +104,63 @@ export function CollaboratorsTab({ opportunityId }: { opportunityId: string }) {
             const keptIds = new Set(newEntries.map(e => e.tempId).filter(Boolean));
             const toDelete = dbCollaborators.filter(c => !keptIds.has(c.id));
 
-            for (const item of toDelete) {
-                // Soft delete
-                await db.opportunityCollaborators.update(item.id, { is_deleted: true });
-                await syncEngine.queueMutation('CRM_Oportunidades_Colaboradores', item.id, { is_deleted: true });
-            }
-
-            // 2. Identify Adds and Updates
-            for (const entry of newEntries) {
-                if (entry.tempId && currentIds.has(entry.tempId)) {
-                    // Update
-                    const original = dbCollaborators.find(c => c.id === entry.tempId);
-                    if (original) {
-                        const hasChanged =
-                            original.usuario_id !== entry.usuario_id ||
-                            original.porcentaje !== entry.porcentaje ||
-                            original.rol !== entry.rol;
-
-                        if (hasChanged) {
-                            const updated = {
-                                ...original,
-                                usuario_id: entry.usuario_id,
-                                porcentaje: entry.porcentaje,
-                                rol: entry.rol,
-                                updated_at: new Date().toISOString()
-                            };
-                            await db.opportunityCollaborators.put(updated);
-                            // Queue specific field updates
-                            await syncEngine.queueMutation('CRM_Oportunidades_Colaboradores', updated.id, {
-                                usuario_id: entry.usuario_id,
-                                porcentaje: entry.porcentaje,
-                                rol: entry.rol,
-                                updated_at: updated.updated_at
-                            });
-                        }
-                    }
-                } else {
-                    // Create New
-                    const newId = uuidv4();
-                    const newItem = {
-                        id: newId,
-                        oportunidad_id: opportunityId,
-                        usuario_id: entry.usuario_id,
-                        porcentaje: entry.porcentaje,
-                        rol: entry.rol || 'COLABORADOR',
-                        is_deleted: false,
-                        created_at: new Date().toISOString(),
-                        updated_at: new Date().toISOString()
-                    };
-                    await db.opportunityCollaborators.add(newItem);
-                    await syncEngine.queueMutation('CRM_Oportunidades_Colaboradores', newId, newItem);
+            await syncEngine.commitLocalChanges([db.opportunityCollaborators], async () => {
+                const requests = [];
+                for (const item of toDelete) {
+                    await db.opportunityCollaborators.update(item.id, { is_deleted: true });
+                    requests.push({
+                        entityTable: 'CRM_Oportunidades_Colaboradores', entityId: item.id,
+                        changes: { is_deleted: true }
+                    });
                 }
-            }
+
+                for (const entry of newEntries) {
+                    if (entry.tempId && currentIds.has(entry.tempId)) {
+                        const original = dbCollaborators.find(c => c.id === entry.tempId);
+                        if (original) {
+                            const hasChanged =
+                                original.usuario_id !== entry.usuario_id ||
+                                original.porcentaje !== entry.porcentaje ||
+                                original.rol !== entry.rol;
+
+                            if (hasChanged) {
+                                const updated = {
+                                    ...original,
+                                    usuario_id: entry.usuario_id,
+                                    porcentaje: entry.porcentaje,
+                                    rol: entry.rol,
+                                    updated_at: new Date().toISOString()
+                                };
+                                await db.opportunityCollaborators.put(updated);
+                                requests.push({
+                                    entityTable: 'CRM_Oportunidades_Colaboradores', entityId: updated.id,
+                                    changes: {
+                                        usuario_id: entry.usuario_id,
+                                        porcentaje: entry.porcentaje,
+                                        rol: entry.rol,
+                                        updated_at: updated.updated_at
+                                    }
+                                });
+                            }
+                        }
+                    } else {
+                        const newId = uuidv4();
+                        const newItem = {
+                            id: newId,
+                            oportunidad_id: opportunityId,
+                            usuario_id: entry.usuario_id,
+                            porcentaje: entry.porcentaje,
+                            rol: entry.rol || 'COLABORADOR',
+                            is_deleted: false,
+                            created_at: new Date().toISOString(),
+                            updated_at: new Date().toISOString()
+                        };
+                        await db.opportunityCollaborators.add(newItem);
+                        requests.push({ entityTable: 'CRM_Oportunidades_Colaboradores', entityId: newId, changes: newItem });
+                    }
+                }
+                return requests;
+            });
 
             alert('Cambios guardados correctamente');
             setIsDirty(false);

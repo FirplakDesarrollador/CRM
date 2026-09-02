@@ -3,9 +3,9 @@ import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { getMicrosoftTokens, getMicrosoftEvent, updateMicrosoftEvent, deleteMicrosoftEvent } from '@/lib/microsoft';
 
-export async function GET(req: NextRequest, { params }: { params: { eventId: string } }) {
+export async function GET(req: NextRequest, { params }: { params: Promise<{ eventId: string }> }) {
     try {
-        const { eventId } = params;
+        const { eventId } = await params;
 
         const cookieStore = await cookies();
         const supabase = createServerClient(
@@ -42,9 +42,9 @@ export async function GET(req: NextRequest, { params }: { params: { eventId: str
     }
 }
 
-export async function PATCH(req: NextRequest, { params }: { params: { eventId: string } }) {
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ eventId: string }> }) {
     try {
-        const { eventId } = params;
+        const { eventId } = await params;
         const body = await req.json();
 
         const cookieStore = await cookies();
@@ -79,9 +79,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { eventId: s
     }
 }
 
-export async function DELETE(req: NextRequest, { params }: { params: { eventId: string } }) {
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ eventId: string }> }) {
     try {
-        const { eventId } = params;
+        const { eventId } = await params;
 
         const cookieStore = await cookies();
         const supabase = createServerClient(

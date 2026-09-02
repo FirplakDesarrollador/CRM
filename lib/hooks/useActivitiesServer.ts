@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase';
 import { syncEngine } from '@/lib/sync';
 import { db } from '@/lib/db';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
+import { matchesSearchTokens, getSearchTokens } from '@/lib/utils';
 import { useSyncStore } from '@/lib/stores/useSyncStore';
 
 export type ActivityServer = {
@@ -95,9 +96,15 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
                     }
                 }
 
-                if (searchTerm) {
-                    const lowerSearch = searchTerm.toLowerCase();
-                    localActivities = localActivities.filter(a => a.asunto.toLowerCase().includes(lowerSearch));
+                if (searchTerm && searchTerm.trim()) {
+                    localActivities = localActivities.filter(a =>
+                        matchesSearchTokens([
+                            a.asunto,
+                            a.descripcion,
+                            oppMap.get(a.opportunity_id)?.nombre,
+                            a.tipo_actividad
+                        ], searchTerm)
+                    );
                 }
 
                 if (typeFilter !== 'all') {
@@ -180,8 +187,11 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
                 }
             }
 
-            if (searchTerm) {
-                query = query.ilike('asunto', `%${searchTerm}%`);
+            if (searchTerm && searchTerm.trim()) {
+                const tokens = getSearchTokens(searchTerm);
+                for (const token of tokens) {
+                    query = query.or(`asunto.ilike.%${token}%,descripcion.ilike.%${token}%`);
+                }
             }
 
             if (typeFilter !== 'all') {
@@ -202,20 +212,33 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
 
             if (error) throw error;
 
+            let finalResult = (result as any[]) || [];
+            if (searchTerm && searchTerm.trim()) {
+                finalResult = finalResult.filter(a =>
+                    matchesSearchTokens([
+                        a.asunto,
+                        a.descripcion,
+                        a.opportunity?.nombre,
+                        a.tipo_actividad
+                    ], searchTerm)
+                );
+            }
+
             if (isLoadMore) {
                 setData(prev => {
                     const existingIds = new Set(prev.map(i => i.id));
-                    const newItems = (result as any[]).filter(i => !existingIds.has(i.id));
+                    const newItems = finalResult.filter(i => !existingIds.has(i.id));
                     return [...prev, ...newItems];
                 });
                 setPage(currentPage);
             } else {
-                setData(result as any);
+                setData(finalResult as any);
                 setPage(1);
             }
 
             if (totalCount !== null) {
-                setCount(totalCount);
+                const effectiveCount = (searchTerm && searchTerm.trim()) ? finalResult.length : totalCount;
+                setCount(effectiveCount);
                 setHasMore(from + (result?.length || 0) < totalCount);
             }
 

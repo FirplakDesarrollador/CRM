@@ -12,6 +12,7 @@ import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { cn } from "@/components/ui/utils";
 import { AccountDeleteModal } from "@/components/cuentas/AccountDeleteModal";
+import { DataListToolbar } from "@/components/ui/DataListToolbar";
 import dynamic from 'next/dynamic';
 
 const HotTable = dynamic(() => import('@/components/HotTableWrapper'), { ssr: false });
@@ -56,6 +57,7 @@ function AccountsContent() {
     const [editingAccount, setEditingAccount] = useState<any>(null);
     const lastProcessedUrlIdRef = useRef<string | null>(null);
     const [accountToDelete, setAccountToDelete] = useState<any>(null);
+    const [showFilters, setShowFilters] = useState(() => Boolean(searchParams.get('channel') || searchParams.get('subclass') || searchParams.get('nivel') || searchParams.get('start') || searchParams.get('end')));
     const [inputValue, setInputValue] = useState(() => {
         const fromUrl = searchParams.get('search');
         if (fromUrl) return fromUrl;
@@ -77,12 +79,19 @@ function AccountsContent() {
     });
 
     const [currentChannel, setCurrentChannel] = useState<string | null>(() => {
-        return searchParams.get('channel') || null;
+        return searchParams.get('channel') || (typeof window !== 'undefined' ? new URLSearchParams(sessionStorage.getItem('crm_cuentas_state') || '').get('channel') : null);
+    });
+
+    const [currentSubclass, setCurrentSubclass] = useState<number | null>(() => {
+        const value = searchParams.get('subclass') || (typeof window !== 'undefined' ? new URLSearchParams(sessionStorage.getItem('crm_cuentas_state') || '').get('subclass') : null);
+        return value ? Number(value) : null;
     });
 
     const [currentNivel, setCurrentNivel] = useState<string | null>(() => {
-        return searchParams.get('nivel') || null;
+        return searchParams.get('nivel') || (typeof window !== 'undefined' ? new URLSearchParams(sessionStorage.getItem('crm_cuentas_state') || '').get('nivel') : null);
     });
+    const [currentStartDate, setCurrentStartDate] = useState<string | null>(() => searchParams.get('start') || (typeof window !== 'undefined' ? new URLSearchParams(sessionStorage.getItem('crm_cuentas_state') || '').get('start') : null));
+    const [currentEndDate, setCurrentEndDate] = useState<string | null>(() => searchParams.get('end') || (typeof window !== 'undefined' ? new URLSearchParams(sessionStorage.getItem('crm_cuentas_state') || '').get('end') : null));
 
     // Handle Sort
     const handleSort = (field: string) => {
@@ -110,7 +119,10 @@ function AccountsContent() {
         setEndDate(endDate);
 
         setCurrentChannel(channelId);
+        setCurrentSubclass(subclassificationId);
         setCurrentNivel(nivelPremium);
+        setCurrentStartDate(startDate);
+        setCurrentEndDate(endDate);
     }, [setChannelFilter, setSubclassificationFilter, setNivelPremiumFilter, setStartDate, setEndDate]);
 
     const handleUserSelect = useCallback((userId: string | null) => {
@@ -120,12 +132,40 @@ function AccountsContent() {
 
     // Initial Sync from URL
     useEffect(() => {
-        const query = searchParams.get('search') || '';
-        const userQuery = searchParams.get('user') || null;
+        const saved = new URLSearchParams(typeof window !== 'undefined' ? sessionStorage.getItem('crm_cuentas_state') || '' : '');
+        const query = searchParams.get('search') || saved.get('search') || '';
+        const userQuery = searchParams.get('user') || saved.get('user') || null;
+        const channel = searchParams.get('channel') || saved.get('channel') || null;
+        const subclass = searchParams.get('subclass') || saved.get('subclass');
+        const nivel = searchParams.get('nivel') || saved.get('nivel') || null;
+        const start = searchParams.get('start') || saved.get('start') || null;
+        const end = searchParams.get('end') || saved.get('end') || null;
+        const source = searchParams.get('source') || saved.get('source');
+        const sort = searchParams.get('sort') || saved.get('sort');
+        const direction = searchParams.get('dir') || saved.get('dir');
         if (query) setSearchTerm(query);
         if (userQuery) setAssignedUserId(userQuery);
+        if (channel) setChannelFilter(channel);
+        if (subclass) setSubclassificationFilter(Number(subclass));
+        if (nivel) setNivelPremiumFilter(nivel);
+        if (start) setStartDate(start);
+        if (end) setEndDate(end);
+        if (source === 'web') setWebFilter(true);
+        if (sort) setSortField(sort);
+        if (direction) setSortAsc(direction === 'asc');
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+
+    // Restore the last list context when returning from navigation, but never reopen a record.
+    useEffect(() => {
+        if (typeof window === 'undefined' || searchParams.toString() !== '') return;
+        const savedState = sessionStorage.getItem('crm_cuentas_state');
+        if (!savedState) return;
+        const params = new URLSearchParams(savedState);
+        params.delete('id');
+        const restored = params.toString();
+        if (restored) router.replace(`/cuentas?${restored}`, { scroll: false });
+    }, [searchParams, router]);
 
     // Deep linking: Automatically fetch and open account by ID from URL
     useEffect(() => {
@@ -135,9 +175,8 @@ function AccountsContent() {
         lastProcessedUrlIdRef.current = id;
 
         if (!id) {
-            if (editingAccount) {
-                setEditingAccount(null);
-            }
+            setEditingAccount(null);
+            setShowCreate(false);
             return;
         }
 
@@ -182,32 +221,59 @@ function AccountsContent() {
             if (inputValue) params.set('search', inputValue); else params.delete('search');
             if (selectedUserId) params.set('user', selectedUserId); else params.delete('user');
             if (currentChannel) params.set('channel', currentChannel); else params.delete('channel');
+            if (currentSubclass) params.set('subclass', String(currentSubclass)); else params.delete('subclass');
             if (currentNivel) params.set('nivel', currentNivel); else params.delete('nivel');
+            if (currentStartDate) params.set('start', currentStartDate); else params.delete('start');
+            if (currentEndDate) params.set('end', currentEndDate); else params.delete('end');
+            if (webFilter) params.set('source', 'web'); else params.delete('source');
+            if (sortField !== 'updated_at') params.set('sort', sortField); else params.delete('sort');
+            if (sortAsc) params.set('dir', 'asc'); else params.delete('dir');
 
-            if (editingAccount?.id) params.set('id', editingAccount.id); else params.delete('id');
+            if (editingAccount?.id && searchParams.get('id')) {
+                params.set('id', editingAccount.id);
+            } else if (!searchParams.get('id')) {
+                params.delete('id');
+            }
 
             const queryString = params.toString();
-            if (queryString === searchParams.toString()) return;
 
-            if (queryString) sessionStorage.setItem('crm_cuentas_state', queryString);
+            // Save to sessionStorage without ID to keep filters clean
+            const storageParams = new URLSearchParams(params);
+            storageParams.delete('id');
+            const storageQuery = storageParams.toString();
+            if (storageQuery) sessionStorage.setItem('crm_cuentas_state', storageQuery);
             else if (searchParams.toString() !== '') sessionStorage.removeItem('crm_cuentas_state');
+
+            if (queryString === searchParams.toString()) return;
 
             const queryLink = queryString ? `?${queryString}` : window.location.pathname;
             router.replace(queryLink.startsWith('?') ? `${window.location.pathname}${queryLink}` : queryLink, { scroll: false });
-        }, 500);
+        }, 250);
         return () => clearTimeout(timer);
-    }, [inputValue, selectedUserId, currentChannel, currentNivel, editingAccount?.id, searchParams, setSearchTerm, router]);
+    }, [inputValue, selectedUserId, currentChannel, currentSubclass, currentNivel, currentStartDate, currentEndDate, webFilter, sortField, sortAsc, editingAccount?.id, searchParams, setSearchTerm, router]);
 
     const handleEdit = async (acc: any) => {
         setEditingAccount(acc);
         setShowCreate(false);
+        const params = new URLSearchParams(Array.from(searchParams.entries()));
+        params.set('id', acc.id);
+        router.replace(`/cuentas?${params.toString()}`, { scroll: false });
         document.getElementById('main-content')?.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    const handleCloseEdit = () => {
+        setShowCreate(false);
+        setEditingAccount(null);
+        lastProcessedUrlIdRef.current = null;
+        const params = new URLSearchParams(Array.from(searchParams.entries()));
+        params.delete('id');
+        const query = params.toString() ? `?${params.toString()}` : window.location.pathname;
+        router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
     };
 
     const handleSuccess = () => {
         refresh();
-        setShowCreate(false);
-        setEditingAccount(null);
+        handleCloseEdit();
     };
 
     const handleDelete = (e: React.MouseEvent, acc: any) => {
@@ -241,43 +307,86 @@ function AccountsContent() {
     }));
 
     const hotColumns = [
-        { data: 'nombre', title: 'Cuenta', type: 'text', readOnly: true },
-        { data: 'ciudad', title: 'Ubicación', type: 'text', readOnly: true },
-        { data: 'canal_id', title: 'Canal', type: 'text', readOnly: true },
-        { data: 'tipo', title: 'Tipo', type: 'text', readOnly: true },
-        { 
-            data: 'potencial_venta', 
-            title: 'Potencial Venta', 
-            type: 'numeric',
-            numericFormat: { pattern: '$ 0,0', culture: 'es-CO' },
-            readOnly: true
+        { data: 'nombre', title: 'Cuenta', readOnly: true, width: 220, wordWrap: false,
+            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+                const v = value || '';
+                const safe = v.replace(/"/g, '&quot;');
+                td.innerHTML = `<div style="font-weight:600;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</div>`;
+                td.style.overflow = 'hidden';
+                return td;
+            }
         },
-        { data: 'vendedor', title: 'Vendedor', type: 'text', readOnly: true },
-        { data: 'nivel', title: 'Nivel', type: 'text', readOnly: true },
-        { data: 'creacion', title: 'Creación', type: 'text', readOnly: true },
-        { data: 'actualizado', title: 'Actualizado', type: 'text', readOnly: true }
+        { data: 'ciudad', title: 'Ubicación', readOnly: true, width: 140, wordWrap: false,
+            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+                const v = value || '';
+                const safe = v.replace(/"/g, '&quot;');
+                td.innerHTML = `<div style="color:#334155;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</div>`;
+                td.style.overflow = 'hidden';
+                return td;
+            }
+        },
+        { data: 'canal_id', title: 'Canal', readOnly: true, width: 120, wordWrap: false,
+            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+                td.innerHTML = `<div style="color:#475569;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;">${value || '-'}</div>`;
+                td.style.overflow = 'hidden';
+                return td;
+            }
+        },
+        { data: 'tipo', title: 'Tipo', readOnly: true, width: 120, wordWrap: false,
+            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+                td.innerHTML = `<div style="color:#475569;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;">${value || '-'}</div>`;
+                td.style.overflow = 'hidden';
+                return td;
+            }
+        },
+        { data: 'potencial_venta', title: 'Potencial Venta', readOnly: true, width: 130, wordWrap: false,
+            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+                const num = Number(value) || 0;
+                const fmt = new Intl.NumberFormat('es-CO', { style:'currency', currency:'COP', minimumFractionDigits:0, notation: num >= 1_000_000 ? 'compact' : 'standard', compactDisplay:'short' }).format(num);
+                td.innerHTML = `<span style="font-weight:700;color:#0f172a;font-size:13px;font-variant-numeric:tabular-nums;letter-spacing:-0.01em;">${fmt}</span>`;
+                td.style.textAlign = 'right';
+                return td;
+            }
+        },
+        { data: 'vendedor', title: 'Vendedor', readOnly: true, width: 170, wordWrap: false,
+            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+                const name = value || 'Sin asignar';
+                const initials = name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase();
+                let hash = 0;
+                for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
+                const hue = Math.abs(hash) % 360;
+                const bg = `hsl(${hue},45%,92%)`;
+                const fg = `hsl(${hue},55%,35%)`;
+                const safe = name.replace(/"/g, '&quot;');
+                td.innerHTML = `<div style="display:flex;align-items:center;gap:8px;height:100%;overflow:hidden;"><div style="width:26px;height:26px;border-radius:50%;background:${bg};color:${fg};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;flex-shrink:0;letter-spacing:0.02em;">${initials}</div><span style="font-size:12.5px;color:#334155;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${safe}">${name}</span></div>`;
+                td.style.overflow = 'hidden';
+                return td;
+            }
+        },
+        { data: 'nivel', title: 'Nivel', readOnly: true, width: 110, wordWrap: false,
+            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+                const isPremium = value === 'PREMIUM';
+                const bg = isPremium ? '#fef3c7' : '#f1f5f9';
+                const c = isPremium ? '#92400e' : '#475569';
+                const bd = isPremium ? '#fde68a' : '#e2e8f0';
+                td.innerHTML = `<div style="display:flex;align-items:center;height:100%;"><span style="display:inline-block;padding:3px 10px;border-radius:99px;font-size:11px;font-weight:700;white-space:nowrap;background:${bg};color:${c};border:1px solid ${bd};line-height:1.4;">${value || '-'}</span></div>`;
+                td.style.overflow = 'visible';
+                return td;
+            }
+        },
+        { data: 'creacion', title: 'Creación', readOnly: true, width: 90, wordWrap: false,
+            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+                td.innerHTML = `<span style="font-size:12.5px;color:#64748b;font-weight:500;font-variant-numeric:tabular-nums;">${value || '-'}</span>`;
+                return td;
+            }
+        },
+        { data: 'actualizado', title: 'Actualizado', readOnly: true, width: 90, wordWrap: false,
+            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+                td.innerHTML = `<span style="font-size:12.5px;color:#64748b;font-weight:500;font-variant-numeric:tabular-nums;">${value || '-'}</span>`;
+                return td;
+            }
+        }
     ];
-
-    hotColumns.unshift({
-        data: 'acciones',
-        title: 'Acciones',
-        renderer: function (instance: any, td: HTMLTableCellElement, row: number, col: number, prop: string, value: any, cellProperties: any) {
-            td.innerHTML = `
-                <div style="text-align: center; white-space: nowrap;">
-                    <button class="edit-action-btn" title="Editar" style="cursor:pointer; color:#2563eb; background:none; border:none; padding:0 4px; margin:0; display:inline-block; vertical-align:middle;">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>
-                    </button>
-                    ${isAdmin ? `<button class="delete-action-btn" title="Eliminar" style="cursor:pointer; color:#dc2626; background:none; border:none; padding:0 4px; margin:0; display:inline-block; vertical-align:middle;">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
-                    </button>` : ''}
-                </div>
-            `;
-            td.className = "htCenter htMiddle";
-            return td;
-        },
-        readOnly: true,
-        width: 80
-    } as any);
 
     return (
         <div data-testid="accounts-page" className="space-y-4">
@@ -289,23 +398,6 @@ function AccountsContent() {
                 </div>
 
                 <div className="flex flex-wrap md:flex-nowrap gap-2 w-full md:w-auto items-center">
-                    {hasCoordinatorAccess && (
-                        <UserPickerFilter
-                            selectedUserId={selectedUserId}
-                            onUserSelect={handleUserSelect}
-                        />
-                    )}
-
-                    <div className="relative flex-1 md:w-64">
-                        <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-                        <input
-                            data-testid="accounts-search"
-                            className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                            placeholder="Buscar por nombre o NIT..."
-                            value={inputValue}
-                            onChange={(e) => setInputValue(e.target.value)}
-                        />
-                    </div>
                     <button
                         data-testid="accounts-create-button"
                         onClick={() => {
@@ -319,34 +411,31 @@ function AccountsContent() {
                 </div>
             </div>
 
-            <div className="flex gap-4 border-b border-slate-200 mt-2 mb-4">
-                <button
-                    onClick={() => setWebFilter(false)}
-                    className={cn(
-                        "pb-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
-                        !webFilter ? "border-blue-600 text-blue-600" : "border-transparent text-slate-500 hover:text-slate-800"
-                    )}
-                >
-                    Todas
-                </button>
-                <button
-                    onClick={() => setWebFilter(true)}
-                    className={cn(
-                        "pb-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap",
-                        webFilter ? "border-blue-600 text-blue-600" : "border-transparent text-slate-500 hover:text-slate-800"
-                    )}
-                >
-                    Cuentas desde página {webFilter && !loading && `(${count})`}
-                </button>
-            </div>
-
-            <div className="pb-2 border-b border-slate-200">
-                <AccountFilters
+            <DataListToolbar
+                searchValue={inputValue}
+                onSearchChange={setInputValue}
+                searchPlaceholder="Buscar por nombre o NIT…"
+                searchTestId="accounts-search"
+                filtersOpen={showFilters}
+                onFiltersOpenChange={setShowFilters}
+                activeFilterCount={(selectedUserId ? 1 : 0) + (webFilter ? 1 : 0) + (currentChannel ? 1 : 0) + (currentSubclass ? 1 : 0) + (currentNivel ? 1 : 0) + (currentStartDate ? 1 : 0) + (currentEndDate ? 1 : 0)}
+                quickFilters={<>
+                    {hasCoordinatorAccess && <UserPickerFilter selectedUserId={selectedUserId} onUserSelect={handleUserSelect} />}
+                    <div className="flex rounded-lg bg-slate-100 p-1">
+                        <button onClick={() => setWebFilter(false)} className={cn("rounded-md px-2.5 py-1.5 text-xs font-semibold", !webFilter ? "bg-white text-blue-700 shadow-sm" : "text-slate-500")}>Todas</button>
+                        <button onClick={() => setWebFilter(true)} className={cn("rounded-md px-2.5 py-1.5 text-xs font-semibold", webFilter ? "bg-white text-blue-700 shadow-sm" : "text-slate-500")}>Web{webFilter && !loading ? ` (${count})` : ''}</button>
+                    </div>
+                </>}
+                sortControl={<select value={`${sortField}:${sortAsc ? 'asc' : 'desc'}`} onChange={(e) => { const [field, direction] = e.target.value.split(':'); setSortField(field); setSortAsc(direction === 'asc'); }} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-600 outline-none focus:border-blue-500" aria-label="Ordenar cuentas"><option value="updated_at:desc">Actualizadas</option><option value="nombre:asc">Nombre A–Z</option><option value="potencial_venta:desc">Mayor potencial</option></select>}
+                onClear={() => { setInputValue(''); handleUserSelect(null); setWebFilter(false); handleFilterChange({ channelId: null, subclassificationId: null, nivelPremium: null, startDate: null, endDate: null }); }}
+                filters={<AccountFilters
                     onFilterChange={handleFilterChange}
                     initialChannelId={currentChannel}
+                    initialSubclassId={currentSubclass}
                     initialNivelPremium={currentNivel}
-                />
-            </div>
+                    initialDates={{ startDate: currentStartDate, endDate: currentEndDate }}
+                />}
+            />
 
             {(showCreate || editingAccount) && (
                 <div data-testid="accounts-form-panel" className="mb-6 border border-blue-100 rounded-xl shadow-md overflow-hidden animate-in slide-in-from-top-2">
@@ -354,13 +443,26 @@ function AccountsContent() {
                         <h3 className="font-semibold text-blue-900">
                             {editingAccount ? `Editando: ${editingAccount.nombre}` : 'Crear Nueva Cuenta'}
                         </h3>
-                        <button onClick={() => { setShowCreate(false); setEditingAccount(null); }} className="text-blue-400 hover:text-blue-700 transition-colors">✕</button>
+                        <div className="flex items-center gap-2">
+                            {isAdmin && editingAccount && (
+                                <button
+                                    onClick={() => setAccountToDelete(editingAccount)}
+                                    className="px-2.5 py-1 text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg transition-colors flex items-center gap-1 text-xs font-semibold"
+                                    title="Eliminar esta cuenta y sus registros asociados"
+                                >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    <span>Eliminar Cuenta</span>
+                                </button>
+                            )}
+                            <button onClick={handleCloseEdit} className="text-blue-400 hover:text-blue-700 transition-colors p-1" title="Cerrar">✕</button>
+                        </div>
                     </div>
                     <AccountForm
                         key={editingAccount?.id || 'new'}
                         account={editingAccount}
                         onSuccess={handleSuccess}
-                        onCancel={() => { setShowCreate(false); setEditingAccount(null); }}
+                        onCancel={handleCloseEdit}
+                        onDelete={(acc) => setAccountToDelete(acc)}
                     />
                 </div>
             )}
@@ -397,7 +499,11 @@ function AccountsContent() {
                     {/* VISTA MÓVIL: Tarjetas */}
                     <div className="grid grid-cols-1 gap-3 md:hidden">
                         {accounts.map((acc) => (
-                            <div key={acc.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col hover:border-blue-300 active:scale-[0.99] transition-all relative">
+                            <div 
+                                key={acc.id} 
+                                onClick={() => handleEdit(acc)}
+                                className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col hover:border-blue-300 active:scale-[0.99] transition-all relative cursor-pointer"
+                            >
                                 <div className="p-4 border-b border-slate-100 flex justify-between items-start gap-3">
                                     <div className="flex-1 min-w-0">
                                         <div className="font-bold text-slate-900 text-sm mb-0.5 truncate">
@@ -436,36 +542,140 @@ function AccountsContent() {
                                         </div>
                                     </div>
                                 </div>
-                                
-                                <div className="flex divide-x divide-slate-100 border-t border-slate-100 bg-white">
-                                    <button 
-                                        onClick={() => handleEdit(acc)}
-                                        className="flex-1 py-2.5 flex items-center justify-center gap-1.5 text-blue-600 hover:bg-blue-50 font-medium text-xs transition-colors"
-                                    >
-                                        <Pencil className="w-3.5 h-3.5" />
-                                        Editar
-                                    </button>
-                                    {isAdmin && (
-                                        <button 
-                                            onClick={() => {
-                                                if (window.confirm(`¿Estás seguro de que deseas eliminar la cuenta "${acc.nombre}"?`)) {
-                                                    confirmDelete(acc.id);
-                                                }
-                                            }}
-                                            className="flex-1 py-2.5 flex items-center justify-center gap-1.5 text-rose-600 hover:bg-rose-50 font-medium text-xs transition-colors"
-                                        >
-                                            <Trash2 className="w-3.5 h-3.5" />
-                                            Eliminar
-                                        </button>
-                                    )}
-                                </div>
                             </div>
                         ))}
                     </div>
 
                     {/* VISTA DESKTOP: Tabla */}
-                    <div className="hidden md:block w-full relative z-0 bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm" style={{ minHeight: '400px' }}>
-                        <HotTable
+                    <div className="hidden md:block w-full relative z-0 bg-white rounded-2xl border border-slate-200/80 overflow-hidden shadow-sm" style={{ minHeight: '400px' }}>
+                        <style>{`
+                            /* ── Scrollbar ── */
+                            .opp-hot-wrap .ht_master .wtHolder {
+                                scrollbar-width: thin;
+                                scrollbar-color: #c7d2de transparent;
+                            }
+                            .opp-hot-wrap .ht_master .wtHolder::-webkit-scrollbar { width: 6px; height: 6px; }
+                            .opp-hot-wrap .ht_master .wtHolder::-webkit-scrollbar-thumb {
+                                background: #c7d2de; border-radius: 99px;
+                            }
+                            .opp-hot-wrap .ht_master .wtHolder::-webkit-scrollbar-track { background: transparent; }
+
+                            /* ── Header Cells ── */
+                            .opp-hot-wrap .handsontable th {
+                                background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%) !important;
+                                color: #475569 !important;
+                                font-size: 10.5px !important;
+                                font-weight: 800 !important;
+                                letter-spacing: 0.08em !important;
+                                text-transform: uppercase !important;
+                                border-bottom: 2px solid #e2e8f0 !important;
+                                border-right: 1px solid #e8ecf1 !important;
+                                padding: 0 14px !important;
+                                height: 40px !important;
+                                white-space: nowrap !important;
+                            }
+                            .opp-hot-wrap .handsontable th:last-child {
+                                border-right: none !important;
+                            }
+
+                            /* ── Row Number (Row Headers) ── */
+                            .opp-hot-wrap .handsontable .ht_clone_inline_start th,
+                            .opp-hot-wrap .handsontable th.rowHeader,
+                            .opp-hot-wrap .handsontable .ht_clone_inline_start td {
+                                background: #f8fafc !important;
+                                color: #94a3b8 !important;
+                                font-size: 10px !important;
+                                font-weight: 600 !important;
+                                border-right: 1px solid #e2e8f0 !important;
+                                text-align: center !important;
+                                width: 42px !important;
+                                min-width: 42px !important;
+                                max-width: 42px !important;
+                            }
+
+                            /* ── Data Cells ── */
+                            .opp-hot-wrap .handsontable td {
+                                font-size: 13px !important;
+                                color: #334155 !important;
+                                border-bottom: 1px solid #f1f5f9 !important;
+                                border-right: 1px solid transparent !important;
+                                height: 42px !important;
+                                padding: 0 14px !important;
+                                vertical-align: middle !important;
+                                font-family: inherit !important;
+                                transition: background 0.15s ease, box-shadow 0.15s ease !important;
+                                line-height: 1.4 !important;
+                            }
+
+                            /* ── Zebra Striping ── */
+                            .opp-hot-wrap .handsontable tr:nth-child(even) td {
+                                background: #fafbfd !important;
+                            }
+                            .opp-hot-wrap .handsontable tr:nth-child(odd) td {
+                                background: #ffffff !important;
+                            }
+
+                            /* ── Row Hover ── */
+                            .opp-hot-wrap .handsontable tbody tr:hover td {
+                                background: #eff6ff !important;
+                                cursor: pointer;
+                            }
+                            .opp-hot-wrap .handsontable tbody tr:hover td:first-child {
+                                box-shadow: inset 3px 0 0 0 #3b82f6 !important;
+                            }
+
+                            /* ── Selection ── */
+                            .opp-hot-wrap .handsontable .wtBorder.current {
+                                background: #3b82f6 !important;
+                            }
+                            .opp-hot-wrap .handsontable td.area {
+                                background: #eff6ff !important;
+                            }
+                            .opp-hot-wrap .handsontable td.current {
+                                background: #e0edff !important;
+                            }
+
+                            /* ── Dropdown Filter Popover ── */
+                            .opp-hot-wrap .handsontable .htDropdownMenu,
+                            .htDropdownMenu .ht_master .wtHolder {
+                                border-radius: 12px !important;
+                                overflow: hidden !important;
+                            }
+                            .htDropdownMenu {
+                                box-shadow: 0 12px 40px rgba(15, 23, 42, 0.14), 0 0 0 1px rgba(15, 23, 42, 0.06) !important;
+                                border: none !important;
+                                border-radius: 12px !important;
+                            }
+                            .opp-hot-wrap .handsontable .changeType {
+                                border-color: #e2e8f0 !important;
+                            }
+
+                            /* ── Column Resize Handle ── */
+                            .opp-hot-wrap .handsontable .manualColumnResizer {
+                                border-right: 2px solid #3b82f6 !important;
+                                opacity: 0;
+                                transition: opacity 0.2s ease;
+                            }
+                            .opp-hot-wrap .handsontable th:hover .manualColumnResizer {
+                                opacity: 1;
+                            }
+
+                            /* ── Corner Header ── */
+                            .opp-hot-wrap .handsontable .ht_clone_top_inline_start_corner th {
+                                background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%) !important;
+                                border-right: 1px solid #e2e8f0 !important;
+                                border-bottom: 2px solid #e2e8f0 !important;
+                            }
+
+                            /* ── Force single-line cells ── */
+                            .opp-hot-wrap .handsontable td {
+                                white-space: nowrap !important;
+                                overflow: hidden !important;
+                                text-overflow: ellipsis !important;
+                            }
+                        `}</style>
+                        <div className="w-full relative z-0 opp-hot-wrap" style={{ minHeight: '400px' }}>
+                            <HotTable
                             data={hotData}
                             columns={hotColumns}
                             rowHeaders={true}
@@ -479,27 +689,33 @@ function AccountsContent() {
                             rowHeights={38}
                             renderAllRows={false}
                             licenseKey="non-commercial-and-evaluation"
-                            afterOnCellMouseDown={(event, coords, td) => {
+                            afterOnCellMouseDown={(event: any, coords: any, td: any) => {
+                                if (coords.row === -1) {
+                                    const fields: Record<number, string> = { 0: 'nombre', 1: 'ciudad', 2: 'canal_id', 4: 'potencial_venta', 7: 'created_at', 8: 'updated_at' };
+                                    if (fields[coords.col]) handleSort(fields[coords.col]);
+                                    return;
+                                }
                                 if (coords.row >= 0) {
-                                    const acc = hotData[coords.row]._original;
-                                    const target = event.target as HTMLElement;
-                                    
-                                    if (target.closest('.delete-action-btn')) {
-                                        setAccountToDelete(acc);
-                                        return;
-                                    }
-                                    
-                                    if (target.closest('.edit-action-btn')) {
+                                    const acc = hotData[coords.row]?._original;
+                                    if (acc) {
                                         handleEdit(acc);
-                                        return;
                                     }
-                                    
-                                    handleEdit(acc);
+                                }
+                            }}
+                            afterGetColHeader={(column: number, TH: HTMLTableCellElement) => {
+                                const fields: Record<number, string> = { 0: 'nombre', 1: 'ciudad', 2: 'canal_id', 4: 'potencial_venta', 7: 'created_at', 8: 'updated_at' };
+                                const labels: Record<number, string> = { 0: 'Cuenta', 1: 'Ubicación', 2: 'Canal', 4: 'Potencial Venta', 7: 'Creación', 8: 'Actualizado' };
+                                if (fields[column]) {
+                                    TH.style.cursor = 'pointer';
+                                    TH.title = 'Clic para ordenar ascendente o descendente';
+                                    const header = TH.querySelector('.colHeader');
+                                    if (header) header.textContent = `${labels[column]} ${sortField === fields[column] ? (sortAsc ? '↑' : '↓') : '↕'}`;
                                 }
                             }}
                             stretchH="all"
                             className="text-sm font-sans"
                         />
+                        </div>
                     </div>
 
                     {hasMore && (

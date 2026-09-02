@@ -57,7 +57,7 @@ export default function DebugCommissionPage() {
                 if (r.cuenta_id === opp.account_id) score += 4;
                 if (r.vendedor_id === opp.owner_user_id) score += 2;
                 if (r.categoria_id) score += 0; // Not checked here
-                if (r.canal_id && r.canal_id === opp.account?.canal_id) score += 1;
+                if (r.canal_id && r.canal_id === (opp.account as any)?.canal_id) score += 1;
                 return { ...r, score };
             });
 

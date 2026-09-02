@@ -20,7 +20,7 @@ export default function UsuariosPage() {
                 </div>
             }
         >
-            <div className="p-6">
+            <div className="p-4 sm:p-6 max-w-7xl mx-auto">
                 <UserList />
             </div>
         </PermissionGuard>

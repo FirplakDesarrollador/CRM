@@ -12,7 +12,7 @@ test.describe('Activity checklist autosave', () => {
         await page.getByPlaceholder('Nueva actividad...').fill('Actualizar datos de tarea');
         await page.locator('input[placeholder="Nueva actividad..."] + button').click();
 
-        await expect(page.getByText('Actualizar datos de tarea')).toBeVisible();
+        await expect(page.locator('input[value="Actualizar datos de tarea"]')).toBeVisible();
         await expect(page.getByTestId('activity-metadata')).toContainText('Actualizar datos de tarea', { timeout: 4000 });
         await expect(page.getByTestId('activity-metadata')).toContainText('pending_planner_update');
     });

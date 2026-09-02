@@ -2,7 +2,7 @@
 
 import { useOpportunities, useQuotes, useQuoteItems } from "@/lib/hooks/useOpportunities";
 import { DetailHeader } from "@/components/ui/DetailHeader";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { FileText, Plus, AlertCircle, Check, Trash2, Loader2, Truck, Package, Building, ChevronRight, TrendingUp, User, Users, Copy } from "lucide-react";
 import Link from "next/link";
@@ -31,13 +31,15 @@ import { AssignedTab } from "@/components/oportunidades/AssignedTab";
 import { DollarSign } from "lucide-react";
 import { useSyncStore } from "@/lib/stores/useSyncStore";
 import { useOpportunityOrigins } from "@/lib/hooks/useOpportunityOrigins";
+import { MultiSelect } from "@/components/ui/MultiSelect";
+import { OPPORTUNITY_CATEGORIES, parseOpportunityCategories, formatOpportunityCategories } from "@/lib/opportunityCategories";
 
 export default function OpportunityDetailPage() {
     const params = useParams();
     const router = useRouter();
     const id = params.id as string;
     const { opportunities, deleteOpportunity } = useOpportunities();
-    const { user: currentUser, role: userRole } = useCurrentUser();
+    const { user: currentUser, role: userRole, isAdmin } = useCurrentUser();
     const setIsLoadingData = useSyncStore(state => state.setIsLoadingData);
     const phases = useLiveQuery(() => db.phases.toArray());
     const phaseMap = new Map(phases?.map(p => [p.id, p.nombre]));
@@ -180,7 +182,7 @@ export default function OpportunityDetailPage() {
                 }
                 backHref="/oportunidades?view=list"
                 actions={[
-                    ...(userRole === 'ADMIN' || userRole === 'COORDINADOR' || opportunity.owner_user_id === currentUser?.id || opportunity.created_by === currentUser?.id ? [{
+                    ...(userRole === 'ADMIN' || isAdmin ? [{
                         label: "Eliminar Oportunidad",
                         icon: Trash2,
                         variant: 'danger' as const,
@@ -259,13 +261,26 @@ export default function OpportunityDetailPage() {
 }
 
 const LOSS_REASONS = [
-    "Precio elevado",
-    "Compra en la competencia por precio",
-    "No contesta",
-    "Lo pospone",
-    "No va a comprar",
-    "Tiempos de entrega",
-    "No hay medida o color",
+    "N - No responde 1mer contacto",
+    "N- Sin información de contacto",
+    "N- Inadecuada Segmentación",
+    "N- No va a comprar",
+    "RED- Firplak Home",
+    "RED- Ser. Tecnico",
+    "RED- Distribución",
+    "RED- Obras",
+    "RED- MAC",
+    "INT - Abandona Conversación",
+    "INT - Precio Elevado",
+    "INT - Sin cobertura",
+    "INT - Tiempos de entrega",
+    "INT - No se fabrica",
+    "INT- No se tiene medida / Color",
+    "INT- Competencia diferente a precio",
+    "INT- Compro FIRPLAK",
+    "INT- Pago contraentrega",
+    "INT - Lo pospone",
+    "INT - Compra en Homcenter"
 ];
 
 function SummaryTab({ opportunity }: { opportunity: any }) {
@@ -278,12 +293,16 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     const [localUrlOrigen, setLocalUrlOrigen] = useState(opportunity.url_origen || "");
     const [localFuente, setLocalFuente] = useState(opportunity.fuente_conversion || "");
     const [localCategoriaOportunidad, setLocalCategoriaOportunidad] = useState(opportunity.categoria_oportunidad || "");
+    const [localContactosIds, setLocalContactosIds] = useState<string[]>(opportunity.contactos_ids || []);
+    const [localClientesAtendidos, setLocalClientesAtendidos] = useState<number>(opportunity.clientes_atendidos || 0);
     const [isSaving, setIsSaving] = useState(false);
     const [isSavingDate, setIsSavingDate] = useState(false);
     const [isSavingOrigen, setIsSavingOrigen] = useState(false);
     const [isSavingUrl, setIsSavingUrl] = useState(false);
     const [isSavingFuente, setIsSavingFuente] = useState(false);
     const [isSavingCategoria, setIsSavingCategoria] = useState(false);
+    const [isSavingContactos, setIsSavingContactos] = useState(false);
+    const [isSavingClientesAtendidos, setIsSavingClientesAtendidos] = useState(false);
 
     // Loss reason inline fields
     const [localRazonPerdida, setLocalRazonPerdida] = useState(opportunity.razon_perdida || "");
@@ -341,7 +360,9 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
         setLocalComentarios(opportunity.comentarios || "");
         setLocalDireccion(opportunity.direccion_entrega || "");
         setLocalCategoriaOportunidad(opportunity.categoria_oportunidad || "");
-    }, [opportunity.segmento_id, opportunity.fecha_cierre_estimada, opportunity.origen_oportunidad, opportunity.url_origen, opportunity.fuente_conversion, opportunity.razon_perdida, opportunity.comentarios_perdida, opportunity.comentarios, opportunity.direccion_entrega, opportunity.categoria_oportunidad]);
+        setLocalContactosIds(opportunity.contactos_ids || []);
+        setLocalClientesAtendidos(opportunity.clientes_atendidos || 0);
+    }, [opportunity.segmento_id, opportunity.fecha_cierre_estimada, opportunity.origen_oportunidad, opportunity.url_origen, opportunity.fuente_conversion, opportunity.razon_perdida, opportunity.comentarios_perdida, opportunity.comentarios, opportunity.direccion_entrega, opportunity.categoria_oportunidad, opportunity.contactos_ids, opportunity.clientes_atendidos]);
 
     useEffect(() => {
         const fetchSegments = async () => {
@@ -433,6 +454,19 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
         [account?.canal_id]
     );
 
+    // Fetch contacts for account to allow linking contacts to opportunity
+    const localAccountContacts = useLiveQuery(
+        () => effectiveAccount?.id ? db.contacts.where('account_id').equals(effectiveAccount.id).filter(c => !c.is_deleted).toArray() : [],
+        [effectiveAccount?.id]
+    ) || [];
+
+    const contactOptions = useMemo(() => {
+        return localAccountContacts.map(c => ({
+            value: c.id,
+            label: `${c.nombre}${c.cargo ? ` (${c.cargo})` : ''}${c.telefono ? ` - ${c.telefono}` : ''}`
+        }));
+    }, [localAccountContacts]);
+
     // Computed: both loss reason fields are filled
     const lossFieldsComplete = localRazonPerdida.trim() !== "" && localComentariosPerdida.trim() !== "";
 
@@ -500,7 +534,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
         );
     }
 
-    const currentPhaseIndex = phases?.findIndex(p => p.id === opportunity.fase_id) ?? -1;
+    const currentPhaseIndex = phases?.findIndex(p => Number(p.id) === Number(opportunity.fase_id)) ?? -1;
 
     return (
         <div className="space-y-6 animate-in fade-in duration-500">
@@ -587,7 +621,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                         return normalized.includes('cerrada') || normalized.includes('ganada') || normalized.includes('perdida');
                                     }).map((phase) => {
                                         const isWon = phase.nombre.toLowerCase().includes('ganada');
-                                        const isActive = opportunity.fase_id === phase.id;
+                                        const isActive = Number(opportunity.fase_id) === Number(phase.id);
 
                                         const isLostPhase = phase.nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes('perdida');
                                         const isBlocked = isLostPhase && !lossFieldsComplete;
@@ -613,7 +647,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                             >
                                                 <div className={cn(
                                                     "w-2 h-2 rounded-full",
-                                                    isBlocked ? "bg-slate-300" : isWon ? "bg-green-500" : "bg-red-500"
+                                                    isBlocked ? "bg-slate-300" : isActive ? (isWon ? "bg-green-500" : "bg-red-500") : "bg-slate-300"
                                                 )} />
                                                 {phase.nombre}
                                                 {isBlocked && <span className="ml-0.5 text-[8px] opacity-70">🔒</span>}
@@ -935,25 +969,26 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
 
                             <div>
                                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                                    Categoría de Interés (Categoría Oportunidad)
+                                    Categorías de Interés (Categoría Oportunidad)
                                 </label>
                                 <div className="relative group">
-                                    <input
-                                        type="text"
-                                        value={localCategoriaOportunidad}
-                                        onChange={(e) => setLocalCategoriaOportunidad(e.target.value)}
-                                        onBlur={async () => {
-                                            if (localCategoriaOportunidad !== opportunity.categoria_oportunidad) {
+                                    <MultiSelect
+                                        options={OPPORTUNITY_CATEGORIES}
+                                        selected={parseOpportunityCategories(localCategoriaOportunidad)}
+                                        onChange={async (selected) => {
+                                            const formatted = formatOpportunityCategories(selected);
+                                            setLocalCategoriaOportunidad(formatted);
+                                            if (formatted !== (opportunity.categoria_oportunidad || "")) {
                                                 setIsSavingCategoria(true);
-                                                await updateOpportunity(opportunity.id, { categoria_oportunidad: localCategoriaOportunidad });
+                                                await updateOpportunity(opportunity.id, { categoria_oportunidad: formatted });
                                                 setIsSavingCategoria(false);
                                             }
                                         }}
-                                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none placeholder:text-slate-400"
-                                        placeholder="Ej: Cocinas, Baños..."
+                                        placeholder="Seleccionar categorías..."
+                                        className="bg-slate-50 border-slate-200 text-sm"
                                     />
                                     {isSavingCategoria && (
-                                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                        <div className="absolute right-8 top-1/2 -translate-y-1/2">
                                             <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
                                         </div>
                                     )}
@@ -1094,7 +1129,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                 </div>
 
                 {/* Account Card */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-blue-300 transition-all flex flex-col justify-between">
+                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-blue-300 transition-all flex flex-col justify-between h-fit">
                     <div>
                         <div className="flex items-center gap-3 mb-4">
                             <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
@@ -1114,7 +1149,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
                                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">NIT</label>
-                                    <p className="text-slate-700">{effectiveAccount.nit || 'No registrado'}</p>
+                                    <p className="text-slate-700">{(effectiveAccount as any).nit_base || effectiveAccount.nit || 'No registrado'}</p>
                                 </div>
                                 <div>
                                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Teléfono</label>
@@ -1127,6 +1162,79 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                     <p className="text-slate-700">{effectiveAccount.direccion} {effectiveAccount.ciudad && `• ${effectiveAccount.ciudad}`}</p>
                                 </div>
                             )}
+
+                            {/* Contactos Vinculados */}
+                            <div className="pt-3 border-t border-slate-100">
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                                    Contactos Vinculados ({localContactosIds.length})
+                                </label>
+                                {contactOptions.length > 0 ? (
+                                    <div className="relative">
+                                        <MultiSelect
+                                            options={contactOptions}
+                                            selected={localContactosIds}
+                                            onChange={async (vals) => {
+                                                setLocalContactosIds(vals);
+                                                setIsSavingContactos(true);
+                                                try {
+                                                    const autoCount = vals.length;
+                                                    setLocalClientesAtendidos(autoCount);
+                                                    await updateOpportunity(opportunity.id, {
+                                                        contactos_ids: vals,
+                                                        clientes_atendidos: autoCount
+                                                    });
+                                                } finally {
+                                                    setIsSavingContactos(false);
+                                                }
+                                            }}
+                                            placeholder="Seleccionar contactos..."
+                                            className="bg-slate-50 border-slate-200 text-sm"
+                                        />
+                                        {isSavingContactos && (
+                                            <div className="absolute right-8 top-1/2 -translate-y-1/2">
+                                                <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                            </div>
+                                        )}
+                                    </div>
+                                ) : (
+                                    <p className="text-xs text-slate-500 italic">No hay contactos registrados para esta cuenta.</p>
+                                )}
+                            </div>
+
+                            {/* Clientes Atendidos */}
+                            <div className="pt-3 border-t border-slate-100">
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                                    Clientes Atendidos
+                                </label>
+                                <div className="relative group flex items-center gap-2">
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        value={localClientesAtendidos}
+                                        onChange={(e) => setLocalClientesAtendidos(Number(e.target.value))}
+                                        onBlur={async () => {
+                                            if (Number(localClientesAtendidos) !== Number(opportunity.clientes_atendidos)) {
+                                                setIsSavingClientesAtendidos(true);
+                                                try {
+                                                    await updateOpportunity(opportunity.id, {
+                                                        clientes_atendidos: Number(localClientesAtendidos)
+                                                    });
+                                                } finally {
+                                                    setIsSavingClientesAtendidos(false);
+                                                }
+                                            }
+                                        }}
+                                        className="w-28 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-bold text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none"
+                                        placeholder="0"
+                                    />
+                                    <span className="text-xs text-slate-500">
+                                        personas atendidas
+                                    </span>
+                                    {isSavingClientesAtendidos && (
+                                        <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                    )}
+                                </div>
+                            </div>
                         </div>
                     </div>
 

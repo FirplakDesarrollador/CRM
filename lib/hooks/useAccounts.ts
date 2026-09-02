@@ -1,9 +1,10 @@
 import { useLiveQuery } from "dexie-react-hooks";
-import { db, LocalCuenta } from "@/lib/db";
+import { db, LocalContact, LocalCuenta } from "@/lib/db";
 import { syncEngine } from "@/lib/sync";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { generateProvisionalNit, isProvisionalNit } from "@/lib/nitUtils";
 
 export function useAccounts(filters?: { advisor_id?: string | null, showAll?: boolean }) {
     const { user, isVendedor } = useCurrentUser();
@@ -33,14 +34,39 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
     }, [isVendedor, userId, filters?.advisor_id, filters?.showAll]);
     const isLoading = false; // Background sync handles loading
 
-    const createAccount = async (data: Partial<LocalCuenta>) => {
+    const createAccount = async (data: Partial<LocalCuenta>, initialContactData?: {
+        nombre?: string;
+        cargo?: string;
+        telefono?: string | null;
+        email?: string | null;
+        comentarios?: string;
+    }) => {
         const id = crypto.randomUUID();
         const { data: { user } } = await supabase.auth.getUser();
 
         const toNum = (val: any) => (val !== undefined && val !== null && val !== "") ? Number(val) : null;
 
+        // Asegurar que toda cuenta tenga un NIT (real o provisional generado)
+        const finalNitBase = (data.nit_base && String(data.nit_base).trim() !== "" && data.nit_base !== "Sin NIT")
+            ? String(data.nit_base).trim()
+            : generateProvisionalNit();
+
+        // Local duplicate check before inserting (para NITs reales no provisionales)
+        if (finalNitBase && !isProvisionalNit(finalNitBase)) {
+            const existingLocal = await db.accounts
+                .where('nit_base')
+                .equals(finalNitBase)
+                .toArray();
+            
+            // Allow child accounts (sucursales) to share NIT
+            if (existingLocal.length > 0 && !data.is_child) {
+                throw new Error(`Ya existe una cuenta localmente con el NIT ${finalNitBase}`);
+            }
+        }
+
         const sanitizedData = {
             ...data,
+            nit_base: finalNitBase,
             subclasificacion_id: toNum(data.subclasificacion_id),
             departamento_id: toNum(data.departamento_id),
             ciudad_id: toNum(data.ciudad_id),
@@ -51,31 +77,44 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
             ...sanitizedData,
             id,
             created_by: user?.id,
-            owner_user_id: user?.id,
+            owner_user_id: data.owner_user_id || user?.id,
             updated_at: new Date().toISOString()
         };
-        await db.accounts.add(newAccount as LocalCuenta);
-        await syncEngine.queueMutation('CRM_Cuentas', id, newAccount, { isSnapshot: true });
 
         // AUTO-CREATE CONTACT FOR 'PROPIO' CHANNEL
+        let contactData: LocalContact | null = null;
         if (sanitizedData.canal_id === 'PROPIO') {
             const contactId = crypto.randomUUID();
-            const contactData = {
+            contactData = {
                 id: contactId,
                 account_id: id,
-                nombre: sanitizedData.nombre || 'Cliente',
-                cargo: 'Cliente final',
-                telefono: sanitizedData.telefono || null,
-                email: (sanitizedData as any).email || null,
+                nombre: initialContactData?.nombre?.trim() || sanitizedData.nombre || 'Cliente',
+                cargo: initialContactData?.cargo?.trim() || 'Cliente final',
+                telefono: initialContactData?.telefono?.trim() || sanitizedData.telefono || undefined,
+                email: initialContactData?.email?.trim() || (sanitizedData as Partial<LocalCuenta> & { email?: string }).email || undefined,
+                comentarios: initialContactData?.comentarios?.trim() || undefined,
                 es_principal: true,
                 created_by: user?.id,
                 updated_by: user?.id,
                 updated_at: new Date().toISOString()
             };
-            await db.contacts.add(contactData as any);
-            await syncEngine.queueMutation('CRM_Contactos', contactId, contactData, { isSnapshot: true });
-            console.log('[useAccounts] Auto-created contact for PROPIO account:', contactId);
         }
+
+        await syncEngine.commitLocalChanges([db.accounts, db.contacts], async () => {
+            await db.accounts.add(newAccount as LocalCuenta);
+            if (contactData) await db.contacts.add(contactData);
+
+            return [
+                {
+                    entityTable: 'CRM_Cuentas', entityId: id, changes: newAccount,
+                    options: { isSnapshot: true }
+                },
+                ...(contactData ? [{
+                    entityTable: 'CRM_Contactos', entityId: contactData.id, changes: contactData,
+                    options: { isSnapshot: true }
+                }] : [])
+            ];
+        });
 
         return id;
     };
@@ -88,10 +127,20 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
         const { _sync_metadata, ...sanitized } = updates;
         
         const toNum = (val: any) => (val !== undefined && val !== null && val !== "") ? Number(val) : null;
+
+        let updatedNitBase = sanitized.nit_base;
+        if (updates.nit_base !== undefined) {
+            if (!updates.nit_base || String(updates.nit_base).trim() === "" || updates.nit_base === "Sin NIT") {
+                updatedNitBase = generateProvisionalNit();
+            } else {
+                updatedNitBase = String(updates.nit_base).trim();
+            }
+        }
         
         // Ensure email and telefono are preserved even if they are null strings
         const sanitizedUpdates: any = {
             ...sanitized,
+            ...(updatedNitBase !== undefined ? { nit_base: updatedNitBase } : {}),
             subclasificacion_id: toNum((updates as any).subclasificacion_id),
             departamento_id: toNum((updates as any).departamento_id),
             ciudad_id: toNum((updates as any).ciudad_id),
@@ -102,61 +151,90 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
 
         console.log('[useAccounts] DEBUG - sanitizedUpdates result:', JSON.stringify(sanitizedUpdates));
         
-        const currentLocal = await db.accounts.get(id);
         const fullUpdates = { ...sanitizedUpdates, updated_at: new Date().toISOString() };
-        await db.accounts.update(id, fullUpdates);
-        
-        const mergedRecord = { ...currentLocal, ...fullUpdates } as LocalCuenta;
-        console.log('[useAccounts] DEBUG - Queuing mutation for sync (Atomic Snapshot):', mergedRecord);
-        await syncEngine.queueMutation('CRM_Cuentas', id, mergedRecord, { isSnapshot: true });
+        await syncEngine.commitLocalChanges([db.accounts], async () => {
+            const currentLocal = await db.accounts.get(id);
+            if (!currentLocal) throw new Error('La cuenta ya no existe en los datos locales.');
+            await db.accounts.update(id, fullUpdates);
+            const mergedRecord = { ...currentLocal, ...fullUpdates } as LocalCuenta;
+            return [{
+                entityTable: 'CRM_Cuentas', entityId: id, changes: mergedRecord,
+                options: { isSnapshot: true }
+            }];
+        });
     };
 
     const deleteAccount = async (id: string) => {
-        console.log('[useAccounts] deleteAccount - Starting cascade delete for:', id);
+        console.log('[useAccounts] deleteAccount - Starting Local-First cascade delete for:', id);
 
-        // 1. Delete Contacts associated with this account (server-side)
-        const { data: contacts } = await supabase.from('CRM_Contactos').select('id').eq('account_id', id);
-        if (contacts && contacts.length > 0) {
-            const contactIds = contacts.map(c => c.id);
-            await supabase.from('CRM_Contactos').update({ is_deleted: true }).in('id', contactIds);
-            console.log('[useAccounts] Deleted contacts:', contactIds.length);
+        const currentAccount = await db.accounts.get(id);
+        if (!currentAccount) return;
+
+        // 1. Gather all local child entities from Dexie
+        const contacts = await db.contacts.where('account_id').equals(id).toArray();
+        const opportunities = await db.opportunities.where('account_id').equals(id).toArray();
+        const oppIds = opportunities.map(o => o.id);
+
+        let quotes: any[] = [];
+        let quoteItems: any[] = [];
+        let activities: any[] = [];
+        let pedidos: any[] = [];
+        let pedidoItems: any[] = [];
+
+        if (oppIds.length > 0) {
+            quotes = await db.quotes.where('opportunity_id').anyOf(oppIds).toArray();
+            const quoteIds = quotes.map(q => q.id);
+            if (quoteIds.length > 0) {
+                quoteItems = await db.quoteItems.where('cotizacion_id').anyOf(quoteIds).toArray();
+            }
+            activities = await db.activities.where('opportunity_id').anyOf(oppIds).toArray();
+            pedidos = await db.pedidos.where('opportunity_id').anyOf(oppIds).toArray();
+            const pedidoUuids = pedidos.map(p => p.uuid_generado).filter(Boolean);
+            if (pedidoUuids.length > 0) {
+                pedidoItems = await db.pedidoItems.where('pedido_uuid').anyOf(pedidoUuids).toArray();
+            }
         }
 
-        // 2. Get Opportunities associated with this account
-        const { data: opportunities } = await supabase.from('CRM_Oportunidades').select('id').eq('account_id', id);
-        if (opportunities && opportunities.length > 0) {
-            const oppIds = opportunities.map(o => o.id);
-
-            // 3. Delete Activities associated with these opportunities
-            await supabase.from('CRM_Actividades').update({ is_deleted: true }).in('opportunity_id', oppIds);
-
-            // 4. Get Quotes associated with these opportunities
-            const { data: quotes } = await supabase.from('CRM_Cotizaciones').select('id').in('opportunity_id', oppIds);
-            if (quotes && quotes.length > 0) {
+        // 2. Delete local records and queue every server tombstone atomically.
+        await syncEngine.commitLocalChanges([
+            db.accounts,
+            db.contacts,
+            db.opportunities,
+            db.quotes,
+            db.quoteItems,
+            db.activities,
+            db.pedidos,
+            db.pedidoItems
+        ], async () => {
+            await db.accounts.delete(id);
+            if (contacts.length > 0) await db.contacts.where('account_id').equals(id).delete();
+            if (oppIds.length > 0) {
+                await db.opportunities.where('account_id').equals(id).delete();
+                await db.quotes.where('opportunity_id').anyOf(oppIds).delete();
                 const quoteIds = quotes.map(q => q.id);
-
-                // 5. Delete Quote Items
-                await supabase.from('CRM_CotizacionItems').update({ is_deleted: true }).in('cotizacion_id', quoteIds);
-
-                // 6. Delete Quotes
-                await supabase.from('CRM_Cotizaciones').update({ is_deleted: true }).in('id', quoteIds);
+                if (quoteIds.length > 0) await db.quoteItems.where('cotizacion_id').anyOf(quoteIds).delete();
+                await db.activities.where('opportunity_id').anyOf(oppIds).delete();
+                await db.pedidos.where('opportunity_id').anyOf(oppIds).delete();
+                const pedidoUuids = pedidos.map(p => p.uuid_generado).filter(Boolean);
+                if (pedidoUuids.length > 0) await db.pedidoItems.where('pedido_uuid').anyOf(pedidoUuids).delete();
             }
 
-            // 7. Delete Opportunities
-            await supabase.from('CRM_Oportunidades').update({ is_deleted: true }).in('id', oppIds);
-            console.log('[useAccounts] Deleted opportunities:', oppIds.length);
-        }
+            return [
+                { entityTable: 'CRM_Cuentas', entityId: id, changes: { ...currentAccount, is_deleted: true }, options: { isSnapshot: true } },
+                ...contacts.map(contact => ({ entityTable: 'CRM_Contactos', entityId: contact.id, changes: { ...contact, is_deleted: true }, options: { isSnapshot: true } })),
+                ...opportunities.map(opp => ({ entityTable: 'CRM_Oportunidades', entityId: opp.id, changes: { ...opp, is_deleted: true }, options: { isSnapshot: true } })),
+                ...quotes.map(quote => ({ entityTable: 'CRM_Cotizaciones', entityId: quote.id, changes: { ...quote, is_deleted: true }, options: { isSnapshot: true } })),
+                ...quoteItems.map(item => {
+                    const { subtotal, ...itemData } = item;
+                    return { entityTable: 'CRM_CotizacionItems', entityId: item.id, changes: { ...itemData, is_deleted: true }, options: { isSnapshot: true } };
+                }),
+                ...activities.map(act => ({ entityTable: 'CRM_Actividades', entityId: act.id, changes: { ...act, is_deleted: true }, options: { isSnapshot: true } })),
+                ...pedidos.map(ped => ({ entityTable: 'CRM_Pedidos', entityId: ped.uuid_generado, changes: { ...ped, is_deleted: true }, options: { isSnapshot: true } })),
+                ...pedidoItems.map(pItem => ({ entityTable: 'CRM_PedidoItems', entityId: pItem.id, changes: { ...pItem, is_deleted: true }, options: { isSnapshot: true } }))
+            ];
+        });
 
-        // 8. Finally Delete the Account itself
-        const { error } = await supabase.from('CRM_Cuentas').update({ is_deleted: true }).eq('id', id);
-        if (error) {
-            console.error('[useAccounts] Error deleting account:', error);
-            throw error;
-        }
-
-        // Also remove from local Dexie DB for offline consistency
-        await db.accounts.delete(id);
-        console.log('[useAccounts] Account deleted successfully:', id);
+        console.log('[useAccounts] All server mutations queued successfully for offline delete.');
     };
 
     return {

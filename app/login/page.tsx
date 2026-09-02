@@ -267,7 +267,6 @@ export default function LoginPage() {
 
             // Cache user ID for offline mode
             if (authData.user?.id) {
-                localStorage.setItem('cachedUserId', authData.user.id);
             }
 
             router.push("/");

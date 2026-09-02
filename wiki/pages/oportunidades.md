@@ -8,6 +8,8 @@ oportunidad pertenece a una [[cuentas|cuenta]], tiene un vendedor propietario, a
 ## Ciclo de vida
 
 - **Creación:** wizard en `/oportunidades/nueva` (`CreateOpportunityWizard`).
+- **Categorías de Interés Múltiples:** La oportunidad admite selección de una o múltiples categorías comerciales (`Baños`, `Cocinas`, `Zona de Labores`, `Hidromasajes`, `Institucional`) mediante `MultiSelect` en el wizard (`/oportunidades/nueva`), en el detalle (`/oportunidades/[id]`), en `/tiendas` y en el intake de WordPress. Se normaliza mediante `lib/opportunityCategories.ts` (`parseOpportunityCategories` / `formatOpportunityCategories`) y se almacena como string delimitado por comas compatible con PostgreSQL y Dexie (`categoria_oportunidad`).
+- **Contactos Vinculados y Clientes Atendidos:** La oportunidad almacena `contactos_ids` (`uuid[]` en Supabase / `string[]` en Dexie) para asociar uno o más contactos de la cuenta (`CRM_Contactos`) a la negociación, y `clientes_atendidos` (`integer` en Supabase / `number` en Dexie). En `/tiendas`, la sección de contacto permanece siempre activa y opcional; si se elige una cuenta existente, se muestra un `MultiSelect` prefiltrado con sus contactos que auto-contabiliza `clientes_atendidos` (campo editable por el usuario). Ambos campos están integrados en el wizard `/oportunidades/nueva` y en el detalle `/oportunidades/[id]`.
 - **Origen configurable:** `CRM_OrigenesOportunidad` define las opciones administrables desde Configuración; Tiendas-Ferias y el detalle de oportunidad consumen ese catálogo.
 - **Fases por canal:** cada canal tiene su propio conjunto de fases
   (migraciones `obras_nac_phases`, `obras_int_phases`, `dist_nac_phases`,
@@ -43,11 +45,15 @@ solo COORDINADOR/ADMIN); el historial queda en `CRM_TransferenciasOportunidad`.
 (`/oportunidades/[id]/cotizaciones/[quoteId]`), actividades, colaboradores, asignados.
 `OpportunityQuickView` ofrece vista rápida desde listados.
 
+## Interfaz y Listado
+
+- **Vista móvil:** Tarjetas responsivas con badges de fase, estado, valor en COP, cierre estimado, avatar del vendedor y acceso directo al detalle.
+- **Vista desktop:** Tabla interactiva (Handsontable) con estilos adaptados, selección por clic de fila para navegar al detalle y persistencia de estado en `sessionStorage`/URL.
+
 ## Visibilidad
 
 VENDEDOR solo ve las suyas (`view_own_opportunities`); COORDINADOR/ADMIN ven todas.
-Ver [[roles-y-permisos]]. Filtros por vendedor, canal, fase, estado en
-`OpportunityFilters.tsx`; búsqueda sincronizada con la URL (⚠️ patrón anti-bucle
+Ver [[roles-y-permisos]]. Filtros por vendedor, canal, subclasificación, segmento, fase, estado, fechas y origen (`origen_oportunidad` vía `CRM_OrigenesOportunidad`) en `OpportunityFilters.tsx`; búsqueda sincronizada con la URL (⚠️ patrón anti-bucle
 documentado en `bugs-knowhow.md` §6).
 
 ## Embudo de ventas

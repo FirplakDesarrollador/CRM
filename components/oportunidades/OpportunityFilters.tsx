@@ -27,6 +27,14 @@ type Phase = {
     probability?: number;
 };
 
+type Origin = {
+    id: string;
+    codigo: string;
+    nombre: string;
+    orden?: number;
+    is_active?: boolean;
+};
+
 // Status filter type - includes both open stages and closed states
 type StatusFilter = 'all' | 'open' | 'won' | 'lost';
 
@@ -41,12 +49,14 @@ interface OpportunityFiltersProps {
         endDate: string | null;
         startClosingDate: string | null;
         endClosingDate: string | null;
+        origin: string | null;
     }) => void;
     initialChannelId?: string | null;
     initialSubclassId?: number | null;
     initialSegmentId?: number | null;
     initialPhaseId?: number | null;
     initialStatusFilter?: StatusFilter;
+    initialOrigin?: string | null;
     initialDates?: {
         startDate: string | null;
         endDate: string | null;
@@ -62,12 +72,14 @@ export function OpportunityFilters({
     initialSegmentId,
     initialPhaseId,
     initialStatusFilter,
+    initialOrigin,
     initialDates
 }: OpportunityFiltersProps) {
     const [channels, setChannels] = useState<Channel[]>([]);
     const [subclasses, setSubclasses] = useState<Subclasificacion[]>([]);
     const [segments, setSegments] = useState<Segment[]>([]);
     const [phases, setPhases] = useState<Phase[]>([]);
+    const [origins, setOrigins] = useState<Origin[]>([]);
 
     // Selection state
     const [selectedChannel, setSelectedChannel] = useState<string | null>(initialChannelId || null);
@@ -75,6 +87,7 @@ export function OpportunityFilters({
     const [selectedSegment, setSelectedSegment] = useState<number | null>(initialSegmentId || null);
     const [selectedPhase, setSelectedPhase] = useState<number | null>(initialPhaseId || null);
     const [statusFilter, setStatusFilter] = useState<StatusFilter>(initialStatusFilter || 'open');
+    const [selectedOrigin, setSelectedOrigin] = useState<string | null>(initialOrigin || null);
 
     const [startDate, setStartDate] = useState<string | null>(initialDates?.startDate || null);
     const [endDate, setEndDate] = useState<string | null>(initialDates?.endDate || null);
@@ -83,20 +96,28 @@ export function OpportunityFilters({
 
     const [loadingMetadata, setLoadingMetadata] = useState(true);
 
+    useEffect(() => {
+        if (initialOrigin !== undefined) {
+            setSelectedOrigin(initialOrigin || null);
+        }
+    }, [initialOrigin]);
+
     // Initial Load
     useEffect(() => {
         const loadMetadata = async () => {
             try {
-                const [phasesRes, chanRes, subRes, segRes] = await Promise.all([
+                const [phasesRes, chanRes, subRes, segRes, origRes] = await Promise.all([
                     supabase.from('CRM_FasesOportunidad').select('id, nombre, canal_id, probability').eq('is_active', true),
                     supabase.from('CRM_Canales').select('id, nombre').order('nombre'),
                     supabase.from('CRM_Subclasificacion').select('*'),
-                    supabase.from('CRM_Segmentos').select('*')
+                    supabase.from('CRM_Segmentos').select('*'),
+                    supabase.from('CRM_OrigenesOportunidad').select('id, codigo, nombre, orden').eq('is_active', true).order('orden').order('nombre')
                 ]);
 
                 if (phasesRes.data) setPhases(phasesRes.data);
                 if (subRes.data) setSubclasses(subRes.data);
                 if (segRes.data) setSegments(segRes.data);
+                if (origRes.data) setOrigins(origRes.data);
 
                 if (chanRes.data && chanRes.data.length > 0) {
                     setChannels(chanRes.data);
@@ -115,7 +136,7 @@ export function OpportunityFilters({
 
                 // If initial filters were set (e.g., from URL on back navigation),
                 // notify the parent so the hook fetches with correct filters
-                if (initialChannelId || initialSubclassId || initialSegmentId || initialPhaseId || (initialStatusFilter && initialStatusFilter !== 'open') || initialDates) {
+                if (initialChannelId || initialSubclassId || initialSegmentId || initialPhaseId || initialOrigin || (initialStatusFilter && initialStatusFilter !== 'open') || initialDates) {
                     onFilterChange({
                         channelId: initialChannelId || null,
                         subclassificationId: initialSubclassId || null,
@@ -125,7 +146,8 @@ export function OpportunityFilters({
                         startDate: initialDates?.startDate || null,
                         endDate: initialDates?.endDate || null,
                         startClosingDate: initialDates?.startClosingDate || null,
-                        endClosingDate: initialDates?.endClosingDate || null
+                        endClosingDate: initialDates?.endClosingDate || null,
+                        origin: initialOrigin || null
                     });
                 }
 
@@ -179,7 +201,8 @@ export function OpportunityFilters({
             startDate,
             endDate,
             startClosingDate,
-            endClosingDate
+            endClosingDate,
+            origin: selectedOrigin
         });
     };
 
@@ -200,7 +223,8 @@ export function OpportunityFilters({
             startDate,
             endDate,
             startClosingDate,
-            endClosingDate
+            endClosingDate,
+            origin: selectedOrigin
         });
     };
 
@@ -218,7 +242,8 @@ export function OpportunityFilters({
             startDate,
             endDate,
             startClosingDate,
-            endClosingDate
+            endClosingDate,
+            origin: selectedOrigin
         });
     };
 
@@ -234,7 +259,8 @@ export function OpportunityFilters({
             startDate,
             endDate,
             startClosingDate,
-            endClosingDate
+            endClosingDate,
+            origin: selectedOrigin
         });
     };
 
@@ -254,7 +280,25 @@ export function OpportunityFilters({
             startDate,
             endDate,
             startClosingDate,
-            endClosingDate
+            endClosingDate,
+            origin: selectedOrigin
+        });
+    };
+
+    const handleOriginChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+        const val = e.target.value || null;
+        setSelectedOrigin(val);
+        onFilterChange({
+            channelId: selectedChannel,
+            subclassificationId: selectedSubclass,
+            segmentId: selectedSegment,
+            phaseId: selectedPhase,
+            statusFilter,
+            startDate,
+            endDate,
+            startClosingDate,
+            endClosingDate,
+            origin: val
         });
     };
 
@@ -264,6 +308,7 @@ export function OpportunityFilters({
         setSelectedSegment(null);
         setSelectedPhase(null);
         setStatusFilter('open');
+        setSelectedOrigin(null);
         setStartDate(null);
         setEndDate(null);
         setStartClosingDate(null);
@@ -277,11 +322,12 @@ export function OpportunityFilters({
             startDate: null,
             endDate: null,
             startClosingDate: null,
-            endClosingDate: null
+            endClosingDate: null,
+            origin: null
         });
     };
 
-    const hasActiveFilters = selectedChannel || selectedSubclass || selectedSegment || selectedPhase || statusFilter !== 'open' || startDate || endDate || startClosingDate || endClosingDate;
+    const hasActiveFilters = selectedChannel || selectedSubclass || selectedSegment || selectedPhase || selectedOrigin || statusFilter !== 'open' || startDate || endDate || startClosingDate || endClosingDate;
 
     if (loadingMetadata) return <div className="text-xs text-slate-400">Cargando filtros...</div>;
 
@@ -364,7 +410,8 @@ export function OpportunityFilters({
                                 startDate: val,
                                 endDate,
                                 startClosingDate,
-                                endClosingDate
+                                endClosingDate,
+                                origin: selectedOrigin
                             });
                         }}
                     />
@@ -385,7 +432,8 @@ export function OpportunityFilters({
                                 startDate,
                                 endDate: val,
                                 startClosingDate,
-                                endClosingDate
+                                endClosingDate,
+                                origin: selectedOrigin
                             });
                         }}
                     />
@@ -411,7 +459,8 @@ export function OpportunityFilters({
                                 startDate,
                                 endDate,
                                 startClosingDate: val,
-                                endClosingDate
+                                endClosingDate,
+                                origin: selectedOrigin
                             });
                         }}
                     />
@@ -432,7 +481,8 @@ export function OpportunityFilters({
                                 startDate,
                                 endDate,
                                 startClosingDate,
-                                endClosingDate: val
+                                endClosingDate: val,
+                                origin: selectedOrigin
                             });
                         }}
                     />
@@ -517,6 +567,22 @@ export function OpportunityFilters({
                         )}
                     </>
                 )}
+            </div>
+
+            {/* Origin Filter */}
+            <div className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 bg-white shadow-sm">
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-tight">Origen:</span>
+                <select
+                    data-testid="opportunities-filter-origin"
+                    className="text-sm bg-transparent border-none focus:ring-0 cursor-pointer text-slate-700 font-medium max-w-[170px]"
+                    value={selectedOrigin || ""}
+                    onChange={handleOriginChange}
+                >
+                    <option value="">Todos los Orígenes</option>
+                    {origins.map(o => (
+                        <option key={o.id} value={o.codigo}>{o.nombre}</option>
+                    ))}
+                </select>
             </div>
 
             {/* Clear Button */}

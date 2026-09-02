@@ -13,7 +13,10 @@ import { cn } from "@/components/ui/utils";
 const contactSchema = z.object({
     nombre: z.string().min(2, "Nombre requerido"),
     cargo: z.string().optional().nullable(),
-    email: z.string().email("Email inválido").nullable().optional().or(z.literal("")),
+    email: z.string().optional().nullable().refine(val => {
+        if (!val || val.trim() === "" || val === "*****") return true;
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val.trim());
+    }, { message: "Email inválido" }),
     telefono: z.string().nullable().optional(),
     es_principal: z.boolean(),
     comentarios: z.string().nullable().optional(),

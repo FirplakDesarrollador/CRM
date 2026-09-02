@@ -61,6 +61,7 @@ export default function Home() {
 
       // Date Filters
       if (filters.date_from || filters.date_to) {
+        if (!o.created_at) return false;
         const oppDate = new Date(o.created_at);
         if (filters.date_from && oppDate < new Date(filters.date_from)) return false;
         if (filters.date_to) {
@@ -86,6 +87,7 @@ export default function Home() {
 
       // Date Filters for Accounts
       if (filters.date_from || filters.date_to) {
+        if (!a.created_at) return false;
         const accDate = new Date(a.created_at);
         if (filters.date_from && accDate < new Date(filters.date_from)) return false;
         if (filters.date_to) {

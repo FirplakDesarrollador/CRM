@@ -4,6 +4,7 @@ import { syncEngine } from '@/lib/sync';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { db } from '@/lib/db';
 import { useSyncStore } from '@/lib/stores/useSyncStore';
+import { matchesSearchTokens, getSearchTokens } from '@/lib/utils';
 
 export type OpportunityServer = {
     id: string;
@@ -19,6 +20,8 @@ export type OpportunityServer = {
     fecha_cierre_estimada?: string | null;
     segmento_id?: number | null;
     estado_id?: number | null;
+    origen_oportunidad?: string | null;
+    url_origen?: string | null;
     account?: { nombre: string; canal_id?: string } | null; // Joined data
     fase_data?: { nombre: string } | null; // Joined data
     estado_data?: { nombre: string } | null; // Joined data
@@ -49,6 +52,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
     const [segmentFilter, setSegmentFilter] = useState<number | null>(null);
     const [phaseFilter, setPhaseFilter] = useState<number | null>(null);
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('open');
+    const [originFilter, setOriginFilter] = useState<string | null>(null);
     const [accountIdFilter, setAccountIdFilter] = useState<string | null>(null);
 
     // Date Filters
@@ -170,13 +174,15 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                 }
 
                 // Filtering
-                if (searchTerm) {
-                    const lowerSearch = searchTerm.toLowerCase();
-                    localOpps = localOpps.filter(o => {
-                        const oppNameMatches = o.nombre?.toLowerCase().includes(lowerSearch);
-                        const accountNameMatches = accMap.get(o.account_id)?.nombre?.toLowerCase().includes(lowerSearch);
-                        return oppNameMatches || accountNameMatches;
-                    });
+                if (searchTerm && searchTerm.trim()) {
+                    localOpps = localOpps.filter(o =>
+                        matchesSearchTokens([
+                            o.nombre,
+                            accMap.get(o.account_id)?.nombre,
+                            (o as any).vendedor?.full_name,
+                            o.origen_oportunidad
+                        ], searchTerm)
+                    );
                 }
 
                 if (channelFilter) {
@@ -208,6 +214,18 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
 
                 if (accountIdFilter) {
                     localOpps = localOpps.filter(o => o.account_id === accountIdFilter);
+                }
+
+                if (originFilter) {
+                    const lowerOrigin = originFilter.toLowerCase();
+                    localOpps = localOpps.filter(o => {
+                        if (!o.origen_oportunidad) return false;
+                        const val = o.origen_oportunidad.toLowerCase();
+                        if (lowerOrigin === 'wp') {
+                            return val.includes('wp') || val.includes('whatsapp');
+                        }
+                        return val.includes(lowerOrigin);
+                    });
                 }
 
                 // Date Filters offline
@@ -334,10 +352,17 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
             let searchAccountIds: string[] = [];
             let searchUserIds: string[] = [];
 
-            if (searchTerm) {
+            if (searchTerm && searchTerm.trim()) {
+                const tokens = getSearchTokens(searchTerm);
+                let accQuery = supabase.from('CRM_Cuentas').select('id').eq('is_deleted', false);
+                let userQuery = supabase.from('CRM_Usuarios').select('id');
+                for (const token of tokens) {
+                    accQuery = accQuery.ilike('nombre', `%${token}%`);
+                    userQuery = userQuery.ilike('full_name', `%${token}%`);
+                }
                 const [accountsRes, usersRes] = await Promise.all([
-                    supabase.from('CRM_Cuentas').select('id').ilike('nombre', `%${searchTerm}%`).limit(100),
-                    supabase.from('CRM_Usuarios').select('id').ilike('full_name', `%${searchTerm}%`).limit(100)
+                    accQuery.limit(100),
+                    userQuery.limit(100)
                 ]);
 
                 if (accountsRes.data) searchAccountIds = accountsRes.data.map(a => a.id);
@@ -363,6 +388,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                     fecha_cierre_estimada,
                     segmento_id,
                     created_by,
+                    origen_oportunidad,
                     ${accountRelation},
                     fase_data:CRM_FasesOportunidad(nombre),
                     estado_data:CRM_EstadosOportunidad(nombre),
@@ -371,15 +397,18 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                 .eq('is_deleted', false);
 
             // Apply Filters
-            if (searchTerm) {
-                let orConditions = [`nombre.ilike.%${searchTerm}%`];
-                if (searchAccountIds.length > 0) {
-                    orConditions.push(`account_id.in.(${searchAccountIds.join(',')})`);
+            if (searchTerm && searchTerm.trim()) {
+                const tokens = getSearchTokens(searchTerm);
+                for (const token of tokens) {
+                    let orConditions = [`nombre.ilike.%${token}%`];
+                    if (searchAccountIds.length > 0) {
+                        orConditions.push(`account_id.in.(${searchAccountIds.join(',')})`);
+                    }
+                    if (searchUserIds.length > 0) {
+                        orConditions.push(`owner_user_id.in.(${searchUserIds.join(',')})`);
+                    }
+                    query = query.or(orConditions.join(','));
                 }
-                if (searchUserIds.length > 0) {
-                    orConditions.push(`owner_user_id.in.(${searchUserIds.join(',')})`);
-                }
-                query = query.or(orConditions.join(','));
             }
 
             // Hierarchical Filters
@@ -397,6 +426,14 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
 
             if (phaseFilter) {
                 query = query.eq('fase_id', phaseFilter);
+            }
+
+            if (originFilter) {
+                if (originFilter.toLowerCase() === 'wp') {
+                    query = query.or('origen_oportunidad.ilike.%wp%,origen_oportunidad.ilike.%whatsapp%');
+                } else {
+                    query = query.ilike('origen_oportunidad', `%${originFilter}%`);
+                }
             }
 
             // Status Filter (won/lost/open) - combine phase names with legacy estado_id values.
@@ -472,6 +509,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                         fecha_cierre_estimada,
                         segmento_id,
                         created_by,
+                        origen_oportunidad,
                         ${accountRelation},
                         fase_data:CRM_FasesOportunidad(nombre),
                         estado_data:CRM_EstadosOportunidad(nombre),
@@ -566,7 +604,18 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                 }));
             }
 
-            const combinedResults = [...pendingLocalOpps, ...(result as any[])];
+            let combinedResults = [...pendingLocalOpps, ...(result as any[])];
+            if (searchTerm && searchTerm.trim()) {
+                combinedResults = combinedResults.filter(o =>
+                    matchesSearchTokens([
+                        o.nombre,
+                        o.account?.nombre,
+                        o.vendedor?.full_name,
+                        o.fase_data?.nombre,
+                        o.origen_oportunidad
+                    ], searchTerm)
+                );
+            }
 
             if (isLoadMore) {
                 setData(prev => {
@@ -581,7 +630,8 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
             }
 
             if (totalCount !== null) {
-                setCount(totalCount);
+                const effectiveCount = (searchTerm && searchTerm.trim()) ? combinedResults.length : totalCount;
+                setCount(effectiveCount);
                 setHasMore(from + (result?.length || 0) < totalCount);
             }
 
@@ -591,7 +641,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
             setLoading(false);
             useSyncStore.getState().setIsLoadingData(false);
         }
-    }, [currentUserId, subordinateIds, pageSize, userFilter, searchTerm, accountIdFilter, accountOwnerIds, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, phasesReady, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc]);
+    }, [currentUserId, subordinateIds, pageSize, userFilter, searchTerm, accountIdFilter, accountOwnerIds, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, originFilter, phasesReady, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc]);
 
     // Initial Fetch & Filter Fetch - no longer depends on phase IDs (read from refs)
     useEffect(() => {
@@ -643,6 +693,8 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
         setSegmentFilter,
         setPhaseFilter,
         setStatusFilter,
+        setOriginFilter,
+        originFilter,
         setAccountIdFilter,
         setStartDate,
         setEndDate,

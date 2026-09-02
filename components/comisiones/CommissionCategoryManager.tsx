@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useCommissionCategories, CommissionCategory } from '@/lib/hooks/useCommissionCategories';
 import { Upload, Plus, Search, AlertCircle, CheckCircle, Loader2, X, Layers, Wand2 } from 'lucide-react';
+import { matchesSearchTokens } from '@/lib/utils';
 
 export function CommissionCategoryManager() {
     const { data: categories, loading, createCategory, updateCategory, bulkUpload, autoDetectPrefixes, refresh } = useCommissionCategories();
@@ -23,8 +24,7 @@ export function CommissionCategoryManager() {
     const [showDetected, setShowDetected] = useState(false);
 
     const filtered = categories.filter(c =>
-        c.prefijo.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        c.nombre.toLowerCase().includes(searchTerm.toLowerCase())
+        matchesSearchTokens([c.prefijo, c.nombre, c.descripcion], searchTerm)
     );
 
     const handleSubmit = async () => {

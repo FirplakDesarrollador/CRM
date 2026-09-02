@@ -313,7 +313,8 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
             await syncEngine.queueMutation('CRM_Cotizaciones', quote.id, { ...quote, is_deleted: true }, { isSnapshot: true });
         }
         for (const item of quoteItemsAll) {
-            await syncEngine.queueMutation('CRM_CotizacionItems', item.id, { ...item, is_deleted: true }, { isSnapshot: true });
+            const { subtotal, ...itemData } = item;
+            await syncEngine.queueMutation('CRM_CotizacionItems', item.id, { ...itemData, is_deleted: true }, { isSnapshot: true });
         }
         for (const activity of activities) {
             await syncEngine.queueMutation('CRM_Actividades', activity.id, { ...activity, is_deleted: true }, { isSnapshot: true });

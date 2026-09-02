@@ -5,6 +5,7 @@ import { User, useUsers } from "@/lib/hooks/useUsers";
 import { Search, User as UserIcon, Check, X, ChevronDown } from "lucide-react";
 import { cn } from "@/components/ui/utils";
 import { useOnClickOutside } from "@/lib/hooks/useOnClickOutside";
+import { matchesSearchTokens } from "@/lib/utils";
 
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { useMemo } from "react";
@@ -59,8 +60,7 @@ export function UserPickerFilter({
     }, [users, role, currentUser]);
 
     const filteredUsers = availableUsers.filter(u =>
-        u.full_name?.toLowerCase().includes(search.toLowerCase()) ||
-        u.email.toLowerCase().includes(search.toLowerCase())
+        matchesSearchTokens([u.full_name, u.email], search)
     );
 
     return (

@@ -4,15 +4,13 @@ import { useParams, useRouter } from "next/navigation";
 import { useQuotes, useQuoteItems } from "@/lib/hooks/useOpportunities";
 import { useProductSearch, PriceListProduct } from "@/lib/hooks/useProducts";
 import { DetailHeader } from "@/components/ui/DetailHeader";
-import { generateQuotePdf } from "@/lib/pdfGenerator";
 import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { db, LocalQuote } from "@/lib/db";
-import { Save, AlertTriangle, Truck, Receipt, Calendar, Search, Plus, Trash2, Loader2, Package, Download, Send } from "lucide-react";
+import { Save, AlertTriangle, Truck, Receipt, Calendar, Search, Plus, Trash2, Loader2, Package } from "lucide-react";
 import { cn } from "@/components/ui/utils";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useConfig } from "@/lib/hooks/useConfig";
-import { SendQuoteModal } from "@/components/quotes/SendQuoteModal";
 import { useCommissionCategories } from "@/lib/hooks/useCommissionCategories";
 import { PedidosList } from "@/components/quotes/PedidosEditor";
 
@@ -26,61 +24,6 @@ export default function QuoteEditorPage() {
     const quote = quotes?.find(q => q.id === quoteId);
 
     const [activeSection, setActiveSection] = useState<'items' | 'sap'>('items');
-    const [isSendModalOpen, setIsSendModalOpen] = useState(false);
-
-    const sendContext = useLiveQuery(async () => {
-        if (!quote) return null;
-        const opp = await db.opportunities.get(quote.opportunity_id);
-        const acc = opp ? await db.accounts.get(opp.account_id) : null;
-        const qItems = await db.quoteItems.where('cotizacion_id').equals(quoteId).toArray();
-        
-        // Cargar nombres de asesor y códigos SAP en lote para evitar latencia
-        let advisorName = "";
-        let enrichedItems = qItems;
-
-        try {
-            const { supabase } = await import('@/lib/supabase');
-            
-            // 1. Fetch Advisor Name
-            if (opp?.owner_user_id) {
-                const { data: uData } = await supabase.from('CRM_Usuarios').select('full_name').eq('id', opp.owner_user_id).single();
-                advisorName = uData?.full_name || "";
-            }
-
-            // 2. Fetch SAP Article Numbers (numero_articulo)
-            const productIds = qItems.map(i => i.producto_id).filter(Boolean);
-            if (productIds.length > 0) {
-                const { data: pData } = await supabase
-                    .from('CRM_ListaDePrecios')
-                    .select('id, numero_articulo')
-                    .in('id', productIds);
-                
-                if (pData) {
-                    enrichedItems = qItems.map(item => ({
-                        ...item,
-                        numero_articulo: pData.find(p => p.id === item.producto_id)?.numero_articulo || item.producto_id
-                    }));
-                }
-            }
-        } catch (e) {
-            console.error("Error pre-fetching PDF data", e);
-        }
-
-        return { opp, acc, qItems: enrichedItems, advisorName };
-    }, [quote]);
-
-    const handleDownloadPdf = () => {
-        if (!quote || !sendContext) return;
-        
-        generateQuotePdf(
-            quote, 
-            sendContext.qItems, 
-            sendContext.acc, 
-            sendContext.opp, 
-            true, 
-            sendContext.advisorName
-        );
-    };
 
     if (!quote) return <div className="p-8">Cargando cotización...</div>;
 
@@ -97,10 +40,6 @@ export default function QuoteEditorPage() {
                         router.push(`/oportunidades/${oppId}?tab=cotizaciones`);
                     }
                 }}
-                actions={[
-                    { label: "Enviar Cotización", icon: Send, onClick: () => setIsSendModalOpen(true) },
-                    { label: "Descargar PDF", icon: Download, onClick: handleDownloadPdf }
-                ]}
             />
 
             <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
@@ -136,6 +75,7 @@ export default function QuoteEditorPage() {
                     <QuoteItemsEditor
                         quote={quote}
                         onItemsChange={() => updateQuoteTotal(quoteId)}
+                        onSaveQuote={(updates) => updateQuote(quoteId, updates)}
                     />
                 )}
 
@@ -143,22 +83,16 @@ export default function QuoteEditorPage() {
                     <PedidosList quote={quote} />
                 )}
 
-                {isSendModalOpen && sendContext && (
-                    <SendQuoteModal 
-                        isOpen={isSendModalOpen} 
-                        onClose={() => setIsSendModalOpen(false)} 
-                        quote={quote} 
-                        account={sendContext.acc} 
-                        opportunity={sendContext.opp} 
-                        quoteItems={sendContext.qItems} 
-                    />
-                )}
             </div>
         </div>
     );
 }
 
-function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItemsChange: () => void }) {
+function QuoteItemsEditor({ quote, onItemsChange, onSaveQuote }: {
+    quote: LocalQuote;
+    onItemsChange: () => void;
+    onSaveQuote: (updates: Partial<LocalQuote>) => Promise<void>;
+}) {
     const { items, addItem, updateItem, removeItem } = useQuoteItems(quote.id);
     const [searchTerm, setSearchTerm] = useState("");
     const [selectedPrefix, setSelectedPrefix] = useState<string>("");
@@ -175,13 +109,7 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
         if (comentarios === quote.comentarios) return;
         setIsSaving(true);
         try {
-            const { updateQuote } = await import("@/lib/hooks/useOpportunities");
-            // Nota: El hook useQuotes ya está instanciado en el padre, pero aquí no tenemos acceso a sus setters.
-            // Usamos db directamente para asegurar persistencia y disparar sync.
-            await db.quotes.update(quote.id, { 
-                comentarios,
-                updated_at: new Date().toISOString()
-            });
+            await onSaveQuote({ comentarios });
         } catch (error) {
             console.error("Error saving quote comments:", error);
         } finally {
@@ -413,25 +341,27 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
                                             }
                                         }
 
-                                        // Fallback final robusto si no hay precio en el canal
-                                        if (Number(displayPrice) === 0) displayPrice = Number(product.lista_base_cop) || Number(product.pvp_sin_iva) || 0;
+                                        const formattedPrice = new Intl.NumberFormat(quote.currency_id === 'USD' ? 'en-US' : 'es-CO', {
+                                            maximumFractionDigits: 0,
+                                            minimumFractionDigits: 0
+                                        }).format(Math.round(displayPrice || 0));
 
                                         return (
                                             <button
                                                 key={product.id}
                                                 onClick={() => handleAddProduct(product)}
-                                                className="w-full text-left px-5 py-4 hover:bg-blue-50 flex items-center justify-between border-b border-slate-50 last:border-0 transition-colors"
+                                                className="w-full text-left px-3.5 py-3 sm:px-5 sm:py-3.5 hover:bg-blue-50/70 flex items-center justify-between gap-3 border-b border-slate-100 last:border-0 transition-colors group cursor-pointer"
                                             >
-                                                <div className="max-w-[70%]">
-                                                    <div className="font-semibold text-slate-900 line-clamp-2 leading-tight">{product.descripcion}</div>
-                                                    <div className="text-xs text-slate-500 mt-1">{product.numero_articulo}</div>
+                                                <div className="flex-1 min-w-0 pr-2">
+                                                    <div className="font-medium text-xs sm:text-sm text-slate-900 line-clamp-2 leading-snug group-hover:text-blue-700">{product.descripcion}</div>
+                                                    <div className="text-[11px] text-slate-400 mt-0.5">{product.numero_articulo}</div>
                                                 </div>
-                                                <div className="flex items-center gap-4">
-                                                    <div className="text-sm font-bold text-slate-900 whitespace-nowrap">
-                                                        {quote.currency_id} {new Intl.NumberFormat(quote.currency_id === 'USD' ? 'en-US' : 'es-CO', { style: 'currency', currency: quote.currency_id || 'COP' }).format(displayPrice || 0)}
-                                                    </div>
-                                                    <div className="p-2 bg-blue-100 text-blue-700 rounded-full group-hover:bg-blue-600 group-hover:text-white transition-colors">
-                                                        <Plus className="w-4 h-4" />
+                                                <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+                                                    <span className="text-[11px] sm:text-xs font-semibold text-slate-800 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 whitespace-nowrap">
+                                                        {quote.currency_id || 'COP'} {formattedPrice}
+                                                    </span>
+                                                    <div className="p-1.5 sm:p-2 bg-blue-100 text-blue-700 rounded-full group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                                                        <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                                                     </div>
                                                 </div>
                                             </button>

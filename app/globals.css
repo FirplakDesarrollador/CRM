@@ -61,3 +61,18 @@ nextjs-portal {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+@keyframes luminous-flow {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.animate-luminous-flow {
+  background-size: 200% 100%;
+  animation: luminous-flow 2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  will-change: background-position;
+}

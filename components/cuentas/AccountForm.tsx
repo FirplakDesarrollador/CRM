@@ -7,11 +7,12 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, LocalCuenta } from "@/lib/db";
 import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useState, useEffect } from "react";
-import { Loader2, User, Building2, Medal } from "lucide-react";
+import { Loader2, User, Building2, Medal, Trash2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useFormDraft } from "@/lib/hooks/useFormDraft";
 import AccountContactsTab from "./AccountContactsTab";
 import AccountOpportunitiesTab from "./AccountOpportunitiesTab";
+import { AccountDeleteModal } from "./AccountDeleteModal";
 import { Briefcase } from "lucide-react";
 import { cn } from "@/components/ui/utils";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
@@ -21,17 +22,24 @@ import AccountActivitiesTab from "./AccountActivitiesTab";
 import { ListTodo } from "lucide-react";
 import { useFormAutoSave } from "@/lib/hooks/useFormAutoSave";
 import { AutoSaveIndicator } from "@/components/ui/AutoSaveIndicator";
+import { isProvisionalNit } from "@/lib/nitUtils";
 
 // Schema
 const accountSchema = z.object({
     nombre: z.string().min(2, "Nombre requerido"),
-    nit_base: z.string().min(5, "NIT requerido"),
+    nit_base: z.string().optional().nullable().refine(val => {
+        if (!val || val.trim() === "") return true;
+        return val.trim().length >= 5;
+    }, { message: "NIT debe tener al menos 5 caracteres" }),
     is_child: z.boolean(),
     id_cuenta_principal: z.string().nullable().optional(),
     canal_id: z.string().min(1, "Canal de venta requerido"),
-    subclasificacion_id: z.string().optional().nullable(), // Form uses string, convert to number on submit
+    subclasificacion_id: z.string().optional().nullable(),
     telefono: z.string().nullable().optional(),
-    email: z.string().email("Email inválido").nullable().optional().or(z.literal("")),
+    email: z.string().optional().nullable().refine(val => {
+        if (!val || val.trim() === "" || val === "*****") return true;
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val.trim());
+    }, { message: "Email inválido" }),
     direccion: z.string().nullable().optional(),
     pais_id: z.string().nullable().optional(),
     departamento_id: z.string().nullable().optional(),
@@ -41,6 +49,7 @@ const accountSchema = z.object({
     nivel_premium: z.enum(['PREMIUM', 'DESTACADO', 'ACTIVO']).nullable().optional(),
     ignorar_limites_descuento: z.boolean().optional(),
     comentarios: z.string().nullable().optional(),
+    origen_cuenta: z.string().nullable().optional(),
 });
 
 type AccountFormData = z.infer<typeof accountSchema>;
@@ -48,15 +57,17 @@ type AccountFormData = z.infer<typeof accountSchema>;
 interface AccountFormProps {
     onSuccess: () => void;
     onCancel: () => void;
+    onDelete?: (account: any) => void;
     account?: LocalCuenta; // Existing account to edit
 }
 
-export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) {
-    const { createAccount, updateAccount } = useAccounts();
+export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountFormProps) {
+    const { createAccount, updateAccount, deleteAccount } = useAccounts();
     const { role: userRole, isAdmin } = useCurrentUser();
     const [parents, setParents] = useState<any[]>([]);
     const [activeTab, setActiveTab] = useState<'info' | 'contacts' | 'opportunities' | 'branches' | 'assigned' | 'activities'>('info');
     const [hasBranches, setHasBranches] = useState(false);
+    const [showDeleteModal, setShowDeleteModal] = useState(false);
 
     // Live Query for Subclassifications from local DB
     const subclassifications = useLiveQuery(() => db.subclasificaciones.toArray()) || [];
@@ -207,7 +218,8 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             es_premium: account?.es_premium || false,
             nivel_premium: account?.nivel_premium || null,
             ignorar_limites_descuento: account?.ignorar_limites_descuento || false,
-            comentarios: account?.comentarios || ""
+            comentarios: account?.comentarios || "",
+            origen_cuenta: (account as any)?.origen_cuenta || ""
         }
     });
 
@@ -240,12 +252,13 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             es_premium: !!data.nivel_premium,
             nivel_premium: data.nivel_premium || null,
             ignorar_limites_descuento: data.ignorar_limites_descuento || false,
-            comentarios: data.comentarios || null
+            comentarios: data.comentarios || null,
+            origen_cuenta: data.origen_cuenta || null
         };
         await updateAccount(account.id, payload);
     };
 
-    const { status: autoSaveStatus } = useFormAutoSave({
+    const { status: autoSaveStatus, errorMessage: autoSaveError } = useFormAutoSave({
         form,
         onSave: onAutoSave,
         isEnabled: !!account?.id
@@ -272,7 +285,8 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                 es_premium: account.es_premium || false,
                 nivel_premium: account.nivel_premium || null,
                 ignorar_limites_descuento: account.ignorar_limites_descuento || false,
-                comentarios: account.comentarios || ""
+                comentarios: account.comentarios || "",
+                origen_cuenta: (account as any)?.origen_cuenta || ""
             }, { keepDefaultValues: true });
         }
     }, [account, reset, isDirty]);
@@ -339,28 +353,31 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             // Excludes current account ID if editing.
 
             const checkDuplicates = async () => {
+                const filters = [`nombre.eq.${formData.nombre}`];
+                if (formData.nit_base && formData.nit_base.trim() !== "" && !isProvisionalNit(formData.nit_base)) {
+                    filters.push(`nit_base.eq.${formData.nit_base.trim()}`);
+                }
+                if (formData.telefono) {
+                    filters.push(`telefono.eq.${formData.telefono}`);
+                }
+                if (formData.email) {
+                    filters.push(`email.eq.${formData.email}`);
+                }
+
                 let query = supabase
                     .from('CRM_Cuentas')
                     .select('id, nombre, nit_base, telefono, email')
                     .eq('is_deleted', false)
-                    .or(`nombre.eq.${formData.nombre},nit_base.eq.${formData.nit_base}${formData.telefono ? `,telefono.eq.${formData.telefono}` : ''}${formData.email ? `,email.eq.${formData.email}` : ''}`);
+                    .or(filters.join(','));
 
                 if (account?.id) {
                     query = query.neq('id', account.id);
                 }
 
-                // If it's a child account, we might be less strict about NIT (inherits), 
-                // but NAME should still be unique presumably? 
-                // The requirement says "duplicates in: Account Name, NIT, Phone, Email".
-                // We'll apply it broadly.
-
                 const { data: duplicates, error: checkError } = await query;
 
                 if (checkError) {
                     console.error("Error checking duplicates:", checkError);
-                    // Decide if we block or proceed cautiously. Ideally block or warn?
-                    // Let's not block completely on network error, or alert user?
-                    // For now, allow proceed but log.
                     return null;
                 }
                 return duplicates;
@@ -371,13 +388,15 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             if (duplicates && duplicates.length > 0) {
                 // Find specific conflicts
                 const nameConflict = duplicates.find(d => d.nombre.toLowerCase() === formData.nombre.toLowerCase());
-                const nitConflict = duplicates.find(d => d.nit_base === formData.nit_base);
+                const nitConflict = (formData.nit_base && !isProvisionalNit(formData.nit_base))
+                    ? duplicates.find(d => d.nit_base === formData.nit_base)
+                    : null;
                 const phoneConflict = formData.telefono ? duplicates.find(d => d.telefono === formData.telefono) : null;
                 const emailConflict = formData.email ? duplicates.find(d => d.email === formData.email) : null;
 
                 let errorMessage = "";
                 if (nameConflict) errorMessage += `\n- El nombre "${formData.nombre}" ya existe.`;
-                if (nitConflict && (!formData.is_child)) errorMessage += `\n- El NIT "${formData.nit_base}" ya existe.`; // Allow duplicate NIT for child accounts? Form logic below handles inheritance, but requirement says "NIT". Usually branches share NIT. If is_child, we skip NIT check or let it pass? Code below sets NIT from parent. Let's strictly block invalid NIT usage for PARENTS.
+                if (nitConflict && (!formData.is_child)) errorMessage += `\n- El NIT "${formData.nit_base}" ya existe.`;
                 if (phoneConflict) errorMessage += `\n- El teléfono "${formData.telefono}" ya existe.`;
                 if (emailConflict) errorMessage += `\n- El email "${formData.email}" ya existe.`;
 
@@ -409,7 +428,8 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                 es_premium: !!data.nivel_premium,
                 nivel_premium: data.nivel_premium || null,
                 ignorar_limites_descuento: data.ignorar_limites_descuento || false,
-                comentarios: data.comentarios || null
+                comentarios: data.comentarios || null,
+                origen_cuenta: data.origen_cuenta || null
             };
 
             // DEBUG: Log the final payload
@@ -428,7 +448,8 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             onSuccess();
         } catch (error) {
             console.error(error);
-            alert("Error guardando cuenta");
+            const msg = error instanceof Error ? error.message : String(error);
+            alert(`Error guardando cuenta: ${msg}`);
         } finally {
             setIsSubmitting(false);
         }
@@ -699,12 +720,19 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                         </div>
                     ) : (
                         <div className="space-y-1">
-                            <label className="text-sm font-medium">NIT (Sin dígito de verificación)</label>
+                            <div className="flex items-center justify-between">
+                                <label className="text-sm font-medium">NIT (Sin dígito de verificación)</label>
+                                {isProvisionalNit(watch("nit_base")) && (
+                                    <span className="text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-full">
+                                        Provisional (Requerirá NIT real para pedidos)
+                                    </span>
+                                )}
+                            </div>
                             <input
                                 data-testid="accounts-input-nit"
                                 {...register("nit_base")}
                                 className={cn("w-full border p-2 rounded", nitError ? "border-red-500 bg-red-50" : "border-slate-200")}
-                                placeholder="Ej. 890900123"
+                                placeholder="Ej. 890900123 (opcional, autogenera provisional si se omite)"
                                 onChange={(e) => {
                                     register("nit_base").onChange(e);
                                     if (nitError) setNitError(null);
@@ -790,6 +818,10 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                             <input {...register("email")} type="email" className="w-full border p-2 rounded" placeholder="correo@ejemplo.com" />
                             {errors.email && <span className="text-red-500 text-xs">{errors.email.message}</span>}
                         </div>
+                        <div>
+                            <label className="text-sm font-medium">Origen de la Cuenta <span className="text-slate-400 font-normal text-xs">(Opcional)</span></label>
+                            <input {...register("origen_cuenta")} className="w-full border p-2 rounded" placeholder="Ej. Referido, Feria, Publicidad, Web..." />
+                        </div>
                     </div>
 
                     {/* Comentarios */}
@@ -821,28 +853,46 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
                         </div>
                     )}
 
-                    <div className="flex justify-end items-center gap-4 pt-4 border-t border-slate-100">
+                    <div className="flex justify-between items-center gap-4 pt-4 border-t border-slate-100">
                         {account?.id ? (
                             <>
-                                <AutoSaveIndicator status={autoSaveStatus} />
-                                <button data-testid="accounts-form-cancel" type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">
-                                    Cerrar
-                                </button>
+                                {isAdmin ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowDeleteModal(true)}
+                                        className="px-3.5 py-2 text-sm font-semibold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg flex items-center gap-2 transition-all active:scale-95"
+                                        title="Eliminar esta cuenta y sus registros vinculados"
+                                    >
+                                        <Trash2 size={16} />
+                                        <span>Eliminar Cuenta</span>
+                                    </button>
+                                ) : (
+                                    <div />
+                                )}
+                                <div className="flex items-center gap-4">
+                                     <AutoSaveIndicator status={autoSaveStatus} errorMessage={autoSaveError} />
+                                    <button data-testid="accounts-form-cancel" type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded font-medium">
+                                        Cerrar
+                                    </button>
+                                </div>
                             </>
                         ) : (
                             <>
-                                <button data-testid="accounts-form-cancel" type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">
-                                    Cancelar
-                                </button>
-                                <button
-                                    data-testid="accounts-form-save"
-                                    type="submit"
-                                    disabled={isSubmitting}
-                                    className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center"
-                                >
-                                    {isSubmitting && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
-                                    Guardar Cuenta
-                                </button>
+                                <div />
+                                <div className="flex items-center gap-3">
+                                    <button data-testid="accounts-form-cancel" type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded font-medium">
+                                        Cancelar
+                                    </button>
+                                    <button
+                                        data-testid="accounts-form-save"
+                                        type="submit"
+                                        disabled={isSubmitting}
+                                        className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center font-medium"
+                                    >
+                                        {isSubmitting && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
+                                        Guardar Cuenta
+                                    </button>
+                                </div>
                             </>
                         )}
                     </div>
@@ -851,8 +901,19 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             ) : activeTab === 'contacts' ? (
                 <div className="p-4">
                     {account?.id && <AccountContactsTab accountId={account.id} />}
-                    <div className="flex justify-end pt-4 border-t mt-4">
-                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">
+                    <div className="flex justify-between items-center pt-4 border-t mt-4">
+                        {isAdmin && account?.id ? (
+                            <button
+                                type="button"
+                                onClick={() => setShowDeleteModal(true)}
+                                className="px-3.5 py-2 text-sm font-semibold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg flex items-center gap-2 transition-all active:scale-95"
+                                title="Eliminar esta cuenta y sus registros vinculados"
+                            >
+                                <Trash2 size={16} />
+                                <span>Eliminar Cuenta</span>
+                            </button>
+                        ) : <div />}
+                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded font-medium">
                             Cerrar
                         </button>
                     </div>
@@ -860,8 +921,19 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             ) : activeTab === 'assigned' ? (
                 <div className="p-4">
                     {account?.id && <AccountAssignedTab accountId={account.id} currentOwnerId={(account as any).owner_user_id || account.created_by || null} />}
-                    <div className="flex justify-end pt-4 border-t mt-4">
-                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">
+                    <div className="flex justify-between items-center pt-4 border-t mt-4">
+                        {isAdmin && account?.id ? (
+                            <button
+                                type="button"
+                                onClick={() => setShowDeleteModal(true)}
+                                className="px-3.5 py-2 text-sm font-semibold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg flex items-center gap-2 transition-all active:scale-95"
+                                title="Eliminar esta cuenta y sus registros vinculados"
+                            >
+                                <Trash2 size={16} />
+                                <span>Eliminar Cuenta</span>
+                            </button>
+                        ) : <div />}
+                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded font-medium">
                             Cerrar
                         </button>
                     </div>
@@ -869,11 +941,21 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             ) : activeTab === 'branches' ? (
                 <div className="p-4">
                     {account?.id && <AccountBranchesTab accountId={account.id} onSelectAccount={(branch) => {
-                        // Logic to open branch account - In this CRM context, we can reuse the handleEdit if it's available in props or similar
-                        // For now, it will just show the information.
+                        // Logic to open branch account
                     }} />}
-                    <div className="flex justify-end pt-4 border-t mt-4">
-                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">
+                    <div className="flex justify-between items-center pt-4 border-t mt-4">
+                        {isAdmin && account?.id ? (
+                            <button
+                                type="button"
+                                onClick={() => setShowDeleteModal(true)}
+                                className="px-3.5 py-2 text-sm font-semibold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg flex items-center gap-2 transition-all active:scale-95"
+                                title="Eliminar esta cuenta y sus registros vinculados"
+                            >
+                                <Trash2 size={16} />
+                                <span>Eliminar Cuenta</span>
+                            </button>
+                        ) : <div />}
+                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded font-medium">
                             Cerrar
                         </button>
                     </div>
@@ -881,8 +963,19 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             ) : activeTab === 'activities' ? (
                 <div className="p-4">
                     {account?.id && <AccountActivitiesTab accountId={account.id} />}
-                    <div className="flex justify-end pt-4 border-t mt-4">
-                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">
+                    <div className="flex justify-between items-center pt-4 border-t mt-4">
+                        {isAdmin && account?.id ? (
+                            <button
+                                type="button"
+                                onClick={() => setShowDeleteModal(true)}
+                                className="px-3.5 py-2 text-sm font-semibold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg flex items-center gap-2 transition-all active:scale-95"
+                                title="Eliminar esta cuenta y sus registros vinculados"
+                            >
+                                <Trash2 size={16} />
+                                <span>Eliminar Cuenta</span>
+                            </button>
+                        ) : <div />}
+                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded font-medium">
                             Cerrar
                         </button>
                     </div>
@@ -890,12 +983,39 @@ export function AccountForm({ onSuccess, onCancel, account }: AccountFormProps) 
             ) : (
                 <div className="p-4">
                     {account?.id && <AccountOpportunitiesTab accountId={account.id} />}
-                    <div className="flex justify-end pt-4 border-t mt-4">
-                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded">
+                    <div className="flex justify-between items-center pt-4 border-t mt-4">
+                        {isAdmin && account?.id ? (
+                            <button
+                                type="button"
+                                onClick={() => setShowDeleteModal(true)}
+                                className="px-3.5 py-2 text-sm font-semibold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg flex items-center gap-2 transition-all active:scale-95"
+                                title="Eliminar esta cuenta y sus registros vinculados"
+                            >
+                                <Trash2 size={16} />
+                                <span>Eliminar Cuenta</span>
+                            </button>
+                        ) : <div />}
+                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded font-medium">
                             Cerrar
                         </button>
                     </div>
                 </div>
+            )}
+
+            {showDeleteModal && account && (
+                <AccountDeleteModal
+                    account={account}
+                    onClose={() => setShowDeleteModal(false)}
+                    onConfirm={async (id) => {
+                        if (onDelete) {
+                            await onDelete(account);
+                        } else {
+                            await deleteAccount(id);
+                            onSuccess();
+                        }
+                        setShowDeleteModal(false);
+                    }}
+                />
             )}
         </div>
     );

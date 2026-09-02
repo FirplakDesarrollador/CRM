@@ -12,15 +12,20 @@ import { supabase } from "@/lib/supabase";
 import { cn } from "@/components/ui/utils";
 import { useRouter } from "next/navigation";
 
+import { isProvisionalNit, generateProvisionalNit } from "@/lib/nitUtils";
+
 const accountSchema = z.object({
     nombre: z.string().min(2, "Nombre requerido"),
-    nit_base: z.string().min(5, "NIT requerido"),
+    nit_base: z.string().optional().nullable(),
     is_child: z.boolean().default(false),
     id_cuenta_principal: z.string().nullable().optional(),
     canal_id: z.string().min(1, "Canal de venta requerido"),
     subclasificacion_id: z.string().optional().nullable(),
     telefono: z.string().nullable().optional(),
-    email: z.string().email("Email inválido").nullable().optional().or(z.literal("")),
+    email: z.string().optional().nullable().refine(val => {
+        if (!val || val.trim() === "" || val === "*****") return true;
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val.trim());
+    }, { message: "Email inválido" }),
     direccion: z.string().nullable().optional(),
     pais_id: z.string().nullable().optional(),
     departamento_id: z.string().nullable().optional(),
@@ -30,6 +35,7 @@ const accountSchema = z.object({
     nivel_premium: z.enum(['PREMIUM', 'DESTACADO', 'ACTIVO']).nullable().optional(),
     ignorar_limites_descuento: z.boolean().optional(),
     comentarios: z.string().nullable().optional(),
+    origen_cuenta: z.string().nullable().optional(),
 });
 
 type AccountFormInput = z.input<typeof accountSchema>;
@@ -124,7 +130,8 @@ export default function CreateAccountWizard() {
             es_premium: false,
             nivel_premium: null,
             ignorar_limites_descuento: false,
-            comentarios: ""
+            comentarios: "",
+            origen_cuenta: ""
         }
     });
 
@@ -173,22 +180,38 @@ export default function CreateAccountWizard() {
 
         setIsSubmitting(true);
         try {
-            // Check duplicates against Supabase
+            // Check duplicates against Supabase using individual safe queries
             const checkDuplicates = async () => {
-                const query = supabase
-                    .from('CRM_Cuentas')
-                    .select('id, nombre, nit_base, telefono, email')
-                    .eq('is_deleted', false)
-                    .or(`nombre.eq.${data.nombre},nit_base.eq.${data.nit_base}${data.telefono ? `,telefono.eq.${data.telefono}` : ''}${data.email ? `,email.eq.${data.email}` : ''}`);
+                const checks = [
+                    supabase.from('CRM_Cuentas').select('id, nombre, nit_base, telefono, email').eq('is_deleted', false).eq('nombre', data.nombre),
+                ];
+                if (data.nit_base && data.nit_base.trim() !== "" && !isProvisionalNit(data.nit_base)) {
+                    checks.push(supabase.from('CRM_Cuentas').select('id, nombre, nit_base, telefono, email').eq('is_deleted', false).eq('nit_base', data.nit_base.trim()));
+                }
+                if (data.telefono) {
+                    checks.push(supabase.from('CRM_Cuentas').select('id, nombre, nit_base, telefono, email').eq('is_deleted', false).eq('telefono', data.telefono));
+                }
+                if (data.email) {
+                    checks.push(supabase.from('CRM_Cuentas').select('id, nombre, nit_base, telefono, email').eq('is_deleted', false).eq('email', data.email));
+                }
 
-                const { data: duplicates } = await query;
-                return (duplicates ?? []) as DuplicateAccount[];
+                const results = await Promise.all(checks);
+                const allDuplicates = results.flatMap(r => r.data ?? []);
+                // Deduplicate by id
+                const seen = new Set<string>();
+                return allDuplicates.filter(d => {
+                    if (seen.has(d.id)) return false;
+                    seen.add(d.id);
+                    return true;
+                }) as DuplicateAccount[];
             };
 
             const duplicates = await checkDuplicates();
             if (duplicates && duplicates.length > 0) {
                 const nameConflict = duplicates.find(d => d.nombre.toLowerCase() === data.nombre.toLowerCase());
-                const nitConflict = duplicates.find(d => d.nit_base === data.nit_base);
+                const nitConflict = (data.nit_base && !isProvisionalNit(data.nit_base))
+                    ? duplicates.find(d => d.nit_base === data.nit_base)
+                    : null;
                 const phoneConflict = data.telefono ? duplicates.find(d => d.telefono === data.telefono) : null;
                 const emailConflict = data.email ? duplicates.find(d => d.email === data.email) : null;
 
@@ -210,9 +233,13 @@ export default function CreateAccountWizard() {
                 if (parent) data.nit_base = parent.nit_base || "";
             }
 
+            const finalNit = (data.nit_base && data.nit_base.trim() !== "" && data.nit_base !== "Sin NIT")
+                ? data.nit_base.trim()
+                : generateProvisionalNit();
+
             const payload: Partial<LocalCuenta> = {
                 nombre: data.nombre,
-                nit_base: data.nit_base,
+                nit_base: finalNit,
                 id_cuenta_principal: data.is_child ? data.id_cuenta_principal : null,
                 canal_id: data.canal_id,
                 subclasificacion_id: data.subclasificacion_id ? Number(data.subclasificacion_id) : null,
@@ -226,14 +253,16 @@ export default function CreateAccountWizard() {
                 es_premium: !!data.nivel_premium,
                 nivel_premium: data.nivel_premium || null,
                 ignorar_limites_descuento: data.ignorar_limites_descuento || false,
-                comentarios: data.comentarios || undefined
+                comentarios: data.comentarios || undefined,
+                origen_cuenta: data.origen_cuenta || undefined
             };
 
             const newId = await createAccount(payload);
             router.push(`/cuentas?id=${newId}`);
         } catch (error) {
             console.error("Error creating account:", error);
-            alert("Error al crear la cuenta");
+            const msg = error instanceof Error ? error.message : String(error);
+            alert(`Error al crear la cuenta: ${msg}`);
         } finally {
             setIsSubmitting(false);
         }
@@ -398,6 +427,11 @@ export default function CreateAccountWizard() {
                             <div className="space-y-1">
                                 <label className="text-sm font-bold text-slate-700 block">Dirección Física</label>
                                 <input {...register("direccion")} className="w-full border p-3 rounded-xl border-slate-200 outline-none focus:ring-2 focus:ring-blue-500" placeholder="Calle 123 # 45 - 67" />
+                            </div>
+
+                            <div className="space-y-1">
+                                <label className="text-sm font-bold text-slate-700 block">Origen de la Cuenta <span className="text-slate-400 font-normal">(Opcional)</span></label>
+                                <input {...register("origen_cuenta")} className="w-full border p-3 rounded-xl border-slate-200 outline-none focus:ring-2 focus:ring-blue-500" placeholder="Ej. Referido, Feria, Publicidad, Web, etc." />
                             </div>
                         </div>
                     )}

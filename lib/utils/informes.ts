@@ -388,3 +388,42 @@ export const downloadSopExcel = async (
   saveAs(blob, `${filename}_${new Date().toISOString().split('T')[0]}.xlsx`);
 };
 
+export interface OpportunityFlattenLookups {
+  userMap: Map<string, string>;
+  segmentMap: Map<number, string>;
+  lossReasonMap: Map<number, string>;
+  deptMap: Map<number, string>;
+  cityMap: Map<number, string>;
+  canalMap: Map<string, string>;
+  countryMap: Map<number | string, string>;
+}
+
+export function mapOpportunityReportRow(
+  item: any,
+  lookups: OpportunityFlattenLookups
+) {
+  const getJoinedSingle = (rel: any) => Array.isArray(rel) ? rel[0] : rel;
+  const cuentaObj = getJoinedSingle(item.cuenta);
+  const faseObj = getJoinedSingle(item.fase);
+  const estadoObj = getJoinedSingle(item.estado_info);
+  const paisId = cuentaObj?.pais_id ?? item.pais_id;
+  
+  return {
+    ...item,
+    cuenta_nombre: cuentaObj?.nombre || '-',
+    pais_nombre: paisId ? (lookups.countryMap.get(paisId) || lookups.countryMap.get(Number(paisId)) || lookups.countryMap.get(String(paisId)) || '-') : '-',
+    fase_nombre: faseObj?.nombre || '-',
+    estado_nombre: estadoObj?.nombre || '-',
+    vendedor_nombre: lookups.userMap.get(item.owner_user_id) || '-',
+    creador_nombre: lookups.userMap.get(item.created_by) || '-',
+    segmento_nombre: lookups.segmentMap.get(item.segmento_id) || '-',
+    canal_nombre: lookups.canalMap.get(faseObj?.canal_id || cuentaObj?.canal_id) || '-',
+    departamento_nombre: lookups.deptMap.get(item.departamento_id) || '-',
+    ciudad_nombre: lookups.cityMap.get(item.ciudad_id) || '-',
+    probabilidad: item.probabilidad ?? item.probability ?? 0,
+    probability: item.probabilidad ?? item.probability ?? 0,
+    razon_perdida_label: item.razon_perdida_id ? (lookups.lossReasonMap.get(item.razon_perdida_id) || item.razon_perdida) : (item.razon_perdida || '-')
+  };
+}
+
+

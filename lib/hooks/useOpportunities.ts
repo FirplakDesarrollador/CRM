@@ -1,5 +1,5 @@
 import { useLiveQuery } from "dexie-react-hooks";
-import { db, LocalQuote, LocalQuoteItem } from "@/lib/db";
+import { db, LocalOportunidad, LocalOpportunityCollaborator, LocalQuote, LocalQuoteItem } from "@/lib/db";
 import { syncEngine } from "@/lib/sync";
 import { useState } from "react";
 import { supabase } from "@/lib/supabase";
@@ -64,6 +64,8 @@ function sanitizeOpportunityForSync(opp: any) {
     if (sanitized.estado_id !== undefined) sanitized.estado_id = sanitized.estado_id ? Number(sanitized.estado_id) : 1;
     if (sanitized.fase_id !== undefined) sanitized.fase_id = sanitized.fase_id ? Number(sanitized.fase_id) : 1;
     if (sanitized.razon_perdida_id !== undefined) sanitized.razon_perdida_id = sanitized.razon_perdida_id ? Number(sanitized.razon_perdida_id) : null;
+    if (sanitized.clientes_atendidos !== undefined) sanitized.clientes_atendidos = sanitized.clientes_atendidos !== null && sanitized.clientes_atendidos !== "" ? Number(sanitized.clientes_atendidos) : 0;
+    if (sanitized.contactos_ids !== undefined) sanitized.contactos_ids = Array.isArray(sanitized.contactos_ids) ? sanitized.contactos_ids : [];
     // Text fields — pass through as-is (no conversion needed)
     // razon_perdida and comentarios_perdida are already strings or null
 
@@ -121,38 +123,28 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
             departamento_id: oppData.departamento_id ? Number(oppData.departamento_id) : null,
             ciudad_id: oppData.ciudad_id ? Number(oppData.ciudad_id) : null,
             fecha_cierre_estimada: oppData.fecha_cierre_estimada === "" ? null : (oppData.fecha_cierre_estimada || null),
+            contactos_ids: Array.isArray(oppData.contactos_ids) ? oppData.contactos_ids : [],
+            clientes_atendidos: oppData.clientes_atendidos !== undefined && oppData.clientes_atendidos !== null && oppData.clientes_atendidos !== "" ? Number(oppData.clientes_atendidos) : 0,
             created_by: user?.id,
             updated_by: user?.id,
             updated_at: new Date().toISOString()
         };
-        await db.opportunities.add(newOpp);
-        await syncEngine.queueMutation('CRM_Oportunidades', id, sanitizeOpportunityForSync(newOpp), { isSnapshot: true });
+        const collabEntries: LocalOpportunityCollaborator[] = collaborators?.map((c: any) => ({
+            id: uuidv4(),
+            oportunidad_id: id,
+            usuario_id: c.usuario_id,
+            porcentaje: c.porcentaje,
+            rol: c.rol || 'COLABORADOR',
+            created_at: new Date().toISOString()
+        })) || [];
 
-        // Save Collaborators (Defensive)
-        if (collaborators && collaborators.length > 0) {
-            try {
-                const collabEntries = collaborators.map((c: any) => ({
-                    id: uuidv4(),
-                    oportunidad_id: id,
-                    usuario_id: c.usuario_id,
-                    porcentaje: c.porcentaje,
-                    rol: c.rol || 'COLABORADOR',
-                    created_at: new Date().toISOString()
-                }));
-
-                await db.opportunityCollaborators.bulkAdd(collabEntries);
-                for (const col of collabEntries) {
-                    await syncEngine.queueMutation('CRM_Oportunidades_Colaboradores', col.id, col);
-                }
-            } catch (err) {
-                console.warn("Could not save collaborators locally or queue mutation (table might be missing locally):", err);
-            }
-        }
+        let newQuote: LocalQuote | null = null;
+        let quoteItems: LocalQuoteItem[] = [];
 
         // If items are present, create an initial quote
         if (items && items.length > 0) {
             const quoteId = uuidv4();
-            const newQuote: LocalQuote = {
+            newQuote = {
                 id: quoteId,
                 opportunity_id: id,
                 numero_cotizacion: `COT-${Date.now().toString().slice(-6)}`,
@@ -164,15 +156,10 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
                 updated_at: new Date().toISOString()
             };
 
-            await db.quotes.add(newQuote);
-            await syncEngine.queueMutation('CRM_Cotizaciones', quoteId, newQuote, { isSnapshot: true });
-
-            // Add items
-            // Add items with calculated pricing
             const account = await db.accounts.get(oppData.account_id);
             const channelId = account?.canal_id || 'DIST_NAC';
 
-            const quoteItems: LocalQuoteItem[] = await Promise.all(items.map(async (item: any) => {
+            quoteItems = await Promise.all(items.map(async (item: any) => {
                 // We rely on the Wizard to have picked the correct base price (item.precio) based on channel
                 // We ONLY call fetchPricing to retrieve the VOLUME LIMIT (max_discount_pct) if available.
                 // We ignore the RPC's base_price to avoid overwriting the specific column logic.
@@ -201,12 +188,26 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
                 };
             }));
 
-            await db.quoteItems.bulkAdd(quoteItems);
-            for (const qi of quoteItems) {
-                const { subtotal, ...qiData } = qi;
-                await syncEngine.queueMutation('CRM_CotizacionItems', qi.id, qiData, { isSnapshot: true });
-            }
         }
+
+        await syncEngine.commitLocalChanges([
+            db.opportunities, db.opportunityCollaborators, db.quotes, db.quoteItems
+        ], async () => {
+            await db.opportunities.add(newOpp);
+            if (collabEntries.length > 0) await db.opportunityCollaborators.bulkAdd(collabEntries);
+            if (newQuote) await db.quotes.add(newQuote);
+            if (quoteItems.length > 0) await db.quoteItems.bulkAdd(quoteItems);
+
+            return [
+                { entityTable: 'CRM_Oportunidades', entityId: id, changes: sanitizeOpportunityForSync(newOpp), options: { isSnapshot: true } },
+                ...collabEntries.map(col => ({ entityTable: 'CRM_Oportunidades_Colaboradores', entityId: col.id, changes: col })),
+                ...(newQuote ? [{ entityTable: 'CRM_Cotizaciones', entityId: newQuote.id, changes: newQuote, options: { isSnapshot: true } }] : []),
+                ...quoteItems.map(qi => {
+                    const { subtotal, ...qiData } = qi;
+                    return { entityTable: 'CRM_CotizacionItems', entityId: qi.id, changes: qiData, options: { isSnapshot: true } };
+                })
+            ];
+        });
 
         return id;
     };
@@ -278,8 +279,7 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
             pedidoItems: pedidoItemsAll.length
         });
 
-        // 3. Delete all from Dexie in a single atomic transaction (all tables declared)
-        await db.transaction('rw', [
+        await syncEngine.commitLocalChanges([
             db.opportunities,
             db.quotes,
             db.quoteItems,
@@ -299,33 +299,20 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
                 await db.pedidos.where('opportunity_id').equals(id).delete();
                 await db.pedidoItems.where('pedido_uuid').anyOf(pedidoUuids).delete();
             }
+
+            return [
+                { entityTable: 'CRM_Oportunidades', entityId: id, changes: sanitizeOpportunityForSync({ ...current, is_deleted: true }), options: { isSnapshot: true } },
+                ...collaborators.map(col => ({ entityTable: 'CRM_Oportunidades_Colaboradores', entityId: col.id, changes: { ...col, is_deleted: true }, options: { isSnapshot: true } })),
+                ...quotes.map(quote => ({ entityTable: 'CRM_Cotizaciones', entityId: quote.id, changes: { ...quote, is_deleted: true }, options: { isSnapshot: true } })),
+                ...quoteItemsAll.map(item => {
+                    const { subtotal, ...itemData } = item;
+                    return { entityTable: 'CRM_CotizacionItems', entityId: item.id, changes: { ...itemData, is_deleted: true }, options: { isSnapshot: true } };
+                }),
+                ...activities.map(activity => ({ entityTable: 'CRM_Actividades', entityId: activity.id, changes: { ...activity, is_deleted: true }, options: { isSnapshot: true } })),
+                ...pedidos.map(pedido => ({ entityTable: 'CRM_Pedidos', entityId: pedido.uuid_generado, changes: { ...pedido, is_deleted: true }, options: { isSnapshot: true } })),
+                ...pedidoItemsAll.map(pItem => ({ entityTable: 'CRM_PedidoItems', entityId: pItem.id, changes: { ...pItem, is_deleted: true }, options: { isSnapshot: true } }))
+            ];
         });
-
-        console.log('[deleteOpportunity] Local Dexie delete complete.');
-
-        // 4. Queue Mutations for Server (Soft Delete) — outside transaction
-        await syncEngine.queueMutation('CRM_Oportunidades', id, sanitizeOpportunityForSync({
-            ...current,
-            is_deleted: true
-        }), { isSnapshot: true });
-
-        for (const quote of quotes) {
-            await syncEngine.queueMutation('CRM_Cotizaciones', quote.id, { ...quote, is_deleted: true }, { isSnapshot: true });
-        }
-        for (const item of quoteItemsAll) {
-            await syncEngine.queueMutation('CRM_CotizacionItems', item.id, { ...item, is_deleted: true }, { isSnapshot: true });
-        }
-        for (const activity of activities) {
-            await syncEngine.queueMutation('CRM_Actividades', activity.id, { ...activity, is_deleted: true }, { isSnapshot: true });
-        }
-        for (const pedido of pedidos) {
-            await syncEngine.queueMutation('CRM_Pedidos', pedido.uuid_generado, { ...pedido, is_deleted: true }, { isSnapshot: true });
-        }
-        for (const pItem of pedidoItemsAll) {
-            await syncEngine.queueMutation('CRM_PedidoItems', pItem.id, { ...pItem, is_deleted: true }, { isSnapshot: true });
-        }
-
-        console.log('[deleteOpportunity] All server mutations queued successfully.');
 
         // 5. Send deletion notification (Fire and forget)
         sendOpportunityDeletionEmail(current).catch(err => {
@@ -346,6 +333,8 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
             razon_perdida_id: updates.razon_perdida_id !== undefined ? (updates.razon_perdida_id ? Number(updates.razon_perdida_id) : null) : undefined,
             razon_perdida: updates.razon_perdida !== undefined ? (updates.razon_perdida || null) : undefined,
             comentarios_perdida: updates.comentarios_perdida !== undefined ? (updates.comentarios_perdida || null) : undefined,
+            clientes_atendidos: updates.clientes_atendidos !== undefined ? (updates.clientes_atendidos !== null && updates.clientes_atendidos !== "" ? Number(updates.clientes_atendidos) : 0) : undefined,
+            contactos_ids: updates.contactos_ids !== undefined ? (Array.isArray(updates.contactos_ids) ? updates.contactos_ids : []) : undefined,
         };
 
         // Remove undefined fields to avoid overwriting with undefined
@@ -361,23 +350,24 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
         // Double check if the merged result is still "" (from current)
         if (updated.fecha_cierre_estimada === "") updated.fecha_cierre_estimada = null;
 
-        await db.opportunities.update(id, updated);
-
-        // Send full snapshot to optimize sync payload
-        const syncPayload: any = sanitizeOpportunityForSync(updated);
-        await syncEngine.queueMutation('CRM_Oportunidades', id, syncPayload, { isSnapshot: true });
-
-        // PROPAGATION: If segmento_id changed, update all associated quotes
+        const quoteUpdates: LocalQuote[] = [];
         if (updates.segmento_id !== undefined) {
             const quotes = await db.quotes.where('opportunity_id').equals(id).toArray();
             for (const q of quotes) {
                 if (q.segmento_id !== updates.segmento_id) {
-                    const updatedQuote = { ...q, segmento_id: updates.segmento_id, updated_at: new Date().toISOString() };
-                    await db.quotes.update(q.id, updatedQuote);
-                    await syncEngine.queueMutation('CRM_Cotizaciones', q.id, updatedQuote, { isSnapshot: true });
+                    quoteUpdates.push({ ...q, segmento_id: updates.segmento_id, updated_at: new Date().toISOString() });
                 }
             }
         }
+
+        await syncEngine.commitLocalChanges([db.opportunities, db.quotes], async () => {
+            await db.opportunities.put(updated);
+            if (quoteUpdates.length > 0) await db.quotes.bulkPut(quoteUpdates);
+            return [
+                { entityTable: 'CRM_Oportunidades', entityId: id, changes: sanitizeOpportunityForSync(updated), options: { isSnapshot: true } },
+                ...quoteUpdates.map(quote => ({ entityTable: 'CRM_Cotizaciones', entityId: quote.id, changes: quote, options: { isSnapshot: true } }))
+            ];
+        });
     };
 
     return { opportunities, createOpportunity, generateMockData, deleteOpportunity, updateOpportunity };
@@ -389,11 +379,13 @@ async function performOpportunityUpdate(id: string, updates: any) {
     if (!current) return;
 
     const updated = { ...current, ...updates, updated_at: new Date().toISOString() };
-    await db.opportunities.update(id, updated);
-
-    // Send full snapshot to optimize sync payload
-    const syncPayload: any = sanitizeOpportunityForSync(updated);
-    await syncEngine.queueMutation('CRM_Oportunidades', id, syncPayload, { isSnapshot: true });
+    await syncEngine.commitLocalChanges([db.opportunities], async () => {
+        await db.opportunities.put(updated);
+        return [{
+            entityTable: 'CRM_Oportunidades', entityId: id,
+            changes: sanitizeOpportunityForSync(updated), options: { isSnapshot: true }
+        }];
+    });
 }
 
 
@@ -469,12 +461,8 @@ export function useQuotes(opportunityId?: string) {
             );
         }
 
-        await db.quotes.add(newQuote);
-        await syncEngine.queueMutation('CRM_Cotizaciones', id, newQuote, { isSnapshot: true });
-
-        // Save items
-        if (inheritedItems.length > 0) {
-            const newItems: LocalQuoteItem[] = inheritedItems.map((item: any) => ({
+        const newItems: LocalQuoteItem[] = inheritedItems.length > 0
+            ? inheritedItems.map((item: any) => ({
                 id: uuidv4(),
                 cotizacion_id: id,
                 producto_id: item.product_id || item.producto_id,
@@ -484,14 +472,20 @@ export function useQuotes(opportunityId?: string) {
                 final_unit_price: item.final_unit_price || item.precio_unitario || 0,
                 subtotal: (item.cantidad * (item.final_unit_price || item.precio_unitario || item.precio || 0)),
                 descripcion_linea: item.descripcion_linea || item.nombre
-            }));
+            }))
+            : [];
 
-            await db.quoteItems.bulkAdd(newItems);
-            for (const ni of newItems) {
-                const { subtotal, ...niData } = ni;
-                await syncEngine.queueMutation('CRM_CotizacionItems', ni.id, niData, { isSnapshot: true });
-            }
-        }
+        await syncEngine.commitLocalChanges([db.quotes, db.quoteItems], async () => {
+            await db.quotes.add(newQuote);
+            if (newItems.length > 0) await db.quoteItems.bulkAdd(newItems);
+            return [
+                { entityTable: 'CRM_Cotizaciones', entityId: id, changes: newQuote, options: { isSnapshot: true } },
+                ...newItems.map(item => {
+                    const { subtotal, ...itemData } = item;
+                    return { entityTable: 'CRM_CotizacionItems', entityId: item.id, changes: itemData, options: { isSnapshot: true } };
+                })
+            ];
+        });
 
         return id;
     };
@@ -505,19 +499,25 @@ export function useQuotes(opportunityId?: string) {
         }
 
         const updatedQuote = { ...currentQuote, ...updates, updated_at: new Date().toISOString() };
-        await db.quotes.update(id, updatedQuote);
-
-        await syncEngine.queueMutation('CRM_Cotizaciones', id, updatedQuote, { isSnapshot: true });
-
-        // PROPAGATION: If segmento_id changed, update the parent opportunity
+        let updatedOpp: LocalOportunidad | null = null;
         if (updates.segmento_id !== undefined && currentQuote.opportunity_id) {
             const opp = await db.opportunities.get(currentQuote.opportunity_id);
             if (opp && opp.segmento_id !== updates.segmento_id) {
-                const updatedOpp = { ...opp, segmento_id: updates.segmento_id, updated_at: new Date().toISOString() };
-                await db.opportunities.update(opp.id, updatedOpp);
-                await syncEngine.queueMutation('CRM_Oportunidades', opp.id, sanitizeOpportunityForSync(updatedOpp), { isSnapshot: true });
+                updatedOpp = { ...opp, segmento_id: updates.segmento_id, updated_at: new Date().toISOString() };
             }
         }
+
+        await syncEngine.commitLocalChanges([db.quotes, db.opportunities], async () => {
+            await db.quotes.put(updatedQuote);
+            if (updatedOpp) await db.opportunities.put(updatedOpp);
+            return [
+                { entityTable: 'CRM_Cotizaciones', entityId: id, changes: updatedQuote, options: { isSnapshot: true } },
+                ...(updatedOpp ? [{
+                    entityTable: 'CRM_Oportunidades', entityId: updatedOpp.id,
+                    changes: sanitizeOpportunityForSync(updatedOpp), options: { isSnapshot: true }
+                }] : [])
+            ];
+        });
     };
 
     const updateQuoteTotal = async (quoteId: string) => {
@@ -565,23 +565,18 @@ export function useQuotes(opportunityId?: string) {
         const quote = await db.quotes.get(id);
         if (!quote) return;
 
-        // 1. Delete Items
         const items = await db.quoteItems.where('cotizacion_id').equals(id).toArray();
-        for (const item of items) {
-            await db.quoteItems.delete(item.id);
-            const { subtotal, ...itemData } = item;
-            await syncEngine.queueMutation('CRM_CotizacionItems', item.id, {
-                ...itemData,
-                is_deleted: true
-            }, { isSnapshot: true });
-        }
-
-        // 2. Delete Quote
-        await db.quotes.delete(id);
-        await syncEngine.queueMutation('CRM_Cotizaciones', id, {
-            ...quote,
-            is_deleted: true
-        }, { isSnapshot: true });
+        await syncEngine.commitLocalChanges([db.quotes, db.quoteItems], async () => {
+            if (items.length > 0) await db.quoteItems.bulkDelete(items.map(item => item.id));
+            await db.quotes.delete(id);
+            return [
+                ...items.map(item => {
+                    const { subtotal, ...itemData } = item;
+                    return { entityTable: 'CRM_CotizacionItems', entityId: item.id, changes: { ...itemData, is_deleted: true }, options: { isSnapshot: true } };
+                }),
+                { entityTable: 'CRM_Cotizaciones', entityId: id, changes: { ...quote, is_deleted: true }, options: { isSnapshot: true } }
+            ];
+        });
     };
 
     return { quotes, createQuote, updateQuote, updateQuoteTotal, markAsWinner, deleteQuote };
@@ -667,24 +662,23 @@ export function useQuoteItems(quoteId?: string) {
             final_unit_price: finalPrice,
             subtotal: parseFloat((item.cantidad * finalPrice).toFixed(10))
         };
-        await db.quoteItems.add(newItem);
         const { subtotal, ...itemData } = newItem;
         
         // Defensive check: Ensure required fields are not null for server constraints
         if (!itemData.cotizacion_id || itemData.cotizacion_id === "null") {
-            console.error("[useQuoteItems] CRITICAL: Attempting to sync item with null cotizacion_id", itemData);
-            return;
+            throw new Error('No se puede guardar un ítem sin cotización asociada.');
         }
 
-        await syncEngine.queueMutation('CRM_CotizacionItems', id, itemData, { isSnapshot: true });
-
-        // Touch parent quote with opportunity_id
         const parentQuote = await db.quotes.get(quoteId);
-        if (parentQuote) {
-            const quoteUpdate = { ...parentQuote, updated_at: new Date().toISOString() };
-            await db.quotes.update(quoteId, quoteUpdate);
-            await syncEngine.queueMutation('CRM_Cotizaciones', quoteId, quoteUpdate, { isSnapshot: true });
-        }
+        const quoteUpdate = parentQuote ? { ...parentQuote, updated_at: new Date().toISOString() } : null;
+        await syncEngine.commitLocalChanges([db.quoteItems, db.quotes], async () => {
+            await db.quoteItems.add(newItem);
+            if (quoteUpdate) await db.quotes.put(quoteUpdate);
+            return [
+                { entityTable: 'CRM_CotizacionItems', entityId: id, changes: itemData, options: { isSnapshot: true } },
+                ...(quoteUpdate ? [{ entityTable: 'CRM_Cotizaciones', entityId: quoteId, changes: quoteUpdate, options: { isSnapshot: true } }] : [])
+            ];
+        });
     };
 
     const updateItem = async (itemId: string, updates: Partial<LocalQuoteItem>) => {
@@ -734,41 +728,34 @@ export function useQuoteItems(quoteId?: string) {
         updated.final_unit_price = parseFloat((currentPrice * (1 - currentDiscount / 100)).toFixed(10));
         updated.subtotal = parseFloat((updated.cantidad * updated.final_unit_price).toFixed(10));
 
-        await db.quoteItems.update(itemId, updated);
         const { subtotal, ...updateData } = updated;
-        await syncEngine.queueMutation('CRM_CotizacionItems', itemId, updateData, { isSnapshot: true });
-
-        // Touch parent quote with opportunity_id
         const parentQuote = await db.quotes.get(current.cotizacion_id);
-        if (parentQuote) {
-            const quoteUpdate = { ...parentQuote, updated_at: new Date().toISOString() };
-            await db.quotes.update(current.cotizacion_id, quoteUpdate);
-            await syncEngine.queueMutation('CRM_Cotizaciones', current.cotizacion_id, quoteUpdate, { isSnapshot: true });
-        }
+        const quoteUpdate = parentQuote ? { ...parentQuote, updated_at: new Date().toISOString() } : null;
+        await syncEngine.commitLocalChanges([db.quoteItems, db.quotes], async () => {
+            await db.quoteItems.put(updated);
+            if (quoteUpdate) await db.quotes.put(quoteUpdate);
+            return [
+                { entityTable: 'CRM_CotizacionItems', entityId: itemId, changes: updateData, options: { isSnapshot: true } },
+                ...(quoteUpdate ? [{ entityTable: 'CRM_Cotizaciones', entityId: current.cotizacion_id, changes: quoteUpdate, options: { isSnapshot: true } }] : [])
+            ];
+        });
     };
 
     const removeItem = async (itemId: string) => {
         const current = await db.quoteItems.get(itemId);
         if (!current) return;
 
-        await db.quoteItems.delete(itemId);
-
-        // Include ALL item data + is_deleted to match DB constraints during sync (upsert)
         const { subtotal, ...itemData } = current;
-        await syncEngine.queueMutation('CRM_CotizacionItems', itemId, {
-            ...itemData,
-            is_deleted: true
-        }, { isSnapshot: true });
-
-        // Touch parent quote with opportunity_id
-        if (current) {
-            const parentQuote = await db.quotes.get(current.cotizacion_id);
-            if (parentQuote) {
-                const quoteUpdate = { ...parentQuote, updated_at: new Date().toISOString() };
-                await db.quotes.update(current.cotizacion_id, quoteUpdate);
-                await syncEngine.queueMutation('CRM_Cotizaciones', current.cotizacion_id, quoteUpdate, { isSnapshot: true });
-            }
-        }
+        const parentQuote = await db.quotes.get(current.cotizacion_id);
+        const quoteUpdate = parentQuote ? { ...parentQuote, updated_at: new Date().toISOString() } : null;
+        await syncEngine.commitLocalChanges([db.quoteItems, db.quotes], async () => {
+            await db.quoteItems.delete(itemId);
+            if (quoteUpdate) await db.quotes.put(quoteUpdate);
+            return [
+                { entityTable: 'CRM_CotizacionItems', entityId: itemId, changes: { ...itemData, is_deleted: true }, options: { isSnapshot: true } },
+                ...(quoteUpdate ? [{ entityTable: 'CRM_Cotizaciones', entityId: current.cotizacion_id, changes: quoteUpdate, options: { isSnapshot: true } }] : [])
+            ];
+        });
     };
 
     return { items, addItem, updateItem, removeItem };

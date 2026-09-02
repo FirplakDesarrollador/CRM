@@ -1,24 +1,32 @@
 "use client";
 
 import { useOpportunitiesServer } from "@/lib/hooks/useOpportunitiesServer";
+import { useOpportunities } from "@/lib/hooks/useOpportunities";
 import { useEffect, useState } from "react";
 import { db } from "@/lib/db";
 import { useLiveQuery } from "dexie-react-hooks";
 import Link from "next/link";
-import { Briefcase, ChevronRight, Filter } from "lucide-react";
+import { Briefcase, ChevronRight, Filter, Trash2, Loader2 } from "lucide-react";
 import { cn } from "@/components/ui/utils";
+import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 
 type StatusFilter = 'all' | 'open' | 'won' | 'lost';
 
 export default function AccountOpportunitiesTab({ accountId }: { accountId: string }) {
     const [currentStatus, setCurrentStatus] = useState<StatusFilter>('open');
+    const { deleteOpportunity } = useOpportunities();
+    const { isAdmin } = useCurrentUser();
+    const [oppToDelete, setOppToDelete] = useState<any | null>(null);
+    const [isDeleting, setIsDeleting] = useState(false);
     
     const { 
         data: opportunities, 
         loading,
         setAccountIdFilter,
         setStatusFilter,
-        setUserFilter 
+        setUserFilter,
+        refresh
     } = useOpportunitiesServer({ pageSize: 100 });
 
     useEffect(() => {
@@ -32,6 +40,21 @@ export default function AccountOpportunitiesTab({ accountId }: { accountId: stri
 
     const phases = useLiveQuery(() => db.phases.toArray());
     const phaseMap = new Map(phases?.map(p => [p.id, p.nombre]));
+
+    const handleDeleteOpportunity = async () => {
+        if (!oppToDelete?.id) return;
+        setIsDeleting(true);
+        try {
+            await deleteOpportunity(oppToDelete.id);
+            setOppToDelete(null);
+            refresh();
+        } catch (error) {
+            console.error("Error al eliminar oportunidad:", error);
+            alert("No se pudo eliminar la oportunidad.");
+        } finally {
+            setIsDeleting(false);
+        }
+    };
 
     if (loading && !opportunities?.length) return <div className="p-4 text-center text-slate-400">Cargando oportunidades...</div>;
 
@@ -82,10 +105,10 @@ export default function AccountOpportunitiesTab({ accountId }: { accountId: stri
             ) : (
                 <div className="grid gap-2">
                     {opportunities?.map(opp => (
-                        <Link key={opp.id} href={`/oportunidades/${opp.id}`}>
-                            <div className="bg-white p-3 rounded-xl border border-slate-200 hover:border-blue-400 transition-all cursor-pointer flex justify-between items-center group shadow-sm">
+                        <div key={opp.id} className="bg-white p-3 rounded-xl border border-slate-200 hover:border-blue-400 transition-all flex justify-between items-center group shadow-sm">
+                            <Link href={`/oportunidades/${opp.id}`} className="flex-1 min-w-0 pr-3">
                                 <div>
-                                    <h4 className="font-bold text-slate-800 text-sm">{opp.nombre || "Sin nombre"}</h4>
+                                    <h4 className="font-bold text-slate-800 text-sm group-hover:text-blue-600 transition-colors truncate">{opp.nombre || "Sin nombre"}</h4>
                                     <p className="text-[11px] text-slate-500 mt-0.5">
                                         <span className={cn(
                                             "font-semibold",
@@ -98,11 +121,43 @@ export default function AccountOpportunitiesTab({ accountId }: { accountId: stri
                                         {opp.currency_id || 'COP'} {new Intl.NumberFormat().format(opp.amount || 0)}
                                     </p>
                                 </div>
-                                <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-blue-500 transition-colors" />
+                            </Link>
+
+                            <div className="flex items-center gap-1 shrink-0">
+                                {isAdmin && (
+                                    <button
+                                        type="button"
+                                        onClick={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            setOppToDelete(opp);
+                                        }}
+                                        className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                        title="Eliminar Oportunidad"
+                                    >
+                                        <Trash2 size={15} />
+                                    </button>
+                                )}
+                                <Link href={`/oportunidades/${opp.id}`} className="p-1 text-slate-300 group-hover:text-blue-500 transition-colors">
+                                    <ChevronRight className="w-4 h-4" />
+                                </Link>
                             </div>
-                        </Link>
+                        </div>
                     ))}
                 </div>
+            )}
+
+            {oppToDelete && (
+                <ConfirmationModal
+                    isOpen={!!oppToDelete}
+                    onClose={() => setOppToDelete(null)}
+                    onConfirm={handleDeleteOpportunity}
+                    title="Eliminar Oportunidad"
+                    message={`¿Estás seguro de que deseas eliminar la oportunidad "${oppToDelete.nombre}"? Esta acción no se puede deshacer.`}
+                    confirmLabel="Eliminar Oportunidad"
+                    variant="danger"
+                    isLoading={isDeleting}
+                />
             )}
         </div>
     );

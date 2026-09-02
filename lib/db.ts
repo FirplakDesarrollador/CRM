@@ -13,9 +13,39 @@ export interface OutboxItem {
     new_value: any;
     field_timestamp: number;
     user_id?: string;
-    status: 'PENDING' | 'SYNCING' | 'FAILED' | 'COMPLETED';
+    status: 'PENDING' | 'SYNCING' | 'FAILED' | 'DEAD_LETTER' | 'COMPLETED';
     retry_count: number;
     error?: string;
+    next_attempt_at?: number;
+    last_attempt_at?: number;
+}
+
+export interface SyncCursor {
+    id: string;
+    user_id: string;
+    table_name: string;
+    cursor: string;
+    updated_at: string;
+}
+
+export interface SyncRun {
+    id: string;
+    kind: 'PUSH' | 'FULL_SYNC';
+    trigger: string;
+    status: 'RUNNING' | 'COMPLETED' | 'FAILED';
+    started_at: number;
+    finished_at?: number;
+    duration_ms?: number;
+    pending_before: number;
+    pending_after?: number;
+    error?: string;
+}
+
+interface LocalContextRecord {
+    id: string;
+    user_id: string;
+    status: 'CLAIMED' | 'MIGRATED';
+    updated_at: string;
 }
 
 export interface LocalCuenta {
@@ -44,6 +74,9 @@ export interface LocalCuenta {
     updated_by?: string;
     updated_at?: string;
     comentarios?: string;
+    origen_cuenta?: string | null;
+    is_child?: boolean;
+    is_deleted?: boolean;
 }
 
 export interface LocalPais {
@@ -84,7 +117,7 @@ export interface LocalQuote {
     formas_pago?: string;
     facturacion_electronica?: boolean;
     oc_cot?: string;
-    cierre_facturacion?: string;
+    cierre_facturacion?: boolean | string;
     es_muestra?: boolean;
     aplica_contrato?: boolean;
     multa_incumplimiento?: boolean;
@@ -103,10 +136,12 @@ export interface LocalQuote {
     contacto_ventas?: string;
     contacto_logistico?: string;
     contacto_tesoreria?: string;
+    direccion_envio_factura?: string;
     dir_envio_factura_tipo?: string;
     servicio_subida_hidromasaje?: boolean;
     piso_entrega?: number;
     tiene_escaleras?: boolean;
+    verificacion_previa_firplak?: boolean;
     planos_hidromasaje?: string;
     fecha_entrega?: string;
     nit_cliente_final?: string;
@@ -158,7 +193,7 @@ export interface LocalPedido {
     formas_pago?: string;
     facturacion_electronica?: boolean;
     oc_cot?: string;
-    cierre_facturacion?: string;
+    cierre_facturacion?: boolean | string;
     es_muestra?: boolean;
     aplica_contrato?: boolean;
     multa_incumplimiento?: boolean;
@@ -181,10 +216,12 @@ export interface LocalPedido {
     contacto_ventas?: string;
     contacto_logistico?: string;
     contacto_tesoreria?: string;
+    direccion_envio_factura?: string;
     dir_envio_factura_tipo?: string;
     servicio_subida_hidromasaje?: boolean;
     piso_entrega?: number;
     tiene_escaleras?: boolean;
+    verificacion_previa_firplak?: boolean;
     planos_hidromasaje?: string;
     fecha_entrega?: string;
     nit_cliente_final?: string;
@@ -206,6 +243,7 @@ export interface LocalPedidoItem {
     precio_unitario: number;
     descuento?: number;
     created_at?: string;
+    updated_at?: string;
 }
 
 // Types for Contacts
@@ -221,6 +259,7 @@ export interface LocalContact {
     created_by?: string;
     updated_by?: string;
     updated_at?: string;
+    is_deleted?: boolean;
 }
 
 export interface LocalFase {
@@ -277,12 +316,18 @@ export interface LocalOportunidad {
     updated_by?: string;
     comentarios?: string;
     direccion_entrega?: string;
+    categoria_oportunidad?: string | string[] | null;
+    contactos_ids?: string[] | null;
+    clientes_atendidos?: number | null;
 }
 
 export class CRMFirplakDB extends Dexie {
     // Sync Queues
     outbox!: Table<OutboxItem, string>;
     fileQueue!: Table<any, string>;
+    syncCursors!: Table<SyncCursor, string>;
+    syncRuns!: Table<SyncRun, string>;
+    localContext!: Table<LocalContextRecord, string>;
 
     // Local Mirrors (Add more as needed)
     accounts!: Table<LocalCuenta, string>;
@@ -305,12 +350,12 @@ export class CRMFirplakDB extends Dexie {
     pedidoItems!: Table<LocalPedidoItem, string>;
     isPulling: boolean = false;
 
-    constructor() {
-        super('CRMFirplakDB');
-        this.version(11).stores({
+    constructor(databaseName = 'CRMFirplakDB') {
+        super(databaseName);
+        this.version(12).stores({
             outbox: 'id, entity_type, status, field_timestamp, field_name',
             fileQueue: 'id, status',
-            accounts: 'id, nit, nombre, owner_user_id',
+            accounts: 'id, nit, nit_base, nombre, owner_user_id',
             opportunities: 'id, account_id, owner_user_id', // Simplified index
             contacts: 'id, account_id, email',
             quotes: 'id, opportunity_id, status, es_pedido',
@@ -326,6 +371,55 @@ export class CRMFirplakDB extends Dexie {
             activitySubclassifications: 'id, clasificacion_id',
             lossReasons: 'id',
             opportunityCollaborators: 'id, oportunidad_id, usuario_id', // New table
+            pedidos: 'uuid_generado, cotizacion_id, opportunity_id',
+            pedidoItems: 'id, pedido_uuid'
+        });
+        this.version(13).stores({
+            outbox: 'id, entity_type, status, field_timestamp, field_name, next_attempt_at, [entity_type+entity_id+field_name]',
+            fileQueue: 'id, status',
+            syncCursors: 'id, user_id, table_name, updated_at',
+            syncRuns: 'id, kind, trigger, status, started_at',
+            accounts: 'id, nit, nit_base, nombre, owner_user_id',
+            opportunities: 'id, account_id, owner_user_id',
+            contacts: 'id, account_id, email',
+            quotes: 'id, opportunity_id, status, es_pedido',
+            quoteItems: 'id, cotizacion_id',
+            activities: 'id, opportunity_id, user_id, fecha_inicio, tipo_actividad',
+            phases: 'id, canal_id, orden',
+            subclasificaciones: 'id, canal_id',
+            segments: '++id, subclasificacion_id',
+            countries: 'id',
+            departments: 'id, pais_id, nombre',
+            cities: 'id, departamento_id, nombre',
+            activityClassifications: 'id, tipo_actividad',
+            activitySubclassifications: 'id, clasificacion_id',
+            lossReasons: 'id',
+            opportunityCollaborators: 'id, oportunidad_id, usuario_id',
+            pedidos: 'uuid_generado, cotizacion_id, opportunity_id',
+            pedidoItems: 'id, pedido_uuid'
+        });
+        this.version(14).stores({
+            outbox: 'id, entity_type, status, field_timestamp, field_name, user_id, next_attempt_at, [entity_type+entity_id+field_name]',
+            fileQueue: 'id, status',
+            syncCursors: 'id, user_id, table_name, updated_at',
+            syncRuns: 'id, kind, trigger, status, started_at',
+            localContext: 'id, user_id, status',
+            accounts: 'id, nit, nit_base, nombre, owner_user_id',
+            opportunities: 'id, account_id, owner_user_id',
+            contacts: 'id, account_id, email',
+            quotes: 'id, opportunity_id, status, es_pedido',
+            quoteItems: 'id, cotizacion_id',
+            activities: 'id, opportunity_id, user_id, fecha_inicio, tipo_actividad',
+            phases: 'id, canal_id, orden',
+            subclasificaciones: 'id, canal_id',
+            segments: '++id, subclasificacion_id',
+            countries: 'id',
+            departments: 'id, pais_id, nombre',
+            cities: 'id, departamento_id, nombre',
+            activityClassifications: 'id, tipo_actividad',
+            activitySubclassifications: 'id, clasificacion_id',
+            lossReasons: 'id',
+            opportunityCollaborators: 'id, oportunidad_id, usuario_id',
             pedidos: 'uuid_generado, cotizacion_id, opportunity_id',
             pedidoItems: 'id, pedido_uuid'
         });
@@ -391,4 +485,128 @@ export interface LocalLossReason {
     is_active: boolean;
 }
 
-export const db = new CRMFirplakDB();
+const LEGACY_DATABASE_NAME = 'CRMFirplakDB';
+const ANONYMOUS_DATABASE_NAME = `${LEGACY_DATABASE_NAME}::anonymous`;
+const LEGACY_OWNER_KEY = 'legacy-owner';
+
+export function localDatabaseNameForUser(userId: string | null): string {
+    return userId ? `${LEGACY_DATABASE_NAME}::user::${encodeURIComponent(userId)}` : ANONYMOUS_DATABASE_NAME;
+}
+
+let activeUserId: string | null = null;
+let activeDatabase = new CRMFirplakDB(ANONYMOUS_DATABASE_NAME);
+let activationQueue: Promise<void> = Promise.resolve();
+
+async function legacyHasData(legacy: CRMFirplakDB): Promise<boolean> {
+    for (const table of legacy.tables) {
+        if (table.name !== 'localContext' && await table.count() > 0) return true;
+    }
+    return false;
+}
+
+async function migrateLegacyDatabase(target: CRMFirplakDB, userId: string): Promise<void> {
+    const legacy = new CRMFirplakDB(LEGACY_DATABASE_NAME);
+    await legacy.open();
+
+    try {
+        let claim = await legacy.localContext.get(LEGACY_OWNER_KEY);
+        if (!claim) {
+            if (!await legacyHasData(legacy)) return;
+            await legacy.transaction('rw', legacy.localContext, async () => {
+                claim = await legacy.localContext.get(LEGACY_OWNER_KEY);
+                if (!claim) {
+                    claim = {
+                        id: LEGACY_OWNER_KEY,
+                        user_id: userId,
+                        status: 'CLAIMED',
+                        updated_at: new Date().toISOString()
+                    };
+                    await legacy.localContext.add(claim);
+                }
+            });
+        }
+
+        if (!claim || claim.user_id !== userId || claim.status === 'MIGRATED') return;
+
+        const sourceTables = legacy.tables.filter((table) => table.name !== 'localContext');
+        const snapshots = new Map<string, Array<Record<string, unknown>>>();
+        for (const table of sourceTables) {
+            const rows = await table.toArray() as Array<Record<string, unknown>>;
+            if (table.name === 'outbox') {
+                snapshots.set(table.name, rows
+                    .filter((row) => !row.user_id || row.user_id === userId)
+                    .map((row) => ({ ...row, user_id: userId })));
+            } else if (table.name === 'syncCursors') {
+                snapshots.set(table.name, rows.filter((row) => row.user_id === userId));
+            } else {
+                snapshots.set(table.name, rows);
+            }
+        }
+
+        target.isPulling = true;
+        try {
+            await target.transaction('rw', target.tables, async () => {
+                for (const [tableName, rows] of snapshots) {
+                    if (rows.length > 0) await target.table(tableName).bulkPut(rows);
+                }
+                await target.localContext.put({
+                    id: 'owner',
+                    user_id: userId,
+                    status: 'MIGRATED',
+                    updated_at: new Date().toISOString()
+                });
+            });
+        } finally {
+            target.isPulling = false;
+        }
+
+        await legacy.localContext.put({
+            ...claim,
+            status: 'MIGRATED',
+            updated_at: new Date().toISOString()
+        });
+    } finally {
+        legacy.close();
+    }
+}
+
+async function switchLocalDatabase(userId: string | null): Promise<void> {
+    if (activeUserId === userId) {
+        if (!activeDatabase.isOpen()) await activeDatabase.open();
+        return;
+    }
+
+    const nextDatabase = new CRMFirplakDB(localDatabaseNameForUser(userId));
+    await nextDatabase.open();
+    if (userId) await migrateLegacyDatabase(nextDatabase, userId);
+
+    const previousDatabase = activeDatabase;
+    activeDatabase = nextDatabase;
+    activeUserId = userId;
+    previousDatabase.close();
+}
+
+export function activateLocalDatabase(userId: string): Promise<void> {
+    if (!userId) return Promise.reject(new Error('Se requiere un usuario para activar sus datos locales.'));
+    activationQueue = activationQueue.catch(() => undefined).then(() => switchLocalDatabase(userId));
+    return activationQueue;
+}
+
+export function deactivateLocalDatabase(): Promise<void> {
+    activationQueue = activationQueue.catch(() => undefined).then(() => switchLocalDatabase(null));
+    return activationQueue;
+}
+
+export function getActiveLocalUserId(): string | null {
+    return activeUserId;
+}
+
+export const db = new Proxy(activeDatabase, {
+    get(_target, property) {
+        const value = Reflect.get(activeDatabase, property, activeDatabase);
+        return typeof value === 'function' ? value.bind(activeDatabase) : value;
+    },
+    set(_target, property, value) {
+        return Reflect.set(activeDatabase, property, value, activeDatabase);
+    }
+}) as CRMFirplakDB;

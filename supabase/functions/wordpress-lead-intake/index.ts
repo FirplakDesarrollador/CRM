@@ -154,7 +154,9 @@ Deno.serve(async (req: Request) => {
     account_id: cuentaId,
     owner_user_id: ownerFinal, // <--- Asignado a la oportunidad
     nombre: oportunidadNombre,
-    categoria_oportunidad: body.oportunidad?.categoria_oportunidad,
+    categoria_oportunidad: Array.isArray(body.oportunidad?.categoria_oportunidad)
+      ? body.oportunidad.categoria_oportunidad.join(", ")
+      : body.oportunidad?.categoria_oportunidad,
     estado_id: ESTADO_ID,
     origen_oportunidad: body.oportunidad?.origen_oportunidad,
     url_origen: body.oportunidad?.url_origen,

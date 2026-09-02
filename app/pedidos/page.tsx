@@ -8,6 +8,7 @@ import { useState, useEffect, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { cn } from "@/components/ui/utils";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { matchesSearchTokens } from "@/lib/utils";
 
 function PedidosContent() {
     const searchParams = useSearchParams();
@@ -19,13 +20,13 @@ function PedidosContent() {
             const currentSearch = searchParams.get('search') || "";
             if (currentSearch === search) return;
 
-            const params = new URLSearchParams(Array.from(searchParams.entries()));
+            const params = new URLSearchParams(searchParams.toString());
             if (search) params.set('search', search);
             else params.delete('search');
             
             const query = params.toString() ? `?${params.toString()}` : window.location.pathname;
             router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
-        }, 500);
+        }, 250);
         return () => clearTimeout(timer);
     }, [search, searchParams, router]);
 
@@ -146,13 +147,14 @@ function PedidosContent() {
     const [filterStatus, setFilterStatus] = useState<"all" | "won" | "others">("all");
 
     const filtered = data?.filter(p => {
-        const matchesSearch = (
-            p.order_id_display?.toLowerCase().includes(search.toLowerCase()) ||
-            p.numero_cotizacion?.toLowerCase().includes(search.toLowerCase()) ||
-            p.orden_compra?.toLowerCase().includes(search.toLowerCase()) ||
-            p.opportunity_name?.toLowerCase().includes(search.toLowerCase()) ||
-            p.company_name?.toLowerCase().includes(search.toLowerCase())
-        );
+        const matchesSearch = matchesSearchTokens([
+            p.order_id_display,
+            p.numero_cotizacion,
+            p.orden_compra,
+            p.opportunity_name,
+            p.company_name,
+            p.responsable_name
+        ], search);
 
         if (!matchesSearch) return false;
 

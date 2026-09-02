@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { useActivityClassifications, ActivityClassification } from '@/lib/hooks/useActivityClassifications';
 import { Plus, Trash2, ChevronRight, ChevronDown, List, CheckCircle2, AlertCircle, Calendar, CheckSquare } from 'lucide-react';
 import { cn } from '@/components/ui/utils';
-import { syncEngine } from '@/lib/sync';
 
 export function ActivityClassificationManager() {
     const {
@@ -35,8 +34,6 @@ export function ActivityClassificationManager() {
 
         if (!error) {
             setNewClsName('');
-            // Trigger background sync to update local Dexie for immediate usage
-            syncEngine.triggerSync();
         } else {
             alert('Error al crear clasificación: ' + error);
         }
@@ -52,7 +49,6 @@ export function ActivityClassificationManager() {
 
         if (!error) {
             setNewSubName('');
-            syncEngine.triggerSync();
         } else {
             alert('Error al crear sub-clasificación: ' + error);
         }
@@ -61,13 +57,11 @@ export function ActivityClassificationManager() {
     const handleDeleteCls = async (id: number) => {
         if (!confirm('¿Estás seguro? Se eliminarán también todas las sub-clasificaciones asociadas.')) return;
         await deleteClassification(id);
-        syncEngine.triggerSync();
     };
 
     const handleDeleteSub = async (id: number) => {
         if (!confirm('¿Estás seguro de eliminar esta sub-clasificación?')) return;
         await deleteSubclassification(id);
-        syncEngine.triggerSync();
     };
 
     const filteredClassifications = classifications.filter(c => c.tipo_actividad === selectedType);

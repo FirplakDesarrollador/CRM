@@ -39,6 +39,19 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
 
         const toNum = (val: any) => (val !== undefined && val !== null && val !== "") ? Number(val) : null;
 
+        // Local duplicate check before inserting
+        if (data.nit_base) {
+            const existingLocal = await db.accounts
+                .where('nit_base')
+                .equals(data.nit_base)
+                .toArray();
+            
+            // Allow child accounts (sucursales) to share NIT
+            if (existingLocal.length > 0 && !data.is_child) {
+                throw new Error(`Ya existe una cuenta localmente con el NIT ${data.nit_base}`);
+            }
+        }
+
         const sanitizedData = {
             ...data,
             subclasificacion_id: toNum(data.subclasificacion_id),

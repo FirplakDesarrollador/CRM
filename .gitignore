@@ -41,6 +41,7 @@ yarn-error.log*
 
 # Agent Architecture - Temporary files
 /.tmp/
+/scratch/
 
 # Google OAuth credentials (if needed in future)
 credentials.json
@@ -54,6 +55,7 @@ token.json
 node_modules/
 /test-results/
 /playwright-report/
+/playwright-report-pwa/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
@@ -71,14 +73,14 @@ node_modules/
 !package-lock.json
 !tsconfig.json
 !phases.json
+!quality/*.json
 !*.config.json
 !deno.json
 !deno.jsonc
 
 # SQL Dumps and temporary scripts
 *.sql
-!supabase/migrations/20260716_stores_fairs_catalog_inventory.sql
-!supabase/migrations/20260722143000_propagate_account_owner_to_opportunities.sql
+!supabase/migrations/*.sql
 temp_*.ts
 temp_*.tsx
 temp_*.txt
@@ -92,12 +94,26 @@ temp_*.txt
 # Directories
 /execution/
 /test-results/
+/test-results-pwa/
 /tests/
 !/tests/
 /tests/*
+!/tests/*.test.ts
+!/tests/**/*.test.ts
 !/tests/salesChannels.test.ts
 !/tests/opportunityCollaboratorPermissions.test.ts
+!/tests/opportunityCategories.test.ts
+!/tests/inventoryOpportunityLink.test.ts
+!/tests/networkQuality.test.ts
+!/tests/moduleNavigation.test.ts
 
+
+# Scripts and export dumps
+/scripts/
+*.xml
+export_cuentas.js
+resolve*.py
+scratch_*.js
 
 # n8n-as-code AI helpers
 n8nac-skills

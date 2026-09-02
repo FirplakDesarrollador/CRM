@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { db } from '@/lib/db';
 
 export interface ActivityClassification {
     id: number;
@@ -59,6 +60,7 @@ export function useActivityClassifications() {
 
             if (error) throw error;
             setClassifications(prev => [...prev, data]);
+            await db.activityClassifications.put(data);
             return { data, error: null };
         } catch (err: any) {
             return { data: null, error: err.message };
@@ -87,6 +89,8 @@ export function useActivityClassifications() {
 
             setClassifications(prev => prev.filter(c => c.id !== id));
             setSubclassifications(prev => prev.filter(s => s.clasificacion_id !== id));
+            await db.activityClassifications.delete(id);
+            await db.activitySubclassifications.where('clasificacion_id').equals(id).delete();
             return { error: null };
         } catch (err: any) {
             return { error: err.message };
@@ -103,6 +107,7 @@ export function useActivityClassifications() {
 
             if (error) throw error;
             setSubclassifications(prev => [...prev, data]);
+            await db.activitySubclassifications.put(data);
             return { data, error: null };
         } catch (err: any) {
             return { data: null, error: err.message };
@@ -118,6 +123,7 @@ export function useActivityClassifications() {
 
             if (error) throw error;
             setSubclassifications(prev => prev.filter(s => s.id !== id));
+            await db.activitySubclassifications.delete(id);
             return { error: null };
         } catch (err: any) {
             return { error: err.message };

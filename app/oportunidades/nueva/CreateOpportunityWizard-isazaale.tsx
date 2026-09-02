@@ -18,6 +18,8 @@ import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { useConfig } from "@/lib/hooks/useConfig";
 import { CollaboratorSelector, CollaboratorEntry } from "@/components/oportunidades/CollaboratorSelector";
 import { useUsers } from "@/lib/hooks/useUsers";
+import { MultiSelect } from "@/components/ui/MultiSelect";
+import { OPPORTUNITY_CATEGORIES, parseOpportunityCategories, formatOpportunityCategories } from "@/lib/opportunityCategories";
 
 const STEP_LABELS = ["Cuenta", "Datos del Negocio", "Productos", "Equipo"];
 
@@ -36,7 +38,7 @@ const schema = z.object({
     origen_oportunidad: z.string().optional().nullable(),
     url_origen: z.string().optional().nullable(),
     fuente_conversion: z.string().optional().nullable(),
-    categoria_oportunidad: z.string().optional().nullable(),
+    categoria_oportunidad: z.union([z.array(z.string()), z.string()]).optional().nullable(),
     probability: z.coerce.number().min(0).max(100).default(0).optional().nullable(),
     comentarios: z.string().optional().nullable(),
     direccion_entrega: z.string().optional().nullable(),
@@ -446,6 +448,7 @@ export default function CreateOpportunityWizard() {
                 ciudad_id: data.ciudad_id ? Number(data.ciudad_id) : null,
                 segmento_id: data.segmento_id ? Number(data.segmento_id) : null,
                 probability: data.probability ? Number(data.probability) : 0,
+                categoria_oportunidad: formatOpportunityCategories(data.categoria_oportunidad as any) || undefined,
                 collaborators: collaborators
             };
 
@@ -781,12 +784,12 @@ export default function CreateOpportunityWizard() {
                             </div>
 
                             <div className="space-y-2">
-                                <label htmlFor="categoria_oportunidad" className="text-sm font-medium">Categoría de Interés</label>
-                                <input
-                                    id="categoria_oportunidad"
-                                    placeholder="Ej: Cocinas, Baños..."
-                                    {...register("categoria_oportunidad")}
-                                    className="w-full p-2 border rounded-lg hover:border-blue-300 focus:border-blue-500 transition-colors"
+                                <label htmlFor="categoria_oportunidad" className="text-sm font-medium">Categorías de Interés</label>
+                                <MultiSelect
+                                    options={OPPORTUNITY_CATEGORIES}
+                                    selected={parseOpportunityCategories(watch("categoria_oportunidad"))}
+                                    onChange={(vals) => setValue("categoria_oportunidad", vals, { shouldValidate: true })}
+                                    placeholder="Seleccionar categorías..."
                                 />
                                 {errors.categoria_oportunidad && <p className="text-sm text-red-500 mt-1">{errors.categoria_oportunidad.message as string}</p>}
                             </div>
