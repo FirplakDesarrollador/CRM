@@ -3,6 +3,21 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-09-02 - Operación: Reasignación de Oportunidades y Cuentas Promotores Sodimac (Columna K)
+
+- **Actualización de `owner_user_id` en `CRM_Oportunidades` y `CRM_Cuentas`:**
+  - Se reasignaron **78 oportunidades** comerciales y sus **cuentas asociadas** en Supabase para alinearlas con la distribución de asesores comerciales definida en la Columna K ("Asignación") del archivo `Registros Promotores Sodimac 1.xlsx`.
+  - **Distribución ejecutada:**
+    - Juan Fernando Ospina: 11
+    - Stiven Rua: 11
+    - Víctor Julio Hernández González: 11
+    - Hernando Tovar Mendoza: 10
+    - Medardo Gabriel Hoyos Herrera: 10
+    - Claudia Patricia Granada: 10
+    - Natalia Gómez Usme: 9
+    - Ider Alejandro Sandoval Hernández: 6
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
 ## 2026-09-02 - FIX DISEÑO: Unificación Absoluta de Altura de Encabezados y Celdas de Tabla (Zero Drift)
 
 - **Módulos de Cuentas, Oportunidades y Contactos (`app/cuentas/page.tsx`, `app/oportunidades/page.tsx`, `app/contactos/page.tsx`):**
@@ -167,6 +182,22 @@
 - **Páginas actualizadas:** `wiki/pages/cuentas.md`, `wiki/pages/cotizaciones-y-pedidos.md`, `wiki/LOG.md`.
 - **Pruebas:** `pruebas unitarias/nitValidation.test.ts`, `pruebas unitarias/pedidoFormalization.test.ts`.
 
+=======
+## 2026-08-31 - Operación: Reasignación Masiva de Oportunidades en Supabase (`reasignar_crm_asignado.xlsx`)
+
+- **Actualización de Propietario (`owner_user_id`) en `CRM_Oportunidades`:**
+  - Se reasignaron **145 oportunidades** comerciales en Supabase para alinearlas con la distribución de vendedores definida en el archivo `reasignar_crm_asignado.xlsx` en el Escritorio.
+  - **Distribución de reasignación ejecutada:**
+    - Víctor Julio Hernández González: 31 oportunidades
+    - Medardo Gabriel Hoyos Herrera: 31 oportunidades
+    - Hernando Tovar Mendoza: 30 oportunidades
+    - Stiven Rua: 26 oportunidades
+    - Juan Fernando Ospina: 15 oportunidades
+    - Natalia Gómez Usme: 8 oportunidades
+    - Claudia Patricia Granada: 4 oportunidades
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
+>>>>>>> Stashed changes
 ## 2026-08-31 - Ingest: Visibilidad de Errores en Auto-Guardado (`AutoSaveIndicator`)
 
 - **Mejora en `useFormAutoSave` y `AutoSaveIndicator`:**
