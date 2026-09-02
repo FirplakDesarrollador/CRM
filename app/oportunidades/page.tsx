@@ -875,8 +875,7 @@ function OpportunitiesContent() {
             {showAdvancedFilters && (
                 <div className="animate-in fade-in slide-in-from-top-4 duration-300">
                     <OpportunityFilters
-                        onApplyFilters={handleFiltersApply}
-                        onResetFilters={handleResetAllFilters}
+                        onFilterChange={handleFilterChange}
                         initialChannelId={selectedChannel}
                         initialSubclassId={selectedSubclass}
                         initialSegmentId={selectedSegment}
