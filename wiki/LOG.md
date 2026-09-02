@@ -24,6 +24,140 @@
 - **Páginas actualizadas:** `wiki/pages/dashboard-e-indicadores.md`, `wiki/LOG.md`.
 - **Pruebas:** `pruebas unitarias/informes.test.ts`.
 
+## 2026-09-02 - Operación: Reasignación de Oportunidades y Cuentas Promotores Sodimac (Columna K)
+
+- **Actualización de `owner_user_id` en `CRM_Oportunidades` y `CRM_Cuentas`:**
+  - Se reasignaron **78 oportunidades** comerciales y sus **cuentas asociadas** en Supabase para alinearlas con la distribución de asesores comerciales definida en la Columna K ("Asignación") del archivo `Registros Promotores Sodimac 1.xlsx`.
+  - **Distribución ejecutada:**
+    - Juan Fernando Ospina: 11
+    - Stiven Rua: 11
+    - Víctor Julio Hernández González: 11
+    - Hernando Tovar Mendoza: 10
+    - Medardo Gabriel Hoyos Herrera: 10
+    - Claudia Patricia Granada: 10
+    - Natalia Gómez Usme: 9
+    - Ider Alejandro Sandoval Hernández: 6
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
+## 2026-09-02 - FIX DISEÑO: Unificación Absoluta de Altura de Encabezados y Celdas de Tabla (Zero Drift)
+
+- **Módulos de Cuentas, Oportunidades y Contactos (`app/cuentas/page.tsx`, `app/oportunidades/page.tsx`, `app/contactos/page.tsx`):**
+  - Se identificó la causa exacta del salto acumulativo de filas: los encabezados superiores (`thead` y `ht_clone_top_inline_start_corner`) tenían 40px mientras que las filas del cuerpo (`tbody`) intentaban forzarse a 42px y `rowHeights={38}` en JS.
+  - Se fijó la altura de los encabezados de columna (`thead`) en exactamente **40px**, y la altura de todas las filas y números del cuerpo (`tbody tr`, `tbody td`, `tbody th.rowHeader`) en exactamente **38px** pareando con `rowHeights={38}` en Handsontable.
+  - Se forzó `white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important` en todas las celdas del cuerpo para evitar que textos largos (como nombres de empresas) expandan verticalmente celdas individuales.
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
+## 2026-09-02 - FIX DISEÑO: Alineación Vertical Perfecta de Filas y Números en Tablas
+
+- **Módulos de Cuentas, Oportunidades y Contactos (`app/cuentas/page.tsx`, `app/oportunidades/page.tsx`, `app/contactos/page.tsx`):**
+  - Se corrigió el desfase acumulativo entre la columna de numeración de filas (row headers) y las celdas de datos.
+  - El error ocurría debido a una discrepancia entre el `rowHeights={38}` en las propiedades de Javascript de Handsontable y el `height: 42px` forzado por CSS en las celdas `.handsontable td`.
+  - Se unificó `rowHeights={42}` y se aplicaron reglas CSS estrictas de `height`, `min-height`, `max-height` y `line-height` de 42px en todas las celdas, filas y encabezados de fila (`th.rowHeader`).
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
+## 2026-09-02 - FEAT: Persistencia de Ancho de Columnas de Tablas por Usuario
+
+- **Módulos de Cuentas, Oportunidades y Contactos (`app/cuentas/page.tsx`, `app/oportunidades/page.tsx`, `app/contactos/page.tsx`):**
+  - Se implementó la persistencia automática de anchos de columna personalizados en `localStorage`, indexados por el ID de usuario activo y el nombre del módulo.
+  - Al redimensionar manualmente cualquier columna (arrastrando el borde del título), la medida en píxeles se guarda instantáneamente.
+  - Al cambiar entre módulos, cerrar la aplicación o recargar la página, las tablas se abren conservando los anchos exactos configurados por cada usuario.
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
+## 2026-09-02 - FIX CRÍTICO: Solución de Desaparición de Datos y Paginación en Módulo Cuentas
+
+- **Módulo de Cuentas (`lib/hooks/useAccountsServer.ts`):**
+  - Se corrigió el error HTTP 400 de PostgREST provocado por la duplicación de parámetros `.or()` al realizar búsquedas por texto o aplicar filtros combinados.
+  - Se agrupó la consulta en un único parámetro `.or('nombre.ilike...` para evitar fallos en la consulta del servidor al cambiar de módulo o navegar.
+  - Se implementó un respaldo automático de base de datos local Dexie en el bloque `catch`, asegurando que **las cuentas NUNCA desaparezcan** ante fallos de red o errores del servidor.
+  - Se habilitó la paginación continua en el botón **"Cargar más resultados"** concatenando registros sin duplicados y actualizando el cursor de página correctamente.
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
+## 2026-09-02 - FIX TABLAS: Independencia de Botón de Filtros Desplegable vs Ordenamiento de Columnas
+
+- **Módulos de Cuentas, Contactos y Oportunidades (`app/cuentas/page.tsx`, `app/contactos/page.tsx`, `app/oportunidades/page.tsx`):**
+  - Se corrigió la interacción en las cabeceras de tabla tipo Excel (`Handsontable`).
+  - Anteriormente, al hacer clic sobre el botón con la flecha azul `[▼]` para desplegar la ventana de filtros por valor, el evento activaba también el ordenamiento ascendente/descendente de la columna.
+  - Ahora, el clic en el botón flotante del filtro (`.changeType` / `.htDropdownMenu`) abre exclusivamente el menú de filtrado sin alterar el ordenamiento A–Z / Z–A de la columna.
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
+## 2026-09-02 - UX & INTERFAZ: Botón Explícito de "Guardar Cambios" y Confirmación Visual en Cuentas
+
+- **Módulo de Cuentas (`components/cuentas/AccountForm.tsx`):**
+  - Se agregó el botón explícito **`[ ✓ Guardar Cambios ]`** tanto en la **Barra Superior de Pestañas** como en el **Pie de Página de Acciones** del formulario de Cuenta.
+  - Al hacer clic en "Guardar Cambios", el formulario valida de inmediato todos los campos, ejecuta el guardado directo en Supabase/Dexie, deshabilita el estado `isDirty` y muestra una notificación verde flotante: `¡Cambios guardados correctamente!`.
+  - Mantiene el sistema híbrido: autoguardado de respaldo en segundo plano + confirmación manual explícita para la tranquilidad del usuario.
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
+## 2026-09-02 - UX & RENDIMIENTO: Indicador Visible de Guardado Automático y Flush Inmediato
+
+- **Módulo de Cuentas (`lib/hooks/useFormAutoSave.ts`, `AccountForm.tsx`):**
+  - Se redujo el tiempo de espera (debounce) del autoguardado de 1.5s a **600ms** para que los cambios se procesen de manera mucho más ágil y casi instantánea.
+  - Se implementó la técnica de **Flush Inmediato al Desmontar**: si el usuario modifica un campo y cierra la ventana o navega de inmediato, la modificación se guarda instantáneamente en lugar de ser cancelada.
+  - Se colocó el indicador visual flotante de autoguardado (`AutoSaveIndicator`) **en la parte superior visible de las pestañas del formulario**, mostrando en tiempo real los estados `⏳ Guardando...`, `✓ Guardado` o `⚠ Error al guardar`.
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
+## 2026-09-02 - FIX CRÍTICO: Resolución de Fallo Silencioso en Reasignación de Cuenta
+
+- **Módulo de Cuentas (`lib/hooks/useAccounts.ts`, `AccountAssignedTab.tsx`):**
+  - Se corrigió la excepción lanzada cuando una cuenta no se encontraba presente en la base de datos local Dexie al momento de reasignar.
+  - Ahora `updateAccount` consulta primero a Supabase y actualiza de manera garantizada y síncrona tanto la `CRM_Cuentas` como todas las `CRM_Oportunidades` asociadas en la nube.
+  - Se agregaron banners de mensaje de error (`errorMessage`) y éxito (`successMessage`) en la pestaña "Asignado" para dar retroalimentación visual inmediata al usuario.
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
+## 2026-09-02 - UX & SEGURIDAD: Mensaje Guía y Permisos en Reasignación de Cuenta
+
+- **Módulo de Cuentas (`components/cuentas/AccountAssignedTab.tsx`, `AccountForm.tsx`):**
+  - Se confirmó y documentó la regla de seguridad que mantiene la pestaña de Reasignación ("Asignado") **exclusiva para usuarios con rol ADMINISTRADOR o COORDINADOR**, impidiendo que usuarios con rol VENDEDOR transfieran cuentas por cuenta propia.
+  - Se agregó un mensaje informativo (`💡 Seleccione un comercial diferente...`) en la pestaña "Asignado" para evitar confusión cuando el botón "Confirmar Reasignación" se deshabilita por tener seleccionado el mismo comercial actual.
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
+## 2026-09-02 - FIX LÓGICA: Reasignación Directa de Oportunidades en Supabase al Cambiar Comercial de Cuenta
+
+- **Módulo de Cuentas (`lib/hooks/useAccounts.ts`):**
+  - Se añadió la ejecución directa de la consulta de actualización en Supabase (`supabase.from('CRM_Oportunidades').update({ owner_user_id: newOwnerId }).eq('account_id', id)`) al reasignar una Cuenta.
+  - Esto garantiza que **el 100% de las oportunidades vinculadas a la cuenta en la nube** (incluso si no estaban en el caché local de Dexie de ese dispositivo) se actualicen inmediatamente con el nuevo asesor asignado.
+  - Se emitieron eventos reactivos `crm-optimistic-update` para refrescar al instante los componentes activos de Oportunidades.
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
+## 2026-09-02 - UX & NAVEGACIÓN: Modal Emergente Responsivo de Detalles de Cuenta en Oportunidades
+
+- **Módulo de Oportunidades y Cuentas (`components/cuentas/AccountModal.tsx`, `app/oportunidades/[id]/page.tsx`):**
+  - Se implementó el nuevo componente `AccountModal.tsx` que muestra los detalles y formulario de edición de la cuenta en una ventana emergente (Pop-up Modal) con backdrop-blur en escritorio y panel a pantalla completa en dispositivos móviles.
+  - Se sustituyó el enlace directo de redirección `<Link href="/cuentas?id=...">` por un botón interactivo que activa `AccountModal`.
+  - Permite al usuario revisar o realizar cualquier ajuste en la cuenta sin perder el contexto de la oportunidad y cerrando la ventana al terminar.
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
+## 2026-09-02 - FIX OPORTUNIDADES: Join de Vendedor y Mapeo Completo en Servidor/Offline
+
+- **Módulo de Oportunidades (`lib/hooks/useOpportunitiesServer.ts`):**
+  - Se cambió el join de `vendedor:CRM_Usuarios!owner_user_id(full_name)` a un **LEFT JOIN** (`vendedor:CRM_Usuarios(full_name)`). La presencia del signo `!` obligaba un INNER JOIN en PostgREST, lo cual descartaba oportunidades sin responsable o fallaba el mapeo.
+  - Se agregó la relación `vendedor` y `account` con la consulta a `CRM_Usuarios` tanto en la experiencia offline como en el mapeo de reserva (`catch`), corrigiendo los mensajes de "Sin Cuenta" y "Sin asignar".
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
+## 2026-09-02 - CORRECCIÓN SUPABASE: Parámetros PostgREST en Oportunidades del Servidor
+
+- **Módulo de Oportunidades (`lib/hooks/useOpportunitiesServer.ts`):**
+  - Se corrigió la consulta de `statusFilter` sustituyendo los bloques repetidos de `.or(...)` a nivel raíz por operadores directos de PostgREST (`.not('estado_id', 'in', '(2,3,4,11,14)')` y `.in('estado_id', ...)`).
+  - Esto eliminó el error HTTP 400 (`failed to parse logic tree`) en Supabase generado por múltiples bloques `.or()`, restaurando el listado completo de oportunidades abiertas y filtradas.
+  - Se agregó un respaldo automático a la base de datos local Dexie (`db.opportunities`) en el bloque `catch` para evitar pantallas vacías ante cualquier eventualidad de red.
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
+## 2026-09-02 - UX: Sincronización Inmediata de Filtros al Navegar entre Módulos
+
+- **Módulos de Cuentas y Oportunidades (`useAccountsServer.ts`, `useOpportunitiesServer.ts`, `app/cuentas/page.tsx`):**
+  - Se configuró la inicialización directa de las hooks del servidor (`useAccountsServer` y `useOpportunitiesServer`) leyendo los parámetros iniciales de URL y `sessionStorage`.
+  - Se vincularon explícitamente los setters de UI de la página (`setSelectedUserId`, `setCurrentChannel`, `setInputValue`, etc.) dentro de la función de sincronización.
+  - Al regresar al módulo de Cuentas o cambiar de módulo, la consulta de datos inicia filtrada desde la primera renderización, garantizando coincidencia 100% inmediata entre la barra superior y los datos de la tabla.
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
+## 2026-09-02 - LÓGICA DE NEGOCIO: Reasignación en Cascada de Responsable desde la Cuenta Matriz
+
+- **Módulos de Cuentas y Oportunidades (`lib/hooks/useAccounts.ts`, `AccountAssignedTab.tsx`):**
+  - Se implementó la reasignación en cascada: al reasignar el responsable (`owner_user_id`) de una cuenta matriz, la función `updateAccount` actualiza la cuenta y automáticamente reasigna el responsable de todas las oportunidades vinculadas a dicha cuenta en Dexie y Supabase.
+  - Se configuró la reasignación como un traspaso 100% limpio (sin creación automática de registros de colaboradores).
+  - La reasignación desde una oportunidad individual (`AssignedTab.tsx`) se mantuvo acotada únicamente a esa oportunidad.
+- **Páginas actualizadas:** `wiki/pages/cuentas.md`, `wiki/LOG.md`.
+
 ## 2026-09-02 - UX: Persistencia y Ejecución de Filtros entre Navegación de Módulos
 
 - **Módulos Afectados (`/oportunidades`, `/cuentas`, `/contactos`, `/actividades`):**
@@ -70,6 +204,22 @@
 - **Páginas actualizadas:** `wiki/pages/cuentas.md`, `wiki/pages/cotizaciones-y-pedidos.md`, `wiki/LOG.md`.
 - **Pruebas:** `pruebas unitarias/nitValidation.test.ts`, `pruebas unitarias/pedidoFormalization.test.ts`.
 
+=======
+## 2026-08-31 - Operación: Reasignación Masiva de Oportunidades en Supabase (`reasignar_crm_asignado.xlsx`)
+
+- **Actualización de Propietario (`owner_user_id`) en `CRM_Oportunidades`:**
+  - Se reasignaron **145 oportunidades** comerciales en Supabase para alinearlas con la distribución de vendedores definida en el archivo `reasignar_crm_asignado.xlsx` en el Escritorio.
+  - **Distribución de reasignación ejecutada:**
+    - Víctor Julio Hernández González: 31 oportunidades
+    - Medardo Gabriel Hoyos Herrera: 31 oportunidades
+    - Hernando Tovar Mendoza: 30 oportunidades
+    - Stiven Rua: 26 oportunidades
+    - Juan Fernando Ospina: 15 oportunidades
+    - Natalia Gómez Usme: 8 oportunidades
+    - Claudia Patricia Granada: 4 oportunidades
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
+>>>>>>> Stashed changes
 ## 2026-08-31 - Ingest: Visibilidad de Errores en Auto-Guardado (`AutoSaveIndicator`)
 
 - **Mejora en `useFormAutoSave` y `AutoSaveIndicator`:**

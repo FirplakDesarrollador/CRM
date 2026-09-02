@@ -169,12 +169,19 @@ function AccountsContent() {
         const direction = searchParams.get('dir') || saved.get('dir');
 
         setSearchTerm(query);
+        setInputValue(query);
         setAssignedUserId(userQuery);
+        setSelectedUserId(userQuery);
         setChannelFilter(channel);
+        setCurrentChannel(channel);
         setSubclassificationFilter(subclass ? Number(subclass) : null);
+        setCurrentSubclass(subclass ? Number(subclass) : null);
         setNivelPremiumFilter(nivel);
+        setCurrentNivel(nivel);
         setStartDate(start);
+        setCurrentStartDate(start);
         setEndDate(end);
+        setCurrentEndDate(end);
         setWebFilter(source === 'web');
         if (sort) setSortField(sort);
         if (direction) setSortAsc(direction === 'asc');
@@ -315,6 +322,42 @@ function AccountsContent() {
         }
     };
 
+    const { user } = useCurrentUser();
+    const colStorageKey = `crm_col_widths_cuentas_${user?.id || 'default'}`;
+    const [colWidths, setColWidths] = useState<Record<string, number>>({});
+
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            try {
+                const saved = localStorage.getItem(colStorageKey);
+                if (saved) setColWidths(JSON.parse(saved));
+            } catch (e) {}
+        }
+    }, [colStorageKey]);
+
+    const handleColumnResize = useCallback((arg1: number, arg2: number) => {
+        let width = arg1;
+        let colIndex = arg2;
+        if (arg1 < 20 && arg2 > 20) {
+            colIndex = arg1;
+            width = arg2;
+        }
+        const fields: Record<number, string> = {
+            0: 'nombre', 1: 'pais', 2: 'ciudad', 3: 'canal_id', 4: 'tipo',
+            5: 'potencial_venta', 6: 'vendedor', 7: 'nivel', 8: 'creacion', 9: 'actualizado'
+        };
+        const fieldName = fields[colIndex];
+        if (fieldName && width > 30) {
+            setColWidths(prev => {
+                const next = { ...prev, [fieldName]: width };
+                if (typeof window !== 'undefined') {
+                    localStorage.setItem(colStorageKey, JSON.stringify(next));
+                }
+                return next;
+            });
+        }
+    }, [colStorageKey]);
+
     // Preparar datos para Handsontable
     const hotData = accounts.map(acc => {
         const countryName = acc.pais_id ? (countryMap[acc.pais_id] || "Colombia") : ((acc as any).pais || "Colombia");
@@ -335,7 +378,7 @@ function AccountsContent() {
     });
 
     const hotColumns = [
-        { data: 'nombre', title: 'Cuenta', readOnly: true, width: 240, wordWrap: false,
+        { data: 'nombre', title: 'Cuenta', readOnly: true, width: colWidths['nombre'] || 240, wordWrap: false,
             renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 const v = value || '';
                 const safe = v.replace(/"/g, '&quot;');
@@ -344,7 +387,7 @@ function AccountsContent() {
                 return td;
             }
         },
-        { data: 'pais', title: 'País', readOnly: true, width: 120, wordWrap: false,
+        { data: 'pais', title: 'País', readOnly: true, width: colWidths['pais'] || 120, wordWrap: false,
             renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 const v = value || 'Colombia';
                 const safe = v.replace(/"/g, '&quot;');
@@ -353,7 +396,7 @@ function AccountsContent() {
                 return td;
             }
         },
-        { data: 'ciudad', title: 'Ciudad', readOnly: true, width: 150, wordWrap: false,
+        { data: 'ciudad', title: 'Ciudad', readOnly: true, width: colWidths['ciudad'] || 150, wordWrap: false,
             renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 const v = value || '';
                 const safe = v.replace(/"/g, '&quot;');
@@ -362,21 +405,21 @@ function AccountsContent() {
                 return td;
             }
         },
-        { data: 'canal_id', title: 'Canal', readOnly: true, width: 130, wordWrap: false,
+        { data: 'canal_id', title: 'Canal', readOnly: true, width: colWidths['canal_id'] || 130, wordWrap: false,
             renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 td.innerHTML = `<div style="color:#475569;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;">${value || '-'}</div>`;
                 td.style.overflow = 'hidden';
                 return td;
             }
         },
-        { data: 'tipo', title: 'Tipo', readOnly: true, width: 120, wordWrap: false,
+        { data: 'tipo', title: 'Tipo', readOnly: true, width: colWidths['tipo'] || 120, wordWrap: false,
             renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 td.innerHTML = `<div style="color:#475569;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;">${value || '-'}</div>`;
                 td.style.overflow = 'hidden';
                 return td;
             }
         },
-        { data: 'potencial_venta', title: 'Potencial Venta', readOnly: true, width: 150, wordWrap: false,
+        { data: 'potencial_venta', title: 'Potencial Venta', readOnly: true, width: colWidths['potencial_venta'] || 150, wordWrap: false,
             renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 const num = Number(value) || 0;
                 const fmt = new Intl.NumberFormat('es-CO', { style:'currency', currency:'COP', minimumFractionDigits:0, notation: num >= 1_000_000 ? 'compact' : 'standard', compactDisplay:'short' }).format(num);
@@ -385,7 +428,7 @@ function AccountsContent() {
                 return td;
             }
         },
-        { data: 'vendedor', title: 'Vendedor', readOnly: true, width: 170, wordWrap: false,
+        { data: 'vendedor', title: 'Vendedor', readOnly: true, width: colWidths['vendedor'] || 170, wordWrap: false,
             renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 const name = value || 'Sin asignar';
                 const initials = name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase();
@@ -400,7 +443,7 @@ function AccountsContent() {
                 return td;
             }
         },
-        { data: 'nivel', title: 'Nivel', readOnly: true, width: 110, wordWrap: false,
+        { data: 'nivel', title: 'Nivel', readOnly: true, width: colWidths['nivel'] || 110, wordWrap: false,
             renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 const isPremium = value === 'PREMIUM';
                 const bg = isPremium ? '#fef3c7' : '#f1f5f9';
@@ -411,13 +454,13 @@ function AccountsContent() {
                 return td;
             }
         },
-        { data: 'creacion', title: 'Creación', readOnly: true, width: 90, wordWrap: false,
+        { data: 'creacion', title: 'Creación', readOnly: true, width: colWidths['creacion'] || 90, wordWrap: false,
             renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 td.innerHTML = `<span style="font-size:12.5px;color:#64748b;font-weight:500;font-variant-numeric:tabular-nums;">${value || '-'}</span>`;
                 return td;
             }
         },
-        { data: 'actualizado', title: 'Actualizado', readOnly: true, width: 90, wordWrap: false,
+        { data: 'actualizado', title: 'Actualizado', readOnly: true, width: colWidths['actualizado'] || 90, wordWrap: false,
             renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 td.innerHTML = `<span style="font-size:12.5px;color:#64748b;font-weight:500;font-variant-numeric:tabular-nums;">${value || '-'}</span>`;
                 return td;
@@ -600,8 +643,10 @@ function AccountsContent() {
                             }
                             .opp-hot-wrap .ht_master .wtHolder::-webkit-scrollbar-track { background: transparent; }
 
-                            /* ── Header Cells ── */
-                            .opp-hot-wrap .handsontable th {
+                            /* ── Header Cells (Column Titles & Corner) ── */
+                            .opp-hot-wrap .handsontable thead th,
+                            .opp-hot-wrap .handsontable .ht_clone_top th,
+                            .opp-hot-wrap .handsontable .ht_clone_top_inline_start_corner th {
                                 background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%) !important;
                                 color: #475569 !important;
                                 font-size: 10.5px !important;
@@ -612,39 +657,54 @@ function AccountsContent() {
                                 border-right: 1px solid #e8ecf1 !important;
                                 padding: 0 14px !important;
                                 height: 40px !important;
+                                min-height: 40px !important;
+                                max-height: 40px !important;
+                                line-height: 40px !important;
                                 white-space: nowrap !important;
+                                box-sizing: border-box !important;
                             }
                             .opp-hot-wrap .handsontable th:last-child {
                                 border-right: none !important;
                             }
 
-                            /* ── Row Number (Row Headers) ── */
-                            .opp-hot-wrap .handsontable .ht_clone_inline_start th,
-                            .opp-hot-wrap .handsontable th.rowHeader,
-                            .opp-hot-wrap .handsontable .ht_clone_inline_start td {
+                            /* ── Body Cells & Row Headers Alignment ── */
+                            .opp-hot-wrap .handsontable tbody tr,
+                            .opp-hot-wrap .handsontable tbody td,
+                            .opp-hot-wrap .handsontable tbody th,
+                            .opp-hot-wrap .handsontable .ht_clone_inline_start tbody th,
+                            .opp-hot-wrap .handsontable .ht_clone_inline_start tbody td {
+                                height: 38px !important;
+                                min-height: 38px !important;
+                                max-height: 38px !important;
+                                line-height: 38px !important;
+                                box-sizing: border-box !important;
+                                vertical-align: middle !important;
+                                white-space: nowrap !important;
+                                overflow: hidden !important;
+                                text-overflow: ellipsis !important;
+                            }
+
+                            .opp-hot-wrap .handsontable tbody th.rowHeader {
                                 background: #f8fafc !important;
                                 color: #94a3b8 !important;
                                 font-size: 10px !important;
                                 font-weight: 600 !important;
                                 border-right: 1px solid #e2e8f0 !important;
+                                border-bottom: 1px solid #f1f5f9 !important;
                                 text-align: center !important;
                                 width: 42px !important;
                                 min-width: 42px !important;
                                 max-width: 42px !important;
                             }
 
-                            /* ── Data Cells ── */
-                            .opp-hot-wrap .handsontable td {
+                            .opp-hot-wrap .handsontable tbody td {
                                 font-size: 13px !important;
                                 color: #334155 !important;
                                 border-bottom: 1px solid #f1f5f9 !important;
                                 border-right: 1px solid transparent !important;
-                                height: 42px !important;
                                 padding: 0 14px !important;
-                                vertical-align: middle !important;
                                 font-family: inherit !important;
                                 transition: background 0.15s ease, box-shadow 0.15s ease !important;
-                                line-height: 1.4 !important;
                             }
 
                             /* ── Zebra Striping ── */
@@ -728,6 +788,7 @@ function AccountsContent() {
                             filters={true}
                             dropdownMenu={true}
                             manualColumnResize={true}
+                            afterColumnResize={(width: number, col: number) => handleColumnResize(width, col)}
                             width="100%"
                             height="calc(100vh - 280px)"
                             autoColumnSize={false}
@@ -737,6 +798,12 @@ function AccountsContent() {
                             licenseKey="non-commercial-and-evaluation"
                             afterOnCellMouseDown={(event: any, coords: any, td: any) => {
                                 if (coords.row === -1) {
+                                    const target = event?.target as HTMLElement;
+                                    const isDropdownBtn = target?.closest('.changeType') || target?.closest('.htDropdownMenu') || target?.classList?.contains('changeType');
+                                    if (isDropdownBtn) {
+                                        // User clicked the filter dropdown button [▼], do NOT toggle sort!
+                                        return;
+                                    }
                                     const fields: Record<number, string> = { 0: 'nombre', 1: 'pais', 2: 'ciudad', 3: 'canal_id', 5: 'potencial_venta', 8: 'created_at', 9: 'updated_at' };
                                     if (fields[coords.col]) handleSort(fields[coords.col]);
                                     return;

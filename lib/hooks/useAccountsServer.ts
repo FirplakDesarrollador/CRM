@@ -49,21 +49,35 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
 
     const pageRef = useRef(1);
 
+    // Helper to extract initial filter from URL or sessionStorage
+    const getInitialParam = (key: string) => {
+        if (typeof window === 'undefined') return null;
+        const urlParams = new URLSearchParams(window.location.search);
+        const fromUrl = urlParams.get(key);
+        if (fromUrl) return fromUrl;
+        const saved = sessionStorage.getItem('crm_cuentas_state');
+        if (saved) return new URLSearchParams(saved).get(key) || null;
+        return null;
+    };
+
     // Filters
-    const [searchTerm, setSearchTerm] = useState<string>("");
-    const [assignedUserId, setAssignedUserId] = useState<string | null>(null);
-    const [channelFilter, setChannelFilter] = useState<string | null>(null);
-    const [subclassificationFilter, setSubclassificationFilter] = useState<number | null>(null);
-    const [nivelPremiumFilter, setNivelPremiumFilter] = useState<string | null>(null);
-    const [startDate, setStartDate] = useState<string | null>(null);
-    const [endDate, setEndDate] = useState<string | null>(null);
+    const [searchTerm, setSearchTerm] = useState<string>(() => getInitialParam('search') || "");
+    const [assignedUserId, setAssignedUserId] = useState<string | null>(() => getInitialParam('user'));
+    const [channelFilter, setChannelFilter] = useState<string | null>(() => getInitialParam('channel'));
+    const [subclassificationFilter, setSubclassificationFilter] = useState<number | null>(() => {
+        const val = getInitialParam('subclass');
+        return val ? Number(val) : null;
+    });
+    const [nivelPremiumFilter, setNivelPremiumFilter] = useState<string | null>(() => getInitialParam('nivel'));
+    const [startDate, setStartDate] = useState<string | null>(() => getInitialParam('start'));
+    const [endDate, setEndDate] = useState<string | null>(() => getInitialParam('end'));
 
     // Sorting
-    const [sortField, setSortField] = useState<string>('updated_at');
-    const [sortAsc, setSortAsc] = useState<boolean>(false);
+    const [sortField, setSortField] = useState<string>(() => getInitialParam('sort') || 'updated_at');
+    const [sortAsc, setSortAsc] = useState<boolean>(() => getInitialParam('dir') === 'asc');
 
     // Web Filter
-    const [webFilter, setWebFilter] = useState<boolean>(false);
+    const [webFilter, setWebFilter] = useState<boolean>(() => getInitialParam('source') === 'web');
 
     // User Context
     const { user, role: userRole, isVendedor } = useCurrentUser();
@@ -282,9 +296,11 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
 
             if (searchTerm && searchTerm.trim()) {
                 const tokens = getSearchTokens(searchTerm);
-                for (const token of tokens) {
-                    query = query.or(`nombre.ilike.%${token}%,nit_base.ilike.%${token}%`);
-                }
+                const orParts = tokens.flatMap(token => [
+                    `nombre.ilike.%${token}%`,
+                    `nit_base.ilike.%${token}%`
+                ]);
+                query = query.or(orParts.join(','));
             }
 
             if (assignedUserId) {
@@ -418,7 +434,66 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
             }
 
         } catch (err) {
-            console.error("Error fetching accounts:", err);
+            console.error("Error fetching accounts from server, executing local Dexie fallback:", err);
+            try {
+                let localAccounts = await db.accounts.toArray();
+                const allOpps = await db.opportunities.toArray();
+                const { data: usersData } = await supabase.from('CRM_Usuarios').select('id, full_name, email');
+                const userMap = new Map((usersData || []).map(u => [u.id, u.full_name || u.email]));
+
+                if (searchTerm && searchTerm.trim()) {
+                    localAccounts = localAccounts.filter(a =>
+                        matchesSearchTokens([a.nombre, a.nit_base, a.ciudad, a.direccion, a.email, a.telefono], searchTerm)
+                    );
+                }
+
+                if (assignedUserId) {
+                    localAccounts = localAccounts.filter(a => a.owner_user_id === assignedUserId);
+                }
+
+                if (channelFilter) {
+                    localAccounts = localAccounts.filter(a => a.canal_id === channelFilter);
+                }
+
+                if (subclassificationFilter) {
+                    localAccounts = localAccounts.filter(a => a.subclasificacion_id === subclassificationFilter);
+                }
+
+                if (nivelPremiumFilter) {
+                    localAccounts = localAccounts.filter(a => a.nivel_premium === nivelPremiumFilter);
+                }
+
+                const totalCount = localAccounts.length;
+                const currentPage = isLoadMore ? pageRef.current + 1 : 1;
+                const from = (currentPage - 1) * pageSize;
+                const paginatedAccounts = localAccounts.slice(from, from + pageSize);
+
+                const mappedOpps = paginatedAccounts.map(item => ({
+                    ...item,
+                    owner_name: userMap.get(item.owner_user_id || item.created_by || '') || 'Usuario',
+                    creator_name: userMap.get(item.created_by || '') || 'Usuario',
+                    contact_count: 0,
+                    potencial_venta: (allOpps as any[])
+                        .filter(o => o.account_id === item.id && !o.is_deleted && ![11, 14, 2, 3, 4].includes(o.estado_id))
+                        .reduce((sum, o) => sum + (o.amount || o.valor || 0), 0)
+                }));
+
+                if (isLoadMore) {
+                    setData(prev => {
+                        const existingIds = new Set(prev.map(i => i.id));
+                        const newItems = mappedOpps.filter(i => !existingIds.has(i.id));
+                        return [...prev, ...newItems] as any;
+                    });
+                    pageRef.current = currentPage;
+                } else {
+                    setData(mappedOpps as any);
+                    pageRef.current = 1;
+                }
+                setCount(totalCount);
+                setHasMore(from + paginatedAccounts.length < totalCount);
+            } catch (fallbackErr) {
+                console.error("Dexie fallback exception:", fallbackErr);
+            }
         } finally {
             setLoading(false);
             useSyncStore.getState().setIsLoadingData(false);
