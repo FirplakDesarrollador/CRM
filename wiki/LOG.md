@@ -3,6 +3,27 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-09-02 - Ingest: Columna e Indicador de Actividades (Atrasadas / Programadas) en Oportunidades (/oportunidades)
+
+- **Cálculo y Clasificación (`lib/opportunityActivities.ts`):**
+  - Función `computeOpportunityActivitySummary()` que procesa las actividades de una oportunidad determinando si tiene actividades atrasadas (badge rojo con conteo), programadas a futuro (badge azul con conteo), completadas (verde) o sin actividad.
+- **Hook y Carga (`lib/hooks/useOpportunitiesServer.ts`):**
+  - Inclusión de `actividades:CRM_Actividades(id, fecha_fin, is_completed, is_deleted)` en las consultas online y lectura de `db.activities` en modo offline Dexie.
+- **Vistas Desktop y Móvil (`app/oportunidades/page.tsx`):**
+  - Columna `Actividad` añadida a Handsontable con renderizador visual e icono y añadida al selector de columnas.
+  - Indicador visual y conteo en cada tarjeta de la vista móvil.
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+- **Pruebas:** `pruebas unitarias/opportunityActivities.test.ts`.
+
+## 2026-09-02 - Ingest: Categorías de Interés en Oportunidades y Fallback de Cuenta en Actividades (/informes)
+
+- **Informe de Oportunidades (`lib/utils/informes.ts`, `app/informes/page.tsx`):**
+  - Se agregó la columna `CATEGORÍAS DE INTERÉS` (`categorias_interes`), mapeando y normalizando `categoria_oportunidad` mediante `formatOpportunityCategories()`.
+- **Informe de Actividades (`lib/utils/informes.ts`, `app/informes/page.tsx`):**
+  - Se implementó `mapActivityReportRow` con fallback automático de cuenta (`oportunidad.cuenta.nombre`) para aquellas actividades vinculadas a través de una oportunidad que no cuenten con `account_id` directo.
+- **Páginas actualizadas:** `wiki/pages/dashboard-e-indicadores.md`, `wiki/LOG.md`.
+- **Pruebas:** `pruebas unitarias/informes.test.ts`.
+
 ## 2026-08-31 - Ingest: NIT Alfanumérico Provisional Único y Restricción Numérica en Pedidos
 
 - **Generador y Validador de NIT (`lib/nitUtils.ts`):**

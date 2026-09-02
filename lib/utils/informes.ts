@@ -1,5 +1,6 @@
 import * as ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
+import { formatOpportunityCategories } from '@/lib/opportunityCategories';
 
 /**
  * Interface parameter for columns
@@ -422,8 +423,48 @@ export function mapOpportunityReportRow(
     ciudad_nombre: lookups.cityMap.get(item.ciudad_id) || '-',
     probabilidad: item.probabilidad ?? item.probability ?? 0,
     probability: item.probabilidad ?? item.probability ?? 0,
-    razon_perdida_label: item.razon_perdida_id ? (lookups.lossReasonMap.get(item.razon_perdida_id) || item.razon_perdida) : (item.razon_perdida || '-')
+    razon_perdida_label: item.razon_perdida_id ? (lookups.lossReasonMap.get(item.razon_perdida_id) || item.razon_perdida) : (item.razon_perdida || '-'),
+    categorias_interes: formatOpportunityCategories(item.categoria_oportunidad) || '-'
   };
 }
+
+export interface ActivityFlattenLookups {
+  userMap: Map<string, string>;
+  clasificacionMap: Map<number, string>;
+  subclasificacionMap: Map<number, string>;
+  tipoActividadMap: Map<number, string>;
+}
+
+export function mapActivityReportRow(
+  item: any,
+  lookups: ActivityFlattenLookups
+) {
+  const getJoinedSingle = (rel: any) => Array.isArray(rel) ? rel[0] : rel;
+  const cuentaObj = getJoinedSingle(item.cuenta);
+  const oppObj = getJoinedSingle(item.oportunidad);
+  const oppCuentaObj = oppObj ? getJoinedSingle(oppObj.cuenta) : null;
+  const usrObj = getJoinedSingle(item.usuario);
+  const clasifObj = getJoinedSingle(item.clasificacion);
+  const subclasifObj = getJoinedSingle(item.subclasificacion);
+  const tipoActObj = getJoinedSingle(item.tipo_act_info);
+
+  const cuentaNombre = cuentaObj?.nombre || oppCuentaObj?.nombre || '-';
+  const oppNombre = oppObj?.nombre || '-';
+
+  return {
+    ...item,
+    asunto: item.asunto || '-',
+    clasificacion_nombre: clasifObj?.nombre || lookups.clasificacionMap.get(item.clasificacion_id) || '-',
+    subclasificacion_nombre: subclasifObj?.nombre || lookups.subclasificacionMap.get(item.subclasificacion_id) || '-',
+    cuenta_nombre: cuentaNombre,
+    oportunidad_nombre: oppNombre,
+    oportunidad_monto: oppObj?.amount || 0,
+    vendedor_nombre: usrObj?.full_name || lookups.userMap.get(item.user_id) || '-',
+    estado_nombre: item.is_completed ? 'Completado' : 'No completado',
+    tipo_nombre: tipoActObj?.nombre || lookups.tipoActividadMap.get(item.tipo_actividad_id) || item.tipo_actividad || '-',
+    descripcion: item.descripcion || '-'
+  };
+}
+
 
 

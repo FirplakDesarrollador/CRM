@@ -4,7 +4,7 @@ import React, { useState, useMemo } from 'react';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useUsers } from '@/lib/hooks/useUsers';
 import { supabase } from '@/lib/supabase';
-import { downloadExcel, downloadCSV, downloadSopExcel, ExportColumn, SopRow, mapOpportunityReportRow } from '@/lib/utils/informes';
+import { downloadExcel, downloadCSV, downloadSopExcel, ExportColumn, SopRow, mapOpportunityReportRow, mapActivityReportRow } from '@/lib/utils/informes';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { FileSpreadsheet, Loader2, Download, TableProperties, Users, Briefcase, Building2, Calendar as CalendarIcon, Filter, RotateCcw, DollarSign, MapPin, Tag } from 'lucide-react';
@@ -699,6 +699,7 @@ export default function InformesPage() {
                     { header: 'FECHA CREACIÓN', key: 'created_at', width: 20 },
                     { header: 'NOMBRE OPORTUNIDAD', key: 'nombre', width: 35 },
                     { header: 'CUENTA', key: 'cuenta_nombre', width: 35 },
+                    { header: 'CATEGORÍAS DE INTERÉS', key: 'categorias_interes', width: 30 },
                     { header: 'PAÍS', key: 'pais_nombre', width: 20 },
                     { header: 'CANAL', key: 'canal_nombre' },
                     { header: 'VENDEDOR', key: 'vendedor_nombre', width: 25 },
@@ -805,7 +806,7 @@ export default function InformesPage() {
                 selectStr = `
                     *,
                     cuenta:CRM_Cuentas(nombre),
-                    oportunidad:CRM_Oportunidades(nombre, amount),
+                    oportunidad:CRM_Oportunidades(nombre, amount, cuenta:CRM_Cuentas(nombre)),
                     usuario:CRM_Usuarios(full_name),
                     clasificacion:CRM_Activity_Clasificacion(nombre),
                     subclasificacion:CRM_Activity_Subclasificacion(nombre),
@@ -825,27 +826,12 @@ export default function InformesPage() {
                     { header: 'TIPO', key: 'tipo_nombre', width: 20 },
                     { header: 'NOTAS', key: 'descripcion', width: 50 }
                 ];
-                flattenFn = (item: any) => {
-                    const cuentaObj = getJoinedSingle(item.cuenta);
-                    const oppObj = getJoinedSingle(item.oportunidad);
-                    const usrObj = getJoinedSingle(item.usuario);
-                    const clasifObj = getJoinedSingle(item.clasificacion);
-                    const subclasifObj = getJoinedSingle(item.subclasificacion);
-                    const tipoActObj = getJoinedSingle(item.tipo_act_info);
-                    return {
-                        ...item,
-                        asunto: item.asunto || '-',
-                        clasificacion_nombre: clasifObj?.nombre || clasificacionMap.get(item.clasificacion_id) || '-',
-                        subclasificacion_nombre: subclasifObj?.nombre || subclasificacionMap.get(item.subclasificacion_id) || '-',
-                        cuenta_nombre: cuentaObj?.nombre || '-',
-                        oportunidad_nombre: oppObj?.nombre || '-',
-                        oportunidad_monto: oppObj?.amount || 0,
-                        vendedor_nombre: usrObj?.full_name || userMap.get(item.user_id) || '-',
-                        estado_nombre: item.is_completed ? 'Completado' : 'No completado',
-                        tipo_nombre: tipoActObj?.nombre || tipoActividadMap.get(item.tipo_actividad_id) || item.tipo_actividad || '-',
-                        descripcion: item.descripcion || '-'
-                    };
-                };
+                flattenFn = (item: any) => mapActivityReportRow(item, {
+                    userMap,
+                    clasificacionMap,
+                    subclasificacionMap,
+                    tipoActividadMap
+                });
             }
 
             let query = supabase.from(entidadDef.table).select(selectStr);
