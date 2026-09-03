@@ -63,6 +63,28 @@ function ContactsContent() {
         }
     }, [colStorageKey]);
 
+    const handleColumnResize = useCallback((arg1: number, arg2: number) => {
+        let width = arg1;
+        let colIndex = arg2;
+        if (arg1 < 20 && arg2 > 20) {
+            colIndex = arg1;
+            width = arg2;
+        }
+        const fields: Record<number, string> = {
+            0: 'nombre', 1: 'cargo', 2: 'principal', 3: 'cuenta', 4: 'email', 5: 'telefono'
+        };
+        const fieldName = fields[colIndex];
+        if (fieldName && width > 30) {
+            setColWidths(prev => {
+                const next = { ...prev, [fieldName]: width };
+                if (typeof window !== 'undefined') {
+                    localStorage.setItem(colStorageKey, JSON.stringify(next));
+                }
+                return next;
+            });
+        }
+    }, [colStorageKey]);
+
     // UI States
     const [inputValue, setInputValue] = useState(() => {
         const fromUrl = searchParams.get('search');
@@ -392,28 +414,6 @@ function ContactsContent() {
     }
 
     // Preparar datos para Handsontable
-    const handleColumnResize = useCallback((arg1: number, arg2: number) => {
-        let width = arg1;
-        let colIndex = arg2;
-        if (arg1 < 20 && arg2 > 20) {
-            colIndex = arg1;
-            width = arg2;
-        }
-        const fields: Record<number, string> = {
-            0: 'nombre', 1: 'cargo', 2: 'principal', 3: 'cuenta', 4: 'email', 5: 'telefono'
-        };
-        const fieldName = fields[colIndex];
-        if (fieldName && width > 30) {
-            setColWidths(prev => {
-                const next = { ...prev, [fieldName]: width };
-                if (typeof window !== 'undefined') {
-                    localStorage.setItem(colStorageKey, JSON.stringify(next));
-                }
-                return next;
-            });
-        }
-    }, [colStorageKey]);
-
     const hotData = contacts.map(contact => {
         const accountName = contact.account_name || accountMap.get(contact.account_id) || "-";
         return {
