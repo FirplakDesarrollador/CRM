@@ -10,6 +10,7 @@ La memoria historica detallada continua en `bugs-knowhow.md`. Esta vista conecta
 | Estado de formularios perdido al cambiar pestañas o pasos | `bugs-knowhow.md`; tres specs en `e2e/` | R3, R6 | `e2e-chromium` | Configurado; gate aun no ejecutado tras adopcion |
 | Loops de router y render por sincronizacion de URL | `bugs-knowhow.md` | R3 | Lint por trinquete | INFERRED; no hay prueba de regresion dedicada |
 | Supresiones, errores de tipos ignorados y pruebas debilitadas | `next.config.mjs`; fuentes con supresiones heredadas | Transversal | `safe-change-policy`, `type-ratchet`, `lint-ratchet` | Proteccion monotona; deuda heredada declarada |
+| Violacion de Rules of Hooks (hooks bajo retornos condicionales que rompen orden de llamada) | `bugs-knowhow.md` Bug 20260903-01; `app/contactos/page.tsx` | Transversal / R3 | `safe-change-policy` (auditoria estricta de `react-hooks/rules-of-hooks`) | VERIFIED; 0 violaciones en 136 componentes |
 | Migraciones locales ausentes del control de versiones | `supabase/migrations/`; `.gitignore` | R1-R8 | `migration-static` | BROKEN: 22 archivos locales no versionados bloquean `qa:gate` |
 
 Una regresion nueva se registra con `npm run qa:incident`. La nota debe identificar la prueba RED, la etapa que la ejecuta y la evidencia GREEN.
