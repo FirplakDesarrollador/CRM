@@ -1218,13 +1218,14 @@ Al hacer clic en cualquier contacto del listado para abrir su vista de edición 
 
 Root Cause:
 Violación estricta de las **Rules of Hooks** de React:
-1. En `app/contactos/page.tsx`, existía un retorno condicional temprano en la línea ~351:
-   `if (selectedAccountIdForCreate || editingContact) { return (...); }`
-2. Los hooks `useCurrentUser()`, `useState` (para `colWidths`) y `useEffect` (para persistencia de anchos de columna de Handsontable en `localStorage`) estaban declarados en la línea ~382, es decir, **después** del retorno condicional anterior.
-3. Cuando el usuario seleccionaba un contacto, `editingContact` cambiaba de `undefined` a un objeto válido, provocando que el componente retornara anticipadamente y se saltara la ejecución de dichos hooks. React detectó una cantidad diferente de hooks llamados entre renders sucesivos y disparó la excepción client-side.
+1. En `app/contactos/page.tsx`, existían retornos condicionales tempranos:
+   - `if (isCreating && !selectedAccountIdForCreate) { return (...); }`
+   - `if (selectedAccountIdForCreate || editingContact) { return (...); }`
+2. Los hooks `useCurrentUser()`, `useState` (para `colWidths`), `useEffect` (para persistencia en `localStorage`) y `useCallback` (`handleColumnResize`) estaban declarados después de dichos retornos condicionales.
+3. Cuando el usuario seleccionaba un contacto, el componente retornaba anticipadamente y saltaba la ejecución de estos hooks. React detectó: "Rendered fewer hooks than expected. This may be caused by an accidental early return statement" y disparó el ErrorBoundary / excepción client-side.
 
 Fix Applied:
-1. Se reubicaron `useCurrentUser()`, el estado `colWidths` y su respectivo `useEffect` al inicio de la función `ContactsContent()`, junto a las demás declaraciones de hooks y antes de cualquier retorno condicional.
+1. Se reubicaron incondicionalmente todos los hooks (`useCurrentUser()`, `useState(colWidths)`, `useEffect(colWidths)` y `useCallback(handleColumnResize)`) al inicio de `ContactsContent()`, antes de cualquier declaración `return`.
 2. Se verificó que los módulos hermanos (`app/cuentas/page.tsx` y `app/oportunidades/page.tsx`) no tuvieran retornos tempranos antes de sus llamadas a hooks.
 
 Prevention Rule:
