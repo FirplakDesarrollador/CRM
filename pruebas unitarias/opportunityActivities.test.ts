@@ -84,4 +84,41 @@ describe('Cálculo y clasificación de Actividades en Oportunidades', () => {
         expect(result.scheduled).toBe(0);
         expect(result.label).toBe('1 al día');
     });
+
+    it('clasifica como programada una TAREA con fecha_inicio futura aunque fecha_fin sea del pasado o residual', () => {
+        const activities = [
+            {
+                id: 'task-1',
+                tipo_actividad: 'TAREA',
+                fecha_inicio: '2026-09-09T10:00:00Z', // Futura respecto a baseNow (2026-09-02)
+                fecha_fin: '2026-09-02T11:00:00Z',    // Residual en el pasado
+                is_completed: false
+            }
+        ];
+
+        const result = computeOpportunityActivitySummary(activities, baseNow);
+        expect(result.hasActivity).toBe(true);
+        expect(result.status).toBe('scheduled');
+        expect(result.overdue).toBe(0);
+        expect(result.scheduled).toBe(1);
+        expect(result.label).toBe('1 programada');
+    });
+
+    it('corrige discrepancia cuando fecha_fin es anterior a fecha_inicio en cualquier actividad', () => {
+        const activities = [
+            {
+                id: 'act-inconsistent',
+                fecha_inicio: '2026-09-05T10:00:00Z',
+                fecha_fin: '2026-09-01T10:00:00Z',
+                is_completed: false
+            }
+        ];
+
+        const result = computeOpportunityActivitySummary(activities, baseNow);
+        expect(result.status).toBe('scheduled');
+        expect(result.overdue).toBe(0);
+        expect(result.scheduled).toBe(1);
+        expect(result.label).toBe('1 programada');
+    });
 });
+

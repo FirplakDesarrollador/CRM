@@ -123,4 +123,55 @@ describe("Filtrado de Oportunidades", () => {
         expect(collab).toHaveLength(1);
         expect(collab[0].id).toBe("opp-2");
     });
+
+    it("el filtro por canal reduce el número total de oportunidades y descarta otros canales", () => {
+        // Conteo inicial sin filtro de canal
+        const all = filterOpportunities(mockOpps, {}, { accountsMap: mockAccounts });
+        expect(all).toHaveLength(3);
+
+        // Filtrando por DIST_NAC debe reducir a 1 sola oportunidad
+        const canalDist = filterOpportunities(mockOpps, { channelFilter: "DIST_NAC" }, { accountsMap: mockAccounts });
+        expect(canalDist).toHaveLength(1);
+        expect(canalDist[0].id).toBe("opp-2");
+        expect(canalDist.length).toBeLessThan(all.length);
+
+        // Filtrando por un canal inexistente debe reducir a 0
+        const canalVacio = filterOpportunities(mockOpps, { channelFilter: "CANAL_INEXISTENTE" }, { accountsMap: mockAccounts });
+        expect(canalVacio).toHaveLength(0);
+    });
+
+    it("la paginación preserva el conteo total y limita la vista preliminar al tamaño de página", () => {
+        // Generar un conjunto simulado de 250 oportunidades
+        const manyOpps = Array.from({ length: 250 }, (_, i) => ({
+            id: `opp-bulk-${i}`,
+            nombre: `Oportunidad ${i}`,
+            account_id: i % 2 === 0 ? "acc-1" : "acc-2",
+            amount: 1000000 * (i + 1),
+            fase_id: 1,
+            estado_id: 1,
+            owner_user_id: "user-1",
+            created_by: "user-1",
+            created_at: "2026-08-01T10:00:00Z",
+            fecha_cierre_estimada: "2026-09-30",
+            segmento_id: 101,
+            origen_oportunidad: "Feria",
+            url_origen: null
+        }));
+
+        // Filtrar por canal acc-1 (OBRAS_NAC): 125 oportunidades
+        const filtered = filterOpportunities(manyOpps, { channelFilter: "OBRAS_NAC" }, { accountsMap: mockAccounts });
+        const totalCount = filtered.length;
+        expect(totalCount).toBe(125);
+
+        // Simulación de paginación: pageSize = 100
+        const pageSize = 100;
+        const page1 = filtered.slice(0, pageSize);
+        expect(page1).toHaveLength(100);
+        expect(totalCount).toBe(125);
+
+        // Segunda página: restantes 25
+        const page2 = filtered.slice(pageSize, pageSize * 2);
+        expect(page2).toHaveLength(25);
+    });
 });
+

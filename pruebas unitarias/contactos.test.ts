@@ -81,4 +81,38 @@ describe("Filtrado de Contactos", () => {
         expect(restringido).toHaveLength(2);
         expect(restringido.map(c => c.id)).toEqual(["contact-1", "contact-2"]);
     });
+
+    it("el filtrado por cuenta reduce el conteo total y descarta contactos ajenos", () => {
+        const all = filterContacts(mockContacts, {});
+        expect(all).toHaveLength(3);
+
+        const acc2 = filterContacts(mockContacts, { accountFilter: "acc-2" });
+        expect(acc2).toHaveLength(1);
+        expect(acc2[0].id).toBe("contact-3");
+        expect(acc2.length).toBeLessThan(all.length);
+    });
+
+    it("la paginación preserva el total y limita los resultados preliminares al tamaño de página (100)", () => {
+        const manyContacts = Array.from({ length: 180 }, (_, i) => ({
+            id: `contact-bulk-${i}`,
+            account_id: i % 2 === 0 ? "acc-1" : "acc-2",
+            nombre: `Contacto ${i}`,
+            cargo: "Ingeniero",
+            email: `contacto${i}@empresa.com`,
+            telefono: `30000000${i}`,
+            es_principal: i % 3 === 0
+        }));
+
+        const filtered = filterContacts(manyContacts, { accountFilter: "acc-1" });
+        expect(filtered).toHaveLength(90);
+
+        const pageSize = 50;
+        const page1 = filtered.slice(0, pageSize);
+        expect(page1).toHaveLength(50);
+        expect(filtered.length).toBe(90);
+
+        const page2 = filtered.slice(pageSize, pageSize * 2);
+        expect(page2).toHaveLength(40);
+    });
 });
+
