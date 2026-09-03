@@ -13,6 +13,9 @@ const SCOPES = [
     'profile',
     'email',
     'User.Read',
+    'User.ReadBasic.All',
+    'User.Read.All',
+    'People.Read',
     'Mail.Send',
     'Tasks.ReadWrite',
     'Calendars.ReadWrite',
@@ -234,23 +237,93 @@ export async function getPlannerTaskDetails(accessToken: string, taskId: string)
  * and doesn't require Admin Consent (only People.Read scope)
  */
 export async function searchMicrosoftUsers(accessToken: string, query: string) {
-    console.log(`[Microsoft] Searching users with People API, query: ${query}`);
+    const cleanQuery = query.trim();
+    if (!cleanQuery) return [];
 
-    // Primary method: Use People API search endpoint (same as Teams)
-    const searchBody = {
-        requests: [
-            {
-                entityTypes: ['person'],
-                query: {
-                    queryString: query
-                },
-                from: 0,
-                size: 15
-            }
-        ]
-    };
+    console.log(`[Microsoft] Searching users for query: "${cleanQuery}"`);
 
+    // Tier 1: Direct Azure AD Directory search (/users with $search)
+    // Works across whole Microsoft tenant directory (requires User.ReadBasic.All or User.Read.All)
     try {
+        const searchUrl = `https://graph.microsoft.com/v1.0/users?$search="displayName:${cleanQuery}" OR "mail:${cleanQuery}" OR "userPrincipalName:${cleanQuery}"&$select=id,displayName,mail,userPrincipalName,jobTitle&$top=25`;
+        const res = await fetch(searchUrl, {
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'ConsistencyLevel': 'eventual'
+            }
+        });
+
+        if (res.ok) {
+            const data = await res.json();
+            const users = data.value || [];
+            if (users.length > 0) {
+                console.log(`[Microsoft] /users $search found ${users.length} users`);
+                return users.map((u: any) => ({
+                    id: u.id,
+                    displayName: u.displayName || u.userPrincipalName,
+                    mail: u.mail || u.userPrincipalName,
+                    userPrincipalName: u.userPrincipalName,
+                    jobTitle: u.jobTitle || 'Colaborador Firplak'
+                }));
+            }
+        } else {
+            console.log(`[Microsoft] /users $search returned status ${res.status}, trying filter...`);
+        }
+    } catch (err) {
+        console.warn('[Microsoft] /users $search failed:', err);
+    }
+
+    // Tier 2: Azure AD Directory search (/users with $filter)
+    // Fallback if $search is not supported or returned empty
+    try {
+        const capitalized = cleanQuery.charAt(0).toUpperCase() + cleanQuery.slice(1);
+        const lower = cleanQuery.toLowerCase();
+        const filterParts = [
+            `startsWith(displayName,'${cleanQuery}')`,
+            cleanQuery !== capitalized ? `startsWith(displayName,'${capitalized}')` : null,
+            cleanQuery !== lower ? `startsWith(displayName,'${lower}')` : null,
+            `startsWith(mail,'${lower}')`,
+            `startsWith(userPrincipalName,'${lower}')`,
+            `startsWith(givenName,'${capitalized}')`,
+            `startsWith(surname,'${capitalized}')`
+        ].filter(Boolean).join(' or ');
+
+        const filterUrl = `https://graph.microsoft.com/v1.0/users?$filter=${encodeURIComponent(filterParts)}&$select=id,displayName,mail,userPrincipalName,jobTitle&$top=25`;
+        const res = await fetch(filterUrl, {
+            headers: { 'Authorization': `Bearer ${accessToken}` }
+        });
+
+        if (res.ok) {
+            const data = await res.json();
+            const users = data.value || [];
+            if (users.length > 0) {
+                console.log(`[Microsoft] /users $filter found ${users.length} users`);
+                return users.map((u: any) => ({
+                    id: u.id,
+                    displayName: u.displayName || u.userPrincipalName,
+                    mail: u.mail || u.userPrincipalName,
+                    userPrincipalName: u.userPrincipalName,
+                    jobTitle: u.jobTitle || 'Colaborador Firplak'
+                }));
+            }
+        }
+    } catch (err) {
+        console.warn('[Microsoft] /users $filter failed:', err);
+    }
+
+    // Tier 3: Search Query People API (Teams/Outlook relevance index)
+    try {
+        const searchBody = {
+            requests: [
+                {
+                    entityTypes: ['person'],
+                    query: { queryString: cleanQuery },
+                    from: 0,
+                    size: 15
+                }
+            ]
+        };
+
         const response = await fetch('https://graph.microsoft.com/v1.0/search/query', {
             method: 'POST',
             headers: {
@@ -263,84 +336,56 @@ export async function searchMicrosoftUsers(accessToken: string, query: string) {
         if (response.ok) {
             const data = await response.json();
             const hits = data.value?.[0]?.hitsContainers?.[0]?.hits || [];
-            console.log(`[Microsoft] People Search results count: ${hits.length}`);
-
-            return hits.map((hit: any) => {
-                const person = hit.resource;
-                return {
-                    id: person.id,
-                    displayName: person.displayName,
-                    mail: person.scoredEmailAddresses?.[0]?.address || person.userPrincipalName,
-                    userPrincipalName: person.userPrincipalName,
-                    jobTitle: person.jobTitle
-                };
-            });
+            if (hits.length > 0) {
+                console.log(`[Microsoft] People Search results count: ${hits.length}`);
+                return hits.map((hit: any) => {
+                    const person = hit.resource;
+                    return {
+                        id: person.id,
+                        displayName: person.displayName,
+                        mail: person.scoredEmailAddresses?.[0]?.address || person.userPrincipalName,
+                        userPrincipalName: person.userPrincipalName,
+                        jobTitle: person.jobTitle || 'Colaborador Firplak'
+                    };
+                });
+            }
         }
-
-        // If search/query fails, try /me/people endpoint
-        console.log('[Microsoft] Search API failed, trying /me/people...');
     } catch (err) {
-        console.error('[Microsoft] Search API error:', err);
+        console.warn('[Microsoft] People Search API error:', err);
     }
 
-    // Fallback 1: Use /me/people endpoint with $search
+    // Tier 4: /me/people endpoint
     try {
         const peopleParams = new URLSearchParams({
-            $search: `"${query}"`,
+            $search: `"${cleanQuery}"`,
             $top: '15',
             $select: 'id,displayName,scoredEmailAddresses,jobTitle,userPrincipalName'
         });
 
         const peopleRes = await fetch(`https://graph.microsoft.com/v1.0/me/people?${peopleParams.toString()}`, {
-            headers: {
-                'Authorization': `Bearer ${accessToken}`
-            }
+            headers: { 'Authorization': `Bearer ${accessToken}` }
         });
 
         if (peopleRes.ok) {
             const peopleData = await peopleRes.json();
-            console.log(`[Microsoft] /me/people results count: ${peopleData.value?.length || 0}`);
-
-            return (peopleData.value || []).map((person: any) => ({
-                id: person.id,
-                displayName: person.displayName,
-                mail: person.scoredEmailAddresses?.[0]?.address,
-                userPrincipalName: person.userPrincipalName,
-                jobTitle: person.jobTitle
-            }));
+            const people = peopleData.value || [];
+            if (people.length > 0) {
+                console.log(`[Microsoft] /me/people found ${people.length} results`);
+                return people.map((person: any) => ({
+                    id: person.id,
+                    displayName: person.displayName,
+                    mail: person.scoredEmailAddresses?.[0]?.address || person.userPrincipalName,
+                    userPrincipalName: person.userPrincipalName,
+                    jobTitle: person.jobTitle || 'Colaborador Firplak'
+                }));
+            }
         }
     } catch (err) {
-        console.error('[Microsoft] /me/people error:', err);
+        console.warn('[Microsoft] /me/people error:', err);
     }
 
-    // Fallback 2: Try /users endpoint with filter (requires User.Read.All)
-    console.log('[Microsoft] Falling back to /users endpoint...');
-    const fallbackParams = new URLSearchParams({
-        $select: 'displayName,mail,userPrincipalName,id,jobTitle',
-        $filter: `startsWith(displayName,'${query}') or startsWith(mail,'${query}')`,
-        $top: '10'
-    });
-
-    const fallbackRes = await fetch(`https://graph.microsoft.com/v1.0/users?${fallbackParams.toString()}`, {
-        headers: { 'Authorization': `Bearer ${accessToken}` }
-    });
-
-    if (!fallbackRes.ok) {
-        const error = await fallbackRes.json();
-        console.error('[Microsoft] All search methods failed:', error);
-        return [];
-    }
-
-    const fallbackData = await fallbackRes.json();
-    console.log(`[Microsoft] /users fallback results: ${fallbackData.value?.length || 0}`);
-
-    return (fallbackData.value || []).map((user: any) => ({
-        id: user.id,
-        displayName: user.displayName,
-        mail: user.mail || user.userPrincipalName,
-        userPrincipalName: user.userPrincipalName,
-        jobTitle: user.jobTitle
-    }));
+    console.log(`[Microsoft] No users found across all search tiers for query: "${cleanQuery}"`);
+    return [];
 }
 
 /**

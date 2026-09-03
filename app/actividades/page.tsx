@@ -316,15 +316,7 @@ function ActivitiesContent() {
         }
     }, [searchParams, activities]);
 
-    // Reset dependent filters
-    useEffect(() => {
-        setFilterClassification("");
-        setFilterSubclassification("");
-    }, [filterType]);
 
-    useEffect(() => {
-        setFilterSubclassification("");
-    }, [filterClassification]);
 
     // Reset display limit when search or filters change to improve perceived performance
     useEffect(() => {
@@ -421,17 +413,10 @@ function ActivitiesContent() {
 
             // 7. NEW: Canal
             if (filterChannel) {
-                let actChannel = "";
-                if (act.opportunity_id) {
-                    const opp = oppMap.get(act.opportunity_id);
-                    if (opp?.account_id) {
-                        const acc = accMap.get(opp.account_id);
-                        actChannel = acc?.canal_id || "";
-                    }
-                } else if (act.account_id) {
-                    const acc = accMap.get(act.account_id);
-                    actChannel = acc?.canal_id || "";
-                }
+                const opp = act.opportunity_id ? oppMap.get(act.opportunity_id) : null;
+                const resolvedAccountId = act.account_id || opp?.account_id;
+                const acc = resolvedAccountId ? accMap.get(resolvedAccountId) : null;
+                const actChannel = acc?.canal_id || "";
                 if (actChannel !== filterChannel) return false;
             }
 
@@ -679,7 +664,11 @@ function ActivitiesContent() {
                                 <select
                                     data-testid="activities-filter-type"
                                     value={filterType}
-                                    onChange={(e) => setFilterType(e.target.value)}
+                                    onChange={(e) => {
+                                        setFilterType(e.target.value);
+                                        setFilterClassification("");
+                                        setFilterSubclassification("");
+                                    }}
                                     className="bg-transparent text-sm font-semibold text-slate-600 focus:outline-none p-1.5"
                                 >
                                     <option value="">Tipo...</option>
@@ -692,7 +681,10 @@ function ActivitiesContent() {
                                         <div className="w-px h-4 bg-slate-200 mx-1"></div>
                                         <select
                                             value={filterClassification}
-                                            onChange={(e) => setFilterClassification(e.target.value)}
+                                            onChange={(e) => {
+                                                setFilterClassification(e.target.value);
+                                                setFilterSubclassification("");
+                                            }}
                                             className="bg-transparent text-sm font-semibold text-slate-600 focus:outline-none p-1.5 max-w-[150px] truncate"
                                         >
                                             <option value="">Clasificación...</option>

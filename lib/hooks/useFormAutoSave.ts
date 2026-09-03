@@ -1,31 +1,31 @@
 import { useEffect, useRef, useState } from "react";
 import { FieldValues, UseFormReturn } from "react-hook-form";
 
-interface AutoSaveConfig<T extends FieldValues> {
-    form: UseFormReturn<T>;
+interface AutoSaveConfig<T extends FieldValues, TContext = unknown, TTransformedValues = unknown> {
+    form: UseFormReturn<T, TContext, TTransformedValues>;
     onSave: (data: T) => Promise<void>;
     debounceMs?: number;
     isEnabled: boolean;
 }
 
-export function useFormAutoSave<T extends FieldValues>({
+export function useFormAutoSave<T extends FieldValues, TContext = unknown, TTransformedValues = unknown>({
     form,
     onSave,
-    debounceMs = 1500,
+    debounceMs = 600,
     isEnabled
-}: AutoSaveConfig<T>) {
+}: AutoSaveConfig<T, TContext, TTransformedValues>) {
     const [status, setStatus] = useState<"saved" | "saving" | "error">("saved");
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const lastSavedData = useRef<string>("");
     const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const onSaveRef = useRef(onSave);
+    const formRef = useRef(form);
 
-    // Subscribe to errors proxy so react-hook-form populates formState.errors
-    const formErrors = form.formState.errors;
-
+    // Keep refs up-to-date
     useEffect(() => {
         onSaveRef.current = onSave;
-    }, [onSave]);
+        formRef.current = form;
+    }, [onSave, form]);
 
     // Initialize lastSavedData when hook is mounted or enabled
     useEffect(() => {
@@ -85,6 +85,17 @@ export function useFormAutoSave<T extends FieldValues>({
             subscription.unsubscribe();
             if (timerRef.current) {
                 clearTimeout(timerRef.current);
+                timerRef.current = null;
+
+                // Flush pending save immediately on unmount/close so changes are never lost!
+                const currentValues = formRef.current.getValues();
+                const valueStr = JSON.stringify(currentValues);
+                if (valueStr !== lastSavedData.current) {
+                    console.log("[AutoSave] Flushing pending changes on unmount...");
+                    onSaveRef.current(currentValues).catch(err => {
+                        console.error("[AutoSave] Error flushing save on unmount:", err);
+                    });
+                }
             }
         };
     }, [form, debounceMs, isEnabled]);

@@ -44,29 +44,52 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
     const [loading, setLoading] = useState<boolean>(true);
     const [hasMore, setHasMore] = useState<boolean>(true);
 
+    // Helper to extract initial filter from URL or sessionStorage
+    const getInitialParam = (key: string) => {
+        if (typeof window === 'undefined') return null;
+        const urlParams = new URLSearchParams(window.location.search);
+        const fromUrl = urlParams.get(key);
+        if (fromUrl) return fromUrl;
+        const saved = sessionStorage.getItem('crm_oportunidades_state');
+        if (saved) return new URLSearchParams(saved).get(key) || null;
+        return null;
+    };
+
     // Filters
-    const [searchTerm, setSearchTerm] = useState<string>("");
-    const [userFilter, setUserFilter] = useState<'mine' | 'team' | 'collab' | 'all' | 'unrestricted' | 'web'>('all');
-    const [accountOwnerIds, setAccountOwnerIds] = useState<string[]>([]);
+    const [searchTerm, setSearchTerm] = useState<string>(() => getInitialParam('search') || "");
+    const [userFilter, setUserFilter] = useState<'mine' | 'team' | 'collab' | 'all' | 'unrestricted' | 'web'>(() => (getInitialParam('tab') as any) || 'all');
+    const [accountOwnerIds, setAccountOwnerIds] = useState<string[]>(() => {
+        const owner = getInitialParam('owner');
+        return owner ? owner.split(',').filter(Boolean) : [];
+    });
 
     // New Hierarchical Filters
-    const [channelFilter, setChannelFilter] = useState<string | null>(null);
-    const [subclassificationFilter, setSubclassificationFilter] = useState<number | null>(null);
-    const [segmentFilter, setSegmentFilter] = useState<number | null>(null);
-    const [phaseFilter, setPhaseFilter] = useState<number | null>(null);
-    const [statusFilter, setStatusFilter] = useState<StatusFilter>('open');
-    const [originFilter, setOriginFilter] = useState<string | null>(null);
+    const [channelFilter, setChannelFilter] = useState<string | null>(() => getInitialParam('channel'));
+    const [subclassificationFilter, setSubclassificationFilter] = useState<number | null>(() => {
+        const val = getInitialParam('subclass');
+        return val ? Number(val) : null;
+    });
+    const [segmentFilter, setSegmentFilter] = useState<number | null>(() => {
+        const val = getInitialParam('segment');
+        return val ? Number(val) : null;
+    });
+    const [phaseFilter, setPhaseFilter] = useState<number | null>(() => {
+        const val = getInitialParam('phase');
+        return val ? Number(val) : null;
+    });
+    const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => (getInitialParam('status') as any) || 'open');
+    const [originFilter, setOriginFilter] = useState<string | null>(() => getInitialParam('origin'));
     const [accountIdFilter, setAccountIdFilter] = useState<string | null>(null);
 
     // Date Filters
-    const [startDate, setStartDate] = useState<string | null>(null);
-    const [endDate, setEndDate] = useState<string | null>(null);
-    const [startClosingDate, setStartClosingDate] = useState<string | null>(null);
-    const [endClosingDate, setEndClosingDate] = useState<string | null>(null);
+    const [startDate, setStartDate] = useState<string | null>(() => getInitialParam('start'));
+    const [endDate, setEndDate] = useState<string | null>(() => getInitialParam('end'));
+    const [startClosingDate, setStartClosingDate] = useState<string | null>(() => getInitialParam('startClose'));
+    const [endClosingDate, setEndClosingDate] = useState<string | null>(() => getInitialParam('endClose'));
 
     // Sorting
-    const [sortField, setSortField] = useState<string>('updated_at');
-    const [sortAsc, setSortAsc] = useState<boolean>(false);
+    const [sortField, setSortField] = useState<string>(() => getInitialParam('sort') || 'updated_at');
+    const [sortAsc, setSortAsc] = useState<boolean>(() => getInitialParam('dir') === 'asc');
 
     // PERF FIX: Phase IDs only stored in refs (not state) to avoid triggering refetches
     const wonPhaseIdsRef = useRef<number[]>([]);
@@ -104,17 +127,24 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
     useEffect(() => {
         if (phasesLoadedRef.current) return;
         const loadClosedPhases = async () => {
-            let phases: any[] = [];
+            let phases: { id: number; nombre: string }[] = [];
 
             if (!navigator.onLine) {
                 const localPhases = await db.phases.toArray();
                 phases = localPhases;
             } else {
-                const { data } = await supabase
-                    .from('CRM_FasesOportunidad')
-                    .select('id, nombre')
-                    .eq('is_active', true);
-                if (data) phases = data;
+                try {
+                    const { data, error } = await supabase
+                        .from('CRM_FasesOportunidad')
+                        .select('id, nombre');
+                    if (!error && data && data.length > 0) {
+                        phases = data;
+                    } else {
+                        phases = await db.phases.toArray();
+                    }
+                } catch {
+                    phases = await db.phases.toArray();
+                }
             }
 
             if (phases && phases.length > 0) {
@@ -163,9 +193,11 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                 let localOpps = await db.opportunities.toArray();
                 const allAccounts = await db.accounts.toArray();
                 const allPhases = await db.phases.toArray();
+                const { data: usersData } = await supabase.from('CRM_Usuarios').select('id, full_name, email');
 
                 // Map helpers
                 const accMap = new Map(allAccounts.map(a => [a.id, a]));
+                const userMap = new Map((usersData || []).map(u => [u.id, u]));
                 const phaseMap = new Map(allPhases.map(p => [p.id, p]));
 
                 // Role filtering for offline
@@ -286,7 +318,14 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                             localOpps = localOpps.filter(o => o.owner_user_id === currentUserId);
                         }
                     } else if (userFilter === 'web') {
-                        localOpps = localOpps.filter(o => o.origen_oportunidad && o.origen_oportunidad.toLowerCase().includes('web'));
+                        localOpps = localOpps.filter(o =>
+                            Boolean((o.url_origen && o.url_origen.trim() !== '') ||
+                            (o.origen_oportunidad && (
+                                o.origen_oportunidad.toLowerCase().includes('web') ||
+                                o.origen_oportunidad.toLowerCase().includes('pagina') ||
+                                o.origen_oportunidad.toLowerCase().includes('página')
+                            )))
+                        );
                     }
                 }
 
@@ -338,10 +377,12 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                     const acc = accMap.get(item.account_id);
                     const ph = phaseMap.get(item.fase_id as number);
                     const itemActs = actsByOpp.get(item.id) || [];
+                    const usr = userMap.get(item.owner_user_id || '');
                     return {
                         ...item,
                         account: acc ? { nombre: acc.nombre, canal_id: acc.canal_id, ciudad: acc.ciudad, pais_id: acc.pais_id } : null,
                         fase_data: ph ? { nombre: ph.nombre } : null,
+                        vendedor: usr ? { full_name: usr.full_name || usr.email } : null,
                         estado_data: null, // Mock offline
                         actividades: itemActs,
                         activity_summary: computeOpportunityActivitySummary(itemActs)
@@ -408,7 +449,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                     ${accountRelation},
                     fase_data:CRM_FasesOportunidad(nombre),
                     estado_data:CRM_EstadosOportunidad(nombre),
-                    vendedor:CRM_Usuarios!owner_user_id(full_name),
+                    vendedor:CRM_Usuarios(full_name),
                     actividades:CRM_Actividades(id, fecha_fin, is_completed, is_deleted)
                 `, { count: 'exact' })
                 .eq('is_deleted', false);
@@ -417,7 +458,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
             if (searchTerm && searchTerm.trim()) {
                 const tokens = getSearchTokens(searchTerm);
                 for (const token of tokens) {
-                    let orConditions = [`nombre.ilike.%${token}%`];
+                    const orConditions = [`nombre.ilike.%${token}%`];
                     if (searchAccountIds.length > 0) {
                         orConditions.push(`account_id.in.(${searchAccountIds.join(',')})`);
                     }
@@ -453,25 +494,13 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                 }
             }
 
-            // Status Filter (won/lost/open) - combine phase names with legacy estado_id values.
-            // Keep NULL estado_id as open; Postgres NOT IN would otherwise drop those rows.
+            // Status Filter (won/lost/open) - avoid duplicate top-level PostgREST .or() calls
             if (statusFilter === 'won') {
-                const phaseCondition = wonPhaseIdsRef.current.length > 0
-                    ? `fase_id.in.(${wonPhaseIdsRef.current.join(',')})`
-                    : null;
-                const conditions = [phaseCondition, 'estado_id.in.(2,11)'].filter(Boolean);
-                query = query.or(conditions.join(','));
+                query = query.in('estado_id', [2, 11]);
             } else if (statusFilter === 'lost') {
-                const phaseCondition = lostPhaseIdsRef.current.length > 0
-                    ? `fase_id.in.(${lostPhaseIdsRef.current.join(',')})`
-                    : null;
-                const conditions = [phaseCondition, 'estado_id.in.(3,4,14)'].filter(Boolean);
-                query = query.or(conditions.join(','));
+                query = query.in('estado_id', [3, 4, 14]);
             } else if (statusFilter === 'open') {
-                if (closedPhaseIdsRef.current.length > 0) {
-                    query = query.not('fase_id', 'in', `(${closedPhaseIdsRef.current.join(',')})`);
-                }
-                query = query.or('estado_id.is.null,estado_id.not.in.(2,3,4,11,14)');
+                query = query.not('estado_id', 'in', '(2,3,4,11,14)');
             }
 
             if (accountIdFilter) {
@@ -495,24 +524,19 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
 
             if (accountOwnerIds && accountOwnerIds.length > 0) {
                 query = query.in('owner_user_id', accountOwnerIds);
-            }
-
-            if (userFilter !== 'unrestricted') {
+            } else if (userFilter !== 'unrestricted') {
                 if (userFilter === 'mine') {
                     const ids = [currentUserId].filter(Boolean);
                     const idsString = ids.join(',');
                     query = query.or(`owner_user_id.in.(${idsString}),and(owner_user_id.is.null,created_by.in.(${idsString}))`);
                 } else if (userFilter === 'collab') {
                     // We want opportunities that have collaboration AND the user is involved (either as owner or as collaborator)
-
-                    // Get IDs where the user is explicitly a collaborator
                     const { data: collabRows } = await supabase
                         .from('CRM_Oportunidades_Colaboradores')
                         .select('oportunidad_id')
                         .eq('usuario_id', currentUserId);
                     const collabOppIds = Array.from(new Set((collabRows || []).map(row => row.oportunidad_id).filter(Boolean)));
 
-                    // We use inner join to filter results to ONLY opportunities that have AT LEAST ONE collaborator
                     query = query.select(`
                         id,
                         nombre,
@@ -535,7 +559,6 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                         actividades:CRM_Actividades(id, fecha_fin, is_completed, is_deleted)
                     `);
 
-                    // Filter: The current user is either the owner OR one of the collaborators
                     const ownershipConditions = [
                         `owner_user_id.eq.${currentUserId}`
                     ];
@@ -576,9 +599,9 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
 
             // Order
             if (sortField === 'account_nombre') {
-                query = query.order('nombre', { foreignTable: 'CRM_Cuentas', ascending: sortAsc });
+                query = query.order('nombre', { foreignTable: 'account', ascending: sortAsc });
             } else if (sortField === 'vendedor_nombre') {
-                query = query.order('full_name', { foreignTable: 'CRM_Usuarios', ascending: sortAsc });
+                query = query.order('full_name', { foreignTable: 'vendedor', ascending: sortAsc });
             } else {
                 query = query.order(sortField as any, { ascending: sortAsc });
             }
@@ -658,6 +681,44 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
 
         } catch (err) {
             console.error("Error fetching opportunities:", err);
+            try {
+                let localOpps = await db.opportunities.toArray();
+                const allAccounts = await db.accounts.toArray();
+                const allPhases = await db.phases.toArray();
+                const { data: usersData } = await supabase.from('CRM_Usuarios').select('id, full_name, email');
+                const accMap = new Map(allAccounts.map(a => [a.id, a]));
+                const userMap = new Map((usersData || []).map(u => [u.id, u]));
+                const phaseMap = new Map(allPhases.map(p => [p.id, p]));
+
+                if (searchTerm && searchTerm.trim()) {
+                    localOpps = localOpps.filter(o => matchesSearchTokens([
+                        o.nombre,
+                        accMap.get(o.account_id)?.nombre,
+                        userMap.get(o.owner_user_id || '')?.full_name
+                    ], searchTerm));
+                }
+                if (accountOwnerIds && accountOwnerIds.length > 0) {
+                    localOpps = localOpps.filter(o => o.owner_user_id && accountOwnerIds.includes(o.owner_user_id));
+                }
+
+                const mappedOpps = localOpps.map(item => {
+                    const acc = accMap.get(item.account_id);
+                    const ph = phaseMap.get(item.fase_id as number);
+                    const usr = userMap.get(item.owner_user_id || '');
+                    return {
+                        ...item,
+                        account: acc ? { nombre: acc.nombre, canal_id: acc.canal_id, ciudad: acc.ciudad, pais_id: acc.pais_id } : null,
+                        fase_data: ph ? { nombre: ph.nombre } : null,
+                        vendedor: usr ? { full_name: usr.full_name || usr.email } : null,
+                        estado_data: null
+                    };
+                });
+
+                setData(mappedOpps as any);
+                setCount(mappedOpps.length);
+            } catch (fallbackErr) {
+                console.error("Fallback error:", fallbackErr);
+            }
         } finally {
             setLoading(false);
             useSyncStore.getState().setIsLoadingData(false);

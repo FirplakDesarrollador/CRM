@@ -51,19 +51,22 @@ export function AccountAssignedTab({ accountId, currentOwnerId }: AccountAssigne
         }
     }, [currentOwnerId]);
 
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
     const handleAssign = async () => {
         if (!selectedUserId) return;
 
         setIsSaving(true);
         setSuccessMessage(null);
+        setErrorMessage(null);
 
         try {
-            // Accounts now use 'owner_user_id' as the owner field
             await updateAccount(accountId, { owner_user_id: selectedUserId });
-            setSuccessMessage("Cuenta y oportunidades reasignadas. El responsable anterior queda como colaborador al 50%.");
-            setTimeout(() => setSuccessMessage(null), 3000);
-        } catch (error) {
+            setSuccessMessage("Cuenta y todas sus oportunidades asociadas reasignadas correctamente.");
+            setTimeout(() => setSuccessMessage(null), 5000);
+        } catch (error: any) {
             console.error("Error assigning account:", error);
+            setErrorMessage(error?.message || "Error al reasignar la cuenta. Por favor intente de nuevo.");
         } finally {
             setIsSaving(false);
         }
@@ -120,6 +123,12 @@ export function AccountAssignedTab({ accountId, currentOwnerId }: AccountAssigne
                         </div>
                     )}
 
+                    {selectedUserId === currentOwnerId && (
+                        <p className="text-xs text-amber-600 font-medium bg-amber-50 p-2.5 rounded-lg border border-amber-200">
+                            💡 Seleccione un comercial diferente al propietario actual en la lista para habilitar el botón de reasignación.
+                        </p>
+                    )}
+
                     <button
                         onClick={handleAssign}
                         disabled={isSaving || !selectedUserId || selectedUserId === currentOwnerId}
@@ -147,6 +156,12 @@ export function AccountAssignedTab({ accountId, currentOwnerId }: AccountAssigne
                         <div className="p-3 bg-green-50 text-green-700 text-sm font-medium rounded-xl flex items-center gap-2">
                             <Check className="w-4 h-4" />
                             {successMessage}
+                        </div>
+                    )}
+
+                    {errorMessage && (
+                        <div className="p-3 bg-red-50 text-red-700 text-sm font-medium rounded-xl flex items-center gap-2">
+                            {errorMessage}
                         </div>
                     )}
                 </div>

@@ -32,6 +32,7 @@ import { DollarSign } from "lucide-react";
 import { useSyncStore } from "@/lib/stores/useSyncStore";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { OPPORTUNITY_CATEGORIES, parseOpportunityCategories, formatOpportunityCategories } from "@/lib/opportunityCategories";
+import { AccountModal } from "@/components/cuentas/AccountModal";
 
 export default function OpportunityDetailPage() {
     const params = useParams();
@@ -106,6 +107,7 @@ export default function OpportunityDetailPage() {
     const searchParams = useSearchParams();
     const initialTab = searchParams.get('tab') as any;
     const [activeTab, setActiveTab] = useState<'resumen' | 'colaboradores' | 'cotizaciones' | 'productos' | 'actividades' | 'asignado'>(initialTab || 'resumen');
+    const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
 
     // Sincronizar pestaña con parámetro de URL si cambia
     useEffect(() => {
@@ -293,6 +295,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     const [localFuente, setLocalFuente] = useState(opportunity.fuente_conversion || "");
     const [localCategoriaOportunidad, setLocalCategoriaOportunidad] = useState(opportunity.categoria_oportunidad || "");
     const [isSaving, setIsSaving] = useState(false);
+    const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
     const [isSavingDate, setIsSavingDate] = useState(false);
     const [isSavingOrigen, setIsSavingOrigen] = useState(false);
     const [isSavingUrl, setIsSavingUrl] = useState(false);
@@ -1141,12 +1144,13 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                         </div>
                     </div>
 
-                    <Link
-                        href={`/cuentas?id=${effectiveAccount.id}`}
-                        className="mt-6 w-full py-2 bg-slate-50 hover:bg-blue-50 text-blue-600 text-sm font-bold rounded-xl border border-slate-100 hover:border-blue-200 text-center transition-all flex items-center justify-center gap-2"
+                    <button
+                        type="button"
+                        onClick={() => setIsAccountModalOpen(true)}
+                        className="mt-6 w-full py-2.5 bg-slate-50 hover:bg-blue-50 text-blue-600 hover:text-blue-700 text-sm font-bold rounded-xl border border-slate-200 hover:border-blue-200 text-center transition-all flex items-center justify-center gap-2 shadow-sm active:scale-[0.99]"
                     >
                         Ver detalles en Cuentas <ChevronRight className="w-4 h-4" />
-                    </Link>
+                    </button>
                 </div>
 
                 {/* Seller Card (New) */}
@@ -1184,6 +1188,14 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                 }}
                 onConfirm={confirmLossReason}
             />
+
+            {isAccountModalOpen && effectiveAccount && (
+                <AccountModal
+                    isOpen={isAccountModalOpen}
+                    onClose={() => setIsAccountModalOpen(false)}
+                    account={effectiveAccount}
+                />
+            )}
         </div>
     );
 }

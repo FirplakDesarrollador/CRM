@@ -45,7 +45,7 @@ async function fetchPricing(productId: string, channelId: string, qty: number) {
 }
 
 // Helper to sanitize opportunity data before syncing
-function sanitizeOpportunityForSync(opp: any) {
+export function sanitizeOpportunityForSync(opp: any) {
     const {
         ciudad, // Text representation of city from UI
         fase,   // Joined phase name
