@@ -505,9 +505,43 @@ function OpportunitiesContent() {
         };
     });
 
+    const { user } = useCurrentUser();
+    const colStorageKey = `crm_col_widths_oportunidades_${user?.id || 'default'}`;
+    const [colWidths, setColWidths] = useState<Record<string, number>>({});
+
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            try {
+                const saved = localStorage.getItem(colStorageKey);
+                if (saved) setColWidths(JSON.parse(saved));
+            } catch (e) {}
+        }
+    }, [colStorageKey]);
+
+    const handleColumnResize = useCallback((arg1: number, arg2: number) => {
+        let width = arg1;
+        let colIndex = arg2;
+        if (arg1 < 20 && arg2 > 20) {
+            colIndex = arg1;
+            width = arg2;
+        }
+        const activeKeys = ['nombre','cuenta','pais','ciudad','canal','origen','fase','estado','creada','valor','cierre','vendedor']
+            .filter(key => visibleColumns.includes(key));
+        const keyName = activeKeys[colIndex];
+        if (keyName && width > 30) {
+            setColWidths(prev => {
+                const next = { ...prev, [keyName]: width };
+                if (typeof window !== 'undefined') {
+                    localStorage.setItem(colStorageKey, JSON.stringify(next));
+                }
+                return next;
+            });
+        }
+    }, [colStorageKey, visibleColumns]);
+
     const ALL_COLUMN_DEFS: Record<string, any> = {
         cuenta: {
-            data: 'cuenta', title: 'Cuenta', readOnly: true, width: 220, wordWrap: false,
+            data: 'cuenta', title: 'Cuenta', readOnly: true, width: colWidths['cuenta'] || 220, wordWrap: false,
             renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 const v = value || '';
                 const safe = v.replace(/"/g, '&quot;');
@@ -517,7 +551,7 @@ function OpportunitiesContent() {
             }
         },
         pais: {
-            data: 'pais', title: 'País', readOnly: true, width: 120, wordWrap: false,
+            data: 'pais', title: 'País', readOnly: true, width: colWidths['pais'] || 120, wordWrap: false,
             renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 const v = value || 'Colombia';
                 const safe = v.replace(/"/g, '&quot;');
@@ -527,7 +561,7 @@ function OpportunitiesContent() {
             }
         },
         ciudad: {
-            data: 'ciudad', title: 'Ciudad', readOnly: true, width: 150, wordWrap: false,
+            data: 'ciudad', title: 'Ciudad', readOnly: true, width: colWidths['ciudad'] || 150, wordWrap: false,
             renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 const v = value || 'Sin ciudad';
                 const safe = v.replace(/"/g, '&quot;');
@@ -537,7 +571,7 @@ function OpportunitiesContent() {
             }
         },
         canal: {
-            data: 'canal', title: 'Canal', readOnly: true, width: 130, wordWrap: false,
+            data: 'canal', title: 'Canal', readOnly: true, width: colWidths['canal'] || 130, wordWrap: false,
             renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 const v = value || '-';
                 const safe = v.replace(/"/g, '&quot;');
@@ -547,7 +581,7 @@ function OpportunitiesContent() {
             }
         },
         nombre: {
-            data: 'nombre', title: 'Oportunidad', readOnly: true, width: 240, wordWrap: false,
+            data: 'nombre', title: 'Oportunidad', readOnly: true, width: colWidths['nombre'] || 240, wordWrap: false,
             renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 const v = value || '';
                 const safe = v.replace(/"/g, '&quot;');
@@ -591,35 +625,33 @@ function OpportunitiesContent() {
             }
         },
         origen: {
-            data: 'origen', title: 'Origen', readOnly: true, width: 140, wordWrap: false,
+            data: 'origen', title: 'Origen', readOnly: true, width: colWidths['origen'] || 140, wordWrap: false,
             renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 const v = value || '-';
                 const safe = v.replace(/"/g, '&quot;');
-                td.innerHTML = `<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;color:#475569;font-size:12.5px;font-weight:500;" title="${safe}">${v}</div>`;
+                td.innerHTML = `<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;color:#475569;" title="${safe}">${v}</div>`;
                 td.style.overflow = 'hidden';
                 return td;
             }
         },
         fase: {
-            data: 'fase', title: 'Fase', readOnly: true, width: 155, wordWrap: false,
+            data: 'fase', title: 'Fase', readOnly: true, width: colWidths['fase'] || 130, wordWrap: false,
             renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 const f = (value || '').toLowerCase();
-                let bg, c, bd;
-                if (f.includes('ganada'))                                                      { bg='#d1fae5'; c='#065f46'; bd='#a7f3d0'; }
-                else if (f.includes('perdida'))                                                { bg='#ffe4e6'; c='#9f1239'; bd='#fecdd3'; }
-                else if (f.includes('negociaci'))                                              { bg='#e0e7ff'; c='#3730a3'; bd='#c7d2fe'; }
-                else if (f.includes('acuerdo'))                                                { bg='#ccfbf1'; c='#115e59'; bd='#99f6e4'; }
-                else if (f.includes('propuesta') || f.includes('presentaci'))                  { bg='#dbeafe'; c='#1e40af'; bd='#bfdbfe'; }
-                else if (f.includes('visita'))                                                 { bg='#ede9fe'; c='#5b21b6'; bd='#ddd6fe'; }
-                else if (f.includes('prospecci') || f.includes('pros'))                        { bg='#fef3c7'; c='#92400e'; bd='#fde68a'; }
-                else                                                                          { bg='#f1f5f9'; c='#475569'; bd='#e2e8f0'; }
+                let bg = '#f1f5f9';
+                let c = '#475569';
+                let bd = '#e2e8f0';
+                if (f.includes('pros') || f.includes('descub')) { bg = '#eff6ff'; c = '#1d4ed8'; bd = '#bfdbfe'; }
+                else if (f.includes('cotiz') || f.includes('prop')) { bg = '#fefce8'; c = '#a16207'; bd = '#fef08a'; }
+                else if (f.includes('negoc')) { bg = '#fef2f2'; c = '#b91c1c'; bd = '#fecaca'; }
+                else if (f.includes('ganad')) { bg = '#f0fdf4'; c = '#15803d'; bd = '#bbf7d0'; }
                 td.innerHTML = `<div style="display:flex;align-items:center;height:100%;"><span style="display:inline-block;padding:3px 10px;border-radius:99px;font-size:11px;font-weight:700;white-space:nowrap;background:${bg};color:${c};border:1px solid ${bd};line-height:1.4;">${value || ''}</span></div>`;
                 td.style.overflow = 'visible';
                 return td;
             }
         },
         estado: {
-            data: 'estado', title: 'Estado', readOnly: true, width: 110, wordWrap: false,
+            data: 'estado', title: 'Estado', readOnly: true, width: colWidths['estado'] || 110, wordWrap: false,
             renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 const e = (value || '').toLowerCase();
                 let dot = '#94a3b8';
@@ -631,14 +663,14 @@ function OpportunitiesContent() {
             }
         },
         creada: {
-            data: 'creada', title: 'Creada', readOnly: true, width: 105, wordWrap: false,
+            data: 'creada', title: 'Creada', readOnly: true, width: colWidths['creada'] || 105, wordWrap: false,
             renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 td.innerHTML = `<span style="font-size:12.5px;color:#64748b;font-weight:500;font-variant-numeric:tabular-nums;">${value || '-'}</span>`;
                 return td;
             }
         },
         valor: {
-            data: 'valor', title: 'Valor', readOnly: true, width: 130, wordWrap: false,
+            data: 'valor', title: 'Valor', readOnly: true, width: colWidths['valor'] || 130, wordWrap: false,
             renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 const num = Number(value) || 0;
                 const fmt = new Intl.NumberFormat('es-CO', { style:'currency', currency:'COP', minimumFractionDigits:0, notation: num >= 1_000_000 ? 'compact' : 'standard', compactDisplay:'short' }).format(num);
@@ -648,7 +680,7 @@ function OpportunitiesContent() {
             }
         },
         cierre: {
-            data: 'cierre', title: 'Cierre', readOnly: true, width: 90, wordWrap: false,
+            data: 'cierre', title: 'Cierre', readOnly: true, width: colWidths['cierre'] || 90, wordWrap: false,
             renderer(instance: any, td: HTMLTableCellElement, row: number, ___: number, ____: string, value: any) {
                 const rowData = instance.getSourceDataAtRow(row);
                 const overdue = rowData?.cierre_overdue;
@@ -660,7 +692,7 @@ function OpportunitiesContent() {
             }
         },
         vendedor: {
-            data: 'vendedor', title: 'Vendedor', readOnly: true, width: 170, wordWrap: false,
+            data: 'vendedor', title: 'Vendedor', readOnly: true, width: colWidths['vendedor'] || 170, wordWrap: false,
             renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 const name = value || 'Sin asignar';
                 const initials = name.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase();
@@ -1053,8 +1085,10 @@ function OpportunitiesContent() {
                                 }
                                 .opp-hot-wrap .ht_master .wtHolder::-webkit-scrollbar-track { background: transparent; }
 
-                                /* ── Header Cells ── */
-                                .opp-hot-wrap .handsontable th {
+                                /* ── Header Cells (Column Titles & Corner) ── */
+                                .opp-hot-wrap .handsontable thead th,
+                                .opp-hot-wrap .handsontable .ht_clone_top th,
+                                .opp-hot-wrap .handsontable .ht_clone_top_inline_start_corner th {
                                     background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%) !important;
                                     color: #475569 !important;
                                     font-size: 10.5px !important;
@@ -1065,39 +1099,54 @@ function OpportunitiesContent() {
                                     border-right: 1px solid #e8ecf1 !important;
                                     padding: 0 14px !important;
                                     height: 40px !important;
+                                    min-height: 40px !important;
+                                    max-height: 40px !important;
+                                    line-height: 40px !important;
                                     white-space: nowrap !important;
+                                    box-sizing: border-box !important;
                                 }
                                 .opp-hot-wrap .handsontable th:last-child {
                                     border-right: none !important;
                                 }
 
-                                /* ── Row Number (Row Headers) ── */
-                                .opp-hot-wrap .handsontable .ht_clone_inline_start th,
-                                .opp-hot-wrap .handsontable th.rowHeader,
-                                .opp-hot-wrap .handsontable .ht_clone_inline_start td {
+                                /* ── Body Cells & Row Headers Alignment ── */
+                                .opp-hot-wrap .handsontable tbody tr,
+                                .opp-hot-wrap .handsontable tbody td,
+                                .opp-hot-wrap .handsontable tbody th,
+                                .opp-hot-wrap .handsontable .ht_clone_inline_start tbody th,
+                                .opp-hot-wrap .handsontable .ht_clone_inline_start tbody td {
+                                    height: 38px !important;
+                                    min-height: 38px !important;
+                                    max-height: 38px !important;
+                                    line-height: 38px !important;
+                                    box-sizing: border-box !important;
+                                    vertical-align: middle !important;
+                                    white-space: nowrap !important;
+                                    overflow: hidden !important;
+                                    text-overflow: ellipsis !important;
+                                }
+
+                                .opp-hot-wrap .handsontable tbody th.rowHeader {
                                     background: #f8fafc !important;
                                     color: #94a3b8 !important;
                                     font-size: 10px !important;
                                     font-weight: 600 !important;
                                     border-right: 1px solid #e2e8f0 !important;
+                                    border-bottom: 1px solid #f1f5f9 !important;
                                     text-align: center !important;
                                     width: 42px !important;
                                     min-width: 42px !important;
                                     max-width: 42px !important;
                                 }
 
-                                /* ── Data Cells ── */
-                                .opp-hot-wrap .handsontable td {
+                                .opp-hot-wrap .handsontable tbody td {
                                     font-size: 13px !important;
                                     color: #334155 !important;
                                     border-bottom: 1px solid #f1f5f9 !important;
                                     border-right: 1px solid transparent !important;
-                                    height: 42px !important;
                                     padding: 0 14px !important;
-                                    vertical-align: middle !important;
                                     font-family: inherit !important;
                                     transition: background 0.15s ease, box-shadow 0.15s ease !important;
-                                    line-height: 1.4 !important;
                                 }
 
                                 /* ── Zebra Striping ── */
@@ -1181,14 +1230,22 @@ function OpportunitiesContent() {
                                     filters={true}
                                     dropdownMenu={true}
                                     manualColumnResize={true}
+                                    afterColumnResize={(width: number, col: number) => handleColumnResize(width, col)}
                                     width="100%"
                                     height="calc(100vh - 280px)"
                                     autoColumnSize={false}
                                     autoRowSize={false}
+                                    rowHeights={38}
                                     renderAllRows={false}
                                     licenseKey="non-commercial-and-evaluation"
                                     afterOnCellMouseDown={(event: any, coords: any, td: any) => {
                                         if (coords.row === -1) {
+                                            const target = event?.target as HTMLElement;
+                                            const isDropdownBtn = target?.closest('.changeType') || target?.closest('.htDropdownMenu') || target?.classList?.contains('changeType');
+                                            if (isDropdownBtn) {
+                                                // User clicked the filter dropdown button [▼], do NOT toggle sort!
+                                                return;
+                                            }
                                             const colDef = hotColumns[coords.col];
                                             if (colDef) {
                                                 const fieldSortMap: Record<string, string> = {
