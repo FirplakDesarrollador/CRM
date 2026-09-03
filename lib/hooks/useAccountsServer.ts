@@ -142,6 +142,23 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                 }
 
                 // Filters
+                if (webFilter) {
+                    const webAccountIds = new Set(
+                        allOpps
+                            .filter(o => !o.is_deleted && (
+                                Boolean(o.url_origen && o.url_origen.trim() !== '') ||
+                                Boolean(o.origen_oportunidad && (
+                                    o.origen_oportunidad.toLowerCase().includes('web') ||
+                                    o.origen_oportunidad.toLowerCase().includes('pagina') ||
+                                    o.origen_oportunidad.toLowerCase().includes('página')
+                                ))
+                            ))
+                            .map(o => o.account_id)
+                            .filter(Boolean)
+                    );
+                    localAccounts = localAccounts.filter(a => webAccountIds.has(a.id));
+                }
+
                 if (searchTerm && searchTerm.trim()) {
                     localAccounts = localAccounts.filter(a =>
                         matchesSearchTokens([a.nombre, a.nit_base, a.ciudad, a.direccion, a.email, a.telefono], searchTerm)

@@ -1,19 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import { FieldValues, UseFormReturn } from "react-hook-form";
 
-interface AutoSaveConfig<T extends FieldValues> {
-    form: UseFormReturn<T>;
+interface AutoSaveConfig<T extends FieldValues, TContext = unknown, TTransformedValues = unknown> {
+    form: UseFormReturn<T, TContext, TTransformedValues>;
     onSave: (data: T) => Promise<void>;
     debounceMs?: number;
     isEnabled: boolean;
 }
 
-export function useFormAutoSave<T extends FieldValues>({
+export function useFormAutoSave<T extends FieldValues, TContext = unknown, TTransformedValues = unknown>({
     form,
     onSave,
     debounceMs = 600,
     isEnabled
-}: AutoSaveConfig<T>) {
+}: AutoSaveConfig<T, TContext, TTransformedValues>) {
     const [status, setStatus] = useState<"saved" | "saving" | "error">("saved");
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const lastSavedData = useRef<string>("");

@@ -85,6 +85,15 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
                         (!a.owner_user_id && idsToMatch.includes(a.created_by || 'dummy'))
                     ).toArray();
                     const myAccountIds = new Set(myAccounts.map(a => a.id));
+
+                    // Also include accounts where user is collaborator in opportunities
+                    const localCollabs = await db.opportunityCollaborators
+                        .where('usuario_id')
+                        .equals(currentUserId || '')
+                        .toArray();
+                    const collabOppIds = localCollabs.filter(c => !c.is_deleted).map(c => c.oportunidad_id);
+                    const collabOpps = await db.opportunities.where('id').anyOf(collabOppIds).toArray();
+                    collabOpps.filter(o => !o.is_deleted && o.account_id).forEach(o => myAccountIds.add(o.account_id));
                     
                     // Filter contacts: MUST belong to my accounts
                     localContacts = localContacts.filter(c => myAccountIds.has(c.account_id));
@@ -170,13 +179,31 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
                     .or(`owner_user_id.in.(${idsString}),and(owner_user_id.is.null,created_by.in.(${idsString}))`)
                     .eq('is_deleted', false);
                 
-                const myAccountIds = myAccounts?.map(a => a.id) || [];
+                let myAccountIds = myAccounts?.map(a => a.id) || [];
+
+                // Also fetch accounts where user is collaborator in opportunities
+                const { data: collabData } = await supabase
+                    .from('CRM_Oportunidades_Colaboradores')
+                    .select('CRM_Oportunidades!inner(account_id)')
+                    .eq('usuario_id', currentUserId)
+                    .eq('is_deleted', false);
+                
+                const collabAccountIds = (collabData as any[])
+                    ?.map((c: any) => {
+                        const opp = Array.isArray(c.CRM_Oportunidades) ? c.CRM_Oportunidades[0] : c.CRM_Oportunidades;
+                        return opp?.account_id;
+                    })
+                    .filter(Boolean) || [];
+
+                if (collabAccountIds.length > 0) {
+                    myAccountIds = [...new Set([...myAccountIds, ...collabAccountIds])];
+                }
                 
                 if (myAccountIds.length > 0) {
-                    // Contact MUST belong to an account I own/control
+                    // Contact MUST belong to an account I own/control/collaborate
                     query = query.in('account_id', myAccountIds);
                 } else {
-                    // I don't own any accounts, so I shouldn't see any contacts in strict mode
+                    // I don't own or collaborate in any accounts, so I shouldn't see any contacts in strict mode
                     // Filtering by a non-existent ID to ensure empty list
                     query = query.eq('id', '00000000-0000-0000-0000-000000000000');
                 }
