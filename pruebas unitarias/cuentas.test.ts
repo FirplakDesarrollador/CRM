@@ -86,4 +86,42 @@ describe("Filtrado de Cuentas", () => {
         // user-1 es dueño de acc-1 y acc-3, y colabora en acc-2
         expect(resultadoVendedor).toHaveLength(3);
     });
+
+    it("el filtro por canal reduce el conteo total y descarta cuentas de otros canales", () => {
+        const all = filterAccounts(mockAccounts, {});
+        expect(all).toHaveLength(3);
+
+        const dist = filterAccounts(mockAccounts, { channelFilter: "DIST_NAC" });
+        expect(dist).toHaveLength(1);
+        expect(dist[0].id).toBe("acc-2");
+        expect(dist.length).toBeLessThan(all.length);
+    });
+
+    it("la paginación preserva el conteo total y limita la vista previa al tamaño de página (100)", () => {
+        const manyAccounts = Array.from({ length: 220 }, (_, i) => ({
+            id: `acc-bulk-${i}`,
+            nombre: `Cuenta ${i}`,
+            nit: `900${i}-1`,
+            nit_base: `900${i}`,
+            ciudad: "Medellín",
+            canal_id: i % 2 === 0 ? "OBRAS_NAC" : "DIST_NAC",
+            subclasificacion_id: 1,
+            nivel_premium: "PREMIUM" as const,
+            owner_user_id: "user-1",
+            created_by: "user-1",
+            created_at: "2026-07-01T10:00:00Z"
+        }));
+
+        const filtered = filterAccounts(manyAccounts, { channelFilter: "OBRAS_NAC" });
+        expect(filtered).toHaveLength(110);
+
+        const pageSize = 100;
+        const page1 = filtered.slice(0, pageSize);
+        expect(page1).toHaveLength(100);
+        expect(filtered.length).toBe(110);
+
+        const page2 = filtered.slice(pageSize, pageSize * 2);
+        expect(page2).toHaveLength(10);
+    });
 });
+

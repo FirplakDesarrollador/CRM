@@ -1,6 +1,8 @@
 export interface ActivityItem {
     id: string;
+    fecha_inicio?: string | null;
     fecha_fin?: string | null;
+    tipo_actividad?: string | null;
     is_completed?: boolean | null;
     is_deleted?: boolean | null;
 }
@@ -19,7 +21,7 @@ export interface OpportunityActivitySummary {
 /**
  * Calcula el resumen y estado de actividades asociadas a una oportunidad.
  * - 'none': No tiene actividades registradas.
- * - 'overdue': Tiene al menos una actividad atrasada (fecha_fin en el pasado y no completada).
+ * - 'overdue': Tiene al menos una actividad atrasada (fecha límite en el pasado y no completada).
  * - 'scheduled': No tiene atrasadas y tiene al menos una programada a futuro.
  * - 'completed': Todas sus actividades están completadas.
  */
@@ -64,8 +66,19 @@ export function computeOpportunityActivitySummary(
         if (act.is_completed) {
             completed++;
         } else {
-            if (act.fecha_fin) {
-                const actDate = new Date(act.fecha_fin);
+            // Para tareas, fecha_inicio representa la Fecha de Vencimiento seleccionada por el usuario.
+            // Si fecha_fin es anterior a fecha_inicio (por valor predeterminado residual), priorizar fecha_inicio.
+            let targetDateStr = act.fecha_fin;
+            if (act.tipo_actividad === 'TAREA') {
+                targetDateStr = act.fecha_inicio || act.fecha_fin;
+            } else if (act.fecha_inicio && act.fecha_fin && new Date(act.fecha_fin).getTime() < new Date(act.fecha_inicio).getTime()) {
+                targetDateStr = act.fecha_inicio;
+            } else {
+                targetDateStr = act.fecha_fin || act.fecha_inicio;
+            }
+
+            if (targetDateStr) {
+                const actDate = new Date(targetDateStr);
                 if (!isNaN(actDate.getTime()) && actDate.getTime() < nowTime) {
                     overdue++;
                 } else {

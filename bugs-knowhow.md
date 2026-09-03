@@ -1145,6 +1145,62 @@ Prevention Rule:
 Tags:
 [microsoft-graph] [azure-ad] [activities] [users-search] [planner] [fallback] [auth-headers]
 
+---
 
+## [Bug ID: 20260902-02]
 
+Context:
+Módulo de oportunidades (`lib/hooks/useOpportunitiesServer.ts`, `app/oportunidades/page.tsx`). Filtro por canal, paginación en servidor y maquetación de la tabla Handsontable.
 
+Problem:
+1. Al filtrar por canal en oportunidades, el número de registros no disminuía (permanecía en 6882).
+2. El filtro tardaba segundos en responder y congelaba la interfaz.
+3. Se cargaban las 6882 oportunidades completas en el DOM/Handsontable, inutilizando la paginación y el botón "Cargar más resultados".
+4. Experiencia de doble barra de desplazamiento (scroll del contenedor general `<main>` y scroll interno de Handsontable).
+
+Root Cause:
+1. `useOpportunitiesServer.ts` solicitaba `vendedor:CRM_Usuarios(full_name)` sin desambiguar la clave foránea. Al existir dos relaciones entre `CRM_Oportunidades` y `CRM_Usuarios` (`owner_user_id` y colaboradores), PostgREST respondía con error HTTP 300 / `PGRST201: Could not embed because more than one relationship was found`.
+2. La consulta fallaba y caía al bloque `catch`. En el bloque `catch`, se realizaba un volcado masivo de `db.opportunities.toArray()` sin aplicar el filtro de canal (`channelFilter`) ni paginación (`pageSize`), cargando los 6882 registros de IndexedDB directamente a `data`.
+3. En `app/oportunidades/page.tsx`, la altura fija de `HotTable` sumada a los encabezados, contador flotante superior, botón "Cargar más" inferior y padding `pb-12` sobrepasaba el viewport de `<main id="main-content">`, provocando que el contenedor general desplegara una barra vertical externa adicional a la barra interna de la tabla.
+
+Fix Applied:
+1. Se especificó la relación foránea explícita `vendedor:CRM_Usuarios!owner_user_id(full_name)` en `useOpportunitiesServer.ts`, resolviendo la ambigüedad en PostgREST y permitiendo que la consulta retorne el conteo exacto y 100 registros en ~100ms.
+2. Se unificó la lógica de filtrado y paginación en `fetchOffline` compartida por modo offline y el bloque `catch`, aplicando `channelFilter` y `localOpps.slice(from, to + 1)`.
+3. En `app/oportunidades/page.tsx`, se integró el pie de tabla con contador y paginación dentro de la tarjeta desktop, se adaptó la altura dinámica de la tabla (`calc(100vh - 280px)` / `calc(100vh - 490px)`), se ocultó el contador flotante exterior en desktop y se aisló el botón inferior para móvil (`md:hidden`), eliminando el desbordamiento de `<main>` y suprimiendo la doble barra de desplazamiento.
+4. Se incorporaron pruebas unitarias en `pruebas unitarias/oportunidades.test.ts`.
+
+Prevention Rule:
+**Explicit Ambiguous Foreign Key Disambiguation in PostgREST and In-Card Table Pagination Layout**:
+1. Cuando existan múltiples relaciones entre dos tablas en Supabase, siempre desambiguar en `.select()` con `!foreign_key_column` para prevenir fallos `PGRST201`.
+2. Los bloques de fallback nunca deben cargar colecciones completas sin filtrar ni paginar.
+3. Para evitar doble scrollbar en vistas con tablas de datos, integrar contadores y paginadores dentro de la tarjeta y dimensionar la tabla al espacio restante del viewport sin exceder el contenedor de la página.
+
+Tags:
+[postgrest] [pgrst201] [opportunities] [channel-filter] [pagination] [double-scrollbar] [handsontable] [offline-fallback]
+
+---
+
+## [Bug ID: 20260902-03]
+
+Context:
+Cálculo de resumen de actividades en oportunidades (`lib/opportunityActivities.ts`, `components/activities/CreateActivityModal.tsx`, `lib/hooks/useOpportunitiesServer.ts`).
+
+Problem:
+Una oportunidad ("remodelación casa") aparecía en la vista con el badge rojo de "1 atrasada" a pesar de que su única tarea pendiente ("validación de desarrollo") tenía fecha de vencimiento futura programada para el 9 de septiembre de 2026.
+
+Root Cause:
+1. En `CreateActivityModal.tsx`, las actividades de tipo `TAREA` solo exponen en la interfaz el campo "Fecha Vencimiento" asociado a `fecha_inicio`. El campo `fecha_fin` (oculto para tareas) se inicializaba por defecto con la hora del sistema + 1 hora al abrir el modal (`2026-09-02T23:08:00`) y nunca se actualizaba con la fecha elegida por el usuario.
+2. `computeOpportunityActivitySummary` en `lib/opportunityActivities.ts` evaluaba únicamente `fecha_fin`. Al transcurrir la hora de apertura (11:08 p.m.), el comparador `actDate < nowTime` resultaba verdadero, marcando la tarea como vencida en el pasado inmediato a pesar de tener `fecha_inicio` en el futuro.
+3. En `useOpportunitiesServer.ts`, la consulta de actividades no solicitaba `fecha_inicio` ni `tipo_actividad`.
+
+Fix Applied:
+1. En `lib/opportunityActivities.ts`, se actualizó `computeOpportunityActivitySummary` para priorizar `fecha_inicio` cuando `tipo_actividad === 'TAREA'` o cuando `fecha_fin` sea inconsistente (anterior a `fecha_inicio`).
+2. En `CreateActivityModal.tsx`, se configuró la sincronización reactiva de `fecha_fin = fecha_inicio` cuando el tipo es `TAREA`, tanto en el efecto de cambio de fecha como en el saneamiento previo al `submit`.
+3. En `useOpportunitiesServer.ts`, se agregaron `fecha_inicio` y `tipo_actividad` a la subconsulta de actividades de Supabase.
+4. Se corrigió el registro de la actividad en base de datos y se agregaron pruebas en `pruebas unitarias/opportunityActivities.test.ts`.
+
+Prevention Rule:
+**Semantic Due Date Evaluation for Activities and Tasks**: En actividades de tipo tarea, `fecha_fin` debe coincidir con `fecha_inicio` (fecha de vencimiento). Los algoritmos de clasificación de estado deben evaluar la fecha semántica apropiada según el tipo y protegerse contra valores residuales huérfanos generados en la inicialización de formularios.
+
+Tags:
+[activities] [opportunities] [due-date] [task-deadline] [overdue-calculation] [form-initial-state]

@@ -10,6 +10,7 @@ import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
 import { Edit2, Trash2, Phone, Mail, User, Building, Search, Plus, CloudUpload, Loader2 } from "lucide-react";
 import { useContacts } from "@/lib/hooks/useContacts";
 import { useContactsServer } from "@/lib/hooks/useContactsServer";
+import { useInfiniteScroll } from "@/lib/hooks/useInfiniteScroll";
 import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { supabase } from "@/lib/supabase";
@@ -37,7 +38,13 @@ function ContactsContent() {
         sortField,
         sortAsc,
         refresh
-    } = useContactsServer({ pageSize: 50 });
+    } = useContactsServer({ pageSize: 100 });
+
+    const { tableContainerRef, sentinelRef, triggerLoadMore } = useInfiniteScroll({
+        loading,
+        hasMore,
+        onLoadMore: loadMore,
+    });
 
     const { isAdmin } = useCurrentUser();
     const { accounts } = useAccounts();
@@ -478,7 +485,7 @@ function ContactsContent() {
 
     // --- VIEW: Global List ---
     return (
-        <div data-testid="contacts-page" className="p-4 sm:p-6 max-w-7xl mx-auto space-y-4 sm:space-y-5">
+        <div data-testid="contacts-page" className="max-w-7xl mx-auto space-y-4 sm:space-y-5 pb-8 md:pb-2">
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <div className="flex items-center gap-3">
                     <div className="bg-[#254153] p-2.5 rounded-xl text-white shadow-md shadow-[#254153]/15">
@@ -614,7 +621,7 @@ function ContactsContent() {
 
                     {/* VISTA DESKTOP: Tabla */}
                     <div data-testid="contacts-list" className="hidden md:block overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                        <div className="w-full relative z-0 opp-hot-wrap" style={{ minHeight: '400px' }}>
+                        <div ref={tableContainerRef} className="w-full relative z-0 opp-hot-wrap" style={{ minHeight: '400px' }}>
                             <style>{`
                                 /* ── Scrollbar ── */
                                 .opp-hot-wrap .ht_master .wtHolder {
@@ -764,10 +771,11 @@ function ContactsContent() {
                                 rowHeaders={true}
                                 manualColumnResize={true}
                                 afterColumnResize={(width: number, col: number) => handleColumnResize(width, col)}
+                                afterScrollVertically={triggerLoadMore}
                                 filters={true}
                                 dropdownMenu={true}
                                 width="100%"
-                                height="calc(100vh - 280px)"
+                                height={showFilters ? "calc(100vh - 490px)" : "calc(100vh - 280px)"}
                                 autoColumnSize={false}
                                 autoRowSize={false}
                                 rowHeights={38}
@@ -806,14 +814,32 @@ function ContactsContent() {
                                 className="text-sm font-sans"
                             />
                         </div>
+
+                        {/* Pie de tabla unificado en desktop: contador y paginación integrados */}
+                        <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-200/80 flex justify-between items-center text-xs text-slate-500">
+                            <div>
+                                Mostrando <strong className="text-slate-800 font-bold">{contacts.length}</strong> de <strong className="text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md font-bold">{count !== undefined && count !== null ? count : contacts.length}</strong> contactos
+                            </div>
+                            {hasMore && (
+                                <button
+                                    onClick={loadMore}
+                                    disabled={loading}
+                                    className="px-3.5 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-100 hover:text-blue-600 transition-all shadow-xs flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                                >
+                                    {loading && <div className="w-3 h-3 rounded-full border-2 border-slate-300 border-t-blue-600 animate-spin" />}
+                                    {loading ? 'Cargando...' : 'Cargar más contactos'}
+                                </button>
+                            )}
+                        </div>
                     </div>
 
+                    {/* Botón Cargar más exclusivo para móvil */}
                     {hasMore && (
-                        <div className="flex justify-center mt-8 mb-8 px-2">
+                        <div ref={sentinelRef} className="flex justify-center mt-4 mb-4 px-2 md:hidden">
                             <button
                                 onClick={loadMore}
                                 disabled={loading}
-                                className="w-full sm:w-auto flex items-center justify-center gap-2 px-8 py-3.5 sm:py-3 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold hover:bg-slate-50 active:scale-[0.98] transition-all shadow-sm disabled:opacity-50"
+                                className="w-full flex items-center justify-center gap-2 px-6 py-3.5 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold hover:bg-slate-50 active:scale-[0.98] transition-all shadow-sm disabled:opacity-50"
                             >
                                 {loading && <Loader2 size={16} className="animate-spin" />}
                                 {loading ? "Cargando..." : "Cargar más contactos"}

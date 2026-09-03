@@ -1,6 +1,7 @@
 "use client";
 
 import { useOpportunitiesServer } from "@/lib/hooks/useOpportunitiesServer";
+import { useInfiniteScroll } from "@/lib/hooks/useInfiniteScroll";
 import React, { useState, useEffect, useCallback, Suspense, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Plus, Search, Filter, Briefcase, ArrowUpDown, ChevronUp, ChevronDown, ChevronRight, Columns3, Check, MapPin, Globe } from "lucide-react";
@@ -73,7 +74,13 @@ function OpportunitiesContent() {
         setSortAsc,
         sortField,
         sortAsc
-    } = useOpportunitiesServer({ pageSize: 50 });
+    } = useOpportunitiesServer({ pageSize: 100 });
+
+    const { tableContainerRef, sentinelRef, triggerLoadMore } = useInfiniteScroll({
+        loading,
+        hasMore,
+        onLoadMore: loadMore,
+    });
 
     const [inputValue, setInputValue] = useState(() => {
         const fromUrl = searchParams.get('search');
@@ -764,7 +771,7 @@ function OpportunitiesContent() {
         (startClosingDate ? 1 : 0) + (endClosingDate ? 1 : 0);
 
     return (
-        <div data-testid="opportunities-page" className="space-y-4 md:space-y-6 max-w-[1600px] mx-auto pb-12 animate-in fade-in duration-300">
+        <div data-testid="opportunities-page" className="space-y-3.5 max-w-[1600px] mx-auto pb-8 md:pb-2 animate-in fade-in duration-300">
             {/* Header Rediseñado */}
             <div className="flex flex-col sm:flex-row justify-between sm:items-end gap-4 bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden">
                 <div className="absolute top-0 right-0 w-64 h-64 bg-blue-50/80 rounded-full blur-3xl -mr-20 -mt-20 opacity-60 pointer-events-none"></div>
@@ -944,7 +951,7 @@ function OpportunitiesContent() {
             {/* Listado (Tarjetas en Móvil, Tabla en Desktop) */}
             <div className="flex flex-col relative min-h-[450px] transition-all duration-300">
                 {(!loading || opportunities.length > 0) && (
-                    <div className="flex items-center justify-end mb-3 px-1 z-10">
+                    <div className="flex md:hidden items-center justify-end mb-3 px-1 z-10">
                         <span className="text-sm font-medium text-slate-500 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm flex items-center gap-2">
                             Total de registros: <strong className="text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md">{count !== undefined && count !== null ? count : opportunities.length}</strong>
                         </span>
@@ -1238,7 +1245,7 @@ function OpportunitiesContent() {
                                     text-overflow: ellipsis !important;
                                 }
                             `}</style>
-                            <div className="w-full relative z-0 opp-hot-wrap" style={{ minHeight: '400px' }}>
+                            <div ref={tableContainerRef} className="w-full relative z-0 opp-hot-wrap" style={{ minHeight: '400px' }}>
                                 <HotTable
                                     data={hotData}
                                     columns={hotColumns}
@@ -1248,8 +1255,9 @@ function OpportunitiesContent() {
                                     dropdownMenu={true}
                                     manualColumnResize={true}
                                     afterColumnResize={(width: number, col: number) => handleColumnResize(width, col)}
+                                    afterScrollVertically={triggerLoadMore}
                                     width="100%"
-                                    height="calc(100vh - 280px)"
+                                    height={showAdvancedFilters ? "calc(100vh - 490px)" : "calc(100vh - 280px)"}
                                     autoColumnSize={false}
                                     autoRowSize={false}
                                     rowHeights={38}
@@ -1310,16 +1318,34 @@ function OpportunitiesContent() {
                                     className="text-sm font-sans"
                                 />
                             </div>
+
+                            {/* Pie de tabla unificado en desktop: contador y paginación integrados */}
+                            <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-200/80 flex justify-between items-center text-xs text-slate-500">
+                                <div>
+                                    Mostrando <strong className="text-slate-800 font-bold">{opportunities.length}</strong> de <strong className="text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md font-bold">{count !== undefined && count !== null ? count : opportunities.length}</strong> oportunidades
+                                </div>
+                                {hasMore && (
+                                    <button
+                                        onClick={() => loadMore()}
+                                        disabled={loading}
+                                        className="px-3.5 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-100 hover:text-blue-600 transition-all shadow-xs flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                                    >
+                                        {loading && <div className="w-3 h-3 rounded-full border-2 border-slate-300 border-t-blue-600 animate-spin" />}
+                                        {loading ? 'Cargando...' : 'Cargar más resultados'}
+                                    </button>
+                                )}
+                            </div>
                         </div>
                     </>
                 )}
                 
+                {/* Botón Cargar más exclusivo para móvil */}
                 {hasMore && opportunities.length > 0 && (
-                    <div className="p-4 flex justify-center mt-4">
+                    <div ref={sentinelRef} className="p-4 flex justify-center mt-4 md:hidden">
                         <button
                             onClick={() => loadMore()}
                             disabled={loading}
-                            className="w-full md:w-auto px-6 py-3.5 md:py-2.5 bg-white border border-slate-200 text-slate-700 rounded-xl text-sm font-bold hover:bg-slate-50 hover:border-slate-300 hover:shadow-md hover:-translate-y-0.5 active:scale-[0.98] transition-all disabled:opacity-50 flex justify-center items-center gap-2 shadow-sm"
+                            className="w-full px-6 py-3.5 bg-white border border-slate-200 text-slate-700 rounded-xl text-sm font-bold hover:bg-slate-50 active:scale-[0.98] transition-all disabled:opacity-50 flex justify-center items-center gap-2 shadow-sm"
                         >
                             {loading && <div className="w-4 h-4 rounded-full border-2 border-slate-300 border-t-slate-600 animate-spin"></div>}
                             {loading ? 'Cargando...' : 'Cargar más resultados'}
