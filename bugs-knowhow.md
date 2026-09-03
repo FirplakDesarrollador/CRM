@@ -1204,3 +1204,33 @@ Prevention Rule:
 
 Tags:
 [activities] [opportunities] [due-date] [task-deadline] [overdue-calculation] [form-initial-state]
+
+---
+
+## [Bug ID: 20260903-01]
+
+Context:
+Módulo de contactos (`app/contactos/page.tsx`). Selección y edición de contactos desde el listado global.
+
+Problem:
+Al hacer clic en cualquier contacto del listado para abrir su vista de edición o detalle, la aplicación crasheaba con pantalla blanca arrojando el error de Next.js / React:
+"Application error: a client-side exception has occurred while loading crm-64yu.vercel.app (see the browser console for more information)".
+
+Root Cause:
+Violación estricta de las **Rules of Hooks** de React:
+1. En `app/contactos/page.tsx`, existía un retorno condicional temprano en la línea ~351:
+   `if (selectedAccountIdForCreate || editingContact) { return (...); }`
+2. Los hooks `useCurrentUser()`, `useState` (para `colWidths`) y `useEffect` (para persistencia de anchos de columna de Handsontable en `localStorage`) estaban declarados en la línea ~382, es decir, **después** del retorno condicional anterior.
+3. Cuando el usuario seleccionaba un contacto, `editingContact` cambiaba de `undefined` a un objeto válido, provocando que el componente retornara anticipadamente y se saltara la ejecución de dichos hooks. React detectó una cantidad diferente de hooks llamados entre renders sucesivos y disparó la excepción client-side.
+
+Fix Applied:
+1. Se reubicaron `useCurrentUser()`, el estado `colWidths` y su respectivo `useEffect` al inicio de la función `ContactsContent()`, junto a las demás declaraciones de hooks y antes de cualquier retorno condicional.
+2. Se verificó que los módulos hermanos (`app/cuentas/page.tsx` y `app/oportunidades/page.tsx`) no tuvieran retornos tempranos antes de sus llamadas a hooks.
+
+Prevention Rule:
+**Strict React Hooks Top-Level Invariance**:
+Nunca colocar llamadas a Hooks (`use*`, `useState`, `useEffect`, `useCallback`, etc.) debajo de declaraciones `return` condicionales o dentro de bloques `if / else`. Todos los hooks de un componente deben ejecutarse incondicionalmente y en el mismo orden exacto en cada ciclo de render.
+
+Tags:
+[react] [rules-of-hooks] [client-side-exception] [contacts] [conditional-return] [handsontable-col-widths]
+
