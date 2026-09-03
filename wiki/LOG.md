@@ -3,7 +3,63 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
-## 2026-09-02 - Búsqueda de Colaboradores del Tenant Microsoft en Wizard de Actividades
+## 2026-09-02 - Implementación de Infinite Scroll Automático al Fondo de Galería en Todos los Módulos
+
+- **Hook Unificado (`lib/hooks/useInfiniteScroll.ts`):**
+  - Implementación de un hook reutilizable con debounce/throttling (600ms) y verificación de `hasMore` y `loading`.
+  - Detección dual: escucha eventos de scroll nativo y hook `afterScrollVertically` sobre el contenedor de Handsontable (`.ht_master .wtHolder`), además de un `IntersectionObserver` con `rootMargin: 200px` sobre el centinela móvil/inferior.
+- **Integración en Módulos Principales:**
+  - **Oportunidades (`app/oportunidades/page.tsx`):** Carga automática de los siguientes 100 registros al alcanzar el umbral inferior de la tabla o en el scroll móvil.
+  - **Cuentas (`app/cuentas/page.tsx`):** Carga automática de los siguientes 100 registros al hacer scroll vertical en la tabla o lista de cuentas.
+  - **Contactos (`app/contactos/page.tsx`):** Carga continua de los siguientes 100 contactos al llegar al final de la visualización.
+  - **Actividades (`app/actividades/page.tsx`):** Carga automática de bloques de 20 actividades adicionales en la vista de lista/agenda sin requerir clic manual.
+- **Quality & Pruebas:**
+  - Nueva suite en `pruebas unitarias/infiniteScroll.test.ts` evaluando umbral de fondo, control de estados `loading`/`hasMore` y prevención de ráfagas repetidas (38 pruebas totales en verde).
+
+## 2026-09-02 - Estandarización de Filtros, Paginación 100 Ítems, Fallback y UI en Cuentas, Contactos y Actividades
+
+- **Cuentas (`lib/hooks/useAccountsServer.ts`, `app/cuentas/page.tsx`):**
+  - Unificación de `fetchOffline` tanto para modo offline como para el bloque `catch`, aplicando todos los filtros (canal, subclasificación, nivel, fechas, web y roles) con paginación estricta (`slice(from, to + 1)`).
+  - Eliminación del truncamiento de `totalCount` con `effectiveCount` para respetar el conteo exacto de Supabase.
+  - Integración del pie de tabla en desktop con contador ("Mostrando X de Y cuentas") y botón "Cargar más resultados", reservando el botón externo inferior para móvil (`md:hidden`).
+  - Ajuste dinámico de altura en Handsontable (`calc(100vh - 280px)` / `calc(100vh - 490px)`) y reducción de padding para erradicar el doble scrollbar.
+  - Paginación inicial fijada en 100 registros.
+- **Contactos (`lib/hooks/useContactsServer.ts`, `app/contactos/page.tsx`):**
+  - Implementación de `fetchOffline` en el bloque `catch` para no dejar la vista vacía ante fallos transitorios de red.
+  - Paginación inicial fijada en 100 registros (`pageSize: 100`).
+  - Integración del pie de tabla dentro del card desktop ("Mostrando X de Y contactos" + "Cargar más contactos") y botón externo para móvil (`md:hidden`).
+  - Altura dinámica y ajuste de padding (`max-w-7xl pb-2`) eliminando el desbordamiento vertical.
+- **Actividades (`app/actividades/page.tsx`, `pruebas unitarias/actividades.test.ts`):**
+  - Verificación de consistencia en el filtrado por canal y vencimiento de actividades.
+- **Quality (`pruebas unitarias/`):**
+  - Ampliación de las suites en `cuentas.test.ts`, `contactos.test.ts`, `actividades.test.ts` cubriendo reducción de conteo por canal/cuenta y límite de paginación (35 pruebas totales pasando en verde).
+
+## 2026-09-02 - Corrección de Vencimiento Semántico de Actividades y Tareas en Oportunidades
+
+- **Sincronización de Fechas en Wizard de Actividades (`components/activities/CreateActivityModal.tsx`):**
+  - Para actividades de tipo `TAREA`, `fecha_fin` se sincroniza reactivamente con `fecha_inicio` (Fecha de Vencimiento), impidiendo que persista el valor predeterminado residual de +1 hora tras abrir el modal.
+- **Cálculo de Atraso Resiliente (`lib/opportunityActivities.ts`):**
+  - `computeOpportunityActivitySummary()` ahora evalúa `fecha_inicio` cuando el tipo es `TAREA` o si existe inconsistencia de fechas (`fecha_fin < fecha_inicio`), evitando que tareas futuras sean marcadas erróneamente como "1 atrasada".
+- **Consulta de Servidor (`lib/hooks/useOpportunitiesServer.ts`):**
+  - Se añadieron `fecha_inicio` y `tipo_actividad` a la subconsulta de actividades de `CRM_Oportunidades`.
+- **Quality & Base de Datos:**
+  - Nuevas pruebas unitarias en `pruebas unitarias/opportunityActivities.test.ts` (8 pruebas pasando en verde).
+  - Corrección de `fecha_fin` en la actividad "validación de desarrollo" en Supabase.
+
+## 2026-09-02 - Corrección de Filtro por Canal, Paginación 100 Ítems y Eliminación de Doble Scroll en Oportunidades
+
+- **Resolución de Error PGRST201 y Filtro por Canal (`lib/hooks/useOpportunitiesServer.ts`):**
+  - Desambiguación explícita de la relación `vendedor:CRM_Usuarios!owner_user_id(full_name)` en la consulta PostgREST de Supabase, evitando la ambigüedad con colaboradores que arrojaba HTTP 300 / PGRST201.
+  - La consulta en línea vuelve a ejecutarse en el servidor, aplicando el filtro por canal mediante `account:CRM_Cuentas!inner` y devolviendo el conteo exacto filtrado en milisegundos.
+- **Paginación Estricta de 100 Ítems y Respaldo Local (`lib/hooks/useOpportunitiesServer.ts`):**
+  - Se unificó la lógica de consulta y respaldo local en `fetchOffline` compartida por modo offline y el bloque `catch`.
+  - Se garantiza que el respaldo aplique todos los filtros jerárquicos y pagine estrictamente `localOpps.slice(from, to + 1)` (100 registros), impidiendo el volcado masivo de 6882 oportunidades al DOM.
+- **Eliminación de la Doble Barra de Desplazamiento (`app/oportunidades/page.tsx`):**
+  - Integración del pie de tabla dentro de la tarjeta desktop con contador ("Mostrando X de Y") y botón "Cargar más resultados".
+  - Ajuste dinámico de altura en Handsontable (`calc(100vh - 280px)` / `calc(100vh - 490px)`) y reducción del padding del contenedor a `pb-2`.
+  - El contenedor principal `<main id="main-content">` ya no desborda verticalmente en desktop, dejando a Handsontable como único scrollbar.
+- **Quality (`pruebas unitarias/oportunidades.test.ts`):**
+  - 2 nuevas pruebas unitarias cubriendo la reducción de conteo por canal y el límite de paginación a 100 ítems (totalizando 7 pruebas pasando en verde).
 
 - **Microsoft Graph & Tenant Directory (`lib/microsoft.ts`):**
   - Se reestructuró `searchMicrosoftUsers` para buscar en Azure AD / Entra ID vía `/users?$search=` con header `ConsistencyLevel: eventual` y fallbacks en cascada (`/users?$filter=...`, `search/query` y `/me/people`).

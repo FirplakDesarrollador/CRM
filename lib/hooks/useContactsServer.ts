@@ -65,82 +65,85 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
         const setIsLoadingData = useSyncStore.getState().setIsLoadingData;
         setLoading(true);
         setIsLoadingData(true);
-        try {
-            // Calculate range
-            const currentPage = isLoadMore ? pageRef.current + 1 : 1;
-            const from = (currentPage - 1) * pageSize;
-            const to = from + pageSize - 1;
+        const currentPage = isLoadMore ? pageRef.current + 1 : 1;
+        const from = (currentPage - 1) * pageSize;
+        const to = from + pageSize - 1;
 
-            if (!navigator.onLine) {
-                console.log("[useContactsServer] Device is offline. Falling back to local Dexie database...");
-                let localContacts = (await db.contacts.toArray()).filter(c => !c.is_deleted);
+        const fetchOffline = async () => {
+            console.log("[useContactsServer] Device is offline or server query failed. Falling back to local Dexie database...");
+            let localContacts = (await db.contacts.toArray()).filter(c => !c.is_deleted);
+            
+            // Seller restriction for offline
+            if ((isVendedor || userRole === 'COORDINADOR') && currentUserId) {
+                const idsToMatch = isVendedor ? [currentUserId] : [currentUserId, ...subordinateIds];
+
+                // Get my accounts: Owner OR (No owner and I am creator)
+                const myAccounts = await db.accounts.filter(a => 
+                    idsToMatch.includes(a.owner_user_id || 'dummy') || 
+                    (!a.owner_user_id && idsToMatch.includes(a.created_by || 'dummy'))
+                ).toArray();
+                const myAccountIds = new Set(myAccounts.map(a => a.id));
+
+                // Also include accounts where user is collaborator in opportunities
+                const localCollabs = await db.opportunityCollaborators
+                    .where('usuario_id')
+                    .equals(currentUserId || '')
+                    .toArray();
+                const collabOppIds = localCollabs.filter(c => !c.is_deleted).map(c => c.oportunidad_id);
+                const collabOpps = await db.opportunities.where('id').anyOf(collabOppIds).toArray();
+                collabOpps.filter(o => !o.is_deleted && o.account_id).forEach(o => myAccountIds.add(o.account_id));
                 
-                // Seller restriction for offline
-                if ((isVendedor || userRole === 'COORDINADOR') && currentUserId) {
-                    const idsToMatch = isVendedor ? [currentUserId] : [currentUserId, ...subordinateIds];
+                // Filter contacts: MUST belong to my accounts
+                localContacts = localContacts.filter(c => myAccountIds.has(c.account_id));
+            }
 
-                    // Get my accounts: Owner OR (No owner and I am creator)
-                    const myAccounts = await db.accounts.filter(a => 
-                        idsToMatch.includes(a.owner_user_id || 'dummy') || 
-                        (!a.owner_user_id && idsToMatch.includes(a.created_by || 'dummy'))
-                    ).toArray();
-                    const myAccountIds = new Set(myAccounts.map(a => a.id));
+            if (accountId) {
+                localContacts = localContacts.filter(c => c.account_id === accountId);
+            }
 
-                    // Also include accounts where user is collaborator in opportunities
-                    const localCollabs = await db.opportunityCollaborators
-                        .where('usuario_id')
-                        .equals(currentUserId || '')
-                        .toArray();
-                    const collabOppIds = localCollabs.filter(c => !c.is_deleted).map(c => c.oportunidad_id);
-                    const collabOpps = await db.opportunities.where('id').anyOf(collabOppIds).toArray();
-                    collabOpps.filter(o => !o.is_deleted && o.account_id).forEach(o => myAccountIds.add(o.account_id));
-                    
-                    // Filter contacts: MUST belong to my accounts
-                    localContacts = localContacts.filter(c => myAccountIds.has(c.account_id));
-                }
+            // Filtering
+            if (searchTerm && searchTerm.trim()) {
+                localContacts = localContacts.filter(c => 
+                    matchesSearchTokens([c.nombre, c.email, c.telefono, c.cargo], searchTerm)
+                );
+            }
 
-                if (accountId) {
-                    localContacts = localContacts.filter(c => c.account_id === accountId);
-                }
+            if (accountFilter) localContacts = localContacts.filter(c => c.account_id === accountFilter);
+            if (principalFilter === 'principal') localContacts = localContacts.filter(c => c.es_principal);
+            if (principalFilter === 'secondary') localContacts = localContacts.filter(c => !c.es_principal);
 
-                // Filtering
-                if (searchTerm && searchTerm.trim()) {
-                    localContacts = localContacts.filter(c => 
-                        matchesSearchTokens([c.nombre, c.email, c.telefono, c.cargo], searchTerm)
-                    );
-                }
+            // Sorting
+            localContacts.sort((a, b) => {
+                const valueA = sortField === 'updated_at' ? (a.updated_at ? new Date(a.updated_at).getTime() : 0) : ((a as any)[sortField] || '').toLocaleLowerCase();
+                const valueB = sortField === 'updated_at' ? (b.updated_at ? new Date(b.updated_at).getTime() : 0) : ((b as any)[sortField] || '').toLocaleLowerCase();
+                if (valueA < valueB) return sortAsc ? -1 : 1;
+                if (valueA > valueB) return sortAsc ? 1 : -1;
+                return 0;
+            });
 
-                if (accountFilter) localContacts = localContacts.filter(c => c.account_id === accountFilter);
-                if (principalFilter === 'principal') localContacts = localContacts.filter(c => c.es_principal);
-                if (principalFilter === 'secondary') localContacts = localContacts.filter(c => !c.es_principal);
+            const totalCount = localContacts.length;
+            const paginatedContacts = localContacts.slice(from, to + 1);
 
-                // Sorting
-                localContacts.sort((a, b) => {
-                    const valueA = sortField === 'updated_at' ? (a.updated_at ? new Date(a.updated_at).getTime() : 0) : ((a as any)[sortField] || '').toLocaleLowerCase();
-                    const valueB = sortField === 'updated_at' ? (b.updated_at ? new Date(b.updated_at).getTime() : 0) : ((b as any)[sortField] || '').toLocaleLowerCase();
-                    if (valueA < valueB) return sortAsc ? -1 : 1;
-                    if (valueA > valueB) return sortAsc ? 1 : -1;
-                    return 0;
+            if (isLoadMore) {
+                setData(prev => {
+                    const existingIds = new Set(prev.map(i => i.id));
+                    const newItems = paginatedContacts.filter(i => !existingIds.has(i.id));
+                    return [...prev, ...newItems] as any;
                 });
+                setPage(currentPage);
+                pageRef.current = currentPage;
+            } else {
+                setData(paginatedContacts as any);
+                setPage(1);
+                pageRef.current = 1;
+            }
+            setCount(totalCount);
+            setHasMore(from + paginatedContacts.length < totalCount);
+        };
 
-                const totalCount = localContacts.length;
-                const paginatedContacts = localContacts.slice(from, to + 1);
-
-                if (isLoadMore) {
-                    setData(prev => {
-                        const existingIds = new Set(prev.map(i => i.id));
-                        const newItems = paginatedContacts.filter(i => !existingIds.has(i.id));
-                        return [...prev, ...newItems] as any;
-                    });
-                    setPage(currentPage);
-                    pageRef.current = currentPage;
-                } else {
-                    setData(paginatedContacts as any);
-                    setPage(1);
-                    pageRef.current = 1;
-                }
-                setCount(totalCount);
-                setHasMore(from + paginatedContacts.length < totalCount);
+        try {
+            if (!navigator.onLine) {
+                await fetchOffline();
                 return;
             }
 
@@ -341,13 +344,17 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
             }
 
             if (totalCount !== null) {
-                const effectiveCount = (searchTerm && searchTerm.trim()) ? finalData.length : totalCount;
-                setCount(effectiveCount);
+                setCount(totalCount);
                 setHasMore(from + (result?.length || 0) < totalCount);
             }
 
         } catch (err) {
-            console.error("Error fetching contacts:", err);
+            console.error("Error fetching contacts from server, executing local Dexie fallback:", err);
+            try {
+                await fetchOffline();
+            } catch (fallbackErr) {
+                console.error("Dexie fallback exception:", fallbackErr);
+            }
         } finally {
             setLoading(false);
             useSyncStore.getState().setIsLoadingData(false);

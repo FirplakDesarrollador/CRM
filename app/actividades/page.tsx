@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState, useMemo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useActivities, LocalActivity } from '@/lib/hooks/useActivities';
+import { useInfiniteScroll } from '@/lib/hooks/useInfiniteScroll';
 import { useDebounce } from '@/lib/hooks/useDebounce';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
@@ -472,6 +473,12 @@ function ActivitiesContent() {
             return sortOrder === 'latest' ? -difference : difference;
         });
     }, [globallyFilteredActivities, view, selectedDate, sortOrder]);
+
+    const { sentinelRef: activitiesSentinelRef } = useInfiniteScroll({
+        loading: false,
+        hasMore: (filteredActivities?.length || 0) > displayLimit,
+        onLoadMore: () => setDisplayLimit(prev => prev + 20),
+    });
 
     // PERF FIX: Pre-group activities by day key for month view (computed once, not 31x)
     const activitiesByDay = useMemo(() => {
@@ -999,9 +1006,9 @@ function ActivitiesContent() {
                                         );
                                     })}
 
-                                    {/* Load More Button */}
+                                    {/* Load More Button & Infinite Scroll Sentinel */}
                                     {filteredActivities.length > displayLimit && (
-                                        <div className="flex justify-center pt-8 pb-12">
+                                        <div ref={activitiesSentinelRef} className="flex justify-center pt-8 pb-12">
                                             <button
                                                 onClick={() => setDisplayLimit(prev => prev + 20)}
                                                 className="bg-white border-2 border-slate-100 text-slate-600 hover:text-blue-600 hover:border-blue-200 px-8 py-3 rounded-2xl font-black text-sm transition-all shadow-sm flex items-center gap-2 group"

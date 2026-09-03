@@ -1208,6 +1208,10 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                 Object.assign(dataToSubmit, data);
             }
 
+            if (dataToSubmit.tipo_actividad === 'TAREA' && dataToSubmit.fecha_inicio) {
+                dataToSubmit.fecha_fin = dataToSubmit.fecha_inicio;
+            }
+
             const processed: any = {
                 ...dataToSubmit,
                 teams_meeting_url: teamsMeetingUrl,
@@ -1349,20 +1353,24 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         return subclassifications.filter(s => s.clasificacion_id === Number(selectedClasificacionId));
     }, [subclassifications, selectedClasificacionId]);
 
-    // Auto-set fecha_fin as 1 hour after fecha_inicio for EVENTO
+    // Auto-set fecha_fin: +1 hour for EVENTO, and sync with fecha_inicio for TAREA
     useEffect(() => {
-        if (tipo === 'EVENTO' && fechaInicio) {
-            try {
+        if (!fechaInicio) return;
+        try {
+            if (tipo === 'EVENTO') {
                 const start = new Date(fechaInicio);
                 if (!isNaN(start.getTime())) {
                     const end = new Date(start.getTime() + 3600000); // +1 hour
-
-                    const formattedEnd = toInputDateTime(end);
-                    setValue('fecha_fin', formattedEnd, { shouldDirty: true });
+                    setValue('fecha_fin', toInputDateTime(end), { shouldDirty: true });
                 }
-            } catch (e) {
-                console.error("Error setting end date", e);
+            } else if (tipo === 'TAREA') {
+                const start = new Date(fechaInicio);
+                if (!isNaN(start.getTime())) {
+                    setValue('fecha_fin', toInputDateTime(start), { shouldDirty: true });
+                }
             }
+        } catch (e) {
+            console.error("Error setting end date", e);
         }
     }, [fechaInicio, tipo, setValue]);
 

@@ -113,4 +113,51 @@ describe("Filtrado de Actividades", () => {
         // user-1 es dueño de act-1 y act-3, y colabora en la oportunidad de act-2
         expect(resultado).toHaveLength(3);
     });
+
+    it("el filtro por canal reduce el conteo total de actividades y excluye canales ajenos", () => {
+        const all = filterActivities(mockActivities, {}, {
+            oppMap: mockOppMap,
+            accMap: mockAccMap,
+            canViewAll: true
+        });
+        expect(all).toHaveLength(3);
+
+        const distNac = filterActivities(mockActivities, { filterChannel: "DIST_NAC" }, {
+            oppMap: mockOppMap,
+            accMap: mockAccMap,
+            canViewAll: true
+        });
+        expect(distNac).toHaveLength(1);
+        expect(distNac[0].id).toBe("act-2");
+        expect(distNac.length).toBeLessThan(all.length);
+    });
+
+    it("la paginación preserva el total de actividades y limita el lote mostrado a la página", () => {
+        const manyActs = Array.from({ length: 150 }, (_, i) => ({
+            id: `act-bulk-${i}`,
+            asunto: `Actividad ${i}`,
+            tipo_actividad: "TAREA",
+            user_id: "user-1",
+            opportunity_id: "opp-1",
+            account_id: "acc-1",
+            is_completed: false,
+            fecha_inicio: "2026-09-10T10:00:00Z"
+        }));
+
+        const filtered = filterActivities(manyActs, { filterChannel: "OBRAS_NAC" }, {
+            oppMap: mockOppMap,
+            accMap: mockAccMap,
+            canViewAll: true
+        });
+        expect(filtered).toHaveLength(150);
+
+        const pageSize = 100;
+        const page1 = filtered.slice(0, pageSize);
+        expect(page1).toHaveLength(100);
+        expect(filtered.length).toBe(150);
+
+        const page2 = filtered.slice(pageSize, pageSize * 2);
+        expect(page2).toHaveLength(50);
+    });
 });
+
