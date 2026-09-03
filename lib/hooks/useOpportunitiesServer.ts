@@ -127,17 +127,24 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
     useEffect(() => {
         if (phasesLoadedRef.current) return;
         const loadClosedPhases = async () => {
-            let phases: any[] = [];
+            let phases: { id: number; nombre: string }[] = [];
 
             if (!navigator.onLine) {
                 const localPhases = await db.phases.toArray();
                 phases = localPhases;
             } else {
-                const { data } = await supabase
-                    .from('CRM_FasesOportunidad')
-                    .select('id, nombre')
-                    .eq('is_active', true);
-                if (data) phases = data;
+                try {
+                    const { data, error } = await supabase
+                        .from('CRM_FasesOportunidad')
+                        .select('id, nombre');
+                    if (!error && data && data.length > 0) {
+                        phases = data;
+                    } else {
+                        phases = await db.phases.toArray();
+                    }
+                } catch {
+                    phases = await db.phases.toArray();
+                }
             }
 
             if (phases && phases.length > 0) {
@@ -311,7 +318,14 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                             localOpps = localOpps.filter(o => o.owner_user_id === currentUserId);
                         }
                     } else if (userFilter === 'web') {
-                        localOpps = localOpps.filter(o => o.origen_oportunidad && o.origen_oportunidad.toLowerCase().includes('web'));
+                        localOpps = localOpps.filter(o =>
+                            Boolean((o.url_origen && o.url_origen.trim() !== '') ||
+                            (o.origen_oportunidad && (
+                                o.origen_oportunidad.toLowerCase().includes('web') ||
+                                o.origen_oportunidad.toLowerCase().includes('pagina') ||
+                                o.origen_oportunidad.toLowerCase().includes('página')
+                            )))
+                        );
                     }
                 }
 
@@ -444,7 +458,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
             if (searchTerm && searchTerm.trim()) {
                 const tokens = getSearchTokens(searchTerm);
                 for (const token of tokens) {
-                    let orConditions = [`nombre.ilike.%${token}%`];
+                    const orConditions = [`nombre.ilike.%${token}%`];
                     if (searchAccountIds.length > 0) {
                         orConditions.push(`account_id.in.(${searchAccountIds.join(',')})`);
                     }
@@ -585,9 +599,9 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
 
             // Order
             if (sortField === 'account_nombre') {
-                query = query.order('nombre', { foreignTable: 'CRM_Cuentas', ascending: sortAsc });
+                query = query.order('nombre', { foreignTable: 'account', ascending: sortAsc });
             } else if (sortField === 'vendedor_nombre') {
-                query = query.order('full_name', { foreignTable: 'CRM_Usuarios', ascending: sortAsc });
+                query = query.order('full_name', { foreignTable: 'vendedor', ascending: sortAsc });
             } else {
                 query = query.order(sortField as any, { ascending: sortAsc });
             }

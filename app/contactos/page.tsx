@@ -206,8 +206,13 @@ function ContactsContent() {
         const principal = (searchParams.get('principal') || saved.get('principal') || 'all') as 'all' | 'principal' | 'secondary';
         const sort = (searchParams.get('sort') || saved.get('sort')) as 'updated_at' | 'nombre' | 'email' | null;
         const direction = searchParams.get('dir') || saved.get('dir');
+        const search = searchParams.get('search') || saved.get('search') || '';
+
         setAccountFilter(account || null);
+        setSelectedAccountFilter(account || '');
         setPrincipalFilter(principal);
+        setPrincipalFilterState(principal);
+        setInputValue(search);
         if (sort) setSortField(sort);
         if (direction) setSortAsc(direction === 'asc');
     }, [searchParams]);

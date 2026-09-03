@@ -1,6 +1,6 @@
 import { act } from 'react';
 import { createRoot, Root } from 'react-dom/client';
-import { useForm, UseFormReturn } from 'react-hook-form';
+import { Resolver, useForm, UseFormReturn } from 'react-hook-form';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useFormAutoSave } from './useFormAutoSave';
 
@@ -89,22 +89,24 @@ describe('useFormAutoSave', () => {
         let errorResult: string | null = null;
 
         function Harness() {
+            const resolver: Resolver<TestForm> = async (values) => {
+                if (!values.nombre || values.nombre.length < 2) {
+                    return {
+                        values: {} as Record<string, never>,
+                        errors: {
+                            nombre: {
+                                type: 'min',
+                                message: 'Nombre requerido'
+                            }
+                        }
+                    };
+                }
+                return { values, errors: {} as Record<string, never> };
+            };
+
             const form = useForm<TestForm>({
                 defaultValues: { nombre: '' },
-                resolver: async (values) => {
-                    if (!values.nombre || values.nombre.length < 2) {
-                        return {
-                            values: {},
-                            errors: {
-                                nombre: {
-                                    type: 'min',
-                                    message: 'Nombre requerido'
-                                }
-                            }
-                        };
-                    }
-                    return { values, errors: {} };
-                }
+                resolver
             });
             formApi = form;
             const { status, errorMessage } = useFormAutoSave({

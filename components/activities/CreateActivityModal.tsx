@@ -700,16 +700,56 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
     // Handle User Search
     useEffect(() => {
         const delayDebounceFn = setTimeout(async () => {
-            if (userSearch.length >= 2) {
+            const query = userSearch.trim();
+            if (query.length >= 2) {
                 setIsSearching(true);
                 try {
-                    const res = await fetch(`/api/microsoft/users?q=${encodeURIComponent(userSearch)}`);
-                    if (res.ok) {
-                        const data = await res.json();
-                        setSearchResults(data);
+                    let results: any[] = [];
+                    // 1. Intentar API de Microsoft (con sesión si está disponible)
+                    try {
+                        const { data: sessionData } = await supabase.auth.getSession();
+                        const headers: Record<string, string> = {};
+                        if (sessionData?.session?.access_token) {
+                            headers['Authorization'] = `Bearer ${sessionData.session.access_token}`;
+                        }
+                        const res = await fetch(`/api/microsoft/users?q=${encodeURIComponent(query)}`, {
+                            credentials: 'include',
+                            headers
+                        });
+                        if (res.ok) {
+                            const data = await res.json();
+                            if (Array.isArray(data) && data.length > 0) {
+                                results = data;
+                            }
+                        }
+                    } catch (apiErr) {
+                        console.warn("[CreateActivityModal] Microsoft users API fetch failed, trying local DB fallback:", apiErr);
                     }
+
+                    // 2. Fallback de cliente: Si la API no trajo resultados, consultar directamente CRM_Usuarios
+                    if (results.length === 0) {
+                        const { data: dbUsers } = await supabase
+                            .from('CRM_Usuarios')
+                            .select('id, full_name, email, role')
+                            .eq('is_active', true)
+                            .or(`full_name.ilike.%${query}%,email.ilike.%${query}%`)
+                            .limit(15);
+
+                        if (dbUsers && dbUsers.length > 0) {
+                            results = dbUsers.map((u: any) => ({
+                                id: u.id,
+                                displayName: u.full_name || u.email,
+                                mail: u.email,
+                                userPrincipalName: u.email,
+                                jobTitle: u.role || 'Usuario CRM'
+                            }));
+                        }
+                    }
+
+                    setSearchResults(results);
                 } catch (error) {
                     console.error("Error searching users:", error);
+                    setSearchResults([]);
                 } finally {
                     setIsSearching(false);
                 }

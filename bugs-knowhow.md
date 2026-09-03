@@ -1118,5 +1118,33 @@ Prevention Rule:
 Tags:
 [accounts] [nit] [provisional-id] [sync] [dead-letter] [unique-constraint] [pedidos] [formalization]
 
+## [Bug ID: 20260902-01]
+
+Context:
+Búsqueda y asignación de colaboradores de Microsoft en el modal de actividades (`CreateActivityModal.tsx`, `lib/microsoft.ts`, `app/api/microsoft/users/route.ts`).
+
+Problem:
+Al buscar colaboradores en el paso 3 del wizard de actividades (ej. "luis"), la interfaz no mostraba resultados y desplegaba "No se encontraron personas con \"luis\"".
+
+Root Cause:
+1. `searchMicrosoftUsers` en `lib/microsoft.ts` utilizaba en primer orden la API de People Search (`search/query` con entidad `person`), la cual solo indexa interacciones recientes del usuario autenticado; cuando esta respondía HTTP 200 con `hits: []`, retornaba prematuramente un array vacío y nunca ejecutaba las rutas de búsqueda en el directorio del tenant (`/users`).
+2. La constante `SCOPES` en `lib/microsoft.ts` no incluía `User.ReadBasic.All`, `User.Read.All` ni `People.Read`.
+3. La autenticación en la ruta `/api/microsoft/users` dependía de cookies SSR de un solo chunk (`get(name)` en vez de `getAll()`) y carecía de soporte para token Bearer en cabecera `Authorization`. Si la sesión cookie no estaba presente, retornaba 401 en vez de resolver sobre el directorio de colaboradores.
+4. El cliente en `CreateActivityModal.tsx` no enviaba cabecera `Authorization` ni tenía fallback de cliente hacia `CRM_Usuarios` si la API remota tardaba o no respondía.
+
+Fix Applied:
+1. Se reestructuró `searchMicrosoftUsers` para buscar en Azure AD vía `https://graph.microsoft.com/v1.0/users?$search=` con header `ConsistencyLevel: eventual`, y como respaldos secuenciales `users?$filter=startsWith(...)`, People Search (`search/query`) y `/me/people`.
+2. Se incorporaron `User.ReadBasic.All`, `User.Read.All` y `People.Read` en `SCOPES`.
+3. En `app/api/microsoft/users/route.ts`: se migró a `createClient()` de `@/lib/supabase/server` con soporte de cookies chunked (`getAll()`) y lectura de cabecera `Authorization: Bearer <token>`. Si no hay sesión o tokens de Microsoft, consulta `CRM_Usuarios` garantizando siempre HTTP 200 con colaboradores.
+4. En `CreateActivityModal.tsx`: la llamada a `/api/microsoft/users` envía la cabecera `Authorization` de la sesión activa, y además implementa un fallback de cliente directo a `CRM_Usuarios` en Supabase si la API remota no retorna resultados o falla la red.
+5. Se crearon las suites de pruebas en `pruebas unitarias/microsoftUsersSearch.test.ts` y `pruebas unitarias/microsoftUsersApi.test.ts`.
+
+Prevention Rule:
+**Multi-Tier Directory & Fallback Pattern for Graph/Identity Integrations**: Para búsquedas en directorios de Microsoft 365 / Entra ID, consultar siempre `/users` del tenant con `$search` o `$filter` en lugar de limitar la consulta a contactos personales recientes (`person`), y siempre proveer fallbacks encadenados para no devolver arreglos vacíos por respuestas 200 sin hits. En endpoints auxiliares de búsqueda, tolerar auth desacoplada y proveer fallback a datos locales.
+
+Tags:
+[microsoft-graph] [azure-ad] [activities] [users-search] [planner] [fallback] [auth-headers]
+
+
 
 

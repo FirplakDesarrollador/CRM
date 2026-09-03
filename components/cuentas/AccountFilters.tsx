@@ -45,6 +45,23 @@ export function AccountFilters({ onFilterChange, initialChannelId, initialSubcla
     const [loadingMetadata, setLoadingMetadata] = useState(true);
 
     useEffect(() => {
+        setSelectedChannel(initialChannelId || null);
+    }, [initialChannelId]);
+
+    useEffect(() => {
+        setSelectedSubclass(initialSubclassId || null);
+    }, [initialSubclassId]);
+
+    useEffect(() => {
+        setSelectedNivel(initialNivelPremium || null);
+    }, [initialNivelPremium]);
+
+    useEffect(() => {
+        setStartDate(initialDates?.startDate || null);
+        setEndDate(initialDates?.endDate || null);
+    }, [initialDates?.startDate, initialDates?.endDate]);
+
+    useEffect(() => {
         const loadMetadata = async () => {
             try {
                 const [chanRes, subRes] = await Promise.all([

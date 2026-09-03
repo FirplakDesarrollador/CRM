@@ -237,20 +237,37 @@ function OpportunitiesContent() {
         const endClose = searchParams.get('endClose') || saved.get('endClose') || null;
 
         setSearchTerm(initialSearch);
-        setAccountOwnerIds(initialOwner ? initialOwner.split(',').filter(Boolean) : []);
+        setInputValue(initialSearch);
+        const ownerList = initialOwner ? initialOwner.split(',').filter(Boolean) : [];
+        setAccountOwnerIds(ownerList);
+        setSelectedAccountOwnerIds(ownerList);
         setChannelFilter(initialChannel);
-        setSubclassificationFilter(initialSubclass ? Number(initialSubclass) : null);
-        setSegmentFilter(initialSegment ? Number(initialSegment) : null);
-        setPhaseFilter(initialPhase ? Number(initialPhase) : null);
+        setSelectedChannel(initialChannel);
+        const subclassNum = initialSubclass ? Number(initialSubclass) : null;
+        setSubclassificationFilter(subclassNum);
+        setSelectedSubclass(subclassNum);
+        const segmentNum = initialSegment ? Number(initialSegment) : null;
+        setSegmentFilter(segmentNum);
+        setSelectedSegment(segmentNum);
+        const phaseNum = initialPhase ? Number(initialPhase) : null;
+        setPhaseFilter(phaseNum);
+        setSelectedPhase(phaseNum);
         setStatusFilter(initialStatus as any);
+        setStatusFilterState(initialStatus as any);
         setOriginFilter(initialOrigin);
+        setSelectedOrigin(initialOrigin);
         setStartDate(start);
+        setStartDateState(start);
         setEndDate(end);
+        setEndDateState(end);
         setStartClosingDate(startClose);
+        setStartClosingDateState(startClose);
         setEndClosingDate(endClose);
+        setEndClosingDateState(endClose);
         if (initialSort) setSortField(initialSort);
         if (initialDirection) setSortAsc(initialDirection === 'asc');
         setUserFilter(initialTab as any);
+        setTab(initialTab as any);
     }, [searchParams]);
 
     // Restore state from sessionStorage if navigating from sidebar (empty query)

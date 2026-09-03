@@ -3,6 +3,42 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-09-02 - Búsqueda de Colaboradores del Tenant Microsoft en Wizard de Actividades
+
+- **Microsoft Graph & Tenant Directory (`lib/microsoft.ts`):**
+  - Se reestructuró `searchMicrosoftUsers` para buscar en Azure AD / Entra ID vía `/users?$search=` con header `ConsistencyLevel: eventual` y fallbacks en cascada (`/users?$filter=...`, `search/query` y `/me/people`).
+  - Se añadieron `User.ReadBasic.All`, `User.Read.All` y `People.Read` a `SCOPES`.
+- **API y Fallback Resiliente (`app/api/microsoft/users/route.ts`):**
+  - Migración a `createClient` de `@/lib/supabase/server` con soporte de cookies chunked (`getAll()`) y lectura de header `Authorization: Bearer <token>`.
+  - Soporte de fallback hacia tokens disponibles del tenant en `CRM_MicrosoftTokens` y hacia `CRM_Usuarios` corporativos garantizando siempre HTTP 200 con colaboradores sin bloquear por 401.
+- **UI Wizard (`components/activities/CreateActivityModal.tsx`):**
+  - Envío de cabecera `Authorization` activa con el token de sesión.
+  - Implementación de fallback directo en el cliente hacia `CRM_Usuarios` en Supabase si la API de Microsoft no retorna resultados o falla la red.
+- **Pruebas y QA (`pruebas unitarias/`):**
+  - Suites unitarias automatizadas `microsoftUsersSearch.test.ts` y `microsoftUsersApi.test.ts`.
+- **Wiki:**
+  - Actualización de `wiki/pages/actividades.md`.
+
+## 2026-09-02 - Auditoría y Corrección Integral de Filtros en Módulos Principales (/oportunidades, /cuentas, /actividades, /contactos)
+
+- **Oportunidades (`lib/hooks/useOpportunitiesServer.ts`, `app/oportunidades/page.tsx`, `components/oportunidades/OpportunityFilters.tsx`):**
+  - Corrección de desincronización de UI en navegación histórica/URL sincronizando estados locales en `[searchParams]`.
+  - Sincronización reactiva de props en drawer `OpportunityFilters`.
+  - Inclusión de alias de tablas foráneas (`account`, `vendedor`) en ordenamiento PostgREST.
+  - Fallback a `db.phases` en carga de fases y soporte completo de filtro web offline (`url_origen` y variantes textuales).
+- **Cuentas (`components/cuentas/AccountFilters.tsx`, `lib/hooks/useAccountsServer.ts`):**
+  - Reactividad de props entrantes en `AccountFilters` tras limpiezas o cambios de URL.
+  - Implementación del filtro web en modo offline Dexie cruzando oportunidades web locales.
+- **Actividades (`app/actividades/page.tsx`):**
+  - Eliminación de `useEffect` destructivos en mount que borraban clasificación y subclasificación restauradas de URL/sesión.
+  - Resolución robusta de canal evaluando la cuenta de la oportunidad o la cuenta directa de la actividad.
+- **Contactos (`lib/hooks/useContactsServer.ts`, `app/contactos/page.tsx`):**
+  - Inclusión de cuentas donde el usuario participa como colaborador en oportunidades en la visibilidad de contactos (online y offline).
+  - Sincronización bidireccional de estados de UI ante cambios de `searchParams`.
+- **Quality & Utilidades Purificadas (`lib/filterUtils.ts`, `pruebas unitarias/`):**
+  - Módulo determinista `filterUtils.ts` con funciones puras `filterOpportunities`, `filterAccounts`, `filterActivities`, `filterContacts`.
+  - Creación de 4 suites unitarias exhaustivas con 19 pruebas pasando en verde (`npm run qa:focused`).
+
 ## 2026-09-02 - Ingest: Columna e Indicador de Actividades (Atrasadas / Programadas) en Oportunidades (/oportunidades)
 
 - **Cálculo y Clasificación (`lib/opportunityActivities.ts`):**
@@ -157,7 +193,6 @@
   - Se configuró la reasignación como un traspaso 100% limpio (sin creación automática de registros de colaboradores).
   - La reasignación desde una oportunidad individual (`AssignedTab.tsx`) se mantuvo acotada únicamente a esa oportunidad.
 - **Páginas actualizadas:** `wiki/pages/cuentas.md`, `wiki/LOG.md`.
-
 ## 2026-09-02 - UX: Persistencia y Ejecución de Filtros entre Navegación de Módulos
 
 - **Módulos Afectados (`/oportunidades`, `/cuentas`, `/contactos`, `/actividades`):**
