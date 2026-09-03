@@ -46,9 +46,22 @@ function ContactsContent() {
         onLoadMore: loadMore,
     });
 
-    const { isAdmin } = useCurrentUser();
+    const { isAdmin, user } = useCurrentUser();
     const { accounts } = useAccounts();
     const { deleteContact } = useContacts();
+
+    // Col widths (must be declared here, not after conditional returns)
+    const colStorageKey = `crm_col_widths_contactos_${user?.id || 'default'}`;
+    const [colWidths, setColWidths] = useState<Record<string, number>>({});
+
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            try {
+                const saved = localStorage.getItem(colStorageKey);
+                if (saved) setColWidths(JSON.parse(saved));
+            } catch (e) {}
+        }
+    }, [colStorageKey]);
 
     // UI States
     const [inputValue, setInputValue] = useState(() => {
@@ -379,19 +392,6 @@ function ContactsContent() {
     }
 
     // Preparar datos para Handsontable
-    const { user } = useCurrentUser();
-    const colStorageKey = `crm_col_widths_contactos_${user?.id || 'default'}`;
-    const [colWidths, setColWidths] = useState<Record<string, number>>({});
-
-    useEffect(() => {
-        if (typeof window !== 'undefined') {
-            try {
-                const saved = localStorage.getItem(colStorageKey);
-                if (saved) setColWidths(JSON.parse(saved));
-            } catch (e) {}
-        }
-    }, [colStorageKey]);
-
     const handleColumnResize = useCallback((arg1: number, arg2: number) => {
         let width = arg1;
         let colIndex = arg2;
