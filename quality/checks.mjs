@@ -216,10 +216,37 @@ function testRatchet() {
   process.exitCode = comparison.regressions.length ? 1 : 0;
 }
 
-function policyCheck() {
+async function policyCheck() {
   const current = collectPolicyDebt();
   const comparison = printComparison('Politica de cambio seguro', current, baseline().policy);
-  process.exitCode = comparison.regressions.length ? 1 : 0;
+  let failed = comparison.regressions.length > 0;
+
+  // Verificación estricta de Rules of Hooks en toda la aplicación
+  try {
+    const eslint = new ESLint({ cwd: root });
+    const hookFiles = productLintFiles().filter((f) => /\.(tsx|jsx)$/.test(f));
+    const results = await eslint.lintFiles(hookFiles);
+    const hookErrors = [];
+    for (const res of results) {
+      for (const msg of res.messages) {
+        if (msg.ruleId === 'react-hooks/rules-of-hooks') {
+          hookErrors.push(`${relative(res.filePath)}:${msg.line} -> ${msg.message}`);
+        }
+      }
+    }
+    if (hookErrors.length > 0) {
+      console.error(`\nCRITICAL REGRESSION: ${hookErrors.length} violacion(es) de react-hooks/rules-of-hooks detectadas:`);
+      for (const err of hookErrors) console.error(`  - ${err}`);
+      failed = true;
+    } else {
+      console.log(`Rules of Hooks: 0 violaciones en ${hookFiles.length} componentes/paginas React.`);
+    }
+  } catch (err) {
+    console.error('Error ejecutando auditoria de Rules of Hooks:', err);
+    failed = true;
+  }
+
+  process.exitCode = failed ? 1 : 0;
 }
 
 async function currentBaseline() {
@@ -422,7 +449,7 @@ try {
   if (command === 'lint-ratchet') await lintRatchet();
   else if (command === 'type-ratchet') typeRatchet();
   else if (command === 'test-ratchet') testRatchet();
-  else if (command === 'policy') policyCheck();
+  else if (command === 'policy') await policyCheck();
   else if (command === 'baseline-adopt') await baselineAdopt(args);
   else if (command === 'baseline-update') await baselineUpdate(args);
   else if (command === 'drift') drift();
