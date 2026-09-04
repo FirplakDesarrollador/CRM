@@ -128,12 +128,12 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
                 setData(prev => {
                     const existingIds = new Set(prev.map(i => i.id));
                     const newItems = paginatedContacts.filter(i => !existingIds.has(i.id));
-                    return [...prev, ...newItems] as any;
+                    return [...prev, ...newItems] as ContactServer[];
                 });
                 setPage(currentPage);
                 pageRef.current = currentPage;
             } else {
-                setData(paginatedContacts as any);
+                setData(paginatedContacts as ContactServer[]);
                 setPage(1);
                 pageRef.current = 1;
             }

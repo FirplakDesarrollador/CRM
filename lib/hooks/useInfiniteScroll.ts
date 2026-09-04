@@ -16,9 +16,12 @@ export function useInfiniteScroll({
     throttleMs = 600
 }: UseInfiniteScrollOptions) {
     const loadingRef = useRef(loading);
-    loadingRef.current = loading;
     const hasMoreRef = useRef(hasMore);
-    hasMoreRef.current = hasMore;
+
+    useEffect(() => {
+        loadingRef.current = loading;
+        hasMoreRef.current = hasMore;
+    }, [loading, hasMore]);
 
     const lastLoadTimeRef = useRef(0);
     const tableContainerRef = useRef<HTMLDivElement>(null);

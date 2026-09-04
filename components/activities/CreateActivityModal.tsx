@@ -7,7 +7,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { cn } from "@/components/ui/utils";
 import { toInputDate, toInputDateTime } from "@/lib/date-utils";
-import { db, LocalActivityClassification, LocalActivitySubclassification } from "@/lib/db";
+import { db, LocalActivity, LocalActivityClassification, LocalActivitySubclassification } from "@/lib/db";
 import { syncEngine } from "@/lib/sync";
 import { supabase } from "@/lib/supabase";
 import { DateTimePicker } from "@/components/ui/DateTimePicker";
@@ -21,7 +21,7 @@ import { AutoSaveIndicator } from "@/components/ui/AutoSaveIndicator";
 interface CreateActivityModalProps {
     onClose: () => void;
     onSubmit: (data: any) => void;
-    opportunities?: any[];
+    opportunities?: unknown[];
     initialOpportunityId?: string;
     initialAccountId?: string;
     initialData?: any;
@@ -137,7 +137,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         if (!data.asunto?.trim()) {
             setValue('asunto', autoAsunto);
         }
-        const payload: any = {
+        const payload = {
             asunto: autoAsunto,
             descripcion: data.descripcion || null,
             tipo_actividad: data.tipo_actividad,
@@ -150,7 +150,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
             is_completed: !!data.is_completed,
             prioridad: data.prioridad || 'Media'
         };
-        await updateActivity(initialData.id, payload);
+        await updateActivity(initialData.id, payload as Partial<LocalActivity>);
     };
 
     const { status: autoSaveStatus } = useFormAutoSave({

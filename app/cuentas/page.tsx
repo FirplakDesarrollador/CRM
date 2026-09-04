@@ -7,7 +7,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import React, { Suspense, useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { useLiveQuery } from "dexie-react-hooks";
-import { db } from "@/lib/db";
+import { db, LocalPais } from "@/lib/db";
 import { Plus, Search, Building, User, Pencil, Medal, Trash2, ArrowUpDown, ChevronUp, ChevronDown, MapPin, Briefcase, DollarSign, Globe } from "lucide-react";
 import { UserPickerFilter } from "@/components/cuentas/UserPickerFilter";
 import { AccountFilters } from "@/components/cuentas/AccountFilters";
@@ -104,7 +104,7 @@ function AccountsContent() {
 
     // Lookup countries for country column
     const countriesList = useLiveQuery(() => db.countries.toArray()) || [];
-    const [fallbackCountries, setFallbackCountries] = useState<any[]>([]);
+    const [fallbackCountries, setFallbackCountries] = useState<LocalPais[]>([]);
 
     useEffect(() => {
         if (countriesList.length === 0) {
@@ -142,7 +142,13 @@ function AccountsContent() {
     };
 
     // Filter Changes
-    const handleFilterChange = useCallback(({ channelId, subclassificationId, nivelPremium, startDate, endDate }: any) => {
+    const handleFilterChange = useCallback(({ channelId, subclassificationId, nivelPremium, startDate, endDate }: {
+        channelId: string | null;
+        subclassificationId: number | null;
+        nivelPremium: string | null;
+        startDate: string | null;
+        endDate: string | null;
+    }) => {
         setChannelFilter(channelId);
         setSubclassificationFilter(subclassificationId);
         setNivelPremiumFilter(nivelPremium);
@@ -192,7 +198,7 @@ function AccountsContent() {
         setWebFilter(source === 'web');
         if (sort) setSortField(sort);
         if (direction) setSortAsc(direction === 'asc');
-    }, [searchParams]);
+    }, [searchParams, setAssignedUserId, setChannelFilter, setEndDate, setNivelPremiumFilter, setSearchTerm, setSortAsc, setSortField, setStartDate, setSubclassificationFilter, setWebFilter]);
 
     // Restore the last list context when returning from navigation, but never reopen a record.
     useEffect(() => {
@@ -222,7 +228,7 @@ function AccountsContent() {
 
         const findAndOpen = async () => {
             // 1. Check if already in current list
-            const existing = accounts?.find((a: any) => a.id === id);
+            const existing = accounts?.find(a => a.id === id);
             if (existing) {
                 setEditingAccount(existing);
                 setShowCreate(false);
@@ -290,7 +296,7 @@ function AccountsContent() {
         return () => clearTimeout(timer);
     }, [inputValue, selectedUserId, currentChannel, currentSubclass, currentNivel, currentStartDate, currentEndDate, webFilter, sortField, sortAsc, editingAccount?.id, searchParams, setSearchTerm, router]);
 
-    const handleEdit = async (acc: any) => {
+    const handleEdit = async (acc: AccountServer) => {
         setEditingAccount(acc);
         setShowCreate(false);
         const params = new URLSearchParams(Array.from(searchParams.entries()));
@@ -314,7 +320,7 @@ function AccountsContent() {
         handleCloseEdit();
     };
 
-    const handleDelete = (e: React.MouseEvent, acc: any) => {
+    const handleDelete = (e: React.MouseEvent, acc: AccountServer) => {
         e.stopPropagation();
         setAccountToDelete(acc);
     };

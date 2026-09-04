@@ -174,7 +174,7 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
         }
 
         const ownerChanged = newOwnerId !== undefined && newOwnerId !== null && currentLocal?.owner_user_id !== newOwnerId;
-        let oppUpdates: LocalOportunidad[] = [];
+        const oppUpdates: LocalOportunidad[] = [];
 
         if (typeof window !== 'undefined' && navigator.onLine) {
             try {

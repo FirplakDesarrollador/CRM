@@ -3,11 +3,12 @@
 import React, { useEffect } from "react";
 import { X, Building2 } from "lucide-react";
 import { AccountForm } from "./AccountForm";
+import { LocalCuenta } from "@/lib/db";
 
 interface AccountModalProps {
     isOpen: boolean;
     onClose: () => void;
-    account: any;
+    account: LocalCuenta;
     onAccountUpdated?: () => void;
 }
 

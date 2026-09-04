@@ -124,7 +124,7 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                 const collabAccIds = collabOpps.filter(o => !o.is_deleted).map(o => o.account_id);
 
                 if (isVendedor && currentUserId) {
-                    localAccounts = localAccounts.filter((a: any) => 
+                    localAccounts = localAccounts.filter(a =>
                         a.owner_user_id === currentUserId || 
                         (!a.owner_user_id && a.created_by === currentUserId) ||
                         collabAccIds.includes(a.id)
