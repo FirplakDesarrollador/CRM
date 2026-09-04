@@ -1,4 +1,4 @@
-import { act } from 'react';
+import { act, useEffect } from 'react';
 import { createRoot, Root } from 'react-dom/client';
 import { Resolver, useForm, UseFormReturn } from 'react-hook-form';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -29,7 +29,9 @@ describe('useFormAutoSave', () => {
     it('does not cancel a one-change autosave when the inline callback changes on render', async () => {
         function Harness() {
             const form = useForm<TestForm>({ defaultValues: { nombre: '' } });
-            formApi = form;
+            useEffect(() => {
+                formApi = form;
+            }, [form]);
             useFormAutoSave({
                 form,
                 onSave: async data => {
@@ -58,7 +60,9 @@ describe('useFormAutoSave', () => {
 
         function Harness() {
             const form = useForm<TestForm>({ defaultValues: { nombre: '' } });
-            formApi = form;
+            useEffect(() => {
+                formApi = form;
+            }, [form]);
             const { status, errorMessage } = useFormAutoSave({
                 form,
                 onSave: async () => {
@@ -67,8 +71,10 @@ describe('useFormAutoSave', () => {
                 debounceMs: 100,
                 isEnabled: true
             });
-            statusResult = status;
-            errorResult = errorMessage ?? null;
+            useEffect(() => {
+                statusResult = status;
+                errorResult = errorMessage ?? null;
+            }, [status, errorMessage]);
             return null;
         }
 
@@ -108,15 +114,19 @@ describe('useFormAutoSave', () => {
                 defaultValues: { nombre: '' },
                 resolver
             });
-            formApi = form;
+            useEffect(() => {
+                formApi = form;
+            }, [form]);
             const { status, errorMessage } = useFormAutoSave({
                 form,
                 onSave: async () => {},
                 debounceMs: 100,
                 isEnabled: true
             });
-            statusResult = status;
-            errorResult = errorMessage ?? null;
+            useEffect(() => {
+                statusResult = status;
+                errorResult = errorMessage ?? null;
+            }, [status, errorMessage]);
             return null;
         }
 

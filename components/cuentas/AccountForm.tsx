@@ -57,7 +57,7 @@ type AccountFormData = z.infer<typeof accountSchema>;
 interface AccountFormProps {
     onSuccess: () => void;
     onCancel: () => void;
-    onDelete?: (account: any) => void;
+    onDelete?: (account: LocalCuenta) => void;
     account?: LocalCuenta; // Existing account to edit
 }
 

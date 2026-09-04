@@ -2,6 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getMicrosoftTokens, searchMicrosoftUsers } from '@/lib/microsoft';
 
+type MicrosoftDirectoryUser = {
+    id: string;
+    displayName: string;
+    mail: string | null;
+    userPrincipalName: string;
+    jobTitle: string;
+};
+
 export async function GET(req: NextRequest) {
     const searchParams = req.nextUrl.searchParams;
     const query = searchParams.get('q');
@@ -32,8 +40,8 @@ export async function GET(req: NextRequest) {
             try {
                 const { data } = await supabase.auth.getUser();
                 user = data?.user || null;
-            } catch (err: any) {
-                console.log('[API Users] Auth getUser error:', err?.message);
+            } catch (err: unknown) {
+                console.log('[API Users] Auth getUser error:', err instanceof Error ? err.message : err);
             }
         }
 
@@ -71,7 +79,7 @@ export async function GET(req: NextRequest) {
             }
         }
 
-        let users: any[] = [];
+        let users: MicrosoftDirectoryUser[] = [];
         if (tokens && tokens.access_token) {
             console.log('[API Users] Tokens obtained, searching users via Microsoft Graph...');
             try {
@@ -93,7 +101,7 @@ export async function GET(req: NextRequest) {
                 .limit(15);
 
             if (crmUsers && crmUsers.length > 0) {
-                users = crmUsers.map((u: any) => ({
+                users = crmUsers.map(u => ({
                     id: u.id,
                     displayName: u.full_name || u.email,
                     mail: u.email,
@@ -105,9 +113,9 @@ export async function GET(req: NextRequest) {
 
         console.log(`[API Users] Search complete. Returning ${users.length} users for query: ${query}`);
         return NextResponse.json(users);
-    } catch (error: any) {
+    } catch (error: unknown) {
         console.error('[API Users] Full error:', error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        return NextResponse.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
     }
 }
 

@@ -7,18 +7,17 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { FileText, Plus, AlertCircle, Check, Trash2, Loader2, Truck, Package, Building, ChevronRight, TrendingUp, User, Users, Copy } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
-import { db } from "@/lib/db";
+import { db, LocalCuenta } from "@/lib/db";
 import { ProbabilityDonut } from "@/components/ui/ProbabilityDonut";
 import { syncEngine } from "@/lib/sync";
 import { useLiveQuery } from "dexie-react-hooks";
-import { formatColombiaDate, isDateOverdue, toInputDate, parseColombiaDate } from "@/lib/date-utils";
+import { formatColombiaDate, isDateOverdue, toInputDate } from "@/lib/date-utils";
 import {
     Calendar as CalendarIcon,
     CheckCircle2,
     Circle,
     Clock,
     ListTodo,
-    Search as SearchIcon
 } from "lucide-react";
 import { useActivities, LocalActivity } from "@/lib/hooks/useActivities";
 import { CreateActivityModal } from "@/components/activities/CreateActivityModal";
@@ -1290,7 +1289,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                 <AccountModal
                     isOpen={isAccountModalOpen}
                     onClose={() => setIsAccountModalOpen(false)}
-                    account={effectiveAccount}
+                    account={effectiveAccount as LocalCuenta}
                 />
             )}
         </div>

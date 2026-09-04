@@ -38,6 +38,9 @@ import { CreateActivityModal } from '@/components/activities/CreateActivityModal
 import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { UserPickerFilter } from '@/components/cuentas/UserPickerFilter';
 
+type ActivityView = 'agenda' | 'month' | 'all';
+type ActivityStatus = 'all' | 'completed' | 'pending' | 'overdue';
+
 function ActivitiesContent() {
     const searchParams = useSearchParams();
     const router = useRouter();
@@ -70,12 +73,12 @@ function ActivitiesContent() {
     }, [classifications.length]);
 
     const [selectedDate, setSelectedDate] = useState(new Date());
-    const [view, setView] = useState<'agenda' | 'month' | 'all'>(() => {
+    const [view, setView] = useState<ActivityView>(() => {
         const fromUrl = searchParams.get('view');
-        if (fromUrl) return (fromUrl as any);
+        if (fromUrl) return fromUrl as ActivityView;
         if (typeof window !== 'undefined') {
             const saved = sessionStorage.getItem('crm_actividades_state');
-            if (saved) return (new URLSearchParams(saved).get('view') as any) || 'agenda';
+            if (saved) return (new URLSearchParams(saved).get('view') as ActivityView | null) || 'agenda';
         }
         return 'agenda';
     });
@@ -131,7 +134,7 @@ function ActivitiesContent() {
         }
         return "";
     });
-    const [filterStatus, setFilterStatus] = useState<"all" | "completed" | "pending" | "overdue">(() => {
+    const [filterStatus, setFilterStatus] = useState<ActivityStatus>(() => {
         const fromUrl = searchParams.get('status');
         if (fromUrl) return (fromUrl as any);
         if (typeof window !== 'undefined') {
@@ -209,11 +212,11 @@ function ActivitiesContent() {
         const type = searchParams.get('type') || saved.get('type') || '';
         const classification = searchParams.get('classification') || saved.get('classification') || '';
         const subclassification = searchParams.get('subclassification') || saved.get('subclassification') || '';
-        const status = (searchParams.get('status') || saved.get('status') || 'all') as any;
+        const status = (searchParams.get('status') || saved.get('status') || 'all') as ActivityStatus;
         const channel = searchParams.get('channel') || saved.get('channel') || '';
         const dateFrom = searchParams.get('dateFrom') || saved.get('dateFrom') || '';
         const dateTo = searchParams.get('dateTo') || saved.get('dateTo') || '';
-        const viewUrl = (searchParams.get('view') || saved.get('view') || 'agenda') as any;
+        const viewUrl = (searchParams.get('view') || saved.get('view') || 'agenda') as ActivityView;
 
         setFilterUser(user);
         setSearchQuery(search);

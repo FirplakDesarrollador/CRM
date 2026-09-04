@@ -4,13 +4,12 @@ import { useOpportunitiesServer } from "@/lib/hooks/useOpportunitiesServer";
 import { useInfiniteScroll } from "@/lib/hooks/useInfiniteScroll";
 import React, { useState, useEffect, useCallback, Suspense, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Plus, Search, Filter, Briefcase, ArrowUpDown, ChevronUp, ChevronDown, ChevronRight, Columns3, Check, MapPin, Globe } from "lucide-react";
+import { Plus, Search, Filter, Briefcase, ArrowUpDown, ChevronUp, ChevronDown, Columns3, Check } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/components/ui/utils";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { UserPickerFilter } from "@/components/cuentas/UserPickerFilter";
 import { OpportunityFilters } from "@/components/oportunidades/OpportunityFilters";
-import { formatColombiaDate, isDateOverdue } from "@/lib/date-utils";
 import { computeOpportunityActivitySummary } from "@/lib/opportunityActivities";
 import { supabase } from "@/lib/supabase";
 import { useLiveQuery } from "dexie-react-hooks";
@@ -65,7 +64,6 @@ function OpportunitiesContent() {
         setPhaseFilter,
         setStatusFilter,
         setOriginFilter,
-        originFilter,
         setStartDate,
         setEndDate,
         setStartClosingDate,
@@ -324,9 +322,6 @@ function OpportunitiesContent() {
     useEffect(() => {
         const params = new URLSearchParams(Array.from(searchParams.entries()));
         
-        if (inputValue) params.set('search', inputValue);
-        else params.delete('search');
-        
         if (tab && tab !== 'all') params.set('tab', tab);
         else params.delete('tab');
         
@@ -394,7 +389,18 @@ function OpportunitiesContent() {
         channelId, subclassificationId, segmentId, phaseId, statusFilter: newStatus,
         startDate: sD, endDate: eD, startClosingDate: sCD, endClosingDate: eCD,
         origin: oG
-    }: any) => {
+    }: {
+        channelId: string | null;
+        subclassificationId: number | null;
+        segmentId: number | null;
+        phaseId: number | null;
+        statusFilter: 'all' | 'open' | 'won' | 'lost';
+        startDate: string | null;
+        endDate: string | null;
+        startClosingDate: string | null;
+        endClosingDate: string | null;
+        origin: string | null;
+    }) => {
         setSelectedChannel(channelId);
         setSelectedSubclass(subclassificationId);
         setSelectedSegment(segmentId);
@@ -566,7 +572,7 @@ function OpportunitiesContent() {
     const ALL_COLUMN_DEFS: Record<string, any> = {
         cuenta: {
             data: 'cuenta', title: 'Cuenta', readOnly: true, width: colWidths['cuenta'] || 220, wordWrap: false,
-            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+            renderer(_: unknown, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 const v = value || '';
                 const safe = v.replace(/"/g, '&quot;');
                 td.innerHTML = `<div style="font-weight:600;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</div>`;
@@ -576,7 +582,7 @@ function OpportunitiesContent() {
         },
         pais: {
             data: 'pais', title: 'País', readOnly: true, width: colWidths['pais'] || 120, wordWrap: false,
-            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+            renderer(_: unknown, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 const v = value || 'Colombia';
                 const safe = v.replace(/"/g, '&quot;');
                 td.innerHTML = `<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;color:#334155;font-weight:500;" title="${safe}">${v}</div>`;
@@ -586,7 +592,7 @@ function OpportunitiesContent() {
         },
         ciudad: {
             data: 'ciudad', title: 'Ciudad', readOnly: true, width: colWidths['ciudad'] || 150, wordWrap: false,
-            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+            renderer(_: unknown, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 const v = value || 'Sin ciudad';
                 const safe = v.replace(/"/g, '&quot;');
                 td.innerHTML = `<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;color:#334155;" title="${safe}">${v}</div>`;
@@ -596,7 +602,7 @@ function OpportunitiesContent() {
         },
         canal: {
             data: 'canal', title: 'Canal', readOnly: true, width: colWidths['canal'] || 130, wordWrap: false,
-            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+            renderer(_: unknown, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 const v = value || '-';
                 const safe = v.replace(/"/g, '&quot;');
                 td.innerHTML = `<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;color:#475569;font-weight:500;" title="${safe}">${v}</div>`;
@@ -606,7 +612,7 @@ function OpportunitiesContent() {
         },
         nombre: {
             data: 'nombre', title: 'Oportunidad', readOnly: true, width: colWidths['nombre'] || 240, wordWrap: false,
-            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+            renderer(_: unknown, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 const v = value || '';
                 const safe = v.replace(/"/g, '&quot;');
                 td.innerHTML = `<div style="font-weight:600;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</div>`;
@@ -616,7 +622,7 @@ function OpportunitiesContent() {
         },
         actividades: {
             data: 'actividades', title: 'Actividad', readOnly: true, width: 155, wordWrap: false,
-            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+            renderer(_: unknown, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 const summary = (value && typeof value === 'object' && 'status' in value)
                     ? value
                     : { status: 'none', label: 'Sin actividad', overdue: 0, scheduled: 0, completed: 0, hasActivity: false };
@@ -650,7 +656,7 @@ function OpportunitiesContent() {
         },
         origen: {
             data: 'origen', title: 'Origen', readOnly: true, width: colWidths['origen'] || 140, wordWrap: false,
-            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+            renderer(_: unknown, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 const v = value || '-';
                 const safe = v.replace(/"/g, '&quot;');
                 td.innerHTML = `<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;color:#475569;" title="${safe}">${v}</div>`;
@@ -660,7 +666,7 @@ function OpportunitiesContent() {
         },
         fase: {
             data: 'fase', title: 'Fase', readOnly: true, width: colWidths['fase'] || 130, wordWrap: false,
-            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+            renderer(_: unknown, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 const f = (value || '').toLowerCase();
                 let bg = '#f1f5f9';
                 let c = '#475569';
@@ -676,7 +682,7 @@ function OpportunitiesContent() {
         },
         estado: {
             data: 'estado', title: 'Estado', readOnly: true, width: colWidths['estado'] || 110, wordWrap: false,
-            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+            renderer(_: unknown, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 const e = (value || '').toLowerCase();
                 let dot = '#94a3b8';
                 if (e.includes('abierta'))      dot = '#3b82f6';
@@ -688,14 +694,14 @@ function OpportunitiesContent() {
         },
         creada: {
             data: 'creada', title: 'Creada', readOnly: true, width: colWidths['creada'] || 105, wordWrap: false,
-            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+            renderer(_: unknown, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 td.innerHTML = `<span style="font-size:12.5px;color:#64748b;font-weight:500;font-variant-numeric:tabular-nums;">${value || '-'}</span>`;
                 return td;
             }
         },
         valor: {
             data: 'valor', title: 'Valor', readOnly: true, width: colWidths['valor'] || 130, wordWrap: false,
-            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+            renderer(_: unknown, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 const num = Number(value) || 0;
                 const fmt = new Intl.NumberFormat('es-CO', { style:'currency', currency:'COP', minimumFractionDigits:0, notation: num >= 1_000_000 ? 'compact' : 'standard', compactDisplay:'short' }).format(num);
                 td.innerHTML = `<span style="font-weight:700;color:#0f172a;font-size:13px;font-variant-numeric:tabular-nums;letter-spacing:-0.01em;">${fmt}</span>`;

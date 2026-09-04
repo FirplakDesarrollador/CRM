@@ -57,7 +57,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
 
     // Filters
     const [searchTerm, setSearchTerm] = useState<string>(() => getInitialParam('search') || "");
-    const [userFilter, setUserFilter] = useState<'mine' | 'team' | 'collab' | 'all' | 'unrestricted' | 'web'>(() => (getInitialParam('tab') as any) || 'all');
+    const [userFilter, setUserFilter] = useState<'mine' | 'team' | 'collab' | 'all' | 'unrestricted' | 'web'>(() => (getInitialParam('tab') as 'mine' | 'team' | 'collab' | 'all' | 'unrestricted' | 'web' | null) || 'all');
     const [accountOwnerIds, setAccountOwnerIds] = useState<string[]>(() => {
         const owner = getInitialParam('owner');
         return owner ? owner.split(',').filter(Boolean) : [];
@@ -77,7 +77,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
         const val = getInitialParam('phase');
         return val ? Number(val) : null;
     });
-    const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => (getInitialParam('status') as any) || 'open');
+    const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => (getInitialParam('status') as StatusFilter | null) || 'open');
     const [originFilter, setOriginFilter] = useState<string | null>(() => getInitialParam('origin'));
     const [accountIdFilter, setAccountIdFilter] = useState<string | null>(null);
 

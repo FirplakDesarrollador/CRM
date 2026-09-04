@@ -8,21 +8,18 @@ import {
     ChevronRight, 
     ChevronsLeft, 
     ChevronsRight, 
-    ChevronsUpDown, 
     Copy, 
     Check, 
     Filter, 
     Layers, 
-    ListFilter, 
     Loader2, 
     Palette, 
     Search, 
-    SlidersHorizontal 
 } from "lucide-react";
-import { useFullCatalog, useProductFilterOptions, PriceListProduct } from "@/lib/hooks/useProducts";
+import { useFullCatalog, useProductFilterOptions } from "@/lib/hooks/useProducts";
 import { useInventorySummary } from "@/lib/hooks/useInventory";
 import { matchesSearchTokens } from "@/lib/utils";
-import { groupProductsByColor, GroupedCatalogProduct, ProductColorVariant } from "@/lib/productGrouping";
+import { groupProductsByColor } from "@/lib/productGrouping";
 
 const money = new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 });
 

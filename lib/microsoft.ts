@@ -115,7 +115,15 @@ export async function refreshMicrosoftToken(userId: string, refreshToken: string
     return data;
 }
 
-export async function storeMicrosoftTokens(userId: string, tokenData: any, supabaseClient = supabase) {
+type MicrosoftTokenData = {
+    access_token: string;
+    refresh_token?: string;
+    id_token?: string;
+    expires_in: number;
+    scope?: string;
+};
+
+export async function storeMicrosoftTokens(userId: string, tokenData: MicrosoftTokenData, supabaseClient = supabase) {
     const { access_token, refresh_token, id_token, expires_in, scope } = tokenData;
     const expiresAt = new Date(Date.now() + expires_in * 1000).toISOString();
 
