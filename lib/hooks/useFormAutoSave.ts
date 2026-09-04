@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { FieldValues, UseFormReturn } from "react-hook-form";
+import { FieldErrors, FieldValues, UseFormReturn } from "react-hook-form";
 
 interface AutoSaveConfig<T extends FieldValues, TContext = unknown, TTransformedValues = unknown> {
     form: UseFormReturn<T, TContext, TTransformedValues>;
@@ -65,7 +65,10 @@ export function useFormAutoSave<T extends FieldValues, TContext = unknown, TTran
                         setErrorMessage(err instanceof Error ? err.message : String(err));
                     }
                 } else {
-                    const currentErrors = (form as any).control?._formState?.errors || form.formState.errors || {};
+                    const controlWithState = form.control as typeof form.control & {
+                        _formState?: { errors?: FieldErrors<T> };
+                    };
+                    const currentErrors = controlWithState._formState?.errors ?? form.formState.errors;
                     const errorKeys = Object.keys(currentErrors);
                     let firstErrorMessage = "";
                     if (errorKeys.length > 0) {

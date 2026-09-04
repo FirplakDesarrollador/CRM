@@ -12,5 +12,6 @@ La memoria historica detallada continua en `bugs-knowhow.md`. Esta vista conecta
 | Supresiones, errores de tipos ignorados y pruebas debilitadas | `next.config.mjs`; fuentes con supresiones heredadas | Transversal | `safe-change-policy`, `type-ratchet`, `lint-ratchet` | Proteccion monotona; deuda heredada declarada |
 | Violacion de Rules of Hooks (hooks bajo retornos condicionales que rompen orden de llamada) | `bugs-knowhow.md` Bug 20260903-01; `app/contactos/page.tsx` | Transversal / R3 | `safe-change-policy` (auditoria estricta de `react-hooks/rules-of-hooks`) | VERIFIED; 0 violaciones en 136 componentes |
 | Migraciones locales ausentes del control de versiones | `supabase/migrations/`; `.gitignore` | R1-R8 | `migration-static` | BROKEN: 22 archivos locales no versionados bloquean `qa:gate` |
+| Campos editables aceptados localmente pero ausentes del esquema remoto o descartados por el pull | `bugs-knowhow.md` Bug 20260904-01; `docs/failures/2026-09-04-INC-2026-009.md`; `lib/persistence-contracts.test.ts` | R2, R3, R4 | `product-tests`, `migration-static` | VERIFIED enfocado: contrato RED/GREEN de columnas y mapeos |
 
 Una regresion nueva se registra con `npm run qa:incident`. La nota debe identificar la prueba RED, la etapa que la ejecuta y la evidencia GREEN.

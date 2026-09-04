@@ -14,7 +14,7 @@ export interface ExportColumn<T> {
 /**
  * Helper to download an array of objects to Excel
  */
-export const downloadExcel = async <T extends Record<string, any>>(
+export const downloadExcel = async <T extends object>(
   data: T[], 
   columns: ExportColumn<T>[], 
   filename: string, 
@@ -48,7 +48,7 @@ export const downloadExcel = async <T extends Record<string, any>>(
 /**
  * Helper to download an array of objects to CSV
  */
-export const downloadCSV = <T extends Record<string, any>>(
+export const downloadCSV = <T extends object>(
   data: T[], 
   columns: ExportColumn<T>[], 
   filename: string
@@ -403,7 +403,7 @@ export function mapOpportunityReportRow(
   item: any,
   lookups: OpportunityFlattenLookups
 ) {
-  const getJoinedSingle = (rel: any) => Array.isArray(rel) ? rel[0] : rel;
+  const getJoinedSingle = <T>(rel: T | T[]) => Array.isArray(rel) ? rel[0] : rel;
   const cuentaObj = getJoinedSingle(item.cuenta);
   const faseObj = getJoinedSingle(item.fase);
   const estadoObj = getJoinedSingle(item.estado_info);
@@ -439,7 +439,7 @@ export function mapActivityReportRow(
   item: any,
   lookups: ActivityFlattenLookups
 ) {
-  const getJoinedSingle = (rel: any) => Array.isArray(rel) ? rel[0] : rel;
+  const getJoinedSingle = <T>(rel: T | T[]) => Array.isArray(rel) ? rel[0] : rel;
   const cuentaObj = getJoinedSingle(item.cuenta);
   const oppObj = getJoinedSingle(item.oportunidad);
   const oppCuentaObj = oppObj ? getJoinedSingle(oppObj.cuenta) : null;

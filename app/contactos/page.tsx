@@ -46,7 +46,7 @@ function ContactsContent() {
         onLoadMore: loadMore,
     });
 
-    const { isAdmin, user } = useCurrentUser();
+    const { user } = useCurrentUser();
     const { accounts } = useAccounts();
     const { deleteContact } = useContacts();
 
@@ -257,7 +257,7 @@ function ContactsContent() {
         setInputValue(search);
         if (sort) setSortField(sort);
         if (direction) setSortAsc(direction === 'asc');
-    }, [searchParams]);
+    }, [searchParams, setAccountFilter, setPrincipalFilter, setSortAsc, setSortField]);
 
     // Handle Edit
     const handleEdit = (contact: any) => {

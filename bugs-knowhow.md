@@ -1235,3 +1235,51 @@ Nunca colocar llamadas a Hooks (`use*`, `useState`, `useEffect`, `useCallback`, 
 Tags:
 [react] [rules-of-hooks] [client-side-exception] [contacts] [conditional-return] [handsontable-col-widths]
 
+---
+
+## [Bug ID: 20260904-01]
+
+Context:
+Persistencia offline-first de campos editables en `CRM_Cuentas`,
+`CRM_Contactos`, `CRM_Cotizaciones` y `CRM_Pedidos`; mapeos de pull en
+`lib/sync.ts` y esquema Supabase/PostgreSQL.
+
+Problem:
+1. Los comentarios de contactos y cotizaciones parecian guardarse, pero no
+   sobrevivian la sincronizacion ni estaban disponibles en otro dispositivo.
+2. `email_contacto`, `tiene_escaleras`, `planos_hidromasaje` y `fecha_entrega`
+   de pedidos solo persistian en IndexedDB.
+3. Los campos F-V-29 copiados a la cotizacion no existian remotamente.
+4. El pull eliminaba de la copia local `origen_cuenta` y campos validos de
+   cotizaciones, incluidos identificadores SAP y datos de facturacion.
+
+Root Cause:
+1. Los formularios y tipos locales incorporaron campos sin que el esquema real
+   recibiera todas las columnas correspondientes.
+2. El RPC de snapshots omite claves desconocidas y puede confirmar el resto del
+   snapshot, creando una perdida silenciosa.
+3. Los pulls usaban allowlists manuales que quedaron obsoletas. Al aplicar
+   `bulkPut`, Dexie reemplazaba el objeto local completo por esa proyeccion.
+
+Fix Applied:
+1. Se creo la migracion append-only
+   `20260904193842_persist_crm_editable_fields.sql` con las columnas faltantes
+   para contactos, cotizaciones y pedidos.
+2. El pull de cuentas conserva `origen_cuenta` y el de contactos conserva
+   `comentarios`.
+3. El pull de cotizaciones conserva el registro remoto completo para que nuevas
+   columnas no desaparezcan de IndexedDB.
+4. `lib/persistence-contracts.test.ts` verifica permanentemente la migracion y
+   los mapeos. La suite fallo RED en 3/3 casos antes del cambio y paso GREEN en
+   3/3 despues.
+
+Prevention Rule:
+**Editable Field End-to-End Contract**: Todo campo editable debe existir en el
+formulario/tipo local, payload de push, esquema PostgreSQL y mapeo de pull. Los
+pulls de entidades extensibles deben conservar el registro remoto completo o
+tener una prueba que obligue a actualizar su allowlist. Una mutacion no puede
+considerarse validada solo porque el RPC acepte el resto del snapshot.
+
+Tags:
+[sync] [dexie] [supabase] [schema-drift] [contacts] [quotes] [orders] [data-loss]
+
