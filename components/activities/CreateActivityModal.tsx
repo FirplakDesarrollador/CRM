@@ -6,7 +6,7 @@ import { CalendarClock, ListTodo, Loader2, Users, Search, X, Video, Plus, CheckC
 import { useLiveQuery } from "dexie-react-hooks";
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { cn } from "@/components/ui/utils";
-import { toInputDate, toInputDateTime } from "@/lib/date-utils";
+import { toInputDate, toInputDateTime, parseColombiaDate } from "@/lib/date-utils";
 import { db, LocalActivity, LocalActivityClassification, LocalActivitySubclassification } from "@/lib/db";
 import { syncEngine } from "@/lib/sync";
 import { supabase } from "@/lib/supabase";
@@ -131,6 +131,12 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         return currentTipo === 'TAREA' ? 'Nueva Tarea' : 'Nuevo Evento';
     }, [classifications, getValues, relatedOpportunity, relatedAccount, resolvedAccountName]);
 
+    const safeToISO = (val?: string | Date | null) => {
+        if (!val) return null;
+        const parsed = parseColombiaDate(val);
+        return parsed ? parsed.toISOString() : null;
+    };
+
     const onAutoSave = async (data: any) => {
         if (!isEditing || !initialData?.id) return;
         const autoAsunto = data.asunto?.trim() || getAutoAsunto(data.clasificacion_id, data.opportunity_id, data.account_id);
@@ -143,8 +149,8 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
             tipo_actividad: data.tipo_actividad,
             clasificacion_id: data.clasificacion_id ? Number(data.clasificacion_id) : null,
             subclasificacion_id: data.subclasificacion_id ? Number(data.subclasificacion_id) : null,
-            fecha_inicio: data.fecha_inicio ? new Date(data.fecha_inicio).toISOString() : null,
-            fecha_fin: data.fecha_fin ? new Date(data.fecha_fin).toISOString() : null,
+            fecha_inicio: safeToISO(data.fecha_inicio),
+            fecha_fin: safeToISO(data.fecha_fin),
             opportunity_id: data.opportunity_id || null,
             account_id: data.account_id || null,
             is_completed: !!data.is_completed,
@@ -153,7 +159,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         await updateActivity(initialData.id, payload as Partial<LocalActivity>);
     };
 
-    const { status: autoSaveStatus } = useFormAutoSave({
+    const { status: autoSaveStatus, errorMessage: autoSaveErrorMessage } = useFormAutoSave({
         form,
         onSave: onAutoSave,
         isEnabled: isEditing
@@ -1999,7 +2005,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                     <div className="flex justify-end items-center gap-3 pt-6 mt-auto border-t border-slate-100 bg-white shrink-0 sticky bottom-0">
                         {isEditing ? (
                             <>
-                                <AutoSaveIndicator status={autoSaveStatus} />
+                                <AutoSaveIndicator status={autoSaveStatus} errorMessage={autoSaveErrorMessage} />
                                 <button
                                     type="button"
                                     onClick={onClose}
