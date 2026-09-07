@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState, useMemo } from 'react';
+import { Suspense, useEffect, useState, useMemo, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useActivities, LocalActivity } from '@/lib/hooks/useActivities';
 import { useInfiniteScroll } from '@/lib/hooks/useInfiniteScroll';
@@ -304,21 +304,56 @@ function ActivitiesContent() {
 
 
 
-    // Deep linking: detect id in URL and open edit modal
+    const lastProcessedUrlIdRef = useRef<string | null>(null);
+
+    const openActivityModal = (act: LocalActivity) => {
+        setSelectedActivity(act);
+        setIsModalOpen(true);
+        lastProcessedUrlIdRef.current = act.id;
+        const params = new URLSearchParams(Array.from(searchParams.entries()));
+        params.set('id', act.id);
+        const query = params.toString() ? `?${params.toString()}` : window.location.pathname;
+        router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
+    };
+
+    const closeActivityModal = () => {
+        setIsModalOpen(false);
+        setSelectedActivity(null);
+        lastProcessedUrlIdRef.current = null;
+        const params = new URLSearchParams(Array.from(searchParams.entries()));
+        params.delete('id');
+        const query = params.toString() ? `?${params.toString()}` : window.location.pathname;
+        router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
+    };
+
+    // Deep linking: detect id in URL and open edit modal without auto-closing during live updates
     useEffect(() => {
         const id = searchParams.get('id');
+
+        if (!id) {
+            if (lastProcessedUrlIdRef.current !== null) {
+                lastProcessedUrlIdRef.current = null;
+                setIsModalOpen(false);
+                setSelectedActivity(null);
+            }
+            return;
+        }
+
+        if (id === lastProcessedUrlIdRef.current && isModalOpen) {
+            return;
+        }
+
         if (id && activities) {
             const act = activities.find(a => a.id === id);
             if (act) {
+                lastProcessedUrlIdRef.current = id;
                 setSelectedDate(new Date(act.fecha_inicio));
                 setSelectedActivity(act);
                 setIsModalOpen(true);
             }
-        } else if (!id) {
-            setIsModalOpen(false);
-            setSelectedActivity(null);
         }
-    }, [searchParams, activities]);
+    }, [searchParams, activities, isModalOpen]);
+
 
 
 
@@ -914,10 +949,7 @@ function ActivitiesContent() {
                                                                 ? "border-emerald-200 hover:border-emerald-300 hover:shadow-emerald-100"
                                                                 : "border-blue-200 hover:border-blue-300 hover:shadow-blue-100"
                                                 )}
-                                                onClick={() => {
-                                                    setSelectedActivity(act);
-                                                    setIsModalOpen(true);
-                                                }}
+                                                onClick={() => openActivityModal(act)}
                                             >
                                                 <div className="flex items-start gap-4">
                                                     <button
@@ -1104,8 +1136,9 @@ function ActivitiesContent() {
                                                             return (
                                                                 <div key={act.id} className="flex gap-1 group/act">
                                                                     <div
+                                                                        onClick={() => openActivityModal(act)}
                                                                         className={cn(
-                                                                            "text-[9px] px-1 py-0.5 rounded truncate font-medium border-l-2 flex-1",
+                                                                            "text-[9px] px-1 py-0.5 rounded truncate font-medium border-l-2 flex-1 cursor-pointer",
                                                                             act.is_completed
                                                                                 ? "bg-slate-50 text-slate-400 border-slate-300 line-through"
                                                                                 : isOverdueAct
@@ -1158,15 +1191,18 @@ function ActivitiesContent() {
                                                                     const cName = classifications.find(c => String(c.id) === String(act.clasificacion_id))?.nombre;
 
                                                                     return (
-                                                                        <div key={act.id} className={cn(
-                                                                            "relative group/tip flex items-center gap-2 p-1.5 rounded border-l-2 transition-all hover:bg-slate-50",
-                                                                            act.is_completed
-                                                                                ? "bg-slate-50/50 text-slate-400 border-slate-300"
-                                                                                : isOverdueAct
-                                                                                    ? "bg-red-50 text-red-800 border-red-400"
-                                                                                    : act.tipo_actividad === 'TAREA'
-                                                                                        ? "bg-emerald-50 text-emerald-800 border-emerald-400"
-                                                                                        : "bg-blue-50 text-blue-800 border-blue-400"
+                                                                        <div 
+                                                                            key={act.id} 
+                                                                            onClick={() => openActivityModal(act)}
+                                                                            className={cn(
+                                                                                "relative group/tip flex items-center gap-2 p-1.5 rounded border-l-2 transition-all hover:bg-slate-50 cursor-pointer",
+                                                                                act.is_completed
+                                                                                    ? "bg-slate-50/50 text-slate-400 border-slate-300"
+                                                                                    : isOverdueAct
+                                                                                        ? "bg-red-50 text-red-800 border-red-400"
+                                                                                        : act.tipo_actividad === 'TAREA'
+                                                                                            ? "bg-emerald-50 text-emerald-800 border-emerald-400"
+                                                                                            : "bg-blue-50 text-blue-800 border-blue-400"
                                                                         )}>
                                                                             <div className="flex-1 min-w-0">
                                                                                 <div className="font-medium truncate">{act.asunto}</div>
@@ -1222,15 +1258,7 @@ function ActivitiesContent() {
             {/* Modal for Creating Activity */}
             {isModalOpen && (
                 <CreateActivityModal
-                    onClose={() => {
-                        setIsModalOpen(false);
-                        setSelectedActivity(null);
-                        // Clear URL parameter to prevent modal from reopening while preserving filters
-                        const params = new URLSearchParams(Array.from(searchParams.entries()));
-                        params.delete('id');
-                        const query = params.toString() ? `?${params.toString()}` : window.location.pathname;
-                        router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
-                    }}
+                    onClose={closeActivityModal}
                     onSubmit={async (data: any) => {
                         console.log("[ActivitiesPage] Modal Submitted Data:", data);
                         if (selectedActivity) {
@@ -1240,12 +1268,7 @@ function ActivitiesContent() {
                             console.log("[ActivitiesPage] Calling createActivity");
                             await createActivity(data);
                         }
-                        setIsModalOpen(false);
-                        setSelectedActivity(null);
-                        const params = new URLSearchParams(Array.from(searchParams.entries()));
-                        params.delete('id');
-                        const query = params.toString() ? `?${params.toString()}` : window.location.pathname;
-                        router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
+                        closeActivityModal();
                     }}
                     initialData={selectedActivity}
                 />

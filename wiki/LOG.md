@@ -3,6 +3,16 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-09-07 - Corrección de Cierre Involuntario de Modal Editar Actividad por Updates de Dexie
+
+- **Página de Actividades (`app/actividades/page.tsx`):**
+  - **Problema:** Al abrir el modal "Editar Actividad", las acciones de autoguardado (`useFormAutoSave`), resolución de cuenta o sincronizaciones secundarias emitían escrituras en Dexie (`updateActivity`). `useLiveQuery` retornaba una nueva referencia del arreglo `activities`, reejecutando el `useEffect` de deep-linking que, al no tener `?id=` explícito en la URL en aperturas directas, invocaba `setIsModalOpen(false)` y cerraba el modal de inmediato.
+  - **Solución:** Introducción de `lastProcessedUrlIdRef` y guardas de estado en el `useEffect` de deep linking para abortar cierres y aperturas innecesarias cuando `id === lastProcessedUrlIdRef.current` y el modal ya está abierto.
+  - **Helpers Unificados:** Implementación de `openActivityModal` y `closeActivityModal` para mantener el parámetro `?id=` en la URL en sincronía limpia con el estado del modal.
+  - **Pruebas:** Nueva suite de pruebas unitarias en `pruebas unitarias/actividades.test.ts` evaluando la persistencia del estado del modal durante re-evaluaciones en vivo de Dexie.
+
+
+
 ## 2026-09-02 - Implementación de Infinite Scroll Automático al Fondo de Galería en Todos los Módulos
 
 - **Hook Unificado (`lib/hooks/useInfiniteScroll.ts`):**

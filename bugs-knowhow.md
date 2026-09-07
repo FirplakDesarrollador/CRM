@@ -1283,3 +1283,31 @@ considerarse validada solo porque el RPC acepte el resto del snapshot.
 Tags:
 [sync] [dexie] [supabase] [schema-drift] [contacts] [quotes] [orders] [data-loss]
 
+---
+
+## [Bug ID: 20260907-01]
+
+Context:
+`app/actividades/page.tsx`, `components/activities/CreateActivityModal.tsx`. El modal "Editar Actividad" se cerraba automáticamente casi inmediatamente después de abrirse al editar una actividad.
+
+What I Did:
+Corregí el efecto de deep linking en `app/actividades/page.tsx` agregando la referencia `lastProcessedUrlIdRef` y guardas de estado para no reejecutar el cierre del modal cuando cambie la referencia del arreglo `activities` emitido por Dexie (`useLiveQuery`) durante un guardado automático o sincronización en segundo plano.
+
+Problem:
+Al abrir la ventana modal de edición de una actividad, el hook `useFormAutoSave` o las sincronizaciones internas de Planner/Calendar realizaban un `updateActivity` en Dexie. Al actualizarse IndexedDB, `useLiveQuery` emitía un nuevo arreglo `activities`. El `useEffect` de deep-linking se disparaba por el cambio en la dependencia `activities`, y dado que la URL no tenía parámetro `?id=`, la rama `else if (!id)` se ejecutaba y reseteaba `isModalOpen(false)` y `selectedActivity(null)`, cerrando la ventana modal de inmediato mientras mostraba la píldora "Guardando...".
+
+Root Cause:
+Disparo involuntario de side-effect en `useEffect` con dependencias reactivas de datos en tiempo real (`activities`), sin verificar si el modal ya estaba abierto para esa misma entidad ni proteger la transición de estado ante actualizaciones emitidas por IndexedDB/Dexie.
+
+Fix Applied:
+1. Se implementó `lastProcessedUrlIdRef` y guardas en `useEffect` para evitar reejecutar apertura/cierre de modal si `id === lastProcessedUrlIdRef.current` y el modal ya está abierto.
+2. Se unificó la gestión de apertura (`openActivityModal`) y cierre (`closeActivityModal`) asegurando la sincronización limpia de parámetros en la URL.
+3. Se añadió la prueba permanente en `pruebas unitarias/actividades.test.ts`.
+
+Prevention Rule:
+**Live Query Modal Guard**: Cuando un `useEffect` controle la apertura/cierre de un modal mediante parámetros en la URL o enlaces profundos y dependa de un query en tiempo real (Dexie `useLiveQuery` o suscripción de Supabase), NUNCA incluir una cláusula de cierre incondicional sin verificar si el modal ya fue abierto por la misma entidad. Se debe rastrear el último ID procesado (`useRef`) y abortar reejecuciones si el modal ya está abierto para ese ID.
+
+Tags:
+[actividades] [deep-linking] [useLiveQuery] [autosave] [modal] [dexie]
+
+

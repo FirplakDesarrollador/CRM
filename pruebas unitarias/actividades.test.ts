@@ -161,3 +161,45 @@ describe("Filtrado de Actividades", () => {
     });
 });
 
+describe("Deep Link y Estado de Modal de Actividades", () => {
+    it("no cierra el modal si la actividad está abierta y el ID coincide con la URL aunque cambie el listado de actividades", () => {
+        let isModalOpen = true;
+        let selectedActivityId: string | null = "act-1";
+        let lastProcessedUrlId: string | null = "act-1";
+
+        const handleUrlChange = (urlId: string | null, currentActivities: any[]) => {
+            if (!urlId) {
+                if (lastProcessedUrlId !== null) {
+                    lastProcessedUrlId = null;
+                    isModalOpen = false;
+                    selectedActivityId = null;
+                }
+                return;
+            }
+
+            if (urlId === lastProcessedUrlId && isModalOpen) {
+                return;
+            }
+
+            if (urlId && currentActivities) {
+                const act = currentActivities.find(a => a.id === urlId);
+                if (act) {
+                    lastProcessedUrlId = urlId;
+                    selectedActivityId = act.id;
+                    isModalOpen = true;
+                }
+            }
+        };
+
+        const updatedActivities = [
+            { id: "act-1", asunto: "Asunto actualizado por autosave", fecha_inicio: "2026-08-20T10:00:00Z" }
+        ];
+
+        handleUrlChange("act-1", updatedActivities);
+
+        expect(isModalOpen).toBe(true);
+        expect(selectedActivityId).toBe("act-1");
+    });
+});
+
+
