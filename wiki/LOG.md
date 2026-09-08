@@ -3,6 +3,14 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-09-08 - Corrección de Reseteo Involuntario y Pérdida de Datos al Guardar Cuentas (`AccountForm.tsx`)
+
+- **Edición de Cuentas (`components/cuentas/AccountForm.tsx`):**
+  - **Problema:** Al presionar "Guardar Cambios" o autoguardar, `onSubmit` invocaba `reset(data)`, cambiando el estado del formulario a `isDirty = false`. Esto disparaba inmediatamente el `useEffect` de sincronización con la propiedad `account`, el cual ejecutaba un nuevo `reset` utilizando el objeto `account` desactualizado del componente padre, borrando en pantalla los campos recién guardados (`telefono`, `email`, `comentarios`).
+  - **Solución:** Implementación de referencias `lastSyncedAccountIdRef` y `lastSyncedUpdatedAtRef` que rastrean el ID y fecha del último guardado. El `useEffect` sólo resetea el formulario si la propiedad `account` corresponde a una cuenta distinta o si contiene un timestamp genuinamente más reciente recibido del servidor.
+  - **Pruebas:** Creada suite de prueba `tests/accountFormReset.test.ts` (**VERIFIED / GREEN**).
+  - **Páginas actualizadas:** `wiki/pages/cuentas.md`.
+
 ## 2026-09-08 - Reemplazo de Alerta Nativa por Modal Informativo de Cuentas Duplicadas (`DuplicateAccountModal`)
 
 - **Creación y Edición de Cuentas (`CreateAccountWizard.tsx`, `AccountForm.tsx`):**

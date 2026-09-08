@@ -6,7 +6,7 @@ import * as z from "zod";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, LocalCuenta } from "@/lib/db";
 import { useAccounts } from "@/lib/hooks/useAccounts";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Loader2, User, Building2, Medal, Trash2, Check } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useFormDraft } from "@/lib/hooks/useFormDraft";
@@ -238,6 +238,9 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
 
     const { clearDraft } = useFormDraft(form, 'crm_draft_account', !account);
 
+    const lastSyncedAccountIdRef = useRef<string | null>(account?.id || null);
+    const lastSyncedUpdatedAtRef = useRef<string | null>(account?.updated_at || null);
+
     const onAutoSave = async (data: AccountFormData) => {
         if (!account?.id) return;
         const payload: any = {
@@ -260,6 +263,8 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
             origen_cuenta: data.origen_cuenta || null
         };
         await updateAccount(account.id, payload);
+        lastSyncedAccountIdRef.current = account.id;
+        lastSyncedUpdatedAtRef.current = payload.updated_at || new Date().toISOString();
     };
 
     const { status: autoSaveStatus, errorMessage: autoSaveError } = useFormAutoSave({
@@ -268,10 +273,21 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
         isEnabled: !!account?.id
     });
 
-    // Update form when account changes (ONLY if not modified by user to avoid overwriting)
+    // Update form when account prop changes from outside (e.g. user selects a different account or fresh remote version)
     useEffect(() => {
-        if (account && !isDirty) {
-            console.log('[AccountForm] DEBUG - Syncing form with fresh account data (not dirty)');
+        if (!account) return;
+
+        const isNewAccount = account.id !== lastSyncedAccountIdRef.current;
+        const isNewerExternalVersion = Boolean(
+            account.updated_at &&
+            lastSyncedUpdatedAtRef.current &&
+            new Date(account.updated_at).getTime() > new Date(lastSyncedUpdatedAtRef.current).getTime()
+        );
+
+        if ((isNewAccount || isNewerExternalVersion) && !isDirty) {
+            console.log('[AccountForm] DEBUG - Syncing form with fresh account data from prop');
+            lastSyncedAccountIdRef.current = account.id;
+            lastSyncedUpdatedAtRef.current = account.updated_at || null;
             reset({
                 nombre: account.nombre || "",
                 nit_base: account.nit_base || "",
@@ -291,7 +307,7 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
                 ignorar_limites_descuento: account.ignorar_limites_descuento || false,
                 comentarios: account.comentarios || "",
                 origen_cuenta: (account as any)?.origen_cuenta || ""
-            }, { keepDefaultValues: true });
+            });
         }
     }, [account, reset, isDirty]);
 
@@ -461,6 +477,8 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
             if (account?.id) {
                 console.log('[AccountForm] DEBUG - Calling updateAccount with id:', account.id);
                 await updateAccount(account.id, payload);
+                lastSyncedAccountIdRef.current = account.id;
+                lastSyncedUpdatedAtRef.current = new Date().toISOString();
                 reset(data);
                 setManualSaveSuccess(true);
                 setTimeout(() => setManualSaveSuccess(false), 4000);

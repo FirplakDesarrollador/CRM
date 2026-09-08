@@ -31,7 +31,7 @@ que determina su lista de precios.
 - Detalle con pestañas: contactos, oportunidades, actividades, sucursales (branches) y
   asignados (`components/cuentas/Account*Tab.tsx`). La reasignación de responsable desde la cuenta matriz reasigna automáticamente en cascada todas sus oportunidades vinculadas en un traspaso directo. La reasignación desde una oportunidad individual aplica únicamente a esa oportunidad.
 - Formulario `AccountForm` con pestañas (usa `shouldUnregister: false` — ver
-  `bugs-knowhow.md` §1) y botón de eliminación visible en el encabezado y en los footers de todas las pestañas.
+  `bugs-knowhow.md` §1) y botón de eliminación visible en el encabezado y en los footers de todas las pestañas. Utiliza `lastSyncedAccountIdRef` y `lastSyncedUpdatedAtRef` para garantizar que el `useEffect` de sincronización con la propiedad `account` no sobreescriba los cambios guardados tras el submit (`isDirty = false`).
 - Carga masiva de cuentas: `BulkAccountUploader` + API `app/api/bulk-accounts`.
 - Borrado (`delete_account` / `AccountDeleteModal`): funcionalidad restringida estrictamente a usuarios con rol `ADMIN` (`isAdmin`), con modal de confirmación que permite borrado en cascada de la cuenta junto con sus contactos y oportunidades asociadas (además de permitir borrado individual de registros relacionados).
 
