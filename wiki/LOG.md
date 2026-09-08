@@ -3,6 +3,14 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-09-08 - Reemplazo de Alerta Nativa por Modal Informativo de Cuentas Duplicadas (`DuplicateAccountModal`)
+
+- **Creación y Edición de Cuentas (`CreateAccountWizard.tsx`, `AccountForm.tsx`):**
+  - **Cambio:** Se eliminó el uso de la alerta nativa del navegador (`alert(...)`) cuando se intenta registrar o editar una cuenta cuyo NIT, Razón Social, Teléfono o Email coincide con un registro existente en la base de datos central.
+  - **Nuevo Componente:** Se introdujo `DuplicateAccountModal.tsx`, que consulta los datos ampliados de la cuenta coincidente (Razón Social, NIT, Canal) y recupera la información del **Asesor Propietario actual (`full_name` y `email`)** desde `CRM_Usuarios`.
+  - **Experiencia de Usuario:** Despliega una interfaz modal clara e informativa con tarjetas de coincidencia y una explicación sobre las reglas de visibilidad por rol y propietario.
+  - **Páginas actualizadas:** `wiki/pages/cuentas.md`.
+
 ## 2026-09-07 - Corrección de Cierre Involuntario de Modal Editar Actividad por Updates de Dexie
 
 - **Página de Actividades (`app/actividades/page.tsx`):**

@@ -23,6 +23,7 @@ import { ListTodo } from "lucide-react";
 import { useFormAutoSave } from "@/lib/hooks/useFormAutoSave";
 import { AutoSaveIndicator } from "@/components/ui/AutoSaveIndicator";
 import { isProvisionalNit } from "@/lib/nitUtils";
+import { DuplicateAccountModal, type DuplicateAccountInfo } from "./DuplicateAccountModal";
 
 // Schema
 const accountSchema = z.object({
@@ -78,6 +79,8 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
 
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [assignedUserName, setAssignedUserName] = useState<string | null>(null);
+    const [duplicateModalData, setDuplicateModalData] = useState<DuplicateAccountInfo[]>([]);
+    const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
     const [fallbackSubclassifications, setFallbackSubclassifications] = useState<any[]>([]);
     const [fallbackCountries, setFallbackCountries] = useState<any[]>([]);
     const [fallbackDepartments, setFallbackDepartments] = useState<any[]>([]);
@@ -354,17 +357,7 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
             // Excludes current account ID if editing.
 
             const checkDuplicates = async () => {
-                const filters = [`nombre.eq.${formData.nombre}`];
-                if (formData.nit_base && formData.nit_base.trim() !== "" && !isProvisionalNit(formData.nit_base)) {
-                    filters.push(`nit_base.eq.${formData.nit_base.trim()}`);
-                }
-                if (formData.telefono) {
-                    filters.push(`telefono.eq.${formData.telefono}`);
-                }
-                if (formData.email) {
-                    filters.push(`email.eq.${formData.email}`);
-                }
-                let query = supabase.from('CRM_Cuentas').select('id, nombre, nit_base, telefono, email');
+                let query = supabase.from('CRM_Cuentas').select('id, nombre, nit_base, canal_id, owner_user_id, telefono, email, created_at');
 
                 if (account?.id) {
                     query = query.neq('id', account.id);
@@ -389,22 +382,47 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
             const duplicates = await checkDuplicates();
 
             if (duplicates && duplicates.length > 0) {
-                // Find specific conflicts
-                const nameConflict = duplicates.find(d => d.nombre.toLowerCase() === formData.nombre.toLowerCase());
-                const nitConflict = (formData.nit_base && !isProvisionalNit(formData.nit_base))
-                    ? duplicates.find(d => d.nit_base === formData.nit_base)
-                    : null;
-                const phoneConflict = formData.telefono ? duplicates.find(d => d.telefono === formData.telefono) : null;
-                const emailConflict = formData.email ? duplicates.find(d => d.email === formData.email) : null;
+                const duplicateInfos: DuplicateAccountInfo[] = [];
 
-                let errorMessage = "";
-                if (nameConflict) errorMessage += `\n- El nombre "${formData.nombre}" ya existe.`;
-                if (nitConflict && (!formData.is_child)) errorMessage += `\n- El NIT "${formData.nit_base}" ya existe.`;
-                if (phoneConflict) errorMessage += `\n- El teléfono "${formData.telefono}" ya existe.`;
-                if (emailConflict) errorMessage += `\n- El email "${formData.email}" ya existe.`;
+                for (const dup of duplicates) {
+                    const conflicts: string[] = [];
+                    if (formData.nombre && dup.nombre.toLowerCase() === formData.nombre.toLowerCase()) {
+                        conflicts.push(`Nombre "${formData.nombre}" ya existe`);
+                    }
+                    if (formData.nit_base && !isProvisionalNit(formData.nit_base) && !formData.is_child && dup.nit_base === formData.nit_base.trim()) {
+                        conflicts.push(`NIT "${formData.nit_base}" ya existe`);
+                    }
+                    if (formData.telefono && dup.telefono === formData.telefono) {
+                        conflicts.push(`Teléfono "${formData.telefono}" ya existe`);
+                    }
+                    if (formData.email && dup.email === formData.email) {
+                        conflicts.push(`Email "${formData.email}" ya existe`);
+                    }
 
-                if (errorMessage) {
-                    alert(`No se puede guardar. Se encontraron registros duplicados:${errorMessage}`);
+                    if (conflicts.length > 0) {
+                        let ownerInfo = null;
+                        if (dup.owner_user_id) {
+                            const { data: userData } = await supabase
+                                .from('CRM_Usuarios')
+                                .select('full_name, email')
+                                .eq('id', dup.owner_user_id)
+                                .maybeSingle();
+                            if (userData) {
+                                ownerInfo = userData;
+                            }
+                        }
+
+                        duplicateInfos.push({
+                            account: dup,
+                            owner: ownerInfo,
+                            conflicts,
+                        });
+                    }
+                }
+
+                if (duplicateInfos.length > 0) {
+                    setDuplicateModalData(duplicateInfos);
+                    setIsDuplicateModalOpen(true);
                     setIsSubmitting(false);
                     return;
                 }
@@ -1076,6 +1094,13 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
                     }}
                 />
             )}
+
+            <DuplicateAccountModal
+                isOpen={isDuplicateModalOpen}
+                onClose={() => setIsDuplicateModalOpen(false)}
+                duplicates={duplicateModalData}
+                title="Cliente ya registrado en el CRM"
+            />
         </div>
     );
 }

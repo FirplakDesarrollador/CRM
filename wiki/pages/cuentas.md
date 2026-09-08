@@ -24,7 +24,7 @@ que determina su lista de precios.
 - Creación mediante `app/cuentas/nueva/CreateAccountWizard.tsx`: wizard de 3 pasos
   (información base, ubicación/contacto con origen_cuenta, y clasificación). La cuenta solo se crea
   desde el último paso con `Crear Cuenta`; el submit está protegido contra avances
-  o doble clics que intenten saltarse la clasificación.
+  o doble clics que intenten saltarse la clasificación. Si se detecta un duplicado (NIT, Razón Social, Teléfono o Email), se despliega `DuplicateAccountModal` mostrando los detalles de la cuenta existente, el asesor propietario asignado (`CRM_Usuarios`) y su canal de venta.
 - Prueba E2E dev-only en `/e2e/cuentas-wizard` para validar el wizard sin depender
   de cookies de Supabase; en producción la ruta devuelve 404.
 - Listado con filtros (`AccountFilters`, `UserPickerFilter`): vista móvil con tarjetas responsivas y vista desktop con tabla interactiva (Handsontable) donde la columna "País" (mapeada dinámicamente desde `pais_id` / catálogos) se visualiza en la vista inicial junto a Ubicación, y la edición se activa directamente al hacer clic/seleccionar la fila.
