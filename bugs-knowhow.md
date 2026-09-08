@@ -1310,4 +1310,59 @@ Prevention Rule:
 Tags:
 [actividades] [deep-linking] [useLiveQuery] [autosave] [modal] [dexie]
 
+---
+
+## [Bug ID: 20260908-01]
+
+Context:
+`app/cuentas/nueva/CreateAccountWizard.tsx`, `components/cuentas/AccountForm.tsx`. Al intentar crear o editar una cuenta cuyo NIT, Razón Social, Teléfono o Email ya existía en Supabase, aparecía un mensaje de alerta nativo `alert(...)` genérico diciendo "El NIT ya existe". Los asesores de un canal/equipo (ej: Distribución) no entendían por qué no veían la cuenta en su listado si pertenecía a otro asesor (ej: Obras Nacionales).
+
+What I Did:
+Reemplacé las alertas nativas `alert(...)` por el nuevo componente `DuplicateAccountModal.tsx`. Amplié la consulta a Supabase para recuperar la información completa de la cuenta en conflicto (Razón Social, NIT, Canal) y consultar en `CRM_Usuarios` el Nombre Completo y Correo Institucional del **Asesor Propietario actual**. Añadí la prueba permanente en `tests/duplicateAccountModal.test.ts`.
+
+Problem:
+1. Alerta nativa `alert()` genérica y poco amigable.
+2. Confusión de los vendedores ante la regla de visibilidad por RLS/propietario: al no ver un cliente en su listado personal, asumían que el NIT no existía en el CRM.
+
+Root Cause:
+Validación global de duplicados arrojaba excepciones genéricas mediante `alert(...)` sin revelar los datos de cartera ni la explicación de visibilidad del propietario actual.
+
+Fix Applied:
+1. Creación del componente `DuplicateAccountModal.tsx` con badges de coincidencia, tarjeta de cuenta, datos del asesor propietario actual (`CRM_Usuarios`) y caja explicativa de permisos de visibilidad.
+2. Integración en `CreateAccountWizard.tsx` y `AccountForm.tsx`.
+3. Prueba unitaria en `tests/duplicateAccountModal.test.ts`.
+
+Prevention Rule:
+**Duplicate Account Visibility Context**: Toda validación de duplicidad en entidades protegidas por ownership/RLS debe devolver los datos de la cuenta existente y la identidad del asesor propietario actual (`CRM_Usuarios`), explicando las reglas de visibilidad al usuario en un modal estructurado en lugar de bloquear con un `alert()` genérico.
+
+Tags:
+[cuentas] [duplicate-check] [ownership] [rls] [DuplicateAccountModal] [ui]
+
+---
+
+## [Bug ID: 20260908-02]
+
+Context:
+`components/cuentas/AccountForm.tsx`. Al presionar "Guardar Cambios" o autoguardar en la edición de una cuenta, los datos de campos modificados (`telefono`, `email`, `comentarios`) se borraban o revertían a sus valores originales inmediatamente después de aparecer la notificación verde "¡Cambios guardados correctamente!".
+
+What I Did:
+Corregí la sincronización del formulario en `components/cuentas/AccountForm.tsx` implementando las referencias `lastSyncedAccountIdRef` y `lastSyncedUpdatedAtRef`. Modifiqué el `useEffect` para que únicamente vuelva a sincronizar el formulario con la propiedad `account` si la cuenta cambió de ID o si el objeto `account` de las propiedades contiene una versión externa genuinamente más reciente. Añadí la prueba permanente `tests/accountFormReset.test.ts`.
+
+Problem:
+Al guardar cambios, `onSubmit` ejecutaba `updateAccount` en Dexie/Supabase y llamaba a `reset(data)`. La función `reset(data)` marcaba `isDirty = false`. Esto disparaba inmediatamente el `useEffect` que sincronizaba la propiedad `account`. Dado que el componente padre aún conservaba la referencia `account` previa al render con nuevos datos, el `useEffect` ejecutaba `reset(account)` con el objeto antiguo, sobrescribiendo en pantalla los valores recién guardados (`telefono`, `email`, `comentarios`).
+
+Root Cause:
+Re-evaluación no condicionada de `useEffect` dependiente de `[account, reset, isDirty]`. Al pasar `isDirty` a `false` por el `reset(data)` del submit, el efecto se ejecutaba con la propiedad `account` estancada (stale prop) del componente padre.
+
+Fix Applied:
+1. Implementación de `lastSyncedAccountIdRef` y `lastSyncedUpdatedAtRef` para registrar el ID y timestamp de la última mutación guardada.
+2. Condicionamiento del `useEffect` de sincronización: sólo resetea el formulario si la propiedad `account` tiene un timestamp superior a `lastSyncedUpdatedAtRef.current` o cambió de ID.
+3. Prueba de regresión en `tests/accountFormReset.test.ts`.
+
+Prevention Rule:
+**Stale Form Prop Sync Guard**: En componentes de formulario que sincronicen sus valores por defecto a través de una propiedad externa `entity` mediante `useEffect` al pasar `isDirty` a `false`, NUNCA ejecutar `reset(entity)` incondicionalmente sin verificar si el timestamp de `entity` es posterior a la última mutación local guardada. Se deben almacenar referencias del último submit/autoguardado para ignorar re-evaluaciones causadas por la transición de `isDirty`.
+
+Tags:
+[cuentas] [react-hook-form] [AccountForm] [reset] [isDirty] [stale-prop] [data-loss]
+
 
