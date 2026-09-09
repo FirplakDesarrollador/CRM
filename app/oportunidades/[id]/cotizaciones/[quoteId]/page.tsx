@@ -4,13 +4,15 @@ import { useParams, useRouter } from "next/navigation";
 import { useQuotes, useQuoteItems } from "@/lib/hooks/useOpportunities";
 import { useProductSearch, PriceListProduct } from "@/lib/hooks/useProducts";
 import { DetailHeader } from "@/components/ui/DetailHeader";
+import { generateQuotePdf } from "@/lib/pdfGenerator";
 import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { db, LocalQuote } from "@/lib/db";
-import { Save, AlertTriangle, Truck, Receipt, Calendar, Search, Plus, Trash2, Loader2, Package } from "lucide-react";
+import { Save, AlertTriangle, Truck, Receipt, Calendar, Search, Plus, Trash2, Loader2, Package, Download, Send } from "lucide-react";
 import { cn } from "@/components/ui/utils";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useConfig } from "@/lib/hooks/useConfig";
+import { SendQuoteModal } from "@/components/quotes/SendQuoteModal";
 import { useCommissionCategories } from "@/lib/hooks/useCommissionCategories";
 import { PedidosList } from "@/components/quotes/PedidosEditor";
 
@@ -24,6 +26,44 @@ export default function QuoteEditorPage() {
     const quote = quotes?.find(q => q.id === quoteId);
 
     const [activeSection, setActiveSection] = useState<'items' | 'sap'>('items');
+    const [isSendModalOpen, setIsSendModalOpen] = useState(false);
+
+    const sendContext = useLiveQuery(async () => {
+        if (!quote) return null;
+        const opp = await db.opportunities.get(quote.opportunity_id);
+        const acc = opp ? await db.accounts.get(opp.account_id) : null;
+        const qItems = await db.quoteItems.where('cotizacion_id').equals(quoteId).toArray();
+        
+        let advisorName = "";
+        let enrichedItems = qItems;
+
+        try {
+            const { supabase } = await import('@/lib/supabase');
+            if (opp?.owner_user_id) {
+                const { data: uData } = await supabase.from('CRM_Usuarios').select('full_name').eq('id', opp.owner_user_id).single();
+                advisorName = uData?.full_name || "";
+            }
+            const productIds = qItems.map(i => i.producto_id).filter(Boolean);
+            if (productIds.length > 0) {
+                const { data: pData } = await supabase.from('CRM_ListaDePrecios').select('id, numero_articulo').in('id', productIds);
+                if (pData) {
+                    enrichedItems = qItems.map(item => ({
+                        ...item,
+                        numero_articulo: pData.find(p => p.id === item.producto_id)?.numero_articulo || item.producto_id
+                    }));
+                }
+            }
+        } catch (e) {
+            console.error("Error pre-fetching PDF data", e);
+        }
+
+        return { opp, acc, qItems: enrichedItems, advisorName };
+    }, [quote]);
+
+    const handleDownloadPdf = () => {
+        if (!quote || !sendContext) return;
+        generateQuotePdf(quote, sendContext.qItems, sendContext.acc, sendContext.opp, true, sendContext.advisorName);
+    };
 
     if (!quote) return <div className="p-8">Cargando cotización...</div>;
 
@@ -40,6 +80,10 @@ export default function QuoteEditorPage() {
                         router.push(`/oportunidades/${oppId}?tab=cotizaciones`);
                     }
                 }}
+                actions={[
+                    { label: "Enviar Cotización", icon: Send, onClick: () => setIsSendModalOpen(true) },
+                    { label: "Descargar PDF", icon: Download, onClick: handleDownloadPdf }
+                ]}
             />
 
             <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
@@ -83,6 +127,17 @@ export default function QuoteEditorPage() {
                     <PedidosList quote={quote} />
                 )}
 
+                {isSendModalOpen && sendContext && (
+                    <SendQuoteModal 
+                        isOpen={isSendModalOpen} 
+                        onClose={() => setIsSendModalOpen(false)} 
+                        quote={quote} 
+                        account={sendContext.acc} 
+                        opportunity={sendContext.opp} 
+                        quoteItems={sendContext.qItems}
+                        advisorName={sendContext.advisorName}
+                    />
+                )}
             </div>
         </div>
     );
