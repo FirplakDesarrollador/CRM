@@ -88,7 +88,7 @@ export function filterOpportunities<T extends {
 
         // Role restriction for sellers
         if (isVendedor && currentUserId && userFilter !== "unrestricted") {
-            const isOwnerOrCreator = o.owner_user_id === currentUserId || (!o.owner_user_id && o.created_by === currentUserId);
+            const isOwnerOrCreator = o.owner_user_id === currentUserId || o.created_by === currentUserId;
             const isCollab = collabOppIds.has(o.id);
             if (!isOwnerOrCreator && !isCollab) {
                 return false;
@@ -194,14 +194,14 @@ export function filterOpportunities<T extends {
         // Tabs (userFilter)
         if (userFilter !== "unrestricted") {
             if (userFilter === "mine" && currentUserId) {
-                const isMine = o.owner_user_id === currentUserId || (!o.owner_user_id && o.created_by === currentUserId);
+                const isMine = o.owner_user_id === currentUserId || o.created_by === currentUserId;
                 if (!isMine) return false;
             } else if (userFilter === "collab") {
                 const isCollab = collabOppIds.has(o.id);
                 if (!isCollab) return false;
             } else if (userFilter === "all") {
                 if (userRole !== "ADMIN" && currentUserId) {
-                    const isMine = o.owner_user_id === currentUserId || (!o.owner_user_id && o.created_by === currentUserId);
+                    const isMine = o.owner_user_id === currentUserId || o.created_by === currentUserId;
                     const isCollab = collabOppIds.has(o.id);
                     const isTeam = userRole === "COORDINADOR" && o.owner_user_id && subordinateIds.includes(o.owner_user_id);
                     if (!isMine && !isCollab && !isTeam) return false;
@@ -292,11 +292,11 @@ export function filterAccounts<T extends {
     return accounts.filter(a => {
         // Role permissions
         if (isVendedor && currentUserId) {
-            const isOwner = a.owner_user_id === currentUserId || (!a.owner_user_id && a.created_by === currentUserId);
+            const isOwner = a.owner_user_id === currentUserId || a.created_by === currentUserId;
             const isCollab = collabAccountIds.has(a.id);
             if (!isOwner && !isCollab) return false;
         } else if (userRole === "COORDINADOR" && currentUserId) {
-            const isOwner = a.owner_user_id === currentUserId || (!a.owner_user_id && a.created_by === currentUserId);
+            const isOwner = a.owner_user_id === currentUserId || a.created_by === currentUserId;
             const isTeam = (a.owner_user_id && subordinateIds.includes(a.owner_user_id)) ||
                 (!a.owner_user_id && a.created_by && subordinateIds.includes(a.created_by));
             const isCollab = collabAccountIds.has(a.id);

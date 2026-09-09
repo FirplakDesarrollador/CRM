@@ -89,7 +89,7 @@ export default function OpportunityDetailPage() {
                         }
 
                         if (userRole === 'VENDEDOR') {
-                            const isOwner = oppData.owner_user_id === currentUser?.id || (!oppData.owner_user_id && oppData.created_by === currentUser?.id);
+                            const isOwner = oppData.owner_user_id === currentUser?.id || oppData.created_by === currentUser?.id;
                             if (!isOwner && !isCollab) {
                                 setServerOpportunity('UNAUTHORIZED');
                                 return;

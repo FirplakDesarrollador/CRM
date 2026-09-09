@@ -126,13 +126,13 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                 if (isVendedor && currentUserId) {
                     localAccounts = localAccounts.filter(a =>
                         a.owner_user_id === currentUserId || 
-                        (!a.owner_user_id && a.created_by === currentUserId) ||
+                        a.created_by === currentUserId ||
                         collabAccIds.includes(a.id)
                     );
                 } else if (userRole === 'COORDINADOR' && currentUserId) {
                     localAccounts = localAccounts.filter((a: any) => 
                         a.owner_user_id === currentUserId || 
-                        (!a.owner_user_id && a.created_by === currentUserId) ||
+                        a.created_by === currentUserId ||
                         (a.owner_user_id && subordinateIds.includes(a.owner_user_id)) ||
                         (!a.owner_user_id && a.created_by && subordinateIds.includes(a.created_by)) ||
                         collabAccIds.includes(a.id)
