@@ -3,6 +3,15 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-09-08 - Formato Estándar de Moneda con Separadores es-CO en Oportunidades (`formatNumberCO` / `formatOpportunityAmount`)
+
+- **Mejora Visual en Oportunidades (`lib/utils.ts`, `app/oportunidades/[id]/page.tsx`, `OpportunityQuickView.tsx`, `AccountOpportunitiesTab.tsx`):**
+  - **Requerimiento:** Aplicar separadores de miles con punto (`.`) y separadores de decimales con coma (`,`) en el valor de las oportunidades (ej. `COP 152.266.785,2` o `$ 152.266.785,2 COP`).
+  - **Implementación:** Creación de las utilidades `formatNumberCO` y `formatOpportunityAmount` en `lib/utils.ts` mediante `new Intl.NumberFormat('es-CO', { minimumFractionDigits: 0, maximumFractionDigits: 2 })`.
+  - **Componentes Actualizados:** `DetailHeader` de oportunidad (`subtitle`), tarjeta "Valor de la Oportunidad (Importe)" con badge de previsualización formateada para el campo numérico editable, `OpportunityQuickView.tsx` y `AccountOpportunitiesTab.tsx`.
+  - **Pruebas:** Creada suite de prueba `tests/opportunityAmountFormatting.test.ts` (**VERIFIED / GREEN**).
+  - **Páginas actualizadas:** `wiki/pages/oportunidades.md`.
+
 ## 2026-09-08 - Corrección de Reseteo Involuntario y Pérdida de Datos al Guardar Cuentas (`AccountForm.tsx`)
 
 - **Edición de Cuentas (`components/cuentas/AccountForm.tsx`):**

@@ -6,7 +6,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { FileText, Plus, AlertCircle, Check, Trash2, Loader2, Truck, Package, Building, ChevronRight, TrendingUp, User, Users, Copy } from "lucide-react";
 import Link from "next/link";
-import { cn } from "@/lib/utils";
+import { cn, formatNumberCO, formatOpportunityAmount } from "@/lib/utils";
 import { db, LocalCuenta } from "@/lib/db";
 import { ProbabilityDonut } from "@/components/ui/ProbabilityDonut";
 import { syncEngine } from "@/lib/sync";
@@ -174,7 +174,7 @@ export default function OpportunityDetailPage() {
         <div className="min-h-screen bg-slate-50">
             <DetailHeader
                 title={opportunity.nombre}
-                subtitle={`${opportunity.currency_id} ${opportunity.amount}`}
+                subtitle={formatOpportunityAmount(opportunity.amount, opportunity.currency_id || 'COP')}
                 status={
                     opportunity.estado_id === 2 ? 'Ganada' :
                         opportunity.estado_id === 3 ? 'Perdida' :
@@ -754,6 +754,12 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                             </div>
                                         )}
                                     </div>
+                                    <div className="text-xs font-medium text-slate-600 bg-slate-100/80 px-3 py-1.5 rounded-lg flex items-center justify-between border border-slate-200/60">
+                                        <span className="text-slate-500 font-normal">Valor formateado:</span>
+                                        <span className="text-blue-700 font-bold">
+                                            $ {formatNumberCO(localAmount)} <span className="text-[10px] font-semibold text-blue-500">{opportunity.currency_id || 'COP'}</span>
+                                        </span>
+                                    </div>
                                     <p className="text-[10px] text-slate-400">
                                         No hay cotizaciones activas. Puede editar este valor manualmente.
                                     </p>
@@ -763,7 +769,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                     <div className="p-3 bg-blue-50 border border-blue-100 rounded-xl">
                                         <div className="text-xl font-bold text-blue-700 flex items-center gap-1.5">
                                             <span className="text-blue-500 font-medium">$</span>
-                                            {new Intl.NumberFormat().format(opportunity.amount || 0)}
+                                            {formatNumberCO(opportunity.amount)}
                                             <span className="ml-1 text-xs font-medium text-blue-500">{opportunity.currency_id}</span>
                                         </div>
                                     </div>
@@ -1413,7 +1419,7 @@ function ProductsTab({ opportunityId }: { opportunityId: string }) {
                                     </td>
                                     <td className="px-4 py-3 text-center text-slate-600">{item.cantidad}</td>
                                     <td className="px-4 py-3 text-right text-slate-600">
-                                        ${new Intl.NumberFormat().format(unitPrice)}
+                                        ${formatNumberCO(unitPrice)}
                                     </td>
                                     <td className="px-4 py-3 text-center text-slate-600 font-medium">
                                         {discount > 0 ? (
@@ -1423,7 +1429,7 @@ function ProductsTab({ opportunityId }: { opportunityId: string }) {
                                         )}
                                     </td>
                                     <td className="px-4 py-3 text-right font-bold text-slate-900">
-                                        ${new Intl.NumberFormat().format(effectiveSubtotal)}
+                                        ${formatNumberCO(effectiveSubtotal)}
                                     </td>
                                 </tr>
                             );
@@ -1433,7 +1439,7 @@ function ProductsTab({ opportunityId }: { opportunityId: string }) {
                         <tr>
                             <td colSpan={4} className="px-4 py-3 text-right text-slate-500">Total</td>
                             <td className="px-4 py-3 text-right text-blue-600 text-lg">
-                                ${new Intl.NumberFormat().format(
+                                ${formatNumberCO(
                                     itemsToShow.reduce((acc: number, item: any) =>
                                         acc + (item.subtotal || (item.cantidad * (item.precio_unitario || item.precio || 0) * (1 - (item.discount_pct || 0) / 100))), 0
                                     )
@@ -1560,7 +1566,7 @@ function QuotesTab({ opportunityId, currency }: { opportunityId: string, currenc
 
                                 <div className="text-right flex flex-col items-end gap-2 pr-6">
                                     <p className="font-bold text-slate-900 text-lg">
-                                        {q.currency_id} {new Intl.NumberFormat().format(q.total_amount || 0)}
+                                        {q.currency_id} {formatNumberCO(q.total_amount)}
                                     </p>
 
                                     {q.status !== 'WINNER' && q.status !== 'REJECTED' && (

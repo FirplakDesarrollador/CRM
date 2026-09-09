@@ -1365,4 +1365,32 @@ Prevention Rule:
 Tags:
 [cuentas] [react-hook-form] [AccountForm] [reset] [isDirty] [stale-prop] [data-loss]
 
+---
+
+## [Bug ID: 20260908-03]
+
+Context:
+`app/oportunidades/[id]/page.tsx`, `components/opportunities/OpportunityQuickView.tsx`, `components/cuentas/AccountOpportunitiesTab.tsx`, `lib/utils.ts`. Presentación de importes de oportunidades.
+
+What I Did:
+Implementé la función `formatNumberCO` y `formatOpportunityAmount` en `lib/utils.ts` para aplicar el estándar de separadores de Colombia (`es-CO`: punto para miles, coma para decimales). Actualicé el `DetailHeader` de la oportunidad (`subtitle`), la tarjeta "Valor de la Oportunidad (Importe)" (con badge de previsualización formateada para campos de entrada numéricos y totales vinculados a cotizaciones) y los componentes de vista rápida y pestañas de cuenta. Añadí la prueba permanente `tests/opportunityAmountFormatting.test.ts`.
+
+Problem:
+Los importes de oportunidad se mostraban sin separadores de miles o con formato predeterminado sin locale `es-CO` (por ejemplo `COP 152266785.2` o `$ 152266785.2`), generando confusión visual en cifras de millones en COP.
+
+Root Cause:
+Uso de interpolación directa de variables numéricas `${opportunity.amount}` o invocación de `new Intl.NumberFormat().format(...)` / `toLocaleString()` sin especificar el locale `'es-CO'` ni la precisión de decimales requerida.
+
+Fix Applied:
+1. Creación de las utilidades `formatNumberCO` y `formatOpportunityAmount` en `lib/utils.ts` configurando `new Intl.NumberFormat('es-CO', { minimumFractionDigits: 0, maximumFractionDigits: 2 })`.
+2. Actualización de las vistas de detalle y componentes de oportunidad.
+3. Creación de la prueba unitaria `tests/opportunityAmountFormatting.test.ts`.
+
+Prevention Rule:
+**Colombian Currency Formatting Standard**: Toda visualización de montos de dinero u oportunidades en la interfaz debe utilizar las funciones centralizadas de `lib/utils.ts` (`formatNumberCO` o `formatOpportunityAmount`) o `new Intl.NumberFormat('es-CO')` explícito. NUNCA concatenar números directamente ni usar `new Intl.NumberFormat()` sin locale.
+
+Tags:
+[oportunidades] [currency] [es-CO] [formatNumberCO] [formatOpportunityAmount] [ui]
+
+
 

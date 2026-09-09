@@ -10,6 +10,7 @@ import { Briefcase, ChevronRight, Filter, Trash2, Loader2 } from "lucide-react";
 import { cn } from "@/components/ui/utils";
 import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { formatNumberCO } from "@/lib/utils";
 
 type StatusFilter = 'all' | 'open' | 'won' | 'lost';
 
@@ -118,7 +119,7 @@ export default function AccountOpportunitiesTab({ accountId }: { accountId: stri
                                             {opp.fase_data?.nombre || phaseMap.get(Number(opp.fase_id)) || 'Prospecto'}
                                         </span>
                                         <span className="mx-1.5 text-slate-300">•</span>
-                                        {opp.currency_id || 'COP'} {new Intl.NumberFormat().format(opp.amount || 0)}
+                                        {opp.currency_id || 'COP'} {formatNumberCO(opp.amount)}
                                     </p>
                                 </div>
                             </Link>
