@@ -73,6 +73,7 @@ export default function OpportunityDetailPage() {
                         await db.opportunities.put(oppData);
 
                         // Fetch Collaborators (Defensive)
+                        let isCollab = false;
                         try {
                             const { data: collabs, error: collabsError } = await supabase
                                 .from('CRM_Oportunidades_Colaboradores')
@@ -81,10 +82,21 @@ export default function OpportunityDetailPage() {
 
                             if (collabs && !collabsError) {
                                 await db.opportunityCollaborators.bulkPut(collabs);
+                                isCollab = collabs.some(c => c.usuario_id === currentUser?.id);
                             }
                         } catch (err) {
                             console.warn("Could not fetch collaborators from server (table might be missing):", err);
                         }
+
+                        if (userRole === 'VENDEDOR') {
+                            const isOwner = oppData.owner_user_id === currentUser?.id || (!oppData.owner_user_id && oppData.created_by === currentUser?.id);
+                            if (!isOwner && !isCollab) {
+                                setServerOpportunity('UNAUTHORIZED');
+                                return;
+                            }
+                        }
+
+                        setServerOpportunity('FOUND_AND_SAVED');
 
                     } else if (oppError) {
                         console.warn(`[JIT Sync] Opportunity not found on server either:`, oppError.message);
@@ -154,6 +166,18 @@ export default function OpportunityDetailPage() {
                 <div className="min-h-screen bg-slate-50 flex items-center justify-center flex-col gap-4">
                     <AlertCircle className="w-12 h-12 text-slate-300" />
                     <p className="text-slate-500 font-medium text-lg">Oportunidad no encontrada</p>
+                    <button onClick={() => router.push("/oportunidades")} className="text-blue-600 font-bold hover:underline">
+                        Volver al listado
+                    </button>
+                </div>
+            );
+        }
+        if (serverOpportunity === 'UNAUTHORIZED') {
+            return (
+                <div className="min-h-screen bg-slate-50 flex items-center justify-center flex-col gap-4">
+                    <AlertCircle className="w-12 h-12 text-slate-300" />
+                    <p className="text-slate-500 font-medium text-lg">Acceso Denegado</p>
+                    <p className="text-slate-400 text-sm">No tienes permisos para ver esta oportunidad.</p>
                     <button onClick={() => router.push("/oportunidades")} className="text-blue-600 font-bold hover:underline">
                         Volver al listado
                     </button>
