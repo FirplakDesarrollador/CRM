@@ -119,7 +119,7 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
             if (item.href === '/usuarios' && role !== 'ADMIN') return false;
             if (role === 'ADMIN') return true;
             if (allowedModules.length > 0) {
-                return allowedModules.includes(item.href);
+                return item.href === '/' || allowedModules.includes(item.href);
             }
             if (item.requiredRole && item.requiredRole !== role) return false;
             return true;
