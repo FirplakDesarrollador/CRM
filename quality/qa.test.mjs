@@ -132,3 +132,9 @@ test('la politica verificable protege supresiones y debilitamiento de pruebas', 
   assert.ok(policy?.required);
   assert.match(policy.command, /checks\.mjs policy/);
 });
+
+test('la politica safe-change incluye auditoria estricta de react-hooks/rules-of-hooks', async () => {
+  const checksContent = await readFile(path.join(root, 'quality', 'checks.mjs'), 'utf8');
+  assert.match(checksContent, /react-hooks\/rules-of-hooks/);
+});
+

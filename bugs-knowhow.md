@@ -1118,5 +1118,279 @@ Prevention Rule:
 Tags:
 [accounts] [nit] [provisional-id] [sync] [dead-letter] [unique-constraint] [pedidos] [formalization]
 
+## [Bug ID: 20260902-01]
+
+Context:
+Búsqueda y asignación de colaboradores de Microsoft en el modal de actividades (`CreateActivityModal.tsx`, `lib/microsoft.ts`, `app/api/microsoft/users/route.ts`).
+
+Problem:
+Al buscar colaboradores en el paso 3 del wizard de actividades (ej. "luis"), la interfaz no mostraba resultados y desplegaba "No se encontraron personas con \"luis\"".
+
+Root Cause:
+1. `searchMicrosoftUsers` en `lib/microsoft.ts` utilizaba en primer orden la API de People Search (`search/query` con entidad `person`), la cual solo indexa interacciones recientes del usuario autenticado; cuando esta respondía HTTP 200 con `hits: []`, retornaba prematuramente un array vacío y nunca ejecutaba las rutas de búsqueda en el directorio del tenant (`/users`).
+2. La constante `SCOPES` en `lib/microsoft.ts` no incluía `User.ReadBasic.All`, `User.Read.All` ni `People.Read`.
+3. La autenticación en la ruta `/api/microsoft/users` dependía de cookies SSR de un solo chunk (`get(name)` en vez de `getAll()`) y carecía de soporte para token Bearer en cabecera `Authorization`. Si la sesión cookie no estaba presente, retornaba 401 en vez de resolver sobre el directorio de colaboradores.
+4. El cliente en `CreateActivityModal.tsx` no enviaba cabecera `Authorization` ni tenía fallback de cliente hacia `CRM_Usuarios` si la API remota tardaba o no respondía.
+
+Fix Applied:
+1. Se reestructuró `searchMicrosoftUsers` para buscar en Azure AD vía `https://graph.microsoft.com/v1.0/users?$search=` con header `ConsistencyLevel: eventual`, y como respaldos secuenciales `users?$filter=startsWith(...)`, People Search (`search/query`) y `/me/people`.
+2. Se incorporaron `User.ReadBasic.All`, `User.Read.All` y `People.Read` en `SCOPES`.
+3. En `app/api/microsoft/users/route.ts`: se migró a `createClient()` de `@/lib/supabase/server` con soporte de cookies chunked (`getAll()`) y lectura de cabecera `Authorization: Bearer <token>`. Si no hay sesión o tokens de Microsoft, consulta `CRM_Usuarios` garantizando siempre HTTP 200 con colaboradores.
+4. En `CreateActivityModal.tsx`: la llamada a `/api/microsoft/users` envía la cabecera `Authorization` de la sesión activa, y además implementa un fallback de cliente directo a `CRM_Usuarios` en Supabase si la API remota no retorna resultados o falla la red.
+5. Se crearon las suites de pruebas en `pruebas unitarias/microsoftUsersSearch.test.ts` y `pruebas unitarias/microsoftUsersApi.test.ts`.
+
+Prevention Rule:
+**Multi-Tier Directory & Fallback Pattern for Graph/Identity Integrations**: Para búsquedas en directorios de Microsoft 365 / Entra ID, consultar siempre `/users` del tenant con `$search` o `$filter` en lugar de limitar la consulta a contactos personales recientes (`person`), y siempre proveer fallbacks encadenados para no devolver arreglos vacíos por respuestas 200 sin hits. En endpoints auxiliares de búsqueda, tolerar auth desacoplada y proveer fallback a datos locales.
+
+Tags:
+[microsoft-graph] [azure-ad] [activities] [users-search] [planner] [fallback] [auth-headers]
+
+---
+
+## [Bug ID: 20260902-02]
+
+Context:
+Módulo de oportunidades (`lib/hooks/useOpportunitiesServer.ts`, `app/oportunidades/page.tsx`). Filtro por canal, paginación en servidor y maquetación de la tabla Handsontable.
+
+Problem:
+1. Al filtrar por canal en oportunidades, el número de registros no disminuía (permanecía en 6882).
+2. El filtro tardaba segundos en responder y congelaba la interfaz.
+3. Se cargaban las 6882 oportunidades completas en el DOM/Handsontable, inutilizando la paginación y el botón "Cargar más resultados".
+4. Experiencia de doble barra de desplazamiento (scroll del contenedor general `<main>` y scroll interno de Handsontable).
+
+Root Cause:
+1. `useOpportunitiesServer.ts` solicitaba `vendedor:CRM_Usuarios(full_name)` sin desambiguar la clave foránea. Al existir dos relaciones entre `CRM_Oportunidades` y `CRM_Usuarios` (`owner_user_id` y colaboradores), PostgREST respondía con error HTTP 300 / `PGRST201: Could not embed because more than one relationship was found`.
+2. La consulta fallaba y caía al bloque `catch`. En el bloque `catch`, se realizaba un volcado masivo de `db.opportunities.toArray()` sin aplicar el filtro de canal (`channelFilter`) ni paginación (`pageSize`), cargando los 6882 registros de IndexedDB directamente a `data`.
+3. En `app/oportunidades/page.tsx`, la altura fija de `HotTable` sumada a los encabezados, contador flotante superior, botón "Cargar más" inferior y padding `pb-12` sobrepasaba el viewport de `<main id="main-content">`, provocando que el contenedor general desplegara una barra vertical externa adicional a la barra interna de la tabla.
+
+Fix Applied:
+1. Se especificó la relación foránea explícita `vendedor:CRM_Usuarios!owner_user_id(full_name)` en `useOpportunitiesServer.ts`, resolviendo la ambigüedad en PostgREST y permitiendo que la consulta retorne el conteo exacto y 100 registros en ~100ms.
+2. Se unificó la lógica de filtrado y paginación en `fetchOffline` compartida por modo offline y el bloque `catch`, aplicando `channelFilter` y `localOpps.slice(from, to + 1)`.
+3. En `app/oportunidades/page.tsx`, se integró el pie de tabla con contador y paginación dentro de la tarjeta desktop, se adaptó la altura dinámica de la tabla (`calc(100vh - 280px)` / `calc(100vh - 490px)`), se ocultó el contador flotante exterior en desktop y se aisló el botón inferior para móvil (`md:hidden`), eliminando el desbordamiento de `<main>` y suprimiendo la doble barra de desplazamiento.
+4. Se incorporaron pruebas unitarias en `pruebas unitarias/oportunidades.test.ts`.
+
+Prevention Rule:
+**Explicit Ambiguous Foreign Key Disambiguation in PostgREST and In-Card Table Pagination Layout**:
+1. Cuando existan múltiples relaciones entre dos tablas en Supabase, siempre desambiguar en `.select()` con `!foreign_key_column` para prevenir fallos `PGRST201`.
+2. Los bloques de fallback nunca deben cargar colecciones completas sin filtrar ni paginar.
+3. Para evitar doble scrollbar en vistas con tablas de datos, integrar contadores y paginadores dentro de la tarjeta y dimensionar la tabla al espacio restante del viewport sin exceder el contenedor de la página.
+
+Tags:
+[postgrest] [pgrst201] [opportunities] [channel-filter] [pagination] [double-scrollbar] [handsontable] [offline-fallback]
+
+---
+
+## [Bug ID: 20260902-03]
+
+Context:
+Cálculo de resumen de actividades en oportunidades (`lib/opportunityActivities.ts`, `components/activities/CreateActivityModal.tsx`, `lib/hooks/useOpportunitiesServer.ts`).
+
+Problem:
+Una oportunidad ("remodelación casa") aparecía en la vista con el badge rojo de "1 atrasada" a pesar de que su única tarea pendiente ("validación de desarrollo") tenía fecha de vencimiento futura programada para el 9 de septiembre de 2026.
+
+Root Cause:
+1. En `CreateActivityModal.tsx`, las actividades de tipo `TAREA` solo exponen en la interfaz el campo "Fecha Vencimiento" asociado a `fecha_inicio`. El campo `fecha_fin` (oculto para tareas) se inicializaba por defecto con la hora del sistema + 1 hora al abrir el modal (`2026-09-02T23:08:00`) y nunca se actualizaba con la fecha elegida por el usuario.
+2. `computeOpportunityActivitySummary` en `lib/opportunityActivities.ts` evaluaba únicamente `fecha_fin`. Al transcurrir la hora de apertura (11:08 p.m.), el comparador `actDate < nowTime` resultaba verdadero, marcando la tarea como vencida en el pasado inmediato a pesar de tener `fecha_inicio` en el futuro.
+3. En `useOpportunitiesServer.ts`, la consulta de actividades no solicitaba `fecha_inicio` ni `tipo_actividad`.
+
+Fix Applied:
+1. En `lib/opportunityActivities.ts`, se actualizó `computeOpportunityActivitySummary` para priorizar `fecha_inicio` cuando `tipo_actividad === 'TAREA'` o cuando `fecha_fin` sea inconsistente (anterior a `fecha_inicio`).
+2. En `CreateActivityModal.tsx`, se configuró la sincronización reactiva de `fecha_fin = fecha_inicio` cuando el tipo es `TAREA`, tanto en el efecto de cambio de fecha como en el saneamiento previo al `submit`.
+3. En `useOpportunitiesServer.ts`, se agregaron `fecha_inicio` y `tipo_actividad` a la subconsulta de actividades de Supabase.
+4. Se corrigió el registro de la actividad en base de datos y se agregaron pruebas en `pruebas unitarias/opportunityActivities.test.ts`.
+
+Prevention Rule:
+**Semantic Due Date Evaluation for Activities and Tasks**: En actividades de tipo tarea, `fecha_fin` debe coincidir con `fecha_inicio` (fecha de vencimiento). Los algoritmos de clasificación de estado deben evaluar la fecha semántica apropiada según el tipo y protegerse contra valores residuales huérfanos generados en la inicialización de formularios.
+
+Tags:
+[activities] [opportunities] [due-date] [task-deadline] [overdue-calculation] [form-initial-state]
+
+---
+
+## [Bug ID: 20260903-01]
+
+Context:
+Módulo de contactos (`app/contactos/page.tsx`). Selección y edición de contactos desde el listado global.
+
+Problem:
+Al hacer clic en cualquier contacto del listado para abrir su vista de edición o detalle, la aplicación crasheaba con pantalla blanca arrojando el error de Next.js / React:
+"Application error: a client-side exception has occurred while loading crm-64yu.vercel.app (see the browser console for more information)".
+
+Root Cause:
+Violación estricta de las **Rules of Hooks** de React:
+1. En `app/contactos/page.tsx`, existían retornos condicionales tempranos:
+   - `if (isCreating && !selectedAccountIdForCreate) { return (...); }`
+   - `if (selectedAccountIdForCreate || editingContact) { return (...); }`
+2. Los hooks `useCurrentUser()`, `useState` (para `colWidths`), `useEffect` (para persistencia en `localStorage`) y `useCallback` (`handleColumnResize`) estaban declarados después de dichos retornos condicionales.
+3. Cuando el usuario seleccionaba un contacto, el componente retornaba anticipadamente y saltaba la ejecución de estos hooks. React detectó: "Rendered fewer hooks than expected. This may be caused by an accidental early return statement" y disparó el ErrorBoundary / excepción client-side.
+
+Fix Applied:
+1. Se reubicaron incondicionalmente todos los hooks (`useCurrentUser()`, `useState(colWidths)`, `useEffect(colWidths)` y `useCallback(handleColumnResize)`) al inicio de `ContactsContent()`, antes de cualquier declaración `return`.
+2. Se verificó que los módulos hermanos (`app/cuentas/page.tsx` y `app/oportunidades/page.tsx`) no tuvieran retornos tempranos antes de sus llamadas a hooks.
+
+Prevention Rule:
+**Strict React Hooks Top-Level Invariance**:
+Nunca colocar llamadas a Hooks (`use*`, `useState`, `useEffect`, `useCallback`, etc.) debajo de declaraciones `return` condicionales o dentro de bloques `if / else`. Todos los hooks de un componente deben ejecutarse incondicionalmente y en el mismo orden exacto en cada ciclo de render.
+
+Tags:
+[react] [rules-of-hooks] [client-side-exception] [contacts] [conditional-return] [handsontable-col-widths]
+
+---
+
+## [Bug ID: 20260904-01]
+
+Context:
+Persistencia offline-first de campos editables en `CRM_Cuentas`,
+`CRM_Contactos`, `CRM_Cotizaciones` y `CRM_Pedidos`; mapeos de pull en
+`lib/sync.ts` y esquema Supabase/PostgreSQL.
+
+Problem:
+1. Los comentarios de contactos y cotizaciones parecian guardarse, pero no
+   sobrevivian la sincronizacion ni estaban disponibles en otro dispositivo.
+2. `email_contacto`, `tiene_escaleras`, `planos_hidromasaje` y `fecha_entrega`
+   de pedidos solo persistian en IndexedDB.
+3. Los campos F-V-29 copiados a la cotizacion no existian remotamente.
+4. El pull eliminaba de la copia local `origen_cuenta` y campos validos de
+   cotizaciones, incluidos identificadores SAP y datos de facturacion.
+
+Root Cause:
+1. Los formularios y tipos locales incorporaron campos sin que el esquema real
+   recibiera todas las columnas correspondientes.
+2. El RPC de snapshots omite claves desconocidas y puede confirmar el resto del
+   snapshot, creando una perdida silenciosa.
+3. Los pulls usaban allowlists manuales que quedaron obsoletas. Al aplicar
+   `bulkPut`, Dexie reemplazaba el objeto local completo por esa proyeccion.
+
+Fix Applied:
+1. Se creo la migracion append-only
+   `20260904193842_persist_crm_editable_fields.sql` con las columnas faltantes
+   para contactos, cotizaciones y pedidos.
+2. El pull de cuentas conserva `origen_cuenta` y el de contactos conserva
+   `comentarios`.
+3. El pull de cotizaciones conserva el registro remoto completo para que nuevas
+   columnas no desaparezcan de IndexedDB.
+4. `lib/persistence-contracts.test.ts` verifica permanentemente la migracion y
+   los mapeos. La suite fallo RED en 3/3 casos antes del cambio y paso GREEN en
+   3/3 despues.
+
+Prevention Rule:
+**Editable Field End-to-End Contract**: Todo campo editable debe existir en el
+formulario/tipo local, payload de push, esquema PostgreSQL y mapeo de pull. Los
+pulls de entidades extensibles deben conservar el registro remoto completo o
+tener una prueba que obligue a actualizar su allowlist. Una mutacion no puede
+considerarse validada solo porque el RPC acepte el resto del snapshot.
+
+Tags:
+[sync] [dexie] [supabase] [schema-drift] [contacts] [quotes] [orders] [data-loss]
+
+---
+
+## [Bug ID: 20260907-01]
+
+Context:
+`app/actividades/page.tsx`, `components/activities/CreateActivityModal.tsx`. El modal "Editar Actividad" se cerraba automáticamente casi inmediatamente después de abrirse al editar una actividad.
+
+What I Did:
+Corregí el efecto de deep linking en `app/actividades/page.tsx` agregando la referencia `lastProcessedUrlIdRef` y guardas de estado para no reejecutar el cierre del modal cuando cambie la referencia del arreglo `activities` emitido por Dexie (`useLiveQuery`) durante un guardado automático o sincronización en segundo plano.
+
+Problem:
+Al abrir la ventana modal de edición de una actividad, el hook `useFormAutoSave` o las sincronizaciones internas de Planner/Calendar realizaban un `updateActivity` en Dexie. Al actualizarse IndexedDB, `useLiveQuery` emitía un nuevo arreglo `activities`. El `useEffect` de deep-linking se disparaba por el cambio en la dependencia `activities`, y dado que la URL no tenía parámetro `?id=`, la rama `else if (!id)` se ejecutaba y reseteaba `isModalOpen(false)` y `selectedActivity(null)`, cerrando la ventana modal de inmediato mientras mostraba la píldora "Guardando...".
+
+Root Cause:
+Disparo involuntario de side-effect en `useEffect` con dependencias reactivas de datos en tiempo real (`activities`), sin verificar si el modal ya estaba abierto para esa misma entidad ni proteger la transición de estado ante actualizaciones emitidas por IndexedDB/Dexie.
+
+Fix Applied:
+1. Se implementó `lastProcessedUrlIdRef` y guardas en `useEffect` para evitar reejecutar apertura/cierre de modal si `id === lastProcessedUrlIdRef.current` y el modal ya está abierto.
+2. Se unificó la gestión de apertura (`openActivityModal`) y cierre (`closeActivityModal`) asegurando la sincronización limpia de parámetros en la URL.
+3. Se añadió la prueba permanente en `pruebas unitarias/actividades.test.ts`.
+
+Prevention Rule:
+**Live Query Modal Guard**: Cuando un `useEffect` controle la apertura/cierre de un modal mediante parámetros en la URL o enlaces profundos y dependa de un query en tiempo real (Dexie `useLiveQuery` o suscripción de Supabase), NUNCA incluir una cláusula de cierre incondicional sin verificar si el modal ya fue abierto por la misma entidad. Se debe rastrear el último ID procesado (`useRef`) y abortar reejecuciones si el modal ya está abierto para ese ID.
+
+Tags:
+[actividades] [deep-linking] [useLiveQuery] [autosave] [modal] [dexie]
+
+---
+
+## [Bug ID: 20260908-01]
+
+Context:
+`app/cuentas/nueva/CreateAccountWizard.tsx`, `components/cuentas/AccountForm.tsx`. Al intentar crear o editar una cuenta cuyo NIT, Razón Social, Teléfono o Email ya existía en Supabase, aparecía un mensaje de alerta nativo `alert(...)` genérico diciendo "El NIT ya existe". Los asesores de un canal/equipo (ej: Distribución) no entendían por qué no veían la cuenta en su listado si pertenecía a otro asesor (ej: Obras Nacionales).
+
+What I Did:
+Reemplacé las alertas nativas `alert(...)` por el nuevo componente `DuplicateAccountModal.tsx`. Amplié la consulta a Supabase para recuperar la información completa de la cuenta en conflicto (Razón Social, NIT, Canal) y consultar en `CRM_Usuarios` el Nombre Completo y Correo Institucional del **Asesor Propietario actual**. Añadí la prueba permanente en `tests/duplicateAccountModal.test.ts`.
+
+Problem:
+1. Alerta nativa `alert()` genérica y poco amigable.
+2. Confusión de los vendedores ante la regla de visibilidad por RLS/propietario: al no ver un cliente en su listado personal, asumían que el NIT no existía en el CRM.
+
+Root Cause:
+Validación global de duplicados arrojaba excepciones genéricas mediante `alert(...)` sin revelar los datos de cartera ni la explicación de visibilidad del propietario actual.
+
+Fix Applied:
+1. Creación del componente `DuplicateAccountModal.tsx` con badges de coincidencia, tarjeta de cuenta, datos del asesor propietario actual (`CRM_Usuarios`) y caja explicativa de permisos de visibilidad.
+2. Integración en `CreateAccountWizard.tsx` y `AccountForm.tsx`.
+3. Prueba unitaria en `tests/duplicateAccountModal.test.ts`.
+
+Prevention Rule:
+**Duplicate Account Visibility Context**: Toda validación de duplicidad en entidades protegidas por ownership/RLS debe devolver los datos de la cuenta existente y la identidad del asesor propietario actual (`CRM_Usuarios`), explicando las reglas de visibilidad al usuario en un modal estructurado en lugar de bloquear con un `alert()` genérico.
+
+Tags:
+[cuentas] [duplicate-check] [ownership] [rls] [DuplicateAccountModal] [ui]
+
+---
+
+## [Bug ID: 20260908-02]
+
+Context:
+`components/cuentas/AccountForm.tsx`. Al presionar "Guardar Cambios" o autoguardar en la edición de una cuenta, los datos de campos modificados (`telefono`, `email`, `comentarios`) se borraban o revertían a sus valores originales inmediatamente después de aparecer la notificación verde "¡Cambios guardados correctamente!".
+
+What I Did:
+Corregí la sincronización del formulario en `components/cuentas/AccountForm.tsx` implementando las referencias `lastSyncedAccountIdRef` y `lastSyncedUpdatedAtRef`. Modifiqué el `useEffect` para que únicamente vuelva a sincronizar el formulario con la propiedad `account` si la cuenta cambió de ID o si el objeto `account` de las propiedades contiene una versión externa genuinamente más reciente. Añadí la prueba permanente `tests/accountFormReset.test.ts`.
+
+Problem:
+Al guardar cambios, `onSubmit` ejecutaba `updateAccount` en Dexie/Supabase y llamaba a `reset(data)`. La función `reset(data)` marcaba `isDirty = false`. Esto disparaba inmediatamente el `useEffect` que sincronizaba la propiedad `account`. Dado que el componente padre aún conservaba la referencia `account` previa al render con nuevos datos, el `useEffect` ejecutaba `reset(account)` con el objeto antiguo, sobrescribiendo en pantalla los valores recién guardados (`telefono`, `email`, `comentarios`).
+
+Root Cause:
+Re-evaluación no condicionada de `useEffect` dependiente de `[account, reset, isDirty]`. Al pasar `isDirty` a `false` por el `reset(data)` del submit, el efecto se ejecutaba con la propiedad `account` estancada (stale prop) del componente padre.
+
+Fix Applied:
+1. Implementación de `lastSyncedAccountIdRef` y `lastSyncedUpdatedAtRef` para registrar el ID y timestamp de la última mutación guardada.
+2. Condicionamiento del `useEffect` de sincronización: sólo resetea el formulario si la propiedad `account` tiene un timestamp superior a `lastSyncedUpdatedAtRef.current` o cambió de ID.
+3. Prueba de regresión en `tests/accountFormReset.test.ts`.
+
+Prevention Rule:
+**Stale Form Prop Sync Guard**: En componentes de formulario que sincronicen sus valores por defecto a través de una propiedad externa `entity` mediante `useEffect` al pasar `isDirty` a `false`, NUNCA ejecutar `reset(entity)` incondicionalmente sin verificar si el timestamp de `entity` es posterior a la última mutación local guardada. Se deben almacenar referencias del último submit/autoguardado para ignorar re-evaluaciones causadas por la transición de `isDirty`.
+
+Tags:
+[cuentas] [react-hook-form] [AccountForm] [reset] [isDirty] [stale-prop] [data-loss]
+
+---
+
+## [Bug ID: 20260908-03]
+
+Context:
+`app/oportunidades/[id]/page.tsx`, `components/opportunities/OpportunityQuickView.tsx`, `components/cuentas/AccountOpportunitiesTab.tsx`, `lib/utils.ts`. Presentación de importes de oportunidades.
+
+What I Did:
+Implementé la función `formatNumberCO` y `formatOpportunityAmount` en `lib/utils.ts` para aplicar el estándar de separadores de Colombia (`es-CO`: punto para miles, coma para decimales). Actualicé el `DetailHeader` de la oportunidad (`subtitle`), la tarjeta "Valor de la Oportunidad (Importe)" (con badge de previsualización formateada para campos de entrada numéricos y totales vinculados a cotizaciones) y los componentes de vista rápida y pestañas de cuenta. Añadí la prueba permanente `tests/opportunityAmountFormatting.test.ts`.
+
+Problem:
+Los importes de oportunidad se mostraban sin separadores de miles o con formato predeterminado sin locale `es-CO` (por ejemplo `COP 152266785.2` o `$ 152266785.2`), generando confusión visual en cifras de millones en COP.
+
+Root Cause:
+Uso de interpolación directa de variables numéricas `${opportunity.amount}` o invocación de `new Intl.NumberFormat().format(...)` / `toLocaleString()` sin especificar el locale `'es-CO'` ni la precisión de decimales requerida.
+
+Fix Applied:
+1. Creación de las utilidades `formatNumberCO` y `formatOpportunityAmount` en `lib/utils.ts` configurando `new Intl.NumberFormat('es-CO', { minimumFractionDigits: 0, maximumFractionDigits: 2 })`.
+2. Actualización de las vistas de detalle y componentes de oportunidad.
+3. Creación de la prueba unitaria `tests/opportunityAmountFormatting.test.ts`.
+
+Prevention Rule:
+**Colombian Currency Formatting Standard**: Toda visualización de montos de dinero u oportunidades en la interfaz debe utilizar las funciones centralizadas de `lib/utils.ts` (`formatNumberCO` o `formatOpportunityAmount`) o `new Intl.NumberFormat('es-CO')` explícito. NUNCA concatenar números directamente ni usar `new Intl.NumberFormat()` sin locale.
+
+Tags:
+[oportunidades] [currency] [es-CO] [formatNumberCO] [formatOpportunityAmount] [ui]
+
 
 

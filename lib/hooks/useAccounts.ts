@@ -27,7 +27,7 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
         if (isVendedor && userId) {
             return db.accounts.filter(a => 
                 a.owner_user_id === userId || 
-                (!a.owner_user_id && a.created_by === userId)
+                a.created_by === userId
             ).toArray();
         }
 
@@ -174,7 +174,7 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
         }
 
         const ownerChanged = newOwnerId !== undefined && newOwnerId !== null && currentLocal?.owner_user_id !== newOwnerId;
-        let oppUpdates: LocalOportunidad[] = [];
+        const oppUpdates: LocalOportunidad[] = [];
 
         if (typeof window !== 'undefined' && navigator.onLine) {
             try {

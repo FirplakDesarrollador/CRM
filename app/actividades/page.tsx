@@ -1,8 +1,9 @@
 "use client";
 
-import { Suspense, useEffect, useState, useMemo } from 'react';
+import { Suspense, useEffect, useState, useMemo, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useActivities, LocalActivity } from '@/lib/hooks/useActivities';
+import { useInfiniteScroll } from '@/lib/hooks/useInfiniteScroll';
 import { useDebounce } from '@/lib/hooks/useDebounce';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
@@ -37,6 +38,9 @@ import { CreateActivityModal } from '@/components/activities/CreateActivityModal
 import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { UserPickerFilter } from '@/components/cuentas/UserPickerFilter';
 
+type ActivityView = 'agenda' | 'month' | 'all';
+type ActivityStatus = 'all' | 'completed' | 'pending' | 'overdue';
+
 function ActivitiesContent() {
     const searchParams = useSearchParams();
     const router = useRouter();
@@ -69,12 +73,12 @@ function ActivitiesContent() {
     }, [classifications.length]);
 
     const [selectedDate, setSelectedDate] = useState(new Date());
-    const [view, setView] = useState<'agenda' | 'month' | 'all'>(() => {
+    const [view, setView] = useState<ActivityView>(() => {
         const fromUrl = searchParams.get('view');
-        if (fromUrl) return (fromUrl as any);
+        if (fromUrl) return fromUrl as ActivityView;
         if (typeof window !== 'undefined') {
             const saved = sessionStorage.getItem('crm_actividades_state');
-            if (saved) return (new URLSearchParams(saved).get('view') as any) || 'agenda';
+            if (saved) return (new URLSearchParams(saved).get('view') as ActivityView | null) || 'agenda';
         }
         return 'agenda';
     });
@@ -130,7 +134,7 @@ function ActivitiesContent() {
         }
         return "";
     });
-    const [filterStatus, setFilterStatus] = useState<"all" | "completed" | "pending" | "overdue">(() => {
+    const [filterStatus, setFilterStatus] = useState<ActivityStatus>(() => {
         const fromUrl = searchParams.get('status');
         if (fromUrl) return (fromUrl as any);
         if (typeof window !== 'undefined') {
@@ -208,11 +212,11 @@ function ActivitiesContent() {
         const type = searchParams.get('type') || saved.get('type') || '';
         const classification = searchParams.get('classification') || saved.get('classification') || '';
         const subclassification = searchParams.get('subclassification') || saved.get('subclassification') || '';
-        const status = (searchParams.get('status') || saved.get('status') || 'all') as any;
+        const status = (searchParams.get('status') || saved.get('status') || 'all') as ActivityStatus;
         const channel = searchParams.get('channel') || saved.get('channel') || '';
         const dateFrom = searchParams.get('dateFrom') || saved.get('dateFrom') || '';
         const dateTo = searchParams.get('dateTo') || saved.get('dateTo') || '';
-        const viewUrl = (searchParams.get('view') || saved.get('view') || 'agenda') as any;
+        const viewUrl = (searchParams.get('view') || saved.get('view') || 'agenda') as ActivityView;
 
         setFilterUser(user);
         setSearchQuery(search);
@@ -300,31 +304,58 @@ function ActivitiesContent() {
 
 
 
-    // Deep linking: detect id in URL and open edit modal
+    const lastProcessedUrlIdRef = useRef<string | null>(null);
+
+    const openActivityModal = (act: LocalActivity) => {
+        setSelectedActivity(act);
+        setIsModalOpen(true);
+        lastProcessedUrlIdRef.current = act.id;
+        const params = new URLSearchParams(Array.from(searchParams.entries()));
+        params.set('id', act.id);
+        const query = params.toString() ? `?${params.toString()}` : window.location.pathname;
+        router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
+    };
+
+    const closeActivityModal = () => {
+        setIsModalOpen(false);
+        setSelectedActivity(null);
+        lastProcessedUrlIdRef.current = null;
+        const params = new URLSearchParams(Array.from(searchParams.entries()));
+        params.delete('id');
+        const query = params.toString() ? `?${params.toString()}` : window.location.pathname;
+        router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
+    };
+
+    // Deep linking: detect id in URL and open edit modal without auto-closing during live updates
     useEffect(() => {
         const id = searchParams.get('id');
+
+        if (!id) {
+            if (lastProcessedUrlIdRef.current !== null) {
+                lastProcessedUrlIdRef.current = null;
+                setIsModalOpen(false);
+                setSelectedActivity(null);
+            }
+            return;
+        }
+
+        if (id === lastProcessedUrlIdRef.current && isModalOpen) {
+            return;
+        }
+
         if (id && activities) {
             const act = activities.find(a => a.id === id);
             if (act) {
+                lastProcessedUrlIdRef.current = id;
                 setSelectedDate(new Date(act.fecha_inicio));
                 setSelectedActivity(act);
                 setIsModalOpen(true);
             }
-        } else if (!id) {
-            setIsModalOpen(false);
-            setSelectedActivity(null);
         }
-    }, [searchParams, activities]);
+    }, [searchParams, activities, isModalOpen]);
 
-    // Reset dependent filters
-    useEffect(() => {
-        setFilterClassification("");
-        setFilterSubclassification("");
-    }, [filterType]);
 
-    useEffect(() => {
-        setFilterSubclassification("");
-    }, [filterClassification]);
+
 
     // Reset display limit when search or filters change to improve perceived performance
     useEffect(() => {
@@ -421,17 +452,10 @@ function ActivitiesContent() {
 
             // 7. NEW: Canal
             if (filterChannel) {
-                let actChannel = "";
-                if (act.opportunity_id) {
-                    const opp = oppMap.get(act.opportunity_id);
-                    if (opp?.account_id) {
-                        const acc = accMap.get(opp.account_id);
-                        actChannel = acc?.canal_id || "";
-                    }
-                } else if (act.account_id) {
-                    const acc = accMap.get(act.account_id);
-                    actChannel = acc?.canal_id || "";
-                }
+                const opp = act.opportunity_id ? oppMap.get(act.opportunity_id) : null;
+                const resolvedAccountId = act.account_id || opp?.account_id;
+                const acc = resolvedAccountId ? accMap.get(resolvedAccountId) : null;
+                const actChannel = acc?.canal_id || "";
                 if (actChannel !== filterChannel) return false;
             }
 
@@ -487,6 +511,12 @@ function ActivitiesContent() {
             return sortOrder === 'latest' ? -difference : difference;
         });
     }, [globallyFilteredActivities, view, selectedDate, sortOrder]);
+
+    const { sentinelRef: activitiesSentinelRef } = useInfiniteScroll({
+        loading: false,
+        hasMore: (filteredActivities?.length || 0) > displayLimit,
+        onLoadMore: () => setDisplayLimit(prev => prev + 20),
+    });
 
     // PERF FIX: Pre-group activities by day key for month view (computed once, not 31x)
     const activitiesByDay = useMemo(() => {
@@ -679,7 +709,11 @@ function ActivitiesContent() {
                                 <select
                                     data-testid="activities-filter-type"
                                     value={filterType}
-                                    onChange={(e) => setFilterType(e.target.value)}
+                                    onChange={(e) => {
+                                        setFilterType(e.target.value);
+                                        setFilterClassification("");
+                                        setFilterSubclassification("");
+                                    }}
                                     className="bg-transparent text-sm font-semibold text-slate-600 focus:outline-none p-1.5"
                                 >
                                     <option value="">Tipo...</option>
@@ -692,7 +726,10 @@ function ActivitiesContent() {
                                         <div className="w-px h-4 bg-slate-200 mx-1"></div>
                                         <select
                                             value={filterClassification}
-                                            onChange={(e) => setFilterClassification(e.target.value)}
+                                            onChange={(e) => {
+                                                setFilterClassification(e.target.value);
+                                                setFilterSubclassification("");
+                                            }}
                                             className="bg-transparent text-sm font-semibold text-slate-600 focus:outline-none p-1.5 max-w-[150px] truncate"
                                         >
                                             <option value="">Clasificación...</option>
@@ -912,10 +949,7 @@ function ActivitiesContent() {
                                                                 ? "border-emerald-200 hover:border-emerald-300 hover:shadow-emerald-100"
                                                                 : "border-blue-200 hover:border-blue-300 hover:shadow-blue-100"
                                                 )}
-                                                onClick={() => {
-                                                    setSelectedActivity(act);
-                                                    setIsModalOpen(true);
-                                                }}
+                                                onClick={() => openActivityModal(act)}
                                             >
                                                 <div className="flex items-start gap-4">
                                                     <button
@@ -1007,9 +1041,9 @@ function ActivitiesContent() {
                                         );
                                     })}
 
-                                    {/* Load More Button */}
+                                    {/* Load More Button & Infinite Scroll Sentinel */}
                                     {filteredActivities.length > displayLimit && (
-                                        <div className="flex justify-center pt-8 pb-12">
+                                        <div ref={activitiesSentinelRef} className="flex justify-center pt-8 pb-12">
                                             <button
                                                 onClick={() => setDisplayLimit(prev => prev + 20)}
                                                 className="bg-white border-2 border-slate-100 text-slate-600 hover:text-blue-600 hover:border-blue-200 px-8 py-3 rounded-2xl font-black text-sm transition-all shadow-sm flex items-center gap-2 group"
@@ -1102,8 +1136,9 @@ function ActivitiesContent() {
                                                             return (
                                                                 <div key={act.id} className="flex gap-1 group/act">
                                                                     <div
+                                                                        onClick={() => openActivityModal(act)}
                                                                         className={cn(
-                                                                            "text-[9px] px-1 py-0.5 rounded truncate font-medium border-l-2 flex-1",
+                                                                            "text-[9px] px-1 py-0.5 rounded truncate font-medium border-l-2 flex-1 cursor-pointer",
                                                                             act.is_completed
                                                                                 ? "bg-slate-50 text-slate-400 border-slate-300 line-through"
                                                                                 : isOverdueAct
@@ -1156,15 +1191,18 @@ function ActivitiesContent() {
                                                                     const cName = classifications.find(c => String(c.id) === String(act.clasificacion_id))?.nombre;
 
                                                                     return (
-                                                                        <div key={act.id} className={cn(
-                                                                            "relative group/tip flex items-center gap-2 p-1.5 rounded border-l-2 transition-all hover:bg-slate-50",
-                                                                            act.is_completed
-                                                                                ? "bg-slate-50/50 text-slate-400 border-slate-300"
-                                                                                : isOverdueAct
-                                                                                    ? "bg-red-50 text-red-800 border-red-400"
-                                                                                    : act.tipo_actividad === 'TAREA'
-                                                                                        ? "bg-emerald-50 text-emerald-800 border-emerald-400"
-                                                                                        : "bg-blue-50 text-blue-800 border-blue-400"
+                                                                        <div 
+                                                                            key={act.id} 
+                                                                            onClick={() => openActivityModal(act)}
+                                                                            className={cn(
+                                                                                "relative group/tip flex items-center gap-2 p-1.5 rounded border-l-2 transition-all hover:bg-slate-50 cursor-pointer",
+                                                                                act.is_completed
+                                                                                    ? "bg-slate-50/50 text-slate-400 border-slate-300"
+                                                                                    : isOverdueAct
+                                                                                        ? "bg-red-50 text-red-800 border-red-400"
+                                                                                        : act.tipo_actividad === 'TAREA'
+                                                                                            ? "bg-emerald-50 text-emerald-800 border-emerald-400"
+                                                                                            : "bg-blue-50 text-blue-800 border-blue-400"
                                                                         )}>
                                                                             <div className="flex-1 min-w-0">
                                                                                 <div className="font-medium truncate">{act.asunto}</div>
@@ -1220,15 +1258,7 @@ function ActivitiesContent() {
             {/* Modal for Creating Activity */}
             {isModalOpen && (
                 <CreateActivityModal
-                    onClose={() => {
-                        setIsModalOpen(false);
-                        setSelectedActivity(null);
-                        // Clear URL parameter to prevent modal from reopening while preserving filters
-                        const params = new URLSearchParams(Array.from(searchParams.entries()));
-                        params.delete('id');
-                        const query = params.toString() ? `?${params.toString()}` : window.location.pathname;
-                        router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
-                    }}
+                    onClose={closeActivityModal}
                     onSubmit={async (data: any) => {
                         console.log("[ActivitiesPage] Modal Submitted Data:", data);
                         if (selectedActivity) {
@@ -1238,12 +1268,7 @@ function ActivitiesContent() {
                             console.log("[ActivitiesPage] Calling createActivity");
                             await createActivity(data);
                         }
-                        setIsModalOpen(false);
-                        setSelectedActivity(null);
-                        const params = new URLSearchParams(Array.from(searchParams.entries()));
-                        params.delete('id');
-                        const query = params.toString() ? `?${params.toString()}` : window.location.pathname;
-                        router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
+                        closeActivityModal();
                     }}
                     initialData={selectedActivity}
                 />

@@ -49,7 +49,7 @@ export const MobileNav = memo(function MobileNav() {
         return MOBILE_NAV.filter(item => {
             if (item.href === '/usuarios' && role !== 'ADMIN') return false;
             if (role === 'ADMIN') return true;
-            if (allowedModules.length > 0) return allowedModules.includes(item.href);
+            if (allowedModules.length > 0) return item.href === '/' || allowedModules.includes(item.href);
             if (item.requiredRole && item.requiredRole !== role) return false;
             return true;
         });

@@ -1,12 +1,13 @@
 "use client";
 
 import { useAccountsServer, AccountServer } from "@/lib/hooks/useAccountsServer";
+import { useInfiniteScroll } from "@/lib/hooks/useInfiniteScroll";
 import { AccountForm } from "@/components/cuentas/AccountForm";
 import { useSearchParams, useRouter } from "next/navigation";
 import React, { Suspense, useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { useLiveQuery } from "dexie-react-hooks";
-import { db } from "@/lib/db";
+import { db, LocalPais } from "@/lib/db";
 import { Plus, Search, Building, User, Pencil, Medal, Trash2, ArrowUpDown, ChevronUp, ChevronDown, MapPin, Briefcase, DollarSign, Globe } from "lucide-react";
 import { UserPickerFilter } from "@/components/cuentas/UserPickerFilter";
 import { AccountFilters } from "@/components/cuentas/AccountFilters";
@@ -53,7 +54,13 @@ function AccountsContent() {
         sortField,
         sortAsc,
         refresh
-    } = useAccountsServer({ pageSize: 50 });
+    } = useAccountsServer({ pageSize: 100 });
+
+    const { tableContainerRef, sentinelRef, triggerLoadMore } = useInfiniteScroll({
+        loading,
+        hasMore,
+        onLoadMore: loadMore,
+    });
 
     const [showCreate, setShowCreate] = useState(false);
     const [editingAccount, setEditingAccount] = useState<any>(null);
@@ -97,7 +104,7 @@ function AccountsContent() {
 
     // Lookup countries for country column
     const countriesList = useLiveQuery(() => db.countries.toArray()) || [];
-    const [fallbackCountries, setFallbackCountries] = useState<any[]>([]);
+    const [fallbackCountries, setFallbackCountries] = useState<LocalPais[]>([]);
 
     useEffect(() => {
         if (countriesList.length === 0) {
@@ -135,7 +142,13 @@ function AccountsContent() {
     };
 
     // Filter Changes
-    const handleFilterChange = useCallback(({ channelId, subclassificationId, nivelPremium, startDate, endDate }: any) => {
+    const handleFilterChange = useCallback(({ channelId, subclassificationId, nivelPremium, startDate, endDate }: {
+        channelId: string | null;
+        subclassificationId: number | null;
+        nivelPremium: string | null;
+        startDate: string | null;
+        endDate: string | null;
+    }) => {
         setChannelFilter(channelId);
         setSubclassificationFilter(subclassificationId);
         setNivelPremiumFilter(nivelPremium);
@@ -185,7 +198,7 @@ function AccountsContent() {
         setWebFilter(source === 'web');
         if (sort) setSortField(sort);
         if (direction) setSortAsc(direction === 'asc');
-    }, [searchParams]);
+    }, [searchParams, setAssignedUserId, setChannelFilter, setEndDate, setNivelPremiumFilter, setSearchTerm, setSortAsc, setSortField, setStartDate, setSubclassificationFilter, setWebFilter]);
 
     // Restore the last list context when returning from navigation, but never reopen a record.
     useEffect(() => {
@@ -215,7 +228,7 @@ function AccountsContent() {
 
         const findAndOpen = async () => {
             // 1. Check if already in current list
-            const existing = accounts?.find((a: any) => a.id === id);
+            const existing = accounts?.find(a => a.id === id);
             if (existing) {
                 setEditingAccount(existing);
                 setShowCreate(false);
@@ -283,7 +296,7 @@ function AccountsContent() {
         return () => clearTimeout(timer);
     }, [inputValue, selectedUserId, currentChannel, currentSubclass, currentNivel, currentStartDate, currentEndDate, webFilter, sortField, sortAsc, editingAccount?.id, searchParams, setSearchTerm, router]);
 
-    const handleEdit = async (acc: any) => {
+    const handleEdit = async (acc: AccountServer) => {
         setEditingAccount(acc);
         setShowCreate(false);
         const params = new URLSearchParams(Array.from(searchParams.entries()));
@@ -307,7 +320,7 @@ function AccountsContent() {
         handleCloseEdit();
     };
 
-    const handleDelete = (e: React.MouseEvent, acc: any) => {
+    const handleDelete = (e: React.MouseEvent, acc: AccountServer) => {
         e.stopPropagation();
         setAccountToDelete(acc);
     };
@@ -469,7 +482,7 @@ function AccountsContent() {
     ];
 
     return (
-        <div data-testid="accounts-page" className="space-y-4">
+        <div data-testid="accounts-page" className="space-y-3.5 pb-8 md:pb-2">
             <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
                 <div className="flex items-center gap-3">
                     <h1 className="text-2xl font-bold text-slate-900">
@@ -630,7 +643,7 @@ function AccountsContent() {
                     </div>
 
                     {/* VISTA DESKTOP: Tabla */}
-                    <div className="hidden md:block w-full relative z-0 bg-white rounded-2xl border border-slate-200/80 overflow-hidden shadow-sm" style={{ minHeight: '400px' }}>
+                    <div ref={tableContainerRef} className="hidden md:block w-full relative z-0 bg-white rounded-2xl border border-slate-200/80 overflow-hidden shadow-sm opp-hot-wrap" style={{ minHeight: '400px' }}>
                         <style>{`
                             /* ── Scrollbar ── */
                             .opp-hot-wrap .ht_master .wtHolder {
@@ -789,8 +802,9 @@ function AccountsContent() {
                             dropdownMenu={true}
                             manualColumnResize={true}
                             afterColumnResize={(width: number, col: number) => handleColumnResize(width, col)}
+                            afterScrollVertically={triggerLoadMore}
                             width="100%"
-                            height="calc(100vh - 280px)"
+                            height={showFilters ? "calc(100vh - 490px)" : "calc(100vh - 280px)"}
                             autoColumnSize={false}
                             autoRowSize={false}
                             rowHeights={38}
@@ -829,15 +843,34 @@ function AccountsContent() {
                             className="text-sm font-sans"
                         />
                         </div>
+
+                        {/* Pie de tabla unificado en desktop: contador y paginación integrados */}
+                        <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-200/80 flex justify-between items-center text-xs text-slate-500">
+                            <div>
+                                Mostrando <strong className="text-slate-800 font-bold">{accounts.length}</strong> de <strong className="text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md font-bold">{count !== undefined && count !== null ? count : accounts.length}</strong> cuentas
+                            </div>
+                            {hasMore && (
+                                <button
+                                    onClick={() => loadMore()}
+                                    disabled={loading}
+                                    className="px-3.5 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-100 hover:text-blue-600 transition-all shadow-xs flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                                >
+                                    {loading && <div className="w-3 h-3 rounded-full border-2 border-slate-300 border-t-blue-600 animate-spin" />}
+                                    {loading ? 'Cargando...' : 'Cargar más resultados'}
+                                </button>
+                            )}
+                        </div>
                     </div>
 
+                    {/* Botón Cargar más exclusivo para móvil */}
                     {hasMore && (
-                        <div className="p-4 border-t border-slate-100 flex justify-center bg-slate-50/50">
+                        <div ref={sentinelRef} className="p-4 border-t border-slate-100 flex justify-center bg-slate-50/50 md:hidden">
                             <button
                                 onClick={() => loadMore()}
                                 disabled={loading}
-                                className="px-6 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-50 hover:text-blue-600 transition-all shadow-sm disabled:opacity-50"
+                                className="w-full px-6 py-3.5 bg-white border border-slate-200 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-50 hover:text-blue-600 transition-all shadow-sm disabled:opacity-50 flex justify-center items-center gap-2"
                             >
+                                {loading && <div className="w-3 h-3 rounded-full border-2 border-slate-300 border-t-blue-600 animate-spin" />}
                                 {loading ? 'Cargando...' : 'Cargar más resultados'}
                             </button>
                         </div>

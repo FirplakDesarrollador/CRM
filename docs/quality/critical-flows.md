@@ -19,7 +19,7 @@ Ordenados primero por fuga/perdida de datos, autorizacion, corrupcion y despues 
 - Resultado: cada sesion usa una base IndexedDB fisicamente separada; entidad y outbox se confirman en una transaccion; la cola sobrevive recargas, reintenta con la misma identidad y conserva dead letters recuperables.
 - Datos/permisos: Dexie outbox y entidades CRM permitidas por RPC.
 - Dependencias: IndexedDB, red, Supabase/RLS.
-- Proteccion/cobertura: 16 casos verdes en `lib/local-database.test.ts`, `lib/sync-runtime.test.ts`, `lib/sync-engine.test.ts` y `lib/hooks/useFormAutoSave.test.tsx`; migracion de hardening.
+- Proteccion/cobertura: 16 casos verdes en `lib/local-database.test.ts`, `lib/sync-runtime.test.ts`, `lib/sync-engine.test.ts` y `lib/hooks/useFormAutoSave.test.tsx`; contrato de campos persistidos en `lib/persistence-contracts.test.ts`; migracion de hardening.
 - Riesgo: perdida silenciosa, corrupcion LWW o escrituras cruzadas. Criticidad: maxima.
 - Prueba enfocada obligatoria: `npm run qa:focused -- lib/local-database.test.ts lib/sync-runtime.test.ts lib/sync-engine.test.ts lib/hooks/useFormAutoSave.test.tsx`.
 - Brecha: falta integracion real Dexie-Supabase con dos identidades autenticadas, dos pestanas y red intermitente; la migracion legado conserva la base origen como respaldo y no se prueba aun con volumen de produccion.
@@ -41,7 +41,7 @@ Ordenados primero por fuga/perdida de datos, autorizacion, corrupcion y despues 
 - Resultado: cantidades, descuentos, moneda, total y campos F-V-29/SAP del pedido seleccionado se conservan; escrituras de items son atomicas/idempotentes.
 - Datos/permisos: `CRM_Cotizaciones`, `CRM_CotizacionItems`, `CRM_Pedidos`, `CRM_PedidoItems`.
 - Dependencias: Dexie, RPC sync, SAP/ForceManager.
-- Proteccion/cobertura: tres casos en `pedidoFormalization.test.ts`; memoria extensa en `bugs-knowhow.md`.
+- Proteccion/cobertura: tres casos en `pedidoFormalization.test.ts`; contrato de campos F-V-29 en `lib/persistence-contracts.test.ts`; memoria extensa en `bugs-knowhow.md`.
 - Riesgo: pedido o importe incorrecto, perdida de cantidades y corrupcion parcial. Criticidad: alta.
 - Prueba enfocada obligatoria: `npm run qa:focused -- "pruebas unitarias/pedidoFormalization.test.ts"` mas prueba de persistencia de items al modificarla.
 - Brecha: sin reconciliacion end-to-end ni contrato SAP sandbox.

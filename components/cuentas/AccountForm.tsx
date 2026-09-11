@@ -6,7 +6,7 @@ import * as z from "zod";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, LocalCuenta } from "@/lib/db";
 import { useAccounts } from "@/lib/hooks/useAccounts";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Loader2, User, Building2, Medal, Trash2, Check } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useFormDraft } from "@/lib/hooks/useFormDraft";
@@ -23,6 +23,7 @@ import { ListTodo } from "lucide-react";
 import { useFormAutoSave } from "@/lib/hooks/useFormAutoSave";
 import { AutoSaveIndicator } from "@/components/ui/AutoSaveIndicator";
 import { isProvisionalNit } from "@/lib/nitUtils";
+import { DuplicateAccountModal, type DuplicateAccountInfo } from "./DuplicateAccountModal";
 
 // Schema
 const accountSchema = z.object({
@@ -57,7 +58,7 @@ type AccountFormData = z.infer<typeof accountSchema>;
 interface AccountFormProps {
     onSuccess: () => void;
     onCancel: () => void;
-    onDelete?: (account: any) => void;
+    onDelete?: (account: LocalCuenta) => void;
     account?: LocalCuenta; // Existing account to edit
 }
 
@@ -78,6 +79,8 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
 
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [assignedUserName, setAssignedUserName] = useState<string | null>(null);
+    const [duplicateModalData, setDuplicateModalData] = useState<DuplicateAccountInfo[]>([]);
+    const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
     const [fallbackSubclassifications, setFallbackSubclassifications] = useState<any[]>([]);
     const [fallbackCountries, setFallbackCountries] = useState<any[]>([]);
     const [fallbackDepartments, setFallbackDepartments] = useState<any[]>([]);
@@ -235,6 +238,9 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
 
     const { clearDraft } = useFormDraft(form, 'crm_draft_account', !account);
 
+    const lastSyncedAccountIdRef = useRef<string | null>(account?.id || null);
+    const lastSyncedUpdatedAtRef = useRef<string | null>(account?.updated_at || null);
+
     const onAutoSave = async (data: AccountFormData) => {
         if (!account?.id) return;
         const payload: any = {
@@ -257,6 +263,8 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
             origen_cuenta: data.origen_cuenta || null
         };
         await updateAccount(account.id, payload);
+        lastSyncedAccountIdRef.current = account.id;
+        lastSyncedUpdatedAtRef.current = payload.updated_at || new Date().toISOString();
     };
 
     const { status: autoSaveStatus, errorMessage: autoSaveError } = useFormAutoSave({
@@ -265,10 +273,21 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
         isEnabled: !!account?.id
     });
 
-    // Update form when account changes (ONLY if not modified by user to avoid overwriting)
+    // Update form when account prop changes from outside (e.g. user selects a different account or fresh remote version)
     useEffect(() => {
-        if (account && !isDirty) {
-            console.log('[AccountForm] DEBUG - Syncing form with fresh account data (not dirty)');
+        if (!account) return;
+
+        const isNewAccount = account.id !== lastSyncedAccountIdRef.current;
+        const isNewerExternalVersion = Boolean(
+            account.updated_at &&
+            lastSyncedUpdatedAtRef.current &&
+            new Date(account.updated_at).getTime() > new Date(lastSyncedUpdatedAtRef.current).getTime()
+        );
+
+        if ((isNewAccount || isNewerExternalVersion) && !isDirty) {
+            console.log('[AccountForm] DEBUG - Syncing form with fresh account data from prop');
+            lastSyncedAccountIdRef.current = account.id;
+            lastSyncedUpdatedAtRef.current = account.updated_at || null;
             reset({
                 nombre: account.nombre || "",
                 nit_base: account.nit_base || "",
@@ -288,7 +307,7 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
                 ignorar_limites_descuento: account.ignorar_limites_descuento || false,
                 comentarios: account.comentarios || "",
                 origen_cuenta: (account as any)?.origen_cuenta || ""
-            }, { keepDefaultValues: true });
+            });
         }
     }, [account, reset, isDirty]);
 
@@ -354,17 +373,7 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
             // Excludes current account ID if editing.
 
             const checkDuplicates = async () => {
-                const filters = [`nombre.eq.${formData.nombre}`];
-                if (formData.nit_base && formData.nit_base.trim() !== "" && !isProvisionalNit(formData.nit_base)) {
-                    filters.push(`nit_base.eq.${formData.nit_base.trim()}`);
-                }
-                if (formData.telefono) {
-                    filters.push(`telefono.eq.${formData.telefono}`);
-                }
-                if (formData.email) {
-                    filters.push(`email.eq.${formData.email}`);
-                }
-                let query = supabase.from('CRM_Cuentas').select('id, nombre, nit_base, telefono, email');
+                let query = supabase.from('CRM_Cuentas').select('id, nombre, nit_base, canal_id, owner_user_id, telefono, email, created_at');
 
                 if (account?.id) {
                     query = query.neq('id', account.id);
@@ -389,22 +398,47 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
             const duplicates = await checkDuplicates();
 
             if (duplicates && duplicates.length > 0) {
-                // Find specific conflicts
-                const nameConflict = duplicates.find(d => d.nombre.toLowerCase() === formData.nombre.toLowerCase());
-                const nitConflict = (formData.nit_base && !isProvisionalNit(formData.nit_base))
-                    ? duplicates.find(d => d.nit_base === formData.nit_base)
-                    : null;
-                const phoneConflict = formData.telefono ? duplicates.find(d => d.telefono === formData.telefono) : null;
-                const emailConflict = formData.email ? duplicates.find(d => d.email === formData.email) : null;
+                const duplicateInfos: DuplicateAccountInfo[] = [];
 
-                let errorMessage = "";
-                if (nameConflict) errorMessage += `\n- El nombre "${formData.nombre}" ya existe.`;
-                if (nitConflict && (!formData.is_child)) errorMessage += `\n- El NIT "${formData.nit_base}" ya existe.`;
-                if (phoneConflict) errorMessage += `\n- El teléfono "${formData.telefono}" ya existe.`;
-                if (emailConflict) errorMessage += `\n- El email "${formData.email}" ya existe.`;
+                for (const dup of duplicates) {
+                    const conflicts: string[] = [];
+                    if (formData.nombre && dup.nombre.toLowerCase() === formData.nombre.toLowerCase()) {
+                        conflicts.push(`Nombre "${formData.nombre}" ya existe`);
+                    }
+                    if (formData.nit_base && !isProvisionalNit(formData.nit_base) && !formData.is_child && dup.nit_base === formData.nit_base.trim()) {
+                        conflicts.push(`NIT "${formData.nit_base}" ya existe`);
+                    }
+                    if (formData.telefono && dup.telefono === formData.telefono) {
+                        conflicts.push(`Teléfono "${formData.telefono}" ya existe`);
+                    }
+                    if (formData.email && dup.email === formData.email) {
+                        conflicts.push(`Email "${formData.email}" ya existe`);
+                    }
 
-                if (errorMessage) {
-                    alert(`No se puede guardar. Se encontraron registros duplicados:${errorMessage}`);
+                    if (conflicts.length > 0) {
+                        let ownerInfo = null;
+                        if (dup.owner_user_id) {
+                            const { data: userData } = await supabase
+                                .from('CRM_Usuarios')
+                                .select('full_name, email')
+                                .eq('id', dup.owner_user_id)
+                                .maybeSingle();
+                            if (userData) {
+                                ownerInfo = userData;
+                            }
+                        }
+
+                        duplicateInfos.push({
+                            account: dup,
+                            owner: ownerInfo,
+                            conflicts,
+                        });
+                    }
+                }
+
+                if (duplicateInfos.length > 0) {
+                    setDuplicateModalData(duplicateInfos);
+                    setIsDuplicateModalOpen(true);
                     setIsSubmitting(false);
                     return;
                 }
@@ -443,6 +477,8 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
             if (account?.id) {
                 console.log('[AccountForm] DEBUG - Calling updateAccount with id:', account.id);
                 await updateAccount(account.id, payload);
+                lastSyncedAccountIdRef.current = account.id;
+                lastSyncedUpdatedAtRef.current = new Date().toISOString();
                 reset(data);
                 setManualSaveSuccess(true);
                 setTimeout(() => setManualSaveSuccess(false), 4000);
@@ -1076,6 +1112,13 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
                     }}
                 />
             )}
+
+            <DuplicateAccountModal
+                isOpen={isDuplicateModalOpen}
+                onClose={() => setIsDuplicateModalOpen(false)}
+                duplicates={duplicateModalData}
+                title="Cliente ya registrado en el CRM"
+            />
         </div>
     );
 }

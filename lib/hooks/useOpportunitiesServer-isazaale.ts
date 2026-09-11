@@ -165,7 +165,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                 if (isVendedor && currentUserId) {
                     localOpps = localOpps.filter(o => 
                         o.owner_user_id === currentUserId || 
-                        (!o.owner_user_id && o.created_by === currentUserId)
+                        o.created_by === currentUserId
                     );
                 }
 
@@ -234,7 +234,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                     if (userFilter === 'mine') {
                         localOpps = localOpps.filter(o => 
                             o.owner_user_id === currentUserId || 
-                            (!o.owner_user_id && o.created_by === currentUserId)
+                            o.created_by === currentUserId
                         );
                     } else if (userFilter === 'collab') {
                         const collabOpps = await db.opportunityCollaborators.where('usuario_id').equals(currentUserId).toArray();
@@ -246,13 +246,13 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                             const collabOppIds = new Set(collabOpps.map(c => c.oportunidad_id));
                             localOpps = localOpps.filter(o =>
                                 o.owner_user_id === currentUserId ||
-                                (!o.owner_user_id && o.created_by === currentUserId) ||
+                                o.created_by === currentUserId ||
                                 collabOppIds.has(o.id)
                             );
                         }
                     } else if (userFilter === 'team' && userRole !== 'ADMIN') {
                         if (userRole === 'COORDINADOR') {
-                            localOpps = localOpps.filter(o => o.owner_user_id === currentUserId || (o.owner_user_id && subordinateIds.includes(o.owner_user_id)));
+                            localOpps = localOpps.filter(o => o.owner_user_id === currentUserId || o.created_by === currentUserId || (o.owner_user_id && subordinateIds.includes(o.owner_user_id)));
                         } else {
                             localOpps = localOpps.filter(o => o.owner_user_id === currentUserId);
                         }

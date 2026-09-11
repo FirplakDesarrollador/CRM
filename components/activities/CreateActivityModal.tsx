@@ -6,8 +6,8 @@ import { CalendarClock, ListTodo, Loader2, Users, Search, X, Video, Plus, CheckC
 import { useLiveQuery } from "dexie-react-hooks";
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { cn } from "@/components/ui/utils";
-import { toInputDate, toInputDateTime } from "@/lib/date-utils";
-import { db, LocalActivityClassification, LocalActivitySubclassification } from "@/lib/db";
+import { toInputDate, toInputDateTime, parseColombiaDate } from "@/lib/date-utils";
+import { db, LocalActivity, LocalActivityClassification, LocalActivitySubclassification } from "@/lib/db";
 import { syncEngine } from "@/lib/sync";
 import { supabase } from "@/lib/supabase";
 import { DateTimePicker } from "@/components/ui/DateTimePicker";
@@ -21,7 +21,7 @@ import { AutoSaveIndicator } from "@/components/ui/AutoSaveIndicator";
 interface CreateActivityModalProps {
     onClose: () => void;
     onSubmit: (data: any) => void;
-    opportunities?: any[];
+    opportunities?: unknown[];
     initialOpportunityId?: string;
     initialAccountId?: string;
     initialData?: any;
@@ -131,29 +131,35 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         return currentTipo === 'TAREA' ? 'Nueva Tarea' : 'Nuevo Evento';
     }, [classifications, getValues, relatedOpportunity, relatedAccount, resolvedAccountName]);
 
+    const safeToISO = (val?: string | Date | null) => {
+        if (!val) return null;
+        const parsed = parseColombiaDate(val);
+        return parsed ? parsed.toISOString() : null;
+    };
+
     const onAutoSave = async (data: any) => {
         if (!isEditing || !initialData?.id) return;
         const autoAsunto = data.asunto?.trim() || getAutoAsunto(data.clasificacion_id, data.opportunity_id, data.account_id);
         if (!data.asunto?.trim()) {
             setValue('asunto', autoAsunto);
         }
-        const payload: any = {
+        const payload = {
             asunto: autoAsunto,
             descripcion: data.descripcion || null,
             tipo_actividad: data.tipo_actividad,
             clasificacion_id: data.clasificacion_id ? Number(data.clasificacion_id) : null,
             subclasificacion_id: data.subclasificacion_id ? Number(data.subclasificacion_id) : null,
-            fecha_inicio: data.fecha_inicio ? new Date(data.fecha_inicio).toISOString() : null,
-            fecha_fin: data.fecha_fin ? new Date(data.fecha_fin).toISOString() : null,
+            fecha_inicio: safeToISO(data.fecha_inicio),
+            fecha_fin: safeToISO(data.fecha_fin),
             opportunity_id: data.opportunity_id || null,
             account_id: data.account_id || null,
             is_completed: !!data.is_completed,
             prioridad: data.prioridad || 'Media'
         };
-        await updateActivity(initialData.id, payload);
+        await updateActivity(initialData.id, payload as Partial<LocalActivity>);
     };
 
-    const { status: autoSaveStatus } = useFormAutoSave({
+    const { status: autoSaveStatus, errorMessage: autoSaveErrorMessage } = useFormAutoSave({
         form,
         onSave: onAutoSave,
         isEnabled: isEditing
@@ -700,16 +706,56 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
     // Handle User Search
     useEffect(() => {
         const delayDebounceFn = setTimeout(async () => {
-            if (userSearch.length >= 2) {
+            const query = userSearch.trim();
+            if (query.length >= 2) {
                 setIsSearching(true);
                 try {
-                    const res = await fetch(`/api/microsoft/users?q=${encodeURIComponent(userSearch)}`);
-                    if (res.ok) {
-                        const data = await res.json();
-                        setSearchResults(data);
+                    let results: any[] = [];
+                    // 1. Intentar API de Microsoft (con sesión si está disponible)
+                    try {
+                        const { data: sessionData } = await supabase.auth.getSession();
+                        const headers: Record<string, string> = {};
+                        if (sessionData?.session?.access_token) {
+                            headers['Authorization'] = `Bearer ${sessionData.session.access_token}`;
+                        }
+                        const res = await fetch(`/api/microsoft/users?q=${encodeURIComponent(query)}`, {
+                            credentials: 'include',
+                            headers
+                        });
+                        if (res.ok) {
+                            const data = await res.json();
+                            if (Array.isArray(data) && data.length > 0) {
+                                results = data;
+                            }
+                        }
+                    } catch (apiErr) {
+                        console.warn("[CreateActivityModal] Microsoft users API fetch failed, trying local DB fallback:", apiErr);
                     }
+
+                    // 2. Fallback de cliente: Si la API no trajo resultados, consultar directamente CRM_Usuarios
+                    if (results.length === 0) {
+                        const { data: dbUsers } = await supabase
+                            .from('CRM_Usuarios')
+                            .select('id, full_name, email, role')
+                            .eq('is_active', true)
+                            .or(`full_name.ilike.%${query}%,email.ilike.%${query}%`)
+                            .limit(15);
+
+                        if (dbUsers && dbUsers.length > 0) {
+                            results = dbUsers.map((u: any) => ({
+                                id: u.id,
+                                displayName: u.full_name || u.email,
+                                mail: u.email,
+                                userPrincipalName: u.email,
+                                jobTitle: u.role || 'Usuario CRM'
+                            }));
+                        }
+                    }
+
+                    setSearchResults(results);
                 } catch (error) {
                     console.error("Error searching users:", error);
+                    setSearchResults([]);
                 } finally {
                     setIsSearching(false);
                 }
@@ -1168,6 +1214,10 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                 Object.assign(dataToSubmit, data);
             }
 
+            if (dataToSubmit.tipo_actividad === 'TAREA' && dataToSubmit.fecha_inicio) {
+                dataToSubmit.fecha_fin = dataToSubmit.fecha_inicio;
+            }
+
             const processed: any = {
                 ...dataToSubmit,
                 teams_meeting_url: teamsMeetingUrl,
@@ -1309,20 +1359,24 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         return subclassifications.filter(s => s.clasificacion_id === Number(selectedClasificacionId));
     }, [subclassifications, selectedClasificacionId]);
 
-    // Auto-set fecha_fin as 1 hour after fecha_inicio for EVENTO
+    // Auto-set fecha_fin: +1 hour for EVENTO, and sync with fecha_inicio for TAREA
     useEffect(() => {
-        if (tipo === 'EVENTO' && fechaInicio) {
-            try {
+        if (!fechaInicio) return;
+        try {
+            if (tipo === 'EVENTO') {
                 const start = new Date(fechaInicio);
                 if (!isNaN(start.getTime())) {
                     const end = new Date(start.getTime() + 3600000); // +1 hour
-
-                    const formattedEnd = toInputDateTime(end);
-                    setValue('fecha_fin', formattedEnd, { shouldDirty: true });
+                    setValue('fecha_fin', toInputDateTime(end), { shouldDirty: true });
                 }
-            } catch (e) {
-                console.error("Error setting end date", e);
+            } else if (tipo === 'TAREA') {
+                const start = new Date(fechaInicio);
+                if (!isNaN(start.getTime())) {
+                    setValue('fecha_fin', toInputDateTime(start), { shouldDirty: true });
+                }
             }
+        } catch (e) {
+            console.error("Error setting end date", e);
         }
     }, [fechaInicio, tipo, setValue]);
 
@@ -1951,7 +2005,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                     <div className="flex justify-end items-center gap-3 pt-6 mt-auto border-t border-slate-100 bg-white shrink-0 sticky bottom-0">
                         {isEditing ? (
                             <>
-                                <AutoSaveIndicator status={autoSaveStatus} />
+                                <AutoSaveIndicator status={autoSaveStatus} errorMessage={autoSaveErrorMessage} />
                                 <button
                                     type="button"
                                     onClick={onClose}

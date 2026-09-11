@@ -1,19 +1,19 @@
 import { useEffect, useRef, useState } from "react";
-import { FieldValues, UseFormReturn } from "react-hook-form";
+import { FieldErrors, FieldValues, UseFormReturn } from "react-hook-form";
 
-interface AutoSaveConfig<T extends FieldValues> {
-    form: UseFormReturn<T>;
+interface AutoSaveConfig<T extends FieldValues, TContext = unknown, TTransformedValues = unknown> {
+    form: UseFormReturn<T, TContext, TTransformedValues>;
     onSave: (data: T) => Promise<void>;
     debounceMs?: number;
     isEnabled: boolean;
 }
 
-export function useFormAutoSave<T extends FieldValues>({
+export function useFormAutoSave<T extends FieldValues, TContext = unknown, TTransformedValues = unknown>({
     form,
     onSave,
     debounceMs = 600,
     isEnabled
-}: AutoSaveConfig<T>) {
+}: AutoSaveConfig<T, TContext, TTransformedValues>) {
     const [status, setStatus] = useState<"saved" | "saving" | "error">("saved");
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const lastSavedData = useRef<string>("");
@@ -65,7 +65,10 @@ export function useFormAutoSave<T extends FieldValues>({
                         setErrorMessage(err instanceof Error ? err.message : String(err));
                     }
                 } else {
-                    const currentErrors = (form as any).control?._formState?.errors || form.formState.errors || {};
+                    const controlWithState = form.control as typeof form.control & {
+                        _formState?: { errors?: FieldErrors<T> };
+                    };
+                    const currentErrors = controlWithState._formState?.errors ?? form.formState.errors;
                     const errorKeys = Object.keys(currentErrors);
                     let firstErrorMessage = "";
                     if (errorKeys.length > 0) {

@@ -92,7 +92,7 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
 
                 return db.opportunities.filter(o => 
                     o.owner_user_id === userId || 
-                    (!o.owner_user_id && o.created_by === userId) ||
+                    o.created_by === userId ||
                     collaboratedIds.has(o.id)
                 ).toArray();
             }
@@ -249,7 +249,7 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
         if (!current) return;
 
         // 1. Permission Check
-        const isOwner = current.owner_user_id === userId || (!current.owner_user_id && current.created_by === userId);
+        const isOwner = current.owner_user_id === userId || current.created_by === userId;
         console.log('[deleteOpportunity] isAdmin:', isAdmin, 'isCoordinador:', isCoordinador, 'isOwner:', isOwner, 'userId:', userId);
         if (!isAdmin && !isCoordinador && !isOwner) {
             throw new Error("No tienes permiso para eliminar esta oportunidad");

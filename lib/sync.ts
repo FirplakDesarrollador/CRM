@@ -1555,6 +1555,7 @@ export class SyncEngine {
                         ciudad: a.ciudad,
                         subclasificacion_id: a.subclasificacion_id,
                         comentarios: a.comentarios,
+                        origen_cuenta: a.origen_cuenta,
                         ignorar_limites_descuento: a.ignorar_limites_descuento ?? false,
                         owner_user_id: a.owner_user_id,
                         created_by: a.created_by,
@@ -1930,6 +1931,7 @@ export class SyncEngine {
                         email: c.email,
                         telefono: c.telefono,
                         es_principal: c.es_principal,
+                        comentarios: c.comentarios,
                         created_by: c.created_by,
                         updated_by: c.updated_by,
                         updated_at: c.updated_at
@@ -2089,28 +2091,9 @@ export class SyncEngine {
                             continue;
                         }
         
-                        quotesToPut.push({
-                            id: q.id,
-                            opportunity_id: q.opportunity_id,
-                            numero_cotizacion: q.numero_cotizacion,
-                            total_amount: q.total_amount,
-                            currency_id: q.currency_id,
-                            status: q.status,
-                            is_winner: q.is_winner,
-                            es_pedido: q.es_pedido,
-                            fecha_minima_requerida: q.fecha_minima_requerida,
-                            fecha_facturacion: q.fecha_facturacion,
-                            tipo_facturacion: q.tipo_facturacion,
-                            notas_sap: q.notas_sap,
-                            formas_pago: q.formas_pago,
-                            facturacion_electronica: q.facturacion_electronica,
-                            orden_compra: q.orden_compra,
-                            incoterm: q.incoterm,
-                            segmento_id: q.segmento_id,
-                            created_by: q.created_by,
-                            updated_by: q.updated_by,
-                            updated_at: q.updated_at
-                        });
+                        // Keep the complete server record. A selective projection here silently
+                        // deleted newly added editable fields from IndexedDB after each pull.
+                        quotesToPut.push({ ...q });
                         mergedCount++;
                     }
                     if (quotesToPut.length > 0) await db.quotes.bulkPut(quotesToPut);

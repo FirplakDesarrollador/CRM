@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { X, TrendingUp, Calendar, Hash, Percent } from "lucide-react";
 import { ProbabilityDonut } from "@/components/ui/ProbabilityDonut";
+import { formatNumberCO } from "@/lib/utils";
 
 interface OpportunityQuickViewProps {
     opportunityId: string;
@@ -193,7 +194,7 @@ export function OpportunityQuickView({ opportunityId, isOpen, onClose, onUpdate 
                                         <span className="text-xs font-bold">Valor</span>
                                     </div>
                                     <p className="font-bold text-slate-900">
-                                        ${opportunity?.amount?.toLocaleString()} {opportunity?.currency_id}
+                                        $ {formatNumberCO(opportunity?.amount)} {opportunity?.currency_id || 'COP'}
                                     </p>
                                 </div>
                                 <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">

@@ -104,14 +104,12 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
         const setIsLoadingData = useSyncStore.getState().setIsLoadingData;
         setLoading(true);
         setIsLoadingData(true);
-        try {
-            // Calculate range
-            const currentPage = isLoadMore ? pageRef.current + 1 : 1;
-            const from = (currentPage - 1) * pageSize;
-            const to = from + pageSize - 1;
+        const currentPage = isLoadMore ? pageRef.current + 1 : 1;
+        const from = (currentPage - 1) * pageSize;
+        const to = from + pageSize - 1;
 
-            if (!navigator.onLine) {
-                console.log("[useAccountsServer] Device is offline. Falling back to local Dexie database...");
+        const fetchOffline = async () => {
+                console.log("[useAccountsServer] Device is offline or server failed. Executing local Dexie fallback...");
                 let localAccounts = await db.accounts.toArray();
                 const allOpps = await db.opportunities.toArray();
 
@@ -126,15 +124,15 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                 const collabAccIds = collabOpps.filter(o => !o.is_deleted).map(o => o.account_id);
 
                 if (isVendedor && currentUserId) {
-                    localAccounts = localAccounts.filter((a: any) => 
+                    localAccounts = localAccounts.filter(a =>
                         a.owner_user_id === currentUserId || 
-                        (!a.owner_user_id && a.created_by === currentUserId) ||
+                        a.created_by === currentUserId ||
                         collabAccIds.includes(a.id)
                     );
                 } else if (userRole === 'COORDINADOR' && currentUserId) {
                     localAccounts = localAccounts.filter((a: any) => 
                         a.owner_user_id === currentUserId || 
-                        (!a.owner_user_id && a.created_by === currentUserId) ||
+                        a.created_by === currentUserId ||
                         (a.owner_user_id && subordinateIds.includes(a.owner_user_id)) ||
                         (!a.owner_user_id && a.created_by && subordinateIds.includes(a.created_by)) ||
                         collabAccIds.includes(a.id)
@@ -142,6 +140,23 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                 }
 
                 // Filters
+                if (webFilter) {
+                    const webAccountIds = new Set(
+                        allOpps
+                            .filter(o => !o.is_deleted && (
+                                Boolean(o.url_origen && o.url_origen.trim() !== '') ||
+                                Boolean(o.origen_oportunidad && (
+                                    o.origen_oportunidad.toLowerCase().includes('web') ||
+                                    o.origen_oportunidad.toLowerCase().includes('pagina') ||
+                                    o.origen_oportunidad.toLowerCase().includes('página')
+                                ))
+                            ))
+                            .map(o => o.account_id)
+                            .filter(Boolean)
+                    );
+                    localAccounts = localAccounts.filter(a => webAccountIds.has(a.id));
+                }
+
                 if (searchTerm && searchTerm.trim()) {
                     localAccounts = localAccounts.filter(a =>
                         matchesSearchTokens([a.nombre, a.nit_base, a.ciudad, a.direccion, a.email, a.telefono], searchTerm)
@@ -236,6 +251,11 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                 }
                 setCount(totalCount);
                 setHasMore(from + paginatedAccounts.length < totalCount);
+            };
+
+        try {
+            if (!navigator.onLine) {
+                await fetchOffline();
                 return;
             }
 
@@ -428,69 +448,14 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
             }
 
             if (totalCount !== null) {
-                const effectiveCount = (searchTerm && searchTerm.trim()) ? combinedResults.length : totalCount;
-                setCount(effectiveCount);
+                setCount(totalCount);
                 setHasMore(from + (result?.length || 0) < totalCount);
             }
 
         } catch (err) {
             console.error("Error fetching accounts from server, executing local Dexie fallback:", err);
             try {
-                let localAccounts = await db.accounts.toArray();
-                const allOpps = await db.opportunities.toArray();
-                const { data: usersData } = await supabase.from('CRM_Usuarios').select('id, full_name, email');
-                const userMap = new Map((usersData || []).map(u => [u.id, u.full_name || u.email]));
-
-                if (searchTerm && searchTerm.trim()) {
-                    localAccounts = localAccounts.filter(a =>
-                        matchesSearchTokens([a.nombre, a.nit_base, a.ciudad, a.direccion, a.email, a.telefono], searchTerm)
-                    );
-                }
-
-                if (assignedUserId) {
-                    localAccounts = localAccounts.filter(a => a.owner_user_id === assignedUserId);
-                }
-
-                if (channelFilter) {
-                    localAccounts = localAccounts.filter(a => a.canal_id === channelFilter);
-                }
-
-                if (subclassificationFilter) {
-                    localAccounts = localAccounts.filter(a => a.subclasificacion_id === subclassificationFilter);
-                }
-
-                if (nivelPremiumFilter) {
-                    localAccounts = localAccounts.filter(a => a.nivel_premium === nivelPremiumFilter);
-                }
-
-                const totalCount = localAccounts.length;
-                const currentPage = isLoadMore ? pageRef.current + 1 : 1;
-                const from = (currentPage - 1) * pageSize;
-                const paginatedAccounts = localAccounts.slice(from, from + pageSize);
-
-                const mappedOpps = paginatedAccounts.map(item => ({
-                    ...item,
-                    owner_name: userMap.get(item.owner_user_id || item.created_by || '') || 'Usuario',
-                    creator_name: userMap.get(item.created_by || '') || 'Usuario',
-                    contact_count: 0,
-                    potencial_venta: (allOpps as any[])
-                        .filter(o => o.account_id === item.id && !o.is_deleted && ![11, 14, 2, 3, 4].includes(o.estado_id))
-                        .reduce((sum, o) => sum + (o.amount || o.valor || 0), 0)
-                }));
-
-                if (isLoadMore) {
-                    setData(prev => {
-                        const existingIds = new Set(prev.map(i => i.id));
-                        const newItems = mappedOpps.filter(i => !existingIds.has(i.id));
-                        return [...prev, ...newItems] as any;
-                    });
-                    pageRef.current = currentPage;
-                } else {
-                    setData(mappedOpps as any);
-                    pageRef.current = 1;
-                }
-                setCount(totalCount);
-                setHasMore(from + paginatedAccounts.length < totalCount);
+                await fetchOffline();
             } catch (fallbackErr) {
                 console.error("Dexie fallback exception:", fallbackErr);
             }

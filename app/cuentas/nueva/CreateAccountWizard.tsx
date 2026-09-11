@@ -11,6 +11,7 @@ import { Loader2, Medal, ChevronRight, Check } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/components/ui/utils";
 import { useRouter } from "next/navigation";
+import { DuplicateAccountModal, type DuplicateAccountInfo } from "@/components/cuentas/DuplicateAccountModal";
 
 import { isProvisionalNit, generateProvisionalNit } from "@/lib/nitUtils";
 
@@ -41,7 +42,16 @@ const accountSchema = z.object({
 type AccountFormInput = z.input<typeof accountSchema>;
 type AccountFormData = z.output<typeof accountSchema>;
 type ParentAccount = Pick<LocalCuenta, "id" | "nombre" | "nit_base">;
-type DuplicateAccount = Pick<LocalCuenta, "id" | "nombre" | "nit_base" | "telefono" | "email">;
+type DuplicateAccount = {
+    id?: string;
+    nombre: string;
+    nit_base?: string | null;
+    canal_id?: string | null;
+    owner_user_id?: string | null;
+    telefono?: string | null;
+    email?: string | null;
+    created_at?: string | null;
+};
 type PremiumTier = NonNullable<AccountFormData["nivel_premium"]>;
 
 const STEP_LABELS = ["Información Base", "Ubicación y Contacto", "Clasificación"];
@@ -55,6 +65,8 @@ export default function CreateAccountWizard() {
     const [parents, setParents] = useState<ParentAccount[]>([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [canSubmitFinalStep, setCanSubmitFinalStep] = useState(false);
+    const [duplicateModalData, setDuplicateModalData] = useState<DuplicateAccountInfo[]>([]);
+    const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
 
     const subclassifications = useLiveQuery(() => db.subclasificaciones.toArray()) || [];
     const countriesList = useLiveQuery(() => db.countries.toArray()) || [];
@@ -180,19 +192,20 @@ export default function CreateAccountWizard() {
 
         setIsSubmitting(true);
         try {
-            // Check duplicates against Supabase using individual safe queries
+            // Check duplicates against Supabase using individual safe queries with expanded fields
             const checkDuplicates = async () => {
+                const fields = 'id, nombre, nit_base, canal_id, owner_user_id, telefono, email, created_at';
                 const checks = [
-                    supabase.from('CRM_Cuentas').select('id, nombre, nit_base, telefono, email').eq('is_deleted', false).eq('nombre', data.nombre),
+                    supabase.from('CRM_Cuentas').select(fields).eq('is_deleted', false).eq('nombre', data.nombre),
                 ];
                 if (data.nit_base && data.nit_base.trim() !== "" && !isProvisionalNit(data.nit_base)) {
-                    checks.push(supabase.from('CRM_Cuentas').select('id, nombre, nit_base, telefono, email').eq('is_deleted', false).eq('nit_base', data.nit_base.trim()));
+                    checks.push(supabase.from('CRM_Cuentas').select(fields).eq('is_deleted', false).eq('nit_base', data.nit_base.trim()));
                 }
                 if (data.telefono) {
-                    checks.push(supabase.from('CRM_Cuentas').select('id, nombre, nit_base, telefono, email').eq('is_deleted', false).eq('telefono', data.telefono));
+                    checks.push(supabase.from('CRM_Cuentas').select(fields).eq('is_deleted', false).eq('telefono', data.telefono));
                 }
                 if (data.email) {
-                    checks.push(supabase.from('CRM_Cuentas').select('id, nombre, nit_base, telefono, email').eq('is_deleted', false).eq('email', data.email));
+                    checks.push(supabase.from('CRM_Cuentas').select(fields).eq('is_deleted', false).eq('email', data.email));
                 }
 
                 const results = await Promise.all(checks);
@@ -208,21 +221,47 @@ export default function CreateAccountWizard() {
 
             const duplicates = await checkDuplicates();
             if (duplicates && duplicates.length > 0) {
-                const nameConflict = duplicates.find(d => d.nombre.toLowerCase() === data.nombre.toLowerCase());
-                const nitConflict = (data.nit_base && !isProvisionalNit(data.nit_base))
-                    ? duplicates.find(d => d.nit_base === data.nit_base)
-                    : null;
-                const phoneConflict = data.telefono ? duplicates.find(d => d.telefono === data.telefono) : null;
-                const emailConflict = data.email ? duplicates.find(d => d.email === data.email) : null;
+                const duplicateInfos: DuplicateAccountInfo[] = [];
 
-                let errorMessage = "";
-                if (nameConflict) errorMessage += `\n- El nombre "${data.nombre}" ya existe.`;
-                if (nitConflict && !data.is_child) errorMessage += `\n- El NIT "${data.nit_base}" ya existe.`;
-                if (phoneConflict) errorMessage += `\n- El teléfono "${data.telefono}" ya existe.`;
-                if (emailConflict) errorMessage += `\n- El email "${data.email}" ya existe.`;
+                for (const dup of duplicates) {
+                    const conflicts: string[] = [];
+                    if (data.nombre && dup.nombre.toLowerCase() === data.nombre.toLowerCase()) {
+                        conflicts.push(`Nombre "${data.nombre}" ya existe`);
+                    }
+                    if (data.nit_base && !isProvisionalNit(data.nit_base) && !data.is_child && dup.nit_base === data.nit_base.trim()) {
+                        conflicts.push(`NIT "${data.nit_base}" ya existe`);
+                    }
+                    if (data.telefono && dup.telefono === data.telefono) {
+                        conflicts.push(`Teléfono "${data.telefono}" ya existe`);
+                    }
+                    if (data.email && dup.email === data.email) {
+                        conflicts.push(`Email "${data.email}" ya existe`);
+                    }
 
-                if (errorMessage) {
-                    alert(`No se puede crear. Se encontraron registros duplicados:${errorMessage}`);
+                    if (conflicts.length > 0) {
+                        let ownerInfo = null;
+                        if (dup.owner_user_id) {
+                            const { data: userData } = await supabase
+                                .from('CRM_Usuarios')
+                                .select('full_name, email')
+                                .eq('id', dup.owner_user_id)
+                                .maybeSingle();
+                            if (userData) {
+                                ownerInfo = userData;
+                            }
+                        }
+
+                        duplicateInfos.push({
+                            account: dup,
+                            owner: ownerInfo,
+                            conflicts,
+                        });
+                    }
+                }
+
+                if (duplicateInfos.length > 0) {
+                    setDuplicateModalData(duplicateInfos);
+                    setIsDuplicateModalOpen(true);
                     setIsSubmitting(false);
                     return;
                 }
@@ -500,6 +539,13 @@ export default function CreateAccountWizard() {
                     </div>
                 </form>
             </div>
+
+            <DuplicateAccountModal
+                isOpen={isDuplicateModalOpen}
+                onClose={() => setIsDuplicateModalOpen(false)}
+                duplicates={duplicateModalData}
+                title="Cliente ya registrado en el CRM"
+            />
         </div>
     );
 }

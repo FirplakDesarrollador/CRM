@@ -15,6 +15,27 @@ export function formatCurrency(amount: number) {
 }
 
 /**
+ * Formatea un número usando el estándar de separadores de Colombia (punto para miles, coma para decimales).
+ */
+export function formatNumberCO(amount: number | null | undefined, maxDecimals: number = 2): string {
+    if (amount === null || amount === undefined || isNaN(amount)) return '0';
+    return new Intl.NumberFormat('es-CO', {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: maxDecimals,
+    }).format(amount);
+}
+
+/**
+ * Formatea el valor de una oportunidad con su código de moneda y separadores es-CO.
+ * Ej: 152266785.2, 'COP' -> "COP 152.266.785,2"
+ */
+export function formatOpportunityAmount(amount: number | null | undefined, currency: string = 'COP'): string {
+    const formatted = formatNumberCO(amount, 2);
+    return `${currency || 'COP'} ${formatted}`;
+}
+
+
+/**
  * Normaliza un texto removiendo tildes y caracteres diacríticos, convirtiéndolo a minúsculas.
  */
 export function removeAccents(str: string | null | undefined): string {

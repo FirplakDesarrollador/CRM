@@ -102,6 +102,35 @@ export function OpportunityFilters({
         }
     }, [initialOrigin]);
 
+    useEffect(() => {
+        setSelectedChannel(initialChannelId || null);
+    }, [initialChannelId]);
+
+    useEffect(() => {
+        setSelectedSubclass(initialSubclassId || null);
+    }, [initialSubclassId]);
+
+    useEffect(() => {
+        setSelectedSegment(initialSegmentId || null);
+    }, [initialSegmentId]);
+
+    useEffect(() => {
+        setSelectedPhase(initialPhaseId || null);
+    }, [initialPhaseId]);
+
+    useEffect(() => {
+        if (initialStatusFilter) {
+            setStatusFilter(initialStatusFilter);
+        }
+    }, [initialStatusFilter]);
+
+    useEffect(() => {
+        setStartDate(initialDates?.startDate || null);
+        setEndDate(initialDates?.endDate || null);
+        setStartClosingDate(initialDates?.startClosingDate || null);
+        setEndClosingDate(initialDates?.endClosingDate || null);
+    }, [initialDates?.startDate, initialDates?.endDate, initialDates?.startClosingDate, initialDates?.endClosingDate]);
+
     // Initial Load
     useEffect(() => {
         const loadMetadata = async () => {

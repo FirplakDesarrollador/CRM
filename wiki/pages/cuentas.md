@@ -24,14 +24,14 @@ que determina su lista de precios.
 - Creación mediante `app/cuentas/nueva/CreateAccountWizard.tsx`: wizard de 3 pasos
   (información base, ubicación/contacto con origen_cuenta, y clasificación). La cuenta solo se crea
   desde el último paso con `Crear Cuenta`; el submit está protegido contra avances
-  o doble clics que intenten saltarse la clasificación.
+  o doble clics que intenten saltarse la clasificación. Si se detecta un duplicado (NIT, Razón Social, Teléfono o Email), se despliega `DuplicateAccountModal` mostrando los detalles de la cuenta existente, el asesor propietario asignado (`CRM_Usuarios`) y su canal de venta.
 - Prueba E2E dev-only en `/e2e/cuentas-wizard` para validar el wizard sin depender
   de cookies de Supabase; en producción la ruta devuelve 404.
 - Listado con filtros (`AccountFilters`, `UserPickerFilter`): vista móvil con tarjetas responsivas y vista desktop con tabla interactiva (Handsontable) donde la columna "País" (mapeada dinámicamente desde `pais_id` / catálogos) se visualiza en la vista inicial junto a Ubicación, y la edición se activa directamente al hacer clic/seleccionar la fila.
 - Detalle con pestañas: contactos, oportunidades, actividades, sucursales (branches) y
   asignados (`components/cuentas/Account*Tab.tsx`). La reasignación de responsable desde la cuenta matriz reasigna automáticamente en cascada todas sus oportunidades vinculadas en un traspaso directo. La reasignación desde una oportunidad individual aplica únicamente a esa oportunidad.
 - Formulario `AccountForm` con pestañas (usa `shouldUnregister: false` — ver
-  `bugs-knowhow.md` §1) y botón de eliminación visible en el encabezado y en los footers de todas las pestañas.
+  `bugs-knowhow.md` §1) y botón de eliminación visible en el encabezado y en los footers de todas las pestañas. Utiliza `lastSyncedAccountIdRef` y `lastSyncedUpdatedAtRef` para garantizar que el `useEffect` de sincronización con la propiedad `account` no sobreescriba los cambios guardados tras el submit (`isDirty = false`).
 - Carga masiva de cuentas: `BulkAccountUploader` + API `app/api/bulk-accounts`.
 - Borrado (`delete_account` / `AccountDeleteModal`): funcionalidad restringida estrictamente a usuarios con rol `ADMIN` (`isAdmin`), con modal de confirmación que permite borrado en cascada de la cuenta junto con sus contactos y oportunidades asociadas (además de permitir borrado individual de registros relacionados).
 

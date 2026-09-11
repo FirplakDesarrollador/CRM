@@ -3,6 +3,154 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-09-08 - Formato Estándar de Moneda con Separadores es-CO en Oportunidades (`formatNumberCO` / `formatOpportunityAmount`)
+
+- **Mejora Visual en Oportunidades (`lib/utils.ts`, `app/oportunidades/[id]/page.tsx`, `OpportunityQuickView.tsx`, `AccountOpportunitiesTab.tsx`):**
+  - **Requerimiento:** Aplicar separadores de miles con punto (`.`) y separadores de decimales con coma (`,`) en el valor de las oportunidades (ej. `COP 152.266.785,2` o `$ 152.266.785,2 COP`).
+  - **Implementación:** Creación de las utilidades `formatNumberCO` y `formatOpportunityAmount` en `lib/utils.ts` mediante `new Intl.NumberFormat('es-CO', { minimumFractionDigits: 0, maximumFractionDigits: 2 })`.
+  - **Componentes Actualizados:** `DetailHeader` de oportunidad (`subtitle`), tarjeta "Valor de la Oportunidad (Importe)" con badge de previsualización formateada para el campo numérico editable, `OpportunityQuickView.tsx` y `AccountOpportunitiesTab.tsx`.
+  - **Pruebas:** Creada suite de prueba `tests/opportunityAmountFormatting.test.ts` (**VERIFIED / GREEN**).
+  - **Páginas actualizadas:** `wiki/pages/oportunidades.md`.
+
+## 2026-09-08 - Corrección de Reseteo Involuntario y Pérdida de Datos al Guardar Cuentas (`AccountForm.tsx`)
+
+- **Edición de Cuentas (`components/cuentas/AccountForm.tsx`):**
+  - **Problema:** Al presionar "Guardar Cambios" o autoguardar, `onSubmit` invocaba `reset(data)`, cambiando el estado del formulario a `isDirty = false`. Esto disparaba inmediatamente el `useEffect` de sincronización con la propiedad `account`, el cual ejecutaba un nuevo `reset` utilizando el objeto `account` desactualizado del componente padre, borrando en pantalla los campos recién guardados (`telefono`, `email`, `comentarios`).
+  - **Solución:** Implementación de referencias `lastSyncedAccountIdRef` y `lastSyncedUpdatedAtRef` que rastrean el ID y fecha del último guardado. El `useEffect` sólo resetea el formulario si la propiedad `account` corresponde a una cuenta distinta o si contiene un timestamp genuinamente más reciente recibido del servidor.
+  - **Pruebas:** Creada suite de prueba `tests/accountFormReset.test.ts` (**VERIFIED / GREEN**).
+  - **Páginas actualizadas:** `wiki/pages/cuentas.md`.
+
+## 2026-09-08 - Reemplazo de Alerta Nativa por Modal Informativo de Cuentas Duplicadas (`DuplicateAccountModal`)
+
+- **Creación y Edición de Cuentas (`CreateAccountWizard.tsx`, `AccountForm.tsx`):**
+  - **Cambio:** Se eliminó el uso de la alerta nativa del navegador (`alert(...)`) cuando se intenta registrar o editar una cuenta cuyo NIT, Razón Social, Teléfono o Email coincide con un registro existente en la base de datos central.
+  - **Nuevo Componente:** Se introdujo `DuplicateAccountModal.tsx`, que consulta los datos ampliados de la cuenta coincidente (Razón Social, NIT, Canal) y recupera la información del **Asesor Propietario actual (`full_name` y `email`)** desde `CRM_Usuarios`.
+  - **Experiencia de Usuario:** Despliega una interfaz modal clara e informativa con tarjetas de coincidencia y una explicación sobre las reglas de visibilidad por rol y propietario.
+  - **Páginas actualizadas:** `wiki/pages/cuentas.md`.
+
+## 2026-09-07 - Corrección de Cierre Involuntario de Modal Editar Actividad por Updates de Dexie
+
+- **Página de Actividades (`app/actividades/page.tsx`):**
+  - **Problema:** Al abrir el modal "Editar Actividad", las acciones de autoguardado (`useFormAutoSave`), resolución de cuenta o sincronizaciones secundarias emitían escrituras en Dexie (`updateActivity`). `useLiveQuery` retornaba una nueva referencia del arreglo `activities`, reejecutando el `useEffect` de deep-linking que, al no tener `?id=` explícito en la URL en aperturas directas, invocaba `setIsModalOpen(false)` y cerraba el modal de inmediato.
+  - **Solución:** Introducción de `lastProcessedUrlIdRef` y guardas de estado en el `useEffect` de deep linking para abortar cierres y aperturas innecesarias cuando `id === lastProcessedUrlIdRef.current` y el modal ya está abierto.
+  - **Helpers Unificados:** Implementación de `openActivityModal` y `closeActivityModal` para mantener el parámetro `?id=` en la URL en sincronía limpia con el estado del modal.
+  - **Pruebas:** Nueva suite de pruebas unitarias en `pruebas unitarias/actividades.test.ts` evaluando la persistencia del estado del modal durante re-evaluaciones en vivo de Dexie.
+
+
+
+## 2026-09-02 - Implementación de Infinite Scroll Automático al Fondo de Galería en Todos los Módulos
+
+- **Hook Unificado (`lib/hooks/useInfiniteScroll.ts`):**
+  - Implementación de un hook reutilizable con debounce/throttling (600ms) y verificación de `hasMore` y `loading`.
+  - Detección dual: escucha eventos de scroll nativo y hook `afterScrollVertically` sobre el contenedor de Handsontable (`.ht_master .wtHolder`), además de un `IntersectionObserver` con `rootMargin: 200px` sobre el centinela móvil/inferior.
+- **Integración en Módulos Principales:**
+  - **Oportunidades (`app/oportunidades/page.tsx`):** Carga automática de los siguientes 100 registros al alcanzar el umbral inferior de la tabla o en el scroll móvil.
+  - **Cuentas (`app/cuentas/page.tsx`):** Carga automática de los siguientes 100 registros al hacer scroll vertical en la tabla o lista de cuentas.
+  - **Contactos (`app/contactos/page.tsx`):** Carga continua de los siguientes 100 contactos al llegar al final de la visualización.
+  - **Actividades (`app/actividades/page.tsx`):** Carga automática de bloques de 20 actividades adicionales en la vista de lista/agenda sin requerir clic manual.
+- **Quality & Pruebas:**
+  - Nueva suite en `pruebas unitarias/infiniteScroll.test.ts` evaluando umbral de fondo, control de estados `loading`/`hasMore` y prevención de ráfagas repetidas (38 pruebas totales en verde).
+
+## 2026-09-02 - Estandarización de Filtros, Paginación 100 Ítems, Fallback y UI en Cuentas, Contactos y Actividades
+
+- **Cuentas (`lib/hooks/useAccountsServer.ts`, `app/cuentas/page.tsx`):**
+  - Unificación de `fetchOffline` tanto para modo offline como para el bloque `catch`, aplicando todos los filtros (canal, subclasificación, nivel, fechas, web y roles) con paginación estricta (`slice(from, to + 1)`).
+  - Eliminación del truncamiento de `totalCount` con `effectiveCount` para respetar el conteo exacto de Supabase.
+  - Integración del pie de tabla en desktop con contador ("Mostrando X de Y cuentas") y botón "Cargar más resultados", reservando el botón externo inferior para móvil (`md:hidden`).
+  - Ajuste dinámico de altura en Handsontable (`calc(100vh - 280px)` / `calc(100vh - 490px)`) y reducción de padding para erradicar el doble scrollbar.
+  - Paginación inicial fijada en 100 registros.
+- **Contactos (`lib/hooks/useContactsServer.ts`, `app/contactos/page.tsx`):**
+  - Implementación de `fetchOffline` en el bloque `catch` para no dejar la vista vacía ante fallos transitorios de red.
+  - Paginación inicial fijada en 100 registros (`pageSize: 100`).
+  - Integración del pie de tabla dentro del card desktop ("Mostrando X de Y contactos" + "Cargar más contactos") y botón externo para móvil (`md:hidden`).
+  - Altura dinámica y ajuste de padding (`max-w-7xl pb-2`) eliminando el desbordamiento vertical.
+- **Actividades (`app/actividades/page.tsx`, `pruebas unitarias/actividades.test.ts`):**
+  - Verificación de consistencia en el filtrado por canal y vencimiento de actividades.
+- **Quality (`pruebas unitarias/`):**
+  - Ampliación de las suites en `cuentas.test.ts`, `contactos.test.ts`, `actividades.test.ts` cubriendo reducción de conteo por canal/cuenta y límite de paginación (35 pruebas totales pasando en verde).
+
+## 2026-09-02 - Corrección de Vencimiento Semántico de Actividades y Tareas en Oportunidades
+
+- **Sincronización de Fechas en Wizard de Actividades (`components/activities/CreateActivityModal.tsx`):**
+  - Para actividades de tipo `TAREA`, `fecha_fin` se sincroniza reactivamente con `fecha_inicio` (Fecha de Vencimiento), impidiendo que persista el valor predeterminado residual de +1 hora tras abrir el modal.
+- **Cálculo de Atraso Resiliente (`lib/opportunityActivities.ts`):**
+  - `computeOpportunityActivitySummary()` ahora evalúa `fecha_inicio` cuando el tipo es `TAREA` o si existe inconsistencia de fechas (`fecha_fin < fecha_inicio`), evitando que tareas futuras sean marcadas erróneamente como "1 atrasada".
+- **Consulta de Servidor (`lib/hooks/useOpportunitiesServer.ts`):**
+  - Se añadieron `fecha_inicio` y `tipo_actividad` a la subconsulta de actividades de `CRM_Oportunidades`.
+- **Quality & Base de Datos:**
+  - Nuevas pruebas unitarias en `pruebas unitarias/opportunityActivities.test.ts` (8 pruebas pasando en verde).
+  - Corrección de `fecha_fin` en la actividad "validación de desarrollo" en Supabase.
+
+## 2026-09-02 - Corrección de Filtro por Canal, Paginación 100 Ítems y Eliminación de Doble Scroll en Oportunidades
+
+- **Resolución de Error PGRST201 y Filtro por Canal (`lib/hooks/useOpportunitiesServer.ts`):**
+  - Desambiguación explícita de la relación `vendedor:CRM_Usuarios!owner_user_id(full_name)` en la consulta PostgREST de Supabase, evitando la ambigüedad con colaboradores que arrojaba HTTP 300 / PGRST201.
+  - La consulta en línea vuelve a ejecutarse en el servidor, aplicando el filtro por canal mediante `account:CRM_Cuentas!inner` y devolviendo el conteo exacto filtrado en milisegundos.
+- **Paginación Estricta de 100 Ítems y Respaldo Local (`lib/hooks/useOpportunitiesServer.ts`):**
+  - Se unificó la lógica de consulta y respaldo local en `fetchOffline` compartida por modo offline y el bloque `catch`.
+  - Se garantiza que el respaldo aplique todos los filtros jerárquicos y pagine estrictamente `localOpps.slice(from, to + 1)` (100 registros), impidiendo el volcado masivo de 6882 oportunidades al DOM.
+- **Eliminación de la Doble Barra de Desplazamiento (`app/oportunidades/page.tsx`):**
+  - Integración del pie de tabla dentro de la tarjeta desktop con contador ("Mostrando X de Y") y botón "Cargar más resultados".
+  - Ajuste dinámico de altura en Handsontable (`calc(100vh - 280px)` / `calc(100vh - 490px)`) y reducción del padding del contenedor a `pb-2`.
+  - El contenedor principal `<main id="main-content">` ya no desborda verticalmente en desktop, dejando a Handsontable como único scrollbar.
+- **Quality (`pruebas unitarias/oportunidades.test.ts`):**
+  - 2 nuevas pruebas unitarias cubriendo la reducción de conteo por canal y el límite de paginación a 100 ítems (totalizando 7 pruebas pasando en verde).
+
+- **Microsoft Graph & Tenant Directory (`lib/microsoft.ts`):**
+  - Se reestructuró `searchMicrosoftUsers` para buscar en Azure AD / Entra ID vía `/users?$search=` con header `ConsistencyLevel: eventual` y fallbacks en cascada (`/users?$filter=...`, `search/query` y `/me/people`).
+  - Se añadieron `User.ReadBasic.All`, `User.Read.All` y `People.Read` a `SCOPES`.
+- **API y Fallback Resiliente (`app/api/microsoft/users/route.ts`):**
+  - Migración a `createClient` de `@/lib/supabase/server` con soporte de cookies chunked (`getAll()`) y lectura de header `Authorization: Bearer <token>`.
+  - Soporte de fallback hacia tokens disponibles del tenant en `CRM_MicrosoftTokens` y hacia `CRM_Usuarios` corporativos garantizando siempre HTTP 200 con colaboradores sin bloquear por 401.
+- **UI Wizard (`components/activities/CreateActivityModal.tsx`):**
+  - Envío de cabecera `Authorization` activa con el token de sesión.
+  - Implementación de fallback directo en el cliente hacia `CRM_Usuarios` en Supabase si la API de Microsoft no retorna resultados o falla la red.
+- **Pruebas y QA (`pruebas unitarias/`):**
+  - Suites unitarias automatizadas `microsoftUsersSearch.test.ts` y `microsoftUsersApi.test.ts`.
+- **Wiki:**
+  - Actualización de `wiki/pages/actividades.md`.
+
+## 2026-09-02 - Auditoría y Corrección Integral de Filtros en Módulos Principales (/oportunidades, /cuentas, /actividades, /contactos)
+
+- **Oportunidades (`lib/hooks/useOpportunitiesServer.ts`, `app/oportunidades/page.tsx`, `components/oportunidades/OpportunityFilters.tsx`):**
+  - Corrección de desincronización de UI en navegación histórica/URL sincronizando estados locales en `[searchParams]`.
+  - Sincronización reactiva de props en drawer `OpportunityFilters`.
+  - Inclusión de alias de tablas foráneas (`account`, `vendedor`) en ordenamiento PostgREST.
+  - Fallback a `db.phases` en carga de fases y soporte completo de filtro web offline (`url_origen` y variantes textuales).
+- **Cuentas (`components/cuentas/AccountFilters.tsx`, `lib/hooks/useAccountsServer.ts`):**
+  - Reactividad de props entrantes en `AccountFilters` tras limpiezas o cambios de URL.
+  - Implementación del filtro web en modo offline Dexie cruzando oportunidades web locales.
+- **Actividades (`app/actividades/page.tsx`):**
+  - Eliminación de `useEffect` destructivos en mount que borraban clasificación y subclasificación restauradas de URL/sesión.
+  - Resolución robusta de canal evaluando la cuenta de la oportunidad o la cuenta directa de la actividad.
+- **Contactos (`lib/hooks/useContactsServer.ts`, `app/contactos/page.tsx`):**
+  - Inclusión de cuentas donde el usuario participa como colaborador en oportunidades en la visibilidad de contactos (online y offline).
+  - Sincronización bidireccional de estados de UI ante cambios de `searchParams`.
+- **Quality & Utilidades Purificadas (`lib/filterUtils.ts`, `pruebas unitarias/`):**
+  - Módulo determinista `filterUtils.ts` con funciones puras `filterOpportunities`, `filterAccounts`, `filterActivities`, `filterContacts`.
+  - Creación de 4 suites unitarias exhaustivas con 19 pruebas pasando en verde (`npm run qa:focused`).
+
+## 2026-09-02 - Ingest: Columna e Indicador de Actividades (Atrasadas / Programadas) en Oportunidades (/oportunidades)
+
+- **Cálculo y Clasificación (`lib/opportunityActivities.ts`):**
+  - Función `computeOpportunityActivitySummary()` que procesa las actividades de una oportunidad determinando si tiene actividades atrasadas (badge rojo con conteo), programadas a futuro (badge azul con conteo), completadas (verde) o sin actividad.
+- **Hook y Carga (`lib/hooks/useOpportunitiesServer.ts`):**
+  - Inclusión de `actividades:CRM_Actividades(id, fecha_fin, is_completed, is_deleted)` en las consultas online y lectura de `db.activities` en modo offline Dexie.
+- **Vistas Desktop y Móvil (`app/oportunidades/page.tsx`):**
+  - Columna `Actividad` añadida a Handsontable con renderizador visual e icono y añadida al selector de columnas.
+  - Indicador visual y conteo en cada tarjeta de la vista móvil.
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+- **Pruebas:** `pruebas unitarias/opportunityActivities.test.ts`.
+
+## 2026-09-02 - Ingest: Categorías de Interés en Oportunidades y Fallback de Cuenta en Actividades (/informes)
+
+- **Informe de Oportunidades (`lib/utils/informes.ts`, `app/informes/page.tsx`):**
+  - Se agregó la columna `CATEGORÍAS DE INTERÉS` (`categorias_interes`), mapeando y normalizando `categoria_oportunidad` mediante `formatOpportunityCategories()`.
+- **Informe de Actividades (`lib/utils/informes.ts`, `app/informes/page.tsx`):**
+  - Se implementó `mapActivityReportRow` con fallback automático de cuenta (`oportunidad.cuenta.nombre`) para aquellas actividades vinculadas a través de una oportunidad que no cuenten con `account_id` directo.
+- **Páginas actualizadas:** `wiki/pages/dashboard-e-indicadores.md`, `wiki/LOG.md`.
+- **Pruebas:** `pruebas unitarias/informes.test.ts`.
+
 ## 2026-09-02 - Operación: Reasignación de Oportunidades y Cuentas Promotores Sodimac (Columna K)
 
 - **Actualización de `owner_user_id` en `CRM_Oportunidades` y `CRM_Cuentas`:**
@@ -136,7 +284,6 @@
   - Se configuró la reasignación como un traspaso 100% limpio (sin creación automática de registros de colaboradores).
   - La reasignación desde una oportunidad individual (`AssignedTab.tsx`) se mantuvo acotada únicamente a esa oportunidad.
 - **Páginas actualizadas:** `wiki/pages/cuentas.md`, `wiki/LOG.md`.
-
 ## 2026-09-02 - UX: Persistencia y Ejecución de Filtros entre Navegación de Módulos
 
 - **Módulos Afectados (`/oportunidades`, `/cuentas`, `/contactos`, `/actividades`):**
@@ -167,6 +314,7 @@
   - Se integró el indicador de País con el ícono `Globe` en la vista móvil de tarjetas.
   - Se incluyó la búsqueda por País en `matchesSearchTokens` dentro de `useAccountsServer.ts`.
 - **Páginas actualizadas:** `wiki/pages/cuentas.md`, `wiki/LOG.md`.
+>>>>>>> origin/main
 
 ## 2026-08-31 - Ingest: NIT Alfanumérico Provisional Único y Restricción Numérica en Pedidos
 

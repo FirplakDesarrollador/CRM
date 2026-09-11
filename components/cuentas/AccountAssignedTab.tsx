@@ -64,9 +64,9 @@ export function AccountAssignedTab({ accountId, currentOwnerId }: AccountAssigne
             await updateAccount(accountId, { owner_user_id: selectedUserId });
             setSuccessMessage("Cuenta y todas sus oportunidades asociadas reasignadas correctamente.");
             setTimeout(() => setSuccessMessage(null), 5000);
-        } catch (error: any) {
+        } catch (error: unknown) {
             console.error("Error assigning account:", error);
-            setErrorMessage(error?.message || "Error al reasignar la cuenta. Por favor intente de nuevo.");
+            setErrorMessage(error instanceof Error ? error.message : "Error al reasignar la cuenta. Por favor intente de nuevo.");
         } finally {
             setIsSaving(false);
         }

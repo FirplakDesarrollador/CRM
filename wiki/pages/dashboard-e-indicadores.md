@@ -25,12 +25,12 @@ Tiles de KPI como ventas ganadas (`VentasGanadasTile`).
 Reportes exportables a Excel (`exceljs`/`xlsx`, utilidades en `lib/utils/informes.ts`).
 Permisos `view_reports` / `view_team_reports` / `export_reports` (ver [[roles-y-permisos]]).
 
-- **Filtros Avanzados por Entidad:**
-  - **Oportunidades:** Rango fechas creación, asesor, canal, estado, fase, segmento, origen, rango de valor ($ min/max) y departamento/ciudad.
+- **Filtros Avanzados y Exportación por Entidad:**
+  - **Oportunidades:** Rango fechas creación, asesor, canal, estado, fase, segmento, origen, rango de valor ($ min/max) y departamento/ciudad. La exportación incluye la columna **Categorías de Interés** (`categorias_interes` / `categoria_oportunidad`), país de la cuenta, fase, canal, vendedor y montos.
   - **Cuentas:** Rango fechas creación, asesor asignado, canal, tipo cliente premium/VIP y departamento/ciudad.
   - **Contactos:** Rango fechas creación, asesor/creador y cargo/rol de decisión.
   - **Cotizaciones:** Rango fechas creación, asesor, estado (DRAFT, SENT, WINNER, REJECTED, EXPIRED) y rango de valor ($ min/max).
-  - **Actividades:** Rango fechas creación, rango fechas vencimiento (`fecha_fin`), asesor, estado cumplimiento (completadas/pendientes), tipo actividad, clasificación y subclasificación.
+  - **Actividades:** Rango fechas creación, rango fechas vencimiento (`fecha_fin`), asesor, estado cumplimiento (completadas/pendientes), tipo actividad, clasificación y subclasificación. La exportación incluye **Cuenta** (con fallback a la cuenta de la oportunidad asociada) y **Oportunidad**.
   - **Informe S&OP:** Reporte pre-diseñado para la planificación de ventas y producción.
     - **Filtros S&OP:** Asesor, canal, estado, año/mes comercial, planta (PC, ALM, FVH), familia de producto, probabilidad mínima (%), quincena (1ª/2ª) y tipo de registro (pedidos/proyectado).
     - **Lógica de Fechas y Pedidos Parciales:** Extrae el Año, Mes Planta y Mes Comercial en español. Considera fraccionamiento por entregas parciales: si una Oportunidad tiene pedidos (`CRM_Pedidos`), consolida por ítems (`CRM_PedidoItems`) con fecha de facturación (`"EXTRA_Fecha de facturación"`) y fecha de entrega (`"EXTRA_Fecha mínima requerida por comercial/cliente"`). Si no tiene pedidos, proyecta a partir de `fecha_cierre_estimada` y su cotización.
