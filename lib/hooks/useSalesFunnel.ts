@@ -16,6 +16,7 @@ export interface SalesFunnelFilters {
     advisor_id: string | null;
     subclasificacion_id: number | null;
     nivel_premium: 'PREMIUM' | 'DESTACADO' | 'ACTIVO' | null;
+    origen_oportunidad?: string | null;
     search_query?: string | null;
     date_from?: string | null;
     date_to?: string | null;
@@ -87,6 +88,7 @@ export function useSalesFunnel(filters?: SalesFunnelFilters) {
         filters?.advisor_id,
         filters?.subclasificacion_id,
         filters?.nivel_premium,
+        filters?.origen_oportunidad,
         filters?.search_query,
         filters?.date_from,
         filters?.date_to,

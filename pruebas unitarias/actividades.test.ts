@@ -167,7 +167,7 @@ describe("Deep Link y Estado de Modal de Actividades", () => {
         let selectedActivityId: string | null = "act-1";
         let lastProcessedUrlId: string | null = "act-1";
 
-        const handleUrlChange = (urlId: string | null, currentActivities: any[]) => {
+        const handleUrlChange = (urlId: string | null, currentActivities: Array<{ id: string; asunto: string; fecha_inicio: string }>) => {
             if (!urlId) {
                 if (lastProcessedUrlId !== null) {
                     lastProcessedUrlId = null;

@@ -3,6 +3,19 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-09-11 - Ingest: Filtro de Origen de Oportunidad en el Dashboard de Inicio
+
+- **Filtros Globales (`components/dashboard/DashboardFilters.tsx`, `lib/hooks/useDashboardFilters.ts`):**
+  - Se agregó el campo `origen_oportunidad` en `DashboardFilterState` y el selector `FilterCombobox` correspondiente (placeholder "Origen de Oportunidad") alimentado dinámicamente con las opciones de `CRM_OrigenesOportunidad` (ordenadas por `orden, nombre`).
+  - Se actualizaron `hasFilters` y `clearFilters` para incluir `origen_oportunidad`.
+- **Vista Principal (`app/(dashboard)/page.tsx`):**
+  - Se actualizó el estado inicial y la lógica de filtrado reactivo de `filteredOpps` y `filteredAccs` (vía `origen_cuenta`) considerando alias como 'wp' para WhatsApp.
+- **Embudo de Ventas (`lib/hooks/useSalesFunnel.ts`, `components/dashboard/SalesFunnelTile.tsx`, `get_sales_funnel_data`):**
+  - Se extendió el hook `useSalesFunnel` con `origen_oportunidad` y se actualizó la función RPC `get_sales_funnel_data` (migración `20260911_add_origin_filter_to_sales_funnel.sql`) agregando el parámetro `p_origen_oportunidad DEFAULT NULL::text` y filtrando en ambas ramas (con canal y agrupada).
+  - Se configuró una capa interna de etiquetas en `SalesFunnelTile.tsx` (`position: 'inside'`) para desplegar visiblemente dentro de cada sección trapezoidal del embudo la cantidad exacta de oportunidades que contiene cada fase (e.g. `24 oportunidades`).
+- **Pruebas:** Suite de prueba unitaria en `pruebas unitarias/dashboardFilters.test.ts` (**VERIFIED / GREEN**).
+- **Páginas actualizadas:** `wiki/pages/dashboard-e-indicadores.md`.
+
 ## 2026-09-08 - Formato Estándar de Moneda con Separadores es-CO en Oportunidades (`formatNumberCO` / `formatOpportunityAmount`)
 
 - **Mejora Visual en Oportunidades (`lib/utils.ts`, `app/oportunidades/[id]/page.tsx`, `OpportunityQuickView.tsx`, `AccountOpportunitiesTab.tsx`):**

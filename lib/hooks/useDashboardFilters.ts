@@ -52,12 +52,13 @@ export function useDashboardFilters() {
                     .select('id, nombre')
                     .order('nombre');
 
-                // 4. Fetch Origins
+                // 4. Fetch Opportunity Origins
                 const { data: origins } = await supabase
                     .from('CRM_OrigenesOportunidad')
-                    .select('id, codigo, nombre')
+                    .select('id, codigo, nombre, orden')
                     .eq('is_active', true)
-                    .order('orden');
+                    .order('orden')
+                    .order('nombre');
 
                 setOptions({
                     channels: channels || [],

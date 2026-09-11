@@ -103,6 +103,16 @@ export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
     const maxAmount = Math.max(...groupedData.map(d => d.total_amount));
     const logMax = Math.log10(maxAmount + 1);
 
+interface FunnelCallbackParams {
+    name?: string;
+    data?: {
+        name?: string;
+        value?: number;
+        actualValue?: number;
+        count?: number;
+    };
+}
+
     // ECharts Funnel Option
     const option = {
         textStyle: {
@@ -114,7 +124,7 @@ export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
             borderWidth: 0,
             padding: 12,
             textStyle: { color: '#fff', fontSize: 12, fontWeight: 'bold', fontFamily: 'var(--font-geist-sans), sans-serif' },
-            formatter: (params: any) => {
+            formatter: (params: FunnelCallbackParams) => {
                 const { name, data } = params;
                 if (!data) return name;
                 const actualValue = data.actualValue || 0;
@@ -123,7 +133,7 @@ export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
                     <div style="font-family: var(--font-geist-sans), sans-serif;">
                         <div style="text-transform: uppercase; font-size: 10px; letter-spacing: 0.1em; opacity: 0.7; margin-bottom: 4px;">${name}</div>
                         <div style="font-size: 14px;">${formatCurrency(actualValue)}</div>
-                        <div style="font-size: 10px; margin-top: 4px; opacity: 0.8;">${data.count || 0} Opportunities • ${pct}% Share</div>
+                        <div style="font-size: 10px; margin-top: 4px; opacity: 0.8;">${data.count || 0} ${data.count === 1 ? 'oportunidad' : 'oportunidades'} • ${pct}% del total</div>
                     </div>
                 `;
             }
@@ -145,7 +155,7 @@ export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
                 label: {
                     show: true,
                     position: 'right',
-                    formatter: (params: any) => {
+                    formatter: (params: FunnelCallbackParams) => {
                         if (!params.data) return params.name;
                         return `{name|${params.name}}\n{val|${formatCurrency(params.data.actualValue || 0)}}\n{qty|${params.data.count || 0} oportunidades}`;
                     },
@@ -206,6 +216,57 @@ export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
                         opacity: item.total_amount === 0 ? 0.4 : 0.9
                     },
                     count: item.count
+                }))
+            },
+            {
+                name: 'FunnelCount',
+                type: 'funnel',
+                left: '10%',
+                top: 40,
+                bottom: 20,
+                width: '70%',
+                min: 0,
+                max: logMax || 1,
+                minSize: '2%',
+                maxSize: '100%',
+                sort: 'none',
+                gap: 4,
+                silent: true,
+                tooltip: { show: false },
+                itemStyle: {
+                    color: 'transparent',
+                    borderColor: 'transparent',
+                    borderWidth: 0
+                },
+                label: {
+                    show: true,
+                    position: 'inside',
+                    formatter: (params: FunnelCallbackParams) => {
+                        const count = params.data?.count ?? 0;
+                        const word = count === 1 ? 'oportunidad' : 'oportunidades';
+                        return `{count|${count}}{unit|  ${word}}`;
+                    },
+                    rich: {
+                        count: {
+                            fontSize: 11,
+                            fontWeight: 600,
+                            fontFamily: 'var(--font-geist-sans), sans-serif'
+                        },
+                        unit: {
+                            fontSize: 9,
+                            fontWeight: 400,
+                            padding: [0, 0, 0, 6],
+                            fontFamily: 'var(--font-geist-sans), sans-serif'
+                        }
+                    }
+                },
+                data: groupedData.map(item => ({
+                    value: Math.log10(item.total_amount + 1),
+                    name: item.fase_nombre,
+                    count: item.count,
+                    label: {
+                        color: item.total_amount === 0 ? '#475569' : '#ffffff'
+                    }
                 }))
             }
         ]
