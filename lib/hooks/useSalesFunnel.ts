@@ -19,6 +19,7 @@ export interface SalesFunnelFilters {
     search_query?: string | null;
     date_from?: string | null;
     date_to?: string | null;
+    origen_oportunidad?: string | null;
 }
 
 export function useSalesFunnel(filters?: SalesFunnelFilters) {
@@ -56,7 +57,8 @@ export function useSalesFunnel(filters?: SalesFunnelFilters) {
                     p_nivel_premium: filters?.nivel_premium || null,
                     p_search_query: filters?.search_query || null,
                     p_date_from: filters?.date_from || null,
-                    p_date_to: filters?.date_to || null
+                    p_date_to: filters?.date_to || null,
+                    p_origen_oportunidad: filters?.origen_oportunidad || null
                 });
 
                 if (rpcError) throw rpcError;
@@ -88,6 +90,7 @@ export function useSalesFunnel(filters?: SalesFunnelFilters) {
         filters?.search_query,
         filters?.date_from,
         filters?.date_to,
+        filters?.origen_oportunidad,
         revision
     ]);
 

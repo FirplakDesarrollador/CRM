@@ -29,7 +29,8 @@ export default function Home() {
     nivel_premium: null,
     search_query: null,
     date_from: null,
-    date_to: null
+    date_to: null,
+    origen_oportunidad: null
   });
 
   const { opportunities } = useOpportunities({ advisor_id: filters.advisor_id });
@@ -70,6 +71,9 @@ export default function Home() {
           if (oppDate > toDate) return false;
         }
       }
+
+      // Origin Filter
+      if (filters.origen_oportunidad && o.origen_oportunidad !== filters.origen_oportunidad) return false;
 
       return true;
     });

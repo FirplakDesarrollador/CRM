@@ -13,6 +13,7 @@ export interface DashboardFilterState {
     search_query: string | null;
     date_from: string | null;
     date_to: string | null;
+    origen_oportunidad: string | null;
 }
 
 interface DashboardFiltersProps {
@@ -38,11 +39,12 @@ export function DashboardFilters({ filters, onFilterChange }: DashboardFiltersPr
             nivel_premium: null,
             search_query: null,
             date_from: null,
-            date_to: null
+            date_to: null,
+            origen_oportunidad: null
         });
     };
 
-    const hasFilters = filters.canal_id || filters.advisor_id || filters.subclasificacion_id || filters.nivel_premium || filters.search_query || filters.date_from || filters.date_to;
+    const hasFilters = filters.canal_id || filters.advisor_id || filters.subclasificacion_id || filters.nivel_premium || filters.search_query || filters.date_from || filters.date_to || filters.origen_oportunidad;
 
     return (
         <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 mb-6 flex flex-wrap items-center gap-6 transition-all duration-300">
@@ -111,6 +113,16 @@ export function DashboardFilters({ filters, onFilterChange }: DashboardFiltersPr
                         value={filters.nivel_premium}
                         onChange={(value) => handleChange("nivel_premium", value as 'ORO' | 'PLATA' | 'BRONCE' | null)}
                         placeholder="Nivel Premium ✨"
+                    />
+                </div>
+
+                {/* Origen Oportunidad */}
+                <div className="relative group w-[200px] shrink-0">
+                    <FilterCombobox
+                        options={options.origins.map(o => ({ value: o.codigo, label: o.nombre }))}
+                        value={filters.origen_oportunidad}
+                        onChange={(value) => handleChange("origen_oportunidad", value as string | null)}
+                        placeholder="Origen Oportunidad"
                     />
                 </div>
 

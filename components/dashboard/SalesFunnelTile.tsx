@@ -147,7 +147,7 @@ export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
                     position: 'right',
                     formatter: (params: any) => {
                         if (!params.data) return params.name;
-                        return `{name|${params.name}}\n{val|${formatCurrency(params.data.actualValue || 0)}}`;
+                        return `{name|${params.name}}\n{val|${formatCurrency(params.data.actualValue || 0)}}\n{qty|${params.data.count || 0} oportunidades}`;
                     },
                     rich: {
                         name: {
@@ -162,6 +162,13 @@ export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
                             fontSize: 12,
                             fontWeight: 'bold',
                             color: '#1e293b',
+                            fontFamily: 'var(--font-geist-sans), sans-serif',
+                            padding: [0, 0, 4, 0]
+                        },
+                        qty: {
+                            fontSize: 10,
+                            fontWeight: 'bold',
+                            color: '#64748b',
                             fontFamily: 'var(--font-geist-sans), sans-serif'
                         }
                     }
