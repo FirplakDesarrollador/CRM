@@ -16,6 +16,7 @@ export interface SalesFunnelFilters {
     advisor_id: string | null;
     subclasificacion_id: number | null;
     nivel_premium: 'PREMIUM' | 'DESTACADO' | 'ACTIVO' | null;
+    origen_oportunidad?: string | null;
     search_query?: string | null;
     date_from?: string | null;
     date_to?: string | null;
@@ -56,7 +57,8 @@ export function useSalesFunnel(filters?: SalesFunnelFilters) {
                     p_nivel_premium: filters?.nivel_premium || null,
                     p_search_query: filters?.search_query || null,
                     p_date_from: filters?.date_from || null,
-                    p_date_to: filters?.date_to || null
+                    p_date_to: filters?.date_to || null,
+                    p_origen_oportunidad: filters?.origen_oportunidad || null
                 });
 
                 if (rpcError) throw rpcError;
@@ -85,6 +87,7 @@ export function useSalesFunnel(filters?: SalesFunnelFilters) {
         filters?.advisor_id,
         filters?.subclasificacion_id,
         filters?.nivel_premium,
+        filters?.origen_oportunidad,
         filters?.search_query,
         filters?.date_from,
         filters?.date_to,

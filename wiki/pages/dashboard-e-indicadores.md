@@ -6,10 +6,9 @@ informes exportables (`/informes`, solo ADMIN) y metas (`/configuracion/metas`).
 ## Dashboard de inicio (`/`)
 
 Grilla de tiles (`DashboardGrid`) con filtros globales (`DashboardFilters`,
-`useDashboardFilters`):
+`useDashboardFilters`): canal, asesor, subclasificación, nivel premium, origen de oportunidad (`origen_oportunidad` vía `CRM_OrigenesOportunidad`), búsqueda y rango de fechas:
 
-- **Embudo de ventas** (`SalesFunnelTile`): RPC `get_sales_funnel` (con variante
-  filtrada y fix de agrupación por fase `20260304`) sobre [[oportunidades]].
+- **Embudo de ventas** (`SalesFunnelTile`): RPC `get_sales_funnel_data` (con soporte para filtros de canal, asesor, tipo cliente, nivel premium, búsqueda, fechas y origen de oportunidad `20260911`) sobre [[oportunidades]], con visualización del conteo de oportunidades al interior de cada sección del embudo.
 - **Resumen de oportunidades** (`OpportunitySummaryCard`).
 - **Objetivos** (`ObjectivesCard`): avance frente a metas.
 - **Distribución de clientes** (`ClientDistributionTile`) y **cuentas recientes**
@@ -51,4 +50,4 @@ Permisos `view_reports` / `view_team_reports` / `export_reports` (ver [[roles-y-
 - `app/informes/page.tsx`, `lib/utils/informes.ts`
 - `app/configuracion/metas/page.tsx`, `components/config/Goals*.tsx`
 - `lib/hooks/useSalesFunnel.ts`, `useDashboardFilters.ts`, `useConfig.ts`
-- Migraciones `20260127_*goals*`, `20260210/20260223_sales_funnel_rpc`
+- Migraciones `20260127_*goals*`, `20260210/20260223_sales_funnel_rpc`, `20260304_fix_sales_funnel_phase_grouping`, `20260911_add_origin_filter_to_sales_funnel`

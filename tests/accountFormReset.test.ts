@@ -5,13 +5,6 @@ describe("AccountForm Reset Prevention", () => {
         const lastSyncedAccountId = "acc-123";
         let lastSyncedUpdatedAt = "2026-09-08T10:00:00.000Z";
 
-        // Simulated form submission with new values
-        const submittedData = {
-            telefono: "3017091765",
-            email: "gabriel@prueba.com",
-            comentarios: "FEERIA EXPOCAMACOL CLIENTE DISTRIBUIDOR \n prueba"
-        };
-
         // Timestamp updated on save
         const savedTimestamp = "2026-09-08T10:30:00.000Z";
         lastSyncedUpdatedAt = savedTimestamp;

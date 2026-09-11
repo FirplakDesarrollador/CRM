@@ -27,6 +27,7 @@ export default function Home() {
     advisor_id: null,
     subclasificacion_id: null,
     nivel_premium: null,
+    origen_oportunidad: null,
     search_query: null,
     date_from: null,
     date_to: null
@@ -51,6 +52,18 @@ export default function Home() {
       if (filters.canal_id && acc?.canal_id !== filters.canal_id) return false;
       if (filters.subclasificacion_id && acc?.subclasificacion_id !== filters.subclasificacion_id) return false;
       if (filters.nivel_premium && acc?.nivel_premium !== filters.nivel_premium) return false;
+
+      // Origin Filter
+      if (filters.origen_oportunidad) {
+        if (!o.origen_oportunidad) return false;
+        const lowerOrigin = filters.origen_oportunidad.toLowerCase();
+        const val = o.origen_oportunidad.toLowerCase();
+        if (lowerOrigin === 'wp') {
+          if (!val.includes('wp') && !val.includes('whatsapp')) return false;
+        } else if (!val.includes(lowerOrigin)) {
+          return false;
+        }
+      }
 
       if (filters.search_query) {
         const query = filters.search_query.toLowerCase();
@@ -79,6 +92,18 @@ export default function Home() {
       if (filters.subclasificacion_id && a.subclasificacion_id !== filters.subclasificacion_id) return false;
       if (filters.nivel_premium && a.nivel_premium !== filters.nivel_premium) return false;
       if (filters.advisor_id && a.owner_user_id !== filters.advisor_id) return false;
+
+      // Origin Filter for Accounts
+      if (filters.origen_oportunidad) {
+        if (!a.origen_cuenta) return false;
+        const lowerOrigin = filters.origen_oportunidad.toLowerCase();
+        const val = a.origen_cuenta.toLowerCase();
+        if (lowerOrigin === 'wp') {
+          if (!val.includes('wp') && !val.includes('whatsapp')) return false;
+        } else if (!val.includes(lowerOrigin)) {
+          return false;
+        }
+      }
 
       if (filters.search_query) {
         const query = filters.search_query.toLowerCase();
