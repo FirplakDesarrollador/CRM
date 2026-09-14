@@ -17,6 +17,7 @@ import {
     ESTADO_BUCKET_ORDER,
     getEstadoBucket,
 } from "./estadoUtils";
+import { EChartsCallbackParams } from "./echartsTypes";
 
 const MONTH_LABELS = [
     "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -37,7 +38,7 @@ const LABEL_TO_BUCKET: Record<string, EstadoBucket> = ESTADO_BUCKET_ORDER.reduce
     {} as Record<string, EstadoBucket>
 );
 
-function computeBucketTotals(list: { amount?: number | null; estado_id?: number | null; [k: string]: any }[]) {
+function computeBucketTotals(list: { amount?: number | null; valor?: number | null; estado_id?: number | null }[]) {
     const acc: Record<EstadoBucket | "total", { amount: number; count: number }> = {
         total: { amount: 0, count: 0 },
         open: { amount: 0, count: 0 },
@@ -225,7 +226,7 @@ export function Page1EstadosTiempo() {
 
     // Works for both the pie (params.name = slice label) and the line chart
     // (params.seriesName = "Abierta" / "Cerrado Ganado" / "Cerrado Perdido").
-    const handleChartClick = (params: any) => {
+    const handleChartClick = (params: EChartsCallbackParams) => {
         const bucket = LABEL_TO_BUCKET[(params.seriesName ?? params.name) as string];
         if (bucket) toggleEstadoFilter(bucket);
     };
@@ -252,7 +253,7 @@ export function Page1EstadosTiempo() {
                 backgroundColor: "#254153",
                 borderWidth: 0,
                 textStyle: { color: "#fff", fontSize: 12 },
-                formatter: (p: any) => `${p.name}<br/>${p.value} oportunidades (${p.percent}%)`,
+                formatter: (p: EChartsCallbackParams) => `${p.name}<br/>${p.value} oportunidades (${p.percent}%)`,
             },
             legend: { bottom: 0, textStyle: { fontSize: 11, color: "#475569" } },
             series: [

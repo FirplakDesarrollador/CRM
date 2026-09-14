@@ -20,31 +20,31 @@ export interface CanalPropioActivity {
  */
 export function useCanalPropioActivities(ownerIds: string[]) {
     const [activities, setActivities] = useState<CanalPropioActivity[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
     const key = ownerIds.slice().sort().join(",");
 
     useEffect(() => {
-        if (ownerIds.length === 0) {
-            setActivities([]);
-            setIsLoading(false);
-            return;
-        }
+        // Derive the id list from `key` itself (rather than closing over the
+        // `ownerIds` prop) so the effect only needs `key` in its dependency
+        // array and stays exhaustive-deps clean.
+        const ids = key ? key.split(",") : [];
         let active = true;
-        setIsLoading(true);
-        supabase
-            .from("CRM_Actividades")
-            .select("id, user_id, tipo_actividad, is_completed, fecha_inicio, is_deleted")
-            .in("user_id", ownerIds)
-            .then(({ data, error }) => {
-                if (!active) return;
-                if (!error && data) setActivities(data as CanalPropioActivity[]);
-                setIsLoading(false);
-            });
+
+        const request = ids.length > 0
+            ? supabase
+                .from("CRM_Actividades")
+                .select("id, user_id, tipo_actividad, is_completed, fecha_inicio, is_deleted")
+                .in("user_id", ids)
+            : Promise.resolve({ data: [] as CanalPropioActivity[], error: null });
+
+        request.then(({ data, error }) => {
+            if (!active) return;
+            if (!error) setActivities((data as CanalPropioActivity[]) || []);
+        });
+
         return () => {
             active = false;
         };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [key]);
 
-    return { activities, isLoading };
+    return { activities };
 }

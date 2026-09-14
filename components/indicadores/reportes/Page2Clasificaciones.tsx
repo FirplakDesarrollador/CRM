@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import ReactECharts from "echarts-for-react";
 import { BarChart3, ListChecks } from "lucide-react";
 import { useActivities } from "@/lib/hooks/useActivities";
@@ -9,6 +9,7 @@ import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { useIndicadoresLookups } from "@/lib/hooks/useIndicadoresLookups";
 import { SearchableSelect, SearchableSelectOption } from "@/components/ui/SearchableSelect";
 import { MultiSelect, Option } from "@/components/ui/MultiSelect";
+import { EChartsCallbackParams } from "./echartsTypes";
 
 const MONTH_LABELS = [
     "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -99,10 +100,13 @@ export function Page2Clasificaciones() {
 
     // Resolve account (id, nombre, canal_id) for an activity, via its direct
     // account_id or, failing that, its linked opportunity's account.
-    const resolveAccount = (activity: { account_id?: string | null; opportunity_id?: string | null }) => {
-        const accountId = activity.account_id || (activity.opportunity_id ? oppAccountMap.get(activity.opportunity_id) : undefined);
-        return accountId ? accountsMap.get(accountId) : undefined;
-    };
+    const resolveAccount = useCallback(
+        (activity: { account_id?: string | null; opportunity_id?: string | null }) => {
+            const accountId = activity.account_id || (activity.opportunity_id ? oppAccountMap.get(activity.opportunity_id) : undefined);
+            return accountId ? accountsMap.get(accountId) : undefined;
+        },
+        [accountsMap, oppAccountMap]
+    );
 
     const filtered = useMemo(() => {
         const ownerSet = filters.ownerIds.length > 0 ? new Set(filters.ownerIds) : null;
@@ -129,7 +133,7 @@ export function Page2Clasificaciones() {
             }
             return true;
         });
-    }, [activities, filters, isVendedor, user?.id, accountsMap, oppAccountMap]);
+    }, [activities, filters, isVendedor, user, resolveAccount]);
 
     // --- Bar chart: cantidad de clasificaciones -----------------------------
     const chartData = useMemo(() => {
@@ -197,9 +201,9 @@ export function Page2Clasificaciones() {
         };
     }, [chartData, filters.clasificacionIds]);
 
-    const handleBarClick = (params: any) => {
+    const handleBarClick = (params: EChartsCallbackParams) => {
         const id = params?.data?.id;
-        if (id != null) toggleClasificacionFilter(id);
+        if (id != null) toggleClasificacionFilter(Number(id));
     };
 
     // --- Table: Asesor | Clasificación | Cliente | Cantidad ------------------
@@ -221,7 +225,7 @@ export function Page2Clasificaciones() {
         return Array.from(groups.values()).sort((a, b) =>
             a.asesor.localeCompare(b.asesor) || a.clasificacion.localeCompare(b.clasificacion) || a.cliente.localeCompare(b.cliente)
         );
-    }, [filtered, users, clasificacionMap, accountsMap, oppAccountMap]);
+    }, [filtered, users, clasificacionMap, resolveAccount]);
 
     const grandTotal = filtered.length;
 

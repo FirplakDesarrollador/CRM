@@ -24,31 +24,31 @@ export interface CanalPropioOpportunity {
  */
 export function useCanalPropioOpportunities(ownerIds: string[]) {
     const [opportunities, setOpportunities] = useState<CanalPropioOpportunity[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
     const key = ownerIds.slice().sort().join(",");
 
     useEffect(() => {
-        if (ownerIds.length === 0) {
-            setOpportunities([]);
-            setIsLoading(false);
-            return;
-        }
+        // Derive the id list from `key` itself (rather than closing over the
+        // `ownerIds` prop) so the effect only needs `key` in its dependency
+        // array and stays exhaustive-deps clean.
+        const ids = key ? key.split(",") : [];
         let active = true;
-        setIsLoading(true);
-        supabase
-            .from("CRM_Oportunidades")
-            .select("id, owner_user_id, estado_id, fase_id, amount, fecha_cierre_estimada, created_at, is_deleted")
-            .in("owner_user_id", ownerIds)
-            .then(({ data, error }) => {
-                if (!active) return;
-                if (!error && data) setOpportunities(data as CanalPropioOpportunity[]);
-                setIsLoading(false);
-            });
+
+        const request = ids.length > 0
+            ? supabase
+                .from("CRM_Oportunidades")
+                .select("id, owner_user_id, estado_id, fase_id, amount, fecha_cierre_estimada, created_at, is_deleted")
+                .in("owner_user_id", ids)
+            : Promise.resolve({ data: [] as CanalPropioOpportunity[], error: null });
+
+        request.then(({ data, error }) => {
+            if (!active) return;
+            if (!error) setOpportunities((data as CanalPropioOpportunity[]) || []);
+        });
+
         return () => {
             active = false;
         };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [key]);
 
-    return { opportunities, isLoading };
+    return { opportunities };
 }

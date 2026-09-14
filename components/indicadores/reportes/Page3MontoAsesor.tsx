@@ -10,6 +10,7 @@ import { formatCurrency } from "@/lib/utils";
 import { SearchableSelect, SearchableSelectOption } from "@/components/ui/SearchableSelect";
 import { getWeekKey } from "./weekUtils";
 import { getEstadoBucket } from "./estadoUtils";
+import { EChartsCallbackParams } from "./echartsTypes";
 
 const TIPO_CANAL_OPTIONS: { value: TipoCanalVendedor; label: string }[] = [
     { value: "Fisico", label: "Físico" },
@@ -90,7 +91,7 @@ export function Page3MontoAsesor() {
 
     // --- KPIs ---------------------------------------------------------------
     const totalWonAmount = useMemo(
-        () => wonOpportunities.reduce((sum, o) => sum + Number(o.amount ?? (o as any).valor ?? 0), 0),
+        () => wonOpportunities.reduce((sum, o) => sum + Number(o.amount ?? 0), 0),
         [wonOpportunities]
     );
 
@@ -101,7 +102,7 @@ export function Page3MontoAsesor() {
             const id = o.owner_user_id!;
             const name = userNameMap.get(id) || "Sin asesor";
             const existing = map.get(id);
-            const amount = Number(o.amount ?? (o as any).valor ?? 0);
+            const amount = Number(o.amount ?? 0);
             if (existing) {
                 existing.count += 1;
                 existing.amount += amount;
@@ -135,7 +136,7 @@ export function Page3MontoAsesor() {
             weekLabel.set(key, week);
             if (!byAdvisorWeek.has(o.owner_user_id)) byAdvisorWeek.set(o.owner_user_id, new Map());
             const advisorMap = byAdvisorWeek.get(o.owner_user_id)!;
-            advisorMap.set(key, (advisorMap.get(key) || 0) + Number(o.amount ?? (o as any).valor ?? 0));
+            advisorMap.set(key, (advisorMap.get(key) || 0) + Number(o.amount ?? 0));
         });
 
         const weekKeys = Array.from(weekLabel.keys()).sort();
@@ -182,7 +183,7 @@ export function Page3MontoAsesor() {
         };
     }, [wonOpportunities, advisorRows, advisorColorMap]);
 
-    const handleLineClick = (params: any) => {
+    const handleLineClick = (params: EChartsCallbackParams) => {
         const row = advisorRows.find(r => r.asesor === params.seriesName);
         if (row) toggleAsesorFilter(row.id);
     };

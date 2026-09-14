@@ -8,6 +8,7 @@ import { useCanalPropioOpportunities } from "@/lib/hooks/useCanalPropioOpportuni
 import { SearchableSelect, SearchableSelectOption } from "@/components/ui/SearchableSelect";
 import { getWeekKey } from "./weekUtils";
 import { EstadoBucket, getEstadoBucket } from "./estadoUtils";
+import { EChartsCallbackParams } from "./echartsTypes";
 
 const TIPO_CANAL_OPTIONS: { value: TipoCanalVendedor; label: string }[] = [
     { value: "Fisico", label: "Físico" },
@@ -181,7 +182,7 @@ export function Page5Leads() {
         };
     }, [leadsWithoutEstado, filters.estado]);
 
-    const handleEstadoBarClick = (params: any) => {
+    const handleEstadoBarClick = (params: EChartsCallbackParams) => {
         const bucket = params?.data?.bucket as EstadoBucket | undefined;
         if (bucket) toggleEstadoFilter(bucket);
     };

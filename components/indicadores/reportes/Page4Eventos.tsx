@@ -8,6 +8,7 @@ import { useCanalPropioVendedores, TipoCanalVendedor } from "@/lib/hooks/useCana
 import { useCanalPropioActivities } from "@/lib/hooks/useCanalPropioActivities";
 import { SearchableSelect, SearchableSelectOption } from "@/components/ui/SearchableSelect";
 import { getWeekKey } from "./weekUtils";
+import { EChartsCallbackParams } from "./echartsTypes";
 
 const TIPO_CANAL_OPTIONS: { value: TipoCanalVendedor; label: string }[] = [
     { value: "Fisico", label: "Físico" },
@@ -135,9 +136,9 @@ export function Page4Eventos() {
         };
     }, [advisorRows]);
 
-    const handleAdvisorBarClick = (params: any) => {
+    const handleAdvisorBarClick = (params: EChartsCallbackParams) => {
         const id = params?.data?.id;
-        if (id) toggleAsesorFilter(id);
+        if (id != null) toggleAsesorFilter(String(id));
     };
 
     // --- Bar chart: eventos completados y programados por semana -------------
