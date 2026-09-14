@@ -23,6 +23,7 @@ import { useActivities, LocalActivity } from "@/lib/hooks/useActivities";
 import { CreateActivityModal } from "@/components/activities/CreateActivityModal";
 import { supabase } from "@/lib/supabase";
 import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
+import { handleEntityLinkClick } from "@/lib/utils/navigation";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { LossReasonModal } from "@/components/oportunidades/LossReasonModal";
 import { CollaboratorsTab } from "@/components/oportunidades/CollaboratorsTab";
@@ -1692,10 +1693,15 @@ function ActivitiesTab({ opportunityId, accountId }: { opportunityId: string, ac
                         const subName = subclassifications.find(s => String(s.id) === String(act.subclasificacion_id))?.nombre;
 
                         return (
-                            <div
+                            <a
                                 key={act.id}
+                                href={`/actividades?id=${act.id}`}
+                                onClick={(e) => handleEntityLinkClick(e, `/actividades?id=${act.id}`, () => {
+                                    setSelectedActivity(act);
+                                    setIsModalOpen(true);
+                                })}
                                 className={cn(
-                                    "group p-4 bg-white rounded-2xl border transition-all hover:shadow-md cursor-pointer",
+                                    "group p-4 bg-white rounded-2xl border transition-all hover:shadow-md cursor-pointer block no-underline text-inherit",
                                     act.is_completed
                                         ? "border-slate-100 opacity-75"
                                         : isOverdue
@@ -1704,10 +1710,6 @@ function ActivitiesTab({ opportunityId, accountId }: { opportunityId: string, ac
                                                 ? "border-emerald-200 hover:border-emerald-300 hover:shadow-emerald-100"
                                                 : "border-blue-200 hover:border-blue-300 hover:shadow-blue-100"
                                 )}
-                                onClick={() => {
-                                    setSelectedActivity(act);
-                                    setIsModalOpen(true);
-                                }}
                             >
                                 <div className="flex items-start gap-4">
                                     <button
@@ -1777,7 +1779,7 @@ function ActivitiesTab({ opportunityId, accountId }: { opportunityId: string, ac
                                         )}
                                     </div>
                                 </div>
-                            </div>
+                            </a>
                         );
                     })}
                 </div>

@@ -15,6 +15,7 @@ import {
     Plus
 } from "lucide-react";
 import { cn } from "@/components/ui/utils";
+import { handleEntityLinkClick } from "@/lib/utils/navigation";
 
 export default function AccountActivitiesTab({ accountId }: { accountId: string }) {
     const {
@@ -62,11 +63,12 @@ export default function AccountActivitiesTab({ accountId }: { accountId: string 
                         const isOverdue = !act.is_completed && actDate < today;
 
                         return (
-                            <div 
+                            <a 
                                 key={act.id} 
-                                onClick={() => setSelectedActivity(act)}
+                                href={`/actividades?id=${act.id}`}
+                                onClick={(e) => handleEntityLinkClick(e, `/actividades?id=${act.id}`, () => setSelectedActivity(act))}
                                 className={cn(
-                                    "bg-white p-3 rounded-xl border transition-all flex items-start gap-3 shadow-sm cursor-pointer",
+                                    "bg-white p-3 rounded-xl border transition-all flex items-start gap-3 shadow-sm cursor-pointer no-underline text-inherit block",
                                     act.is_completed 
                                         ? "border-slate-100 opacity-75"
                                         : isOverdue 
@@ -140,7 +142,7 @@ export default function AccountActivitiesTab({ accountId }: { accountId: string 
                                         )}
                                     </div>
                                 </div>
-                            </div>
+                            </a>
                         );
                     })}
                     
