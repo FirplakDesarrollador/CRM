@@ -3,6 +3,22 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-09-14 - Ingest: Campo desplegable Tipo POD en el Wizard de Pedido Parcial y Mapeo en Supabase
+
+- **Interfaz de Usuario (`components/quotes/PedidosEditor.tsx`):**
+  - Incorporación del selector desplegable **Tipo POD** (`tipo_pod`) en el **Paso 2 ("Datos logísticos SAP")** del wizard de creación y edición de pedidos parciales.
+  - Opciones disponibles: `POD Total` (valor por defecto preseleccionado), `POD Parcial` y `Sin POD`.
+  - Visualización del valor `Tipo POD` en la lista y tarjeta resumen de pedidos parciales asociados a la cotización.
+- **Modelo Local y Persistencia (`lib/db.ts`, `lib/pedidoFormalization.ts`, `components/quotes/PedidosEditor.tsx`):**
+  - Adición de `tipo_pod` y `pod` a las interfaces `LocalPedido` y `LocalQuote`.
+  - Propagación automática de `tipo_pod` y `pod` en `PEDIDO_DOCUMENT_FIELDS` para sincronización con cotización y generación de documentos.
+  - Persistencia y soporte en autosave (`onAutoSave`) y submit manual (`onSubmit`).
+- **Base de Datos y Supabase:**
+  - Migración append-only `supabase/migrations/20260914180000_add_pod_to_orders_and_quotes.sql`.
+  - Columnas `tipo_pod` y `pod` añadidas con default `'POD Total'` a las tablas `CRM_Pedidos` y `CRM_Cotizaciones`, ejecutada y verificada mediante el MCP de Supabase.
+- **Pruebas:** Suite permanente creada en `tests/pedidoPodField.test.ts` (3/3 VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/cotizaciones-y-pedidos.md`.
+
 ## 2026-09-14 - Ingest: Corrección y optimización de filtros de columna en tablas Handsontable (Oportunidades y Cuentas)
 
 - **Normalización de Tipos Primitivos (`lib/opportunityTableHelpers.ts`):**

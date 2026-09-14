@@ -36,6 +36,34 @@ export interface OpportunityHotRow {
     vendedor: string;
 }
 
+export interface OpportunityInput {
+    id: string;
+    account_id?: string | null;
+    nombre?: string | null;
+    amount?: number | null;
+    account?: {
+        id?: string;
+        nombre?: string | null;
+        ciudad?: string | null;
+        canal_id?: string | null;
+        pais_id?: number | null;
+        pais?: string | null;
+    } | null;
+    actividades?: Parameters<typeof computeOpportunityActivitySummary>[0];
+    activity_summary?: ReturnType<typeof computeOpportunityActivitySummary> | null;
+    origen_oportunidad?: string | null;
+    fase_data?: { nombre?: string | null } | null;
+    estado_data?: { nombre?: string | null } | null;
+    created_at?: string | null;
+    fecha_cierre_estimada?: string | null;
+    vendedor?: { full_name?: string | null } | null;
+}
+
+export interface HotInstanceLike {
+    toPhysicalRow?: (visualRow: number) => number;
+    getSourceDataAtRow?: (physicalRow: number) => unknown;
+}
+
 /**
  * Mapea una oportunidad a una fila para Handsontable.
  * Es crítico que todos los campos asignados a columnas sean valores primitivos (strings/numbers)
@@ -43,7 +71,7 @@ export interface OpportunityHotRow {
  * y el input de búsqueda (Search) funcione correctamente, evitando '[object Object]'.
  */
 export function buildOpportunityHotRow(
-    opp: any,
+    opp: OpportunityInput,
     countryMap: Record<number, string> = {}
 ): OpportunityHotRow {
     const actSummary = opp.activity_summary || computeOpportunityActivitySummary(opp.actividades);
@@ -82,16 +110,17 @@ export function buildOpportunityHotRow(
  * Resuelve la fila física correspondiente considerando filtros u ordenamientos de Handsontable.
  * Evita que clics en filas o custom renderers operen sobre la fila equivocada tras filtrar.
  */
-export function resolveHotRowData(
-    hotInstance: any,
+export function resolveHotRowData<T>(
+    hotInstance: unknown,
     visualRow: number,
-    fallbackData: any[] = []
-): any {
-    if (hotInstance && typeof hotInstance.toPhysicalRow === 'function') {
-        const physicalRow = hotInstance.toPhysicalRow(visualRow);
-        if (physicalRow >= 0 && typeof hotInstance.getSourceDataAtRow === 'function') {
-            const data = hotInstance.getSourceDataAtRow(physicalRow);
-            if (data) return data;
+    fallbackData: T[] = []
+): T | undefined {
+    const instance = hotInstance as HotInstanceLike | null | undefined;
+    if (instance && typeof instance.toPhysicalRow === 'function') {
+        const physicalRow = instance.toPhysicalRow(visualRow);
+        if (physicalRow >= 0 && typeof instance.getSourceDataAtRow === 'function') {
+            const data = instance.getSourceDataAtRow(physicalRow);
+            if (data) return data as T;
         }
         if (physicalRow >= 0 && fallbackData[physicalRow]) {
             return fallbackData[physicalRow];

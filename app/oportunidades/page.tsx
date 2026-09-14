@@ -514,7 +514,7 @@ function OpportunitiesContent() {
         });
     };
 
-    const hotTableRef = useRef<any>(null);
+    const hotTableRef = useRef<{ hotInstance?: { toPhysicalRow?: (r: number) => number; getSourceDataAtRow?: (r: number) => unknown } } | null>(null);
 
     const hotData = useMemo(() => {
         return opportunities.map(opp => buildOpportunityHotRow(opp, countryMap));
@@ -557,11 +557,12 @@ function OpportunitiesContent() {
     const ALL_COLUMN_DEFS: Record<string, any> = {
         cuenta: {
             data: 'cuenta', title: 'Cuenta', readOnly: true, width: colWidths['cuenta'] || 220, wordWrap: false,
-            renderer(instance: any, td: HTMLTableCellElement, row: number, col: number, prop: string, value: any) {
+            renderer(instance: unknown, td: HTMLTableCellElement, row: number, _col: number, _prop: string, value: any) {
                 const v = value || '';
                 const safe = v.replace(/"/g, '&quot;');
-                const physicalRow = instance.toPhysicalRow ? instance.toPhysicalRow(row) : row;
-                const rowData = instance.getSourceDataAtRow(physicalRow);
+                const inst = instance as { toPhysicalRow?: (r: number) => number; getSourceDataAtRow?: (r: number) => { id?: string; account_id?: string } } | null | undefined;
+                const physicalRow = inst && typeof inst.toPhysicalRow === 'function' ? inst.toPhysicalRow(row) : row;
+                const rowData = inst && typeof inst.getSourceDataAtRow === 'function' ? inst.getSourceDataAtRow(physicalRow) : undefined;
                 const url = rowData?.account_id ? `/cuentas?id=${rowData.account_id}` : (rowData?.id ? `/oportunidades/${rowData.id}` : '#');
                 td.innerHTML = `<a href="${url}" onclick="if (!event.ctrlKey && !event.metaKey && event.button === 0) { event.preventDefault(); }" style="font-weight:600;color:#0f172a;text-decoration:none;display:block;width:100%;height:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</a>`;
                 td.style.overflow = 'hidden';
@@ -600,11 +601,12 @@ function OpportunitiesContent() {
         },
         nombre: {
             data: 'nombre', title: 'Oportunidad', readOnly: true, width: colWidths['nombre'] || 240, wordWrap: false,
-            renderer(instance: any, td: HTMLTableCellElement, row: number, col: number, prop: string, value: any) {
+            renderer(instance: unknown, td: HTMLTableCellElement, row: number, _col: number, _prop: string, value: any) {
                 const v = value || '';
                 const safe = v.replace(/"/g, '&quot;');
-                const physicalRow = instance.toPhysicalRow ? instance.toPhysicalRow(row) : row;
-                const rowData = instance.getSourceDataAtRow(physicalRow);
+                const inst = instance as { toPhysicalRow?: (r: number) => number; getSourceDataAtRow?: (r: number) => { id?: string } } | null | undefined;
+                const physicalRow = inst && typeof inst.toPhysicalRow === 'function' ? inst.toPhysicalRow(row) : row;
+                const rowData = inst && typeof inst.getSourceDataAtRow === 'function' ? inst.getSourceDataAtRow(physicalRow) : undefined;
                 const oppId = rowData?.id;
                 const url = oppId ? `/oportunidades/${oppId}` : '#';
                 td.innerHTML = `<a href="${url}" onclick="if (!event.ctrlKey && !event.metaKey && event.button === 0) { event.preventDefault(); }" style="font-weight:600;color:#0f172a;text-decoration:none;display:block;width:100%;height:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</a>`;
@@ -614,11 +616,14 @@ function OpportunitiesContent() {
         },
         actividades: {
             data: 'actividades', title: 'Actividad', readOnly: true, width: 155, wordWrap: false,
-            renderer(instance: any, td: HTMLTableCellElement, row: number, col: number, prop: string, value: any) {
-                const physicalRow = instance.toPhysicalRow ? instance.toPhysicalRow(row) : row;
-                const rowData = instance.getSourceDataAtRow(physicalRow);
-                const label = (typeof value === 'string' && value) ? value : (value?.label || 'Sin actividad');
-                const status = rowData?.actividades_status || (typeof value === 'object' && value?.status) ||
+            renderer(instance: unknown, td: HTMLTableCellElement, row: number, _col: number, _prop: string, value: unknown) {
+                const inst = instance as { toPhysicalRow?: (r: number) => number; getSourceDataAtRow?: (r: number) => unknown } | null | undefined;
+                const physicalRow = inst && typeof inst.toPhysicalRow === 'function' ? inst.toPhysicalRow(row) : row;
+                const rowData = (inst && typeof inst.getSourceDataAtRow === 'function')
+                    ? (inst.getSourceDataAtRow(physicalRow) as { actividades_status?: string } | undefined)
+                    : undefined;
+                const label = (typeof value === 'string' && value) ? value : ((value as { label?: string })?.label || 'Sin actividad');
+                const status = rowData?.actividades_status || ((value as { status?: string })?.status) ||
                     (label.includes('atrasad') ? 'overdue' : label.includes('programad') ? 'scheduled' : label.includes('completad') ? 'completed' : 'none');
 
                 let bg = '#f8fafc';
@@ -734,13 +739,13 @@ function OpportunitiesContent() {
         },
     };
 
-    const hotColumns = useMemo(() => [
+    const hotColumns = [
         // Solo incluir las columnas marcadas como visibles, manteniendo el orden original
         ...OPPORTUNITY_TABLE_COLUMN_KEYS
             .filter(key => visibleColumns.includes(key))
             .map(key => ALL_COLUMN_DEFS[key])
             .filter(Boolean)
-    ], [visibleColumns, colWidths]);
+    ];
 
     const getPhaseBadge = (fase: string) => {
         const lowerFase = fase.toLowerCase();
@@ -1273,7 +1278,7 @@ function OpportunitiesContent() {
                                     rowHeights={38}
                                     renderAllRows={false}
                                     licenseKey="non-commercial-and-evaluation"
-                                    afterOnCellMouseDown={(event: any, coords: any, td: any) => {
+                                    afterOnCellMouseDown={(event: MouseEvent | TouchEvent, coords: { row: number; col: number }) => {
                                         if (coords.row === -1) {
                                             const target = event?.target as HTMLElement;
                                             const isDropdownBtn = target?.closest('.changeType') || target?.closest('.htDropdownMenu') || target?.classList?.contains('changeType');

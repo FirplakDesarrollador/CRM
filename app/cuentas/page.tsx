@@ -372,7 +372,7 @@ function AccountsContent() {
         }
     }, [colStorageKey]);
 
-    const hotTableRef = useRef<any>(null);
+    const hotTableRef = useRef<{ hotInstance?: { toPhysicalRow?: (r: number) => number; getSourceDataAtRow?: (r: number) => { _original?: AccountServer } } } | null>(null);
 
     // Preparar datos para Handsontable
     const hotData = accounts.map(acc => {
@@ -827,7 +827,7 @@ function AccountsContent() {
                             rowHeights={38}
                             renderAllRows={false}
                             licenseKey="non-commercial-and-evaluation"
-                            afterOnCellMouseDown={(event: any, coords: any, td: any) => {
+                            afterOnCellMouseDown={(event: MouseEvent | TouchEvent, coords: { row: number; col: number }) => {
                                 if (coords.row === -1) {
                                     const target = event?.target as HTMLElement;
                                     const isDropdownBtn = target?.closest('.changeType') || target?.closest('.htDropdownMenu') || target?.classList?.contains('changeType');

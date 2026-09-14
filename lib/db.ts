@@ -148,6 +148,8 @@ export interface LocalQuote {
     entrega_en_obra?: boolean;
     bodega_externa?: boolean;
     bodega_firplak?: boolean;
+    tipo_pod?: string;
+    pod?: string;
 
     created_by?: string;
     updated_by?: string;
@@ -228,6 +230,8 @@ export interface LocalPedido {
     entrega_en_obra?: boolean;
     bodega_externa?: boolean;
     bodega_firplak?: boolean;
+    tipo_pod?: string;
+    pod?: string;
 
     created_by?: string;
     updated_by?: string;

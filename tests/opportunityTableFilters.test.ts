@@ -2,12 +2,14 @@ import { describe, it, expect } from 'vitest';
 import {
     buildOpportunityHotRow,
     resolveHotRowData,
-    OPPORTUNITY_TABLE_COLUMN_KEYS
+    OPPORTUNITY_TABLE_COLUMN_KEYS,
+    OpportunityInput,
+    OpportunityHotRow
 } from '../lib/opportunityTableHelpers';
 
 describe('Filtros internos de tabla de oportunidades', () => {
     it('debe mapear "actividades" a un string legible y no a un objeto [object Object]', () => {
-        const mockOpp: any = {
+        const mockOpp: OpportunityInput = {
             id: 'opp-1',
             nombre: 'Negocio Venta Grifería',
             amount: 5000000,
@@ -34,7 +36,7 @@ describe('Filtros internos de tabla de oportunidades', () => {
     });
 
     it('debe mapear oportunidad sin actividades a "Sin actividad"', () => {
-        const mockOpp: any = {
+        const mockOpp: OpportunityInput = {
             id: 'opp-2',
             nombre: 'Oportunidad Nueva',
             actividades: []
@@ -46,7 +48,7 @@ describe('Filtros internos de tabla de oportunidades', () => {
     });
 
     it('todas las columnas filtrables deben tener valores primitivos (string/number), nunca objetos ni undefined', () => {
-        const mockOpp: any = {
+        const mockOpp: OpportunityInput = {
             id: 'opp-3',
             nombre: null,
             amount: null,
@@ -63,7 +65,7 @@ describe('Filtros internos de tabla de oportunidades', () => {
 
         // Verificar que ninguna columna visible de la tabla sea un objeto ni null
         for (const colKey of OPPORTUNITY_TABLE_COLUMN_KEYS) {
-            const value = (hotRow as any)[colKey];
+            const value = hotRow[colKey as keyof OpportunityHotRow];
             expect(typeof value).not.toBe('object');
             expect(value).not.toBeNull();
             expect(value).not.toBeUndefined();
@@ -88,8 +90,8 @@ describe('Filtros internos de tabla de oportunidades', () => {
 
         const resolvedOpp = resolveHotRowData(mockHotInstance, 0, sourceData);
         expect(resolvedOpp).toBeDefined();
-        expect(resolvedOpp.id).toBe('opp-3');
-        expect(resolvedOpp.nombre).toBe('Oportunidad 3');
+        expect(resolvedOpp!.id).toBe('opp-3');
+        expect(resolvedOpp!.nombre).toBe('Oportunidad 3');
     });
 
     it('OPPORTUNITY_TABLE_COLUMN_KEYS debe incluir "actividades" en la posición exacta', () => {
