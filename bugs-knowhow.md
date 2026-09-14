@@ -1392,5 +1392,42 @@ Prevention Rule:
 Tags:
 [oportunidades] [currency] [es-CO] [formatNumberCO] [formatOpportunityAmount] [ui]
 
+---
+
+## [Bug ID: 20260914-01]
+
+Context:
+`app/oportunidades/page.tsx`, `app/cuentas/page.tsx`, `components/HotTableWrapper.tsx`, `lib/opportunityTableHelpers.ts`. Tablas interactivas con Handsontable y filtros internos por valor (`dropdownMenu: ['filter_by_value', 'filter_action_bar']`).
+
+What I Did:
+Corregí el mapeo de datos para la columna de actividades en la vista tabular de oportunidades (`actividades: actSummary.label`), asegurando que todos los valores pasados a las columnas sean strings o números primitivos. Implementé la resolución de filas físicas (`instance.toPhysicalRow(row)`) en renderers personalizados y en `afterOnCellMouseDown` (tanto en Oportunidades como en Cuentas). Corregí el desfase de columnas en `handleColumnResize` integrando `OPPORTUNITY_TABLE_COLUMN_KEYS`. Registré el diccionario de idioma `es-MX` de `handsontable/i18n` en `HotTableWrapper` para internacionalizar los controles del dropdown de filtros al español. Añadí la prueba permanente `tests/opportunityTableFilters.test.ts`.
+
+Problem:
+1. En el dropdown de la columna "Actividad", todas las opciones de filtro seleccionable mostraban `[object Object]` en lugar de las etiquetas legibles ("Sin actividad", "1 atrasada", etc.) y la barra interna "Search" no encontraba resultados.
+2. Al filtrar u ordenar cualquier columna en Handsontable, hacer clic en una fila o renderizar enlaces de celdas (`cuenta`, `nombre`, `cierre`, `_original`) navegaba u obtenía datos de la fila física original desalineada en vez de la oportunidad/cuenta visible filtrada.
+3. Al redimensionar columnas manualmente, la columna `actividades` no estaba en `activeKeys`, desfasando los anchos guardados en `localStorage`.
+4. Los botones y etiquetas del filtro se mostraban en inglés ("Filter by value:", "Search", "Select all", "Clear", "OK", "Cancel").
+
+Root Cause:
+1. En `hotData`, la propiedad `actividades` recibía el objeto complejo `actSummary` en lugar de una cadena primitiva. El plugin de filtros de Handsontable convierte los valores a string con `String(cellValue)`, resultando en `"[object Object]"`.
+2. En Handsontable, el argumento `row` en renderers y `coords.row` en `afterOnCellMouseDown` representan el índice visual (`visualRow`), el cual difiere del índice físico en los datos cuando hay filtros o reordenamientos activos si no se traduce con `instance.toPhysicalRow(visualRow)`.
+3. Ausencia del registro del diccionario de idioma en `HotTableWrapper`.
+
+Fix Applied:
+1. Creación de `lib/opportunityTableHelpers.ts` con `buildOpportunityHotRow` (que asigna `actividades: actSummary.label || 'Sin actividad'` y `actividades_status: actSummary.status`) y `resolveHotRowData`.
+2. Traducción a fila física mediante `instance.toPhysicalRow(row)` en todos los renderers y clics de fila.
+3. Uso de `OPPORTUNITY_TABLE_COLUMN_KEYS` en `handleColumnResize` y `hotColumns`.
+4. Registro de `esMX` en `HotTableWrapper` con `language: props?.language || esMX.languageCode`.
+5. Creación de `tests/opportunityTableFilters.test.ts`.
+
+Prevention Rule:
+**Handsontable Filterable Data & Physical Row Translation**:
+1. Toda propiedad mapeada en `hotData` para una columna de Handsontable DEBE ser un valor primitivo (`string` o `number`), NUNCA un objeto complejo. Los metadatos secundarios deben guardarse en propiedades auxiliares separadas (ej. `actividades_status`).
+2. En tablas con filtros o plugins de ordenamiento, NUNCA indexar directamente `hotData[coords.row]` ni llamar a `getSourceDataAtRow(row)` con el índice visual. SIEMPRE traducir primero mediante `instance.toPhysicalRow(row)` o usar `resolveHotRowData`.
+
+Tags:
+[handsontable] [HotTable] [filtros] [filter_by_value] [object-object] [toPhysicalRow] [visualRow] [oportunidades] [cuentas]
+
+
 
 

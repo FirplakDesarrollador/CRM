@@ -3,6 +3,33 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-09-14 - Ingest: Corrección y optimización de filtros de columna en tablas Handsontable (Oportunidades y Cuentas)
+
+- **Normalización de Tipos Primitivos (`lib/opportunityTableHelpers.ts`):**
+  - Mapeo de `actividades` a `string` primitivo (`actSummary.label || 'Sin actividad'`) y preservación de `actividades_status` para renderizado visual de badges.
+  - Corrección del bug `[object Object]` en el dropdown de filtros y restauración de la funcionalidad de búsqueda en la columna de actividades.
+- **Resolución de Filas Físicas (`instance.toPhysicalRow`):**
+  - Corrección en renderers de enlaces (`cuenta`, `nombre`, `cierre`, `_original`) y en `afterOnCellMouseDown` para resolver la entidad correspondiente mediante el índice físico real, eliminando el desalineamiento y navegación errónea cuando la tabla está filtrada.
+- **Alineación de Columnas y Anchos (`app/oportunidades/page.tsx`):**
+  - Inclusión de `'actividades'` en `OPPORTUNITY_TABLE_COLUMN_KEYS` para sincronizar `handleColumnResize` y almacenamiento de anchos en `localStorage`.
+- **Localización Oficial en Español (`components/HotTableWrapper.tsx`):**
+  - Registro del diccionario de idioma `es-MX` de `handsontable/i18n` para traducir los controles de filtro ("Filtrar por valor:", "Buscar", "Seleccionar todo", "Borrar", "Aceptar", "Cancelar").
+- **Pruebas:** Suite permanente creada en `tests/opportunityTableFilters.test.ts` (5/5 VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`.
+
+## 2026-09-14 - Ingest: Soporte de Apertura en Nueva Pestaña con Clic Derecho en Todos los Módulos
+
+- **Estandarización de Navegación (`lib/utils/navigation.ts`):**
+  - Creación de `getEntityUrl` para centralizar las URLs canónicas de todas las entidades (`/oportunidades/:id`, `/cuentas?id=:id`, `/contactos?id=:id`, `/actividades?id=:id`, `/oportunidades/:oppId/cotizaciones/:quoteId`).
+  - Creación de `handleEntityLinkClick` para discernir de forma estándar entre clic primario (modal/SPA local) y clic modificado con Ctrl, Cmd, Shift, clic derecho o rueda del ratón (apertura en nueva pestaña).
+- **Módulos Actualizados:**
+  - **Cuentas (`app/cuentas/page.tsx`):** Tarjetas móviles y renderers de columnas en Handsontable envueltos en `<a>` con `href` hacia `/cuentas?id=:id`; soporte en `afterOnCellMouseDown` para auxclick/middle-click.
+  - **Contactos (`app/contactos/page.tsx`):** Tarjetas móviles y celdas Handsontable convertidas en enlaces navegables a contactos y cuentas.
+  - **Oportunidades (`app/oportunidades/page.tsx`, `app/(dashboard)/page.tsx`):** Celdas Handsontable, tarjetas móviles y tabla de oportunidades recientes en el dashboard envueltas en `<Link>` / `<a>` hacia `/oportunidades/:id`.
+  - **Actividades (`app/actividades/page.tsx`, `components/cuentas/AccountActivitiesTab.tsx`, `app/oportunidades/[id]/page.tsx`):** Vistas lista, agenda, mes y pestañas de detalle actualizadas con enlaces `<a>` hacia `/actividades?id=:id` y fallback a IndexedDB en deep-linking.
+- **Pruebas:** Suite permanente creada en `tests/openInNewTab.test.ts` (5/5 VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/arquitectura-general.md`.
+
 ## 2026-09-11 - Ingest: Filtro de Origen de Oportunidad en el Dashboard de Inicio
 
 - **Filtros Globales (`components/dashboard/DashboardFilters.tsx`, `lib/hooks/useDashboardFilters.ts`):**

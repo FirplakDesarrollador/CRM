@@ -2,7 +2,7 @@
 
 import { useOpportunitiesServer } from "@/lib/hooks/useOpportunitiesServer";
 import { useInfiniteScroll } from "@/lib/hooks/useInfiniteScroll";
-import React, { useState, useEffect, useCallback, Suspense, useMemo } from "react";
+import React, { useState, useEffect, useCallback, Suspense, useMemo, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Plus, Search, Filter, Briefcase, ArrowUpDown, ChevronUp, ChevronDown, Columns3, Check } from "lucide-react";
 import Link from "next/link";
@@ -11,6 +11,7 @@ import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { UserPickerFilter } from "@/components/cuentas/UserPickerFilter";
 import { OpportunityFilters } from "@/components/oportunidades/OpportunityFilters";
 import { computeOpportunityActivitySummary } from "@/lib/opportunityActivities";
+import { buildOpportunityHotRow, resolveHotRowData, OPPORTUNITY_TABLE_COLUMN_KEYS } from "@/lib/opportunityTableHelpers";
 import { supabase } from "@/lib/supabase";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/db";
@@ -513,27 +514,11 @@ function OpportunitiesContent() {
         });
     };
 
-    const hotData = opportunities.map(opp => {
-        const actSummary = opp.activity_summary || computeOpportunityActivitySummary(opp.actividades);
-        const countryName = opp.account?.pais_id ? (countryMap[opp.account.pais_id] || "Colombia") : (opp.account?.pais || "Colombia");
-        return {
-            id: opp.id,
-            nombre: opp.nombre || "Sin nombre",
-            cuenta: opp.account?.nombre || "Sin cuenta",
-            actividades: actSummary,
-            pais: countryName,
-            ciudad: opp.account?.ciudad || "Sin ciudad",
-            canal: opp.account?.canal_id || "-",
-            origen: opp.origen_oportunidad || "-",
-            fase: opp.fase_data?.nombre || 'Pros.',
-            estado: opp.estado_data?.nombre || 'Abierta',
-            creada: opp.created_at ? new Date(opp.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' }) : "-",
-            valor: opp.amount || 0,
-            cierre: opp.fecha_cierre_estimada ? new Date(opp.fecha_cierre_estimada).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) : "-",
-            cierre_overdue: opp.fecha_cierre_estimada ? new Date(opp.fecha_cierre_estimada) < new Date() : false,
-            vendedor: opp.vendedor?.full_name || "Sin asignar"
-        };
-    });
+    const hotTableRef = useRef<any>(null);
+
+    const hotData = useMemo(() => {
+        return opportunities.map(opp => buildOpportunityHotRow(opp, countryMap));
+    }, [opportunities, countryMap]);
 
     const { user } = useCurrentUser();
     const colStorageKey = `crm_col_widths_oportunidades_${user?.id || 'default'}`;
@@ -555,7 +540,7 @@ function OpportunitiesContent() {
             colIndex = arg1;
             width = arg2;
         }
-        const activeKeys = ['nombre','cuenta','pais','ciudad','canal','origen','fase','estado','creada','valor','cierre','vendedor']
+        const activeKeys = OPPORTUNITY_TABLE_COLUMN_KEYS
             .filter(key => visibleColumns.includes(key));
         const keyName = activeKeys[colIndex];
         if (keyName && width > 30) {
@@ -572,10 +557,13 @@ function OpportunitiesContent() {
     const ALL_COLUMN_DEFS: Record<string, any> = {
         cuenta: {
             data: 'cuenta', title: 'Cuenta', readOnly: true, width: colWidths['cuenta'] || 220, wordWrap: false,
-            renderer(_: unknown, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+            renderer(instance: any, td: HTMLTableCellElement, row: number, col: number, prop: string, value: any) {
                 const v = value || '';
                 const safe = v.replace(/"/g, '&quot;');
-                td.innerHTML = `<div style="font-weight:600;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</div>`;
+                const physicalRow = instance.toPhysicalRow ? instance.toPhysicalRow(row) : row;
+                const rowData = instance.getSourceDataAtRow(physicalRow);
+                const url = rowData?.account_id ? `/cuentas?id=${rowData.account_id}` : (rowData?.id ? `/oportunidades/${rowData.id}` : '#');
+                td.innerHTML = `<a href="${url}" onclick="if (!event.ctrlKey && !event.metaKey && event.button === 0) { event.preventDefault(); }" style="font-weight:600;color:#0f172a;text-decoration:none;display:block;width:100%;height:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</a>`;
                 td.style.overflow = 'hidden';
                 return td;
             }
@@ -612,44 +600,50 @@ function OpportunitiesContent() {
         },
         nombre: {
             data: 'nombre', title: 'Oportunidad', readOnly: true, width: colWidths['nombre'] || 240, wordWrap: false,
-            renderer(_: unknown, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+            renderer(instance: any, td: HTMLTableCellElement, row: number, col: number, prop: string, value: any) {
                 const v = value || '';
                 const safe = v.replace(/"/g, '&quot;');
-                td.innerHTML = `<div style="font-weight:600;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</div>`;
+                const physicalRow = instance.toPhysicalRow ? instance.toPhysicalRow(row) : row;
+                const rowData = instance.getSourceDataAtRow(physicalRow);
+                const oppId = rowData?.id;
+                const url = oppId ? `/oportunidades/${oppId}` : '#';
+                td.innerHTML = `<a href="${url}" onclick="if (!event.ctrlKey && !event.metaKey && event.button === 0) { event.preventDefault(); }" style="font-weight:600;color:#0f172a;text-decoration:none;display:block;width:100%;height:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</a>`;
                 td.style.overflow = 'hidden';
                 return td;
             }
         },
         actividades: {
             data: 'actividades', title: 'Actividad', readOnly: true, width: 155, wordWrap: false,
-            renderer(_: unknown, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
-                const summary = (value && typeof value === 'object' && 'status' in value)
-                    ? value
-                    : { status: 'none', label: 'Sin actividad', overdue: 0, scheduled: 0, completed: 0, hasActivity: false };
+            renderer(instance: any, td: HTMLTableCellElement, row: number, col: number, prop: string, value: any) {
+                const physicalRow = instance.toPhysicalRow ? instance.toPhysicalRow(row) : row;
+                const rowData = instance.getSourceDataAtRow(physicalRow);
+                const label = (typeof value === 'string' && value) ? value : (value?.label || 'Sin actividad');
+                const status = rowData?.actividades_status || (typeof value === 'object' && value?.status) ||
+                    (label.includes('atrasad') ? 'overdue' : label.includes('programad') ? 'scheduled' : label.includes('completad') ? 'completed' : 'none');
 
                 let bg = '#f8fafc';
                 let c = '#94a3b8';
                 let bd = '#e2e8f0';
                 let icon = '';
 
-                if (summary.status === 'overdue') {
+                if (status === 'overdue') {
                     bg = '#fee2e2';
                     c = '#b91c1c';
                     bd = '#fca5a5';
                     icon = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
-                } else if (summary.status === 'scheduled') {
+                } else if (status === 'scheduled') {
                     bg = '#eff6ff';
                     c = '#1d4ed8';
                     bd = '#bfdbfe';
                     icon = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>`;
-                } else if (summary.status === 'completed') {
+                } else if (status === 'completed') {
                     bg = '#f0fdf4';
                     c = '#15803d';
                     bd = '#bbf7d0';
                     icon = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><polyline points="20 6 9 17 4 12"/></svg>`;
                 }
 
-                td.innerHTML = `<div style="display:flex;align-items:center;height:100%;"><span style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:8px;font-size:11.5px;font-weight:700;white-space:nowrap;background:${bg};color:${c};border:1px solid ${bd};line-height:1.3;">${icon}<span>${summary.label || 'Sin actividad'}</span></span></div>`;
+                td.innerHTML = `<div style="display:flex;align-items:center;height:100%;"><span style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:8px;font-size:11.5px;font-weight:700;white-space:nowrap;background:${bg};color:${c};border:1px solid ${bd};line-height:1.3;">${icon}<span>${label}</span></span></div>`;
                 td.style.overflow = 'visible';
                 return td;
             }
@@ -712,7 +706,8 @@ function OpportunitiesContent() {
         cierre: {
             data: 'cierre', title: 'Cierre', readOnly: true, width: colWidths['cierre'] || 90, wordWrap: false,
             renderer(instance: any, td: HTMLTableCellElement, row: number, ___: number, ____: string, value: any) {
-                const rowData = instance.getSourceDataAtRow(row);
+                const physicalRow = instance.toPhysicalRow ? instance.toPhysicalRow(row) : row;
+                const rowData = instance.getSourceDataAtRow(physicalRow);
                 const overdue = rowData?.cierre_overdue;
                 const clr = overdue ? '#dc2626' : '#64748b';
                 const fw = overdue ? '700' : '500';
@@ -739,13 +734,13 @@ function OpportunitiesContent() {
         },
     };
 
-    const hotColumns = [
+    const hotColumns = useMemo(() => [
         // Solo incluir las columnas marcadas como visibles, manteniendo el orden original
-        ...['nombre','cuenta','actividades','pais','ciudad','canal','origen','fase','estado','creada','valor','cierre','vendedor']
+        ...OPPORTUNITY_TABLE_COLUMN_KEYS
             .filter(key => visibleColumns.includes(key))
             .map(key => ALL_COLUMN_DEFS[key])
             .filter(Boolean)
-    ];
+    ], [visibleColumns, colWidths]);
 
     const getPhaseBadge = (fase: string) => {
         const lowerFase = fase.toLowerCase();
@@ -988,7 +983,13 @@ function OpportunitiesContent() {
                                     <div className="p-4 border-b border-slate-100 flex justify-between items-start gap-3">
                                         <div className="flex-1 min-w-0">
                                             <div className="font-bold text-slate-900 text-sm mb-0.5 truncate">
-                                                {opp.account?.nombre || "Sin cuenta"}
+                                                {opp.account_id ? (
+                                                    <Link href={`/cuentas?id=${opp.account_id}`} className="hover:text-blue-600 transition-colors">
+                                                        {opp.account?.nombre || "Sin cuenta"}
+                                                    </Link>
+                                                ) : (
+                                                    opp.account?.nombre || "Sin cuenta"
+                                                )}
                                             </div>
                                             <div className="text-slate-500 text-[11.5px] truncate font-medium flex items-center gap-1 flex-wrap mb-0.5">
                                                 <span>{opp.account?.ciudad || "Sin ciudad"}</span>
@@ -998,7 +999,9 @@ function OpportunitiesContent() {
                                                 <span className="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded text-[10.5px] font-bold">{opp.account?.canal_id || "-"}</span>
                                             </div>
                                             <div className="text-slate-600 text-xs truncate font-medium">
-                                                {opp.nombre || "Sin nombre"}
+                                                <Link href={`/oportunidades/${opp.id}`} className="hover:text-blue-600 transition-colors">
+                                                    {opp.nombre || "Sin nombre"}
+                                                </Link>
                                             </div>
                                         </div>
                                         <div className="shrink-0 flex items-start">
@@ -1056,17 +1059,17 @@ function OpportunitiesContent() {
                                     </div>
                                     
                                     <div className="flex divide-x divide-slate-100 border-t border-slate-100 bg-white">
-                                        <button 
+                                        <Link 
+                                            href={`/oportunidades/${opp.id}`}
                                             onClick={() => {
                                                 const params = new URLSearchParams(Array.from(searchParams.entries()));
                                                 params.set('id', opp.id);
                                                 sessionStorage.setItem('crm_oportunidades_state', params.toString());
-                                                router.push(`/oportunidades/${opp.id}`);
                                             }}
-                                            className="flex-1 py-3 text-sm font-semibold text-blue-600 flex items-center justify-center gap-2 hover:bg-blue-50 active:bg-blue-100 transition-colors"
+                                            className="flex-1 py-3 text-sm font-semibold text-blue-600 flex items-center justify-center gap-2 hover:bg-blue-50 active:bg-blue-100 transition-colors no-underline"
                                         >
                                             <Search className="w-4 h-4" /> Ver / Editar
-                                        </button>
+                                        </Link>
                                     </div>
                                 </div>
                                 );
@@ -1253,6 +1256,7 @@ function OpportunitiesContent() {
                             `}</style>
                             <div ref={tableContainerRef} className="w-full relative z-0 opp-hot-wrap" style={{ minHeight: '400px' }}>
                                 <HotTable
+                                    ref={hotTableRef}
                                     data={hotData}
                                     columns={hotColumns}
                                     rowHeaders={true}
@@ -1292,7 +1296,18 @@ function OpportunitiesContent() {
                                             return;
                                         }
                                         if (coords.row >= 0) {
-                                            const opp = hotData[coords.row];
+                                            const mouseEvent = event as MouseEvent;
+                                            const opp = resolveHotRowData(hotTableRef.current?.hotInstance, coords.row, hotData);
+                                            if (mouseEvent?.button === 2) {
+                                                // Clic derecho: permitir menú contextual nativo
+                                                return;
+                                            }
+                                            if (mouseEvent?.button === 1 || mouseEvent?.ctrlKey || mouseEvent?.metaKey) {
+                                                if (opp && opp.id) {
+                                                    window.open(`/oportunidades/${opp.id}`, '_blank');
+                                                }
+                                                return;
+                                            }
                                             if (opp && opp.id) {
                                                 const params = new URLSearchParams(Array.from(searchParams.entries()));
                                                 params.set('id', opp.id);

@@ -20,7 +20,6 @@ export interface SalesFunnelFilters {
     search_query?: string | null;
     date_from?: string | null;
     date_to?: string | null;
-    origen_oportunidad?: string | null;
 }
 
 export function useSalesFunnel(filters?: SalesFunnelFilters) {
