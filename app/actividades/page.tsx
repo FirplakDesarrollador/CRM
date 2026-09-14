@@ -32,6 +32,7 @@ import {
     CheckCircle,
     AlertTriangle
 } from 'lucide-react';
+import { handleEntityLinkClick } from '@/lib/utils/navigation';
 
 import { cn } from '@/components/ui/utils';
 import { CreateActivityModal } from '@/components/activities/CreateActivityModal';
@@ -343,15 +344,24 @@ function ActivitiesContent() {
             return;
         }
 
-        if (id && activities) {
-            const act = activities.find(a => a.id === id);
+        const findAndOpen = async () => {
+            let act = activities?.find(a => a.id === id);
+            if (!act) {
+                try {
+                    act = await db.activities.get(id);
+                } catch (e) {
+                    console.warn("[ActivitiesPage] local DB fetch failed", e);
+                }
+            }
             if (act) {
                 lastProcessedUrlIdRef.current = id;
-                setSelectedDate(new Date(act.fecha_inicio));
+                if (act.fecha_inicio) setSelectedDate(new Date(act.fecha_inicio));
                 setSelectedActivity(act);
                 setIsModalOpen(true);
             }
-        }
+        };
+
+        findAndOpen();
     }, [searchParams, activities, isModalOpen]);
 
 
@@ -937,10 +947,12 @@ function ActivitiesContent() {
                                         const subName = subclassificationNode?.nombre;
 
                                         return (
-                                            <div
+                                            <a
                                                 key={act.id}
+                                                href={`/actividades?id=${act.id}`}
+                                                onClick={(e) => handleEntityLinkClick(e, `/actividades?id=${act.id}`, () => openActivityModal(act))}
                                                 className={cn(
-                                                    "group p-4 bg-white rounded-2xl border transition-all hover:shadow-md cursor-pointer",
+                                                    "group p-4 bg-white rounded-2xl border transition-all hover:shadow-md cursor-pointer block no-underline text-inherit",
                                                     act.is_completed
                                                         ? "border-slate-100 opacity-75"
                                                         : isOverdue
@@ -949,7 +961,6 @@ function ActivitiesContent() {
                                                                 ? "border-emerald-200 hover:border-emerald-300 hover:shadow-emerald-100"
                                                                 : "border-blue-200 hover:border-blue-300 hover:shadow-blue-100"
                                                 )}
-                                                onClick={() => openActivityModal(act)}
                                             >
                                                 <div className="flex items-start gap-4">
                                                     <button
@@ -1037,7 +1048,7 @@ function ActivitiesContent() {
                                                         </div>
                                                     </div>
                                                 </div>
-                                            </div>
+                                            </a>
                                         );
                                     })}
 
@@ -1135,10 +1146,11 @@ function ActivitiesContent() {
                                                             const isOverdueAct = !act.is_completed && new Date(act.fecha_inicio).setHours(0, 0, 0, 0) < new Date().setHours(0, 0, 0, 0);
                                                             return (
                                                                 <div key={act.id} className="flex gap-1 group/act">
-                                                                    <div
-                                                                        onClick={() => openActivityModal(act)}
+                                                                    <a
+                                                                        href={`/actividades?id=${act.id}`}
+                                                                        onClick={(e) => handleEntityLinkClick(e, `/actividades?id=${act.id}`, () => openActivityModal(act))}
                                                                         className={cn(
-                                                                            "text-[9px] px-1 py-0.5 rounded truncate font-medium border-l-2 flex-1 cursor-pointer",
+                                                                            "text-[9px] px-1 py-0.5 rounded truncate font-medium border-l-2 flex-1 cursor-pointer no-underline block",
                                                                             act.is_completed
                                                                                 ? "bg-slate-50 text-slate-400 border-slate-300 line-through"
                                                                                 : isOverdueAct
@@ -1150,7 +1162,7 @@ function ActivitiesContent() {
                                                                         title={act.asunto}
                                                                     >
                                                                         {act.asunto}
-                                                                    </div>
+                                                                    </a>
                                                                     <button
                                                                         onClick={(e) => {
                                                                             e.stopPropagation();
@@ -1191,11 +1203,12 @@ function ActivitiesContent() {
                                                                     const cName = classifications.find(c => String(c.id) === String(act.clasificacion_id))?.nombre;
 
                                                                     return (
-                                                                        <div 
+                                                                        <a 
                                                                             key={act.id} 
-                                                                            onClick={() => openActivityModal(act)}
+                                                                            href={`/actividades?id=${act.id}`}
+                                                                            onClick={(e) => handleEntityLinkClick(e, `/actividades?id=${act.id}`, () => openActivityModal(act))}
                                                                             className={cn(
-                                                                                "relative group/tip flex items-center gap-2 p-1.5 rounded border-l-2 transition-all hover:bg-slate-50 cursor-pointer",
+                                                                                "relative group/tip flex items-center gap-2 p-1.5 rounded border-l-2 transition-all hover:bg-slate-50 cursor-pointer no-underline text-inherit block",
                                                                                 act.is_completed
                                                                                     ? "bg-slate-50/50 text-slate-400 border-slate-300"
                                                                                     : isOverdueAct
@@ -1236,7 +1249,7 @@ function ActivitiesContent() {
                                                                             >
                                                                                 <CheckCircle2 className="w-4 h-4" />
                                                                             </button>
-                                                                        </div>
+                                                                        </a>
                                                                     );
                                                                 })}
                                                             </div>

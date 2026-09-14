@@ -241,6 +241,13 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
                                         {ped.tipo_facturacion || 'No definido'}
                                     </p>
                                 </div>
+                                <div className="space-y-0.5">
+                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Tipo POD</p>
+                                    <p className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                                        <Truck className="w-3.5 h-3.5 text-slate-400" />
+                                        {ped.tipo_pod || 'POD Total'}
+                                    </p>
+                                </div>
                             </div>
                             <div className="flex flex-wrap items-center gap-2">
                                 <button
@@ -377,6 +384,7 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
         defaultValues: {
             fecha_facturacion: ped?.fecha_facturacion || "",
             tipo_facturacion: ped?.tipo_facturacion || "",
+            tipo_pod: ped?.tipo_pod || "POD Total",
             cierre_facturacion: ped?.cierre_facturacion ?? false,
             es_muestra: ped?.es_muestra ?? false,
             orden_compra: ped?.orden_compra || "",
@@ -427,6 +435,8 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
         const pedData = {
             fecha_facturacion: data.fecha_facturacion,
             tipo_facturacion: data.tipo_facturacion,
+            tipo_pod: data.tipo_pod || "POD Total",
+            pod: data.tipo_pod || "POD Total",
             cierre_facturacion: Boolean(data.cierre_facturacion),
             es_muestra: Boolean(data.es_muestra),
             orden_compra: data.orden_compra,
@@ -453,6 +463,8 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
         await updatePedido(pedidoUuid, pedData);
         await updatePedidoItems(pedidoUuid, itemsToSave);
         await persistQuotePedidoFields(quote.id, {
+            tipo_pod: pedData.tipo_pod,
+            pod: pedData.pod,
             cierre_facturacion: pedData.cierre_facturacion,
             es_muestra: pedData.es_muestra,
             cliente_final: pedData.cliente_final,
@@ -500,6 +512,7 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
         if (ped) {
             setValue('fecha_facturacion', ped.fecha_facturacion || "");
             setValue('tipo_facturacion', ped.tipo_facturacion || "");
+            setValue('tipo_pod', ped.tipo_pod || "POD Total");
             setValue('cierre_facturacion', ped.cierre_facturacion ?? false);
             setValue('es_muestra', ped.es_muestra ?? false);
             setValue('orden_compra', ped.orden_compra || "");
@@ -606,6 +619,8 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
         const pedData = {
             fecha_facturacion: data.fecha_facturacion,
             tipo_facturacion: data.tipo_facturacion,
+            tipo_pod: data.tipo_pod || "POD Total",
+            pod: data.tipo_pod || "POD Total",
             cierre_facturacion: Boolean(data.cierre_facturacion),
             es_muestra: Boolean(data.es_muestra),
             orden_compra: data.orden_compra,
@@ -641,6 +656,8 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
 
         // Sincronizar estos mismos campos en la Cotización principal para el PDF F-V-29
         await persistQuotePedidoFields(quote.id, {
+            tipo_pod: pedData.tipo_pod,
+            pod: pedData.pod,
             cierre_facturacion: pedData.cierre_facturacion,
             es_muestra: pedData.es_muestra,
             cliente_final: pedData.cliente_final,
@@ -767,6 +784,17 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
                             <option value="">Seleccione...</option>
                             <option value="Standard">Estándar</option>
                             <option value="Anticipo">Anticipo</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label className="text-sm font-medium flex items-center gap-2 mb-1">
+                            <Truck className="w-4 h-4 text-slate-400" /> Tipo POD
+                        </label>
+                        <select {...register("tipo_pod")} className="w-full p-2 border rounded-lg">
+                            <option value="POD Total">POD Total</option>
+                            <option value="POD Parcial">POD Parcial</option>
+                            <option value="Sin POD">Sin POD</option>
                         </select>
                     </div>
 

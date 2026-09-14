@@ -84,6 +84,7 @@ Al crear un nuevo pedido parcial (`!pedidoUuid`), el formulario de creación rec
 - Lista pedidos con estado (`estado_pedido`) y número de orden de venta
   (`sales_order_number`) provenientes de SAP.
 - `PedidoEditorForm` en `PedidosEditor.tsx` gestiona la creación y edición. La creación se estructuró como un Wizard de 3 pasos (Cantidades a Pedir, Datos Logísticos SAP, Datos Adicionales).
+- En el **Paso 2 (Datos Logísticos SAP)**, se incluye el selector desplegable **Tipo POD** (`tipo_pod` / `pod`), con opciones: `POD Total` (por defecto), `POD Parcial` y `Sin POD`, mapeado y persistido tanto en `CRM_Pedidos` como en `CRM_Cotizaciones`.
 - En edición, se eliminan los botones de guardado manual y se implementa guardado automático (auto-save) debounced (1.5 segundos) con indicador visual (`AutoSaveIndicator`) integrado vía `useFormAutoSave`. Los cambios de ítems se calculan de forma diferencial (`updatePedidoItems` en `usePedidos.ts`) y se encolan al [[sincronizacion-offline|outbox]] (ver `bugs-knowhow.md` §5 por el histórico).
 - ⚠️ El pull de pedidos mapea `id` del servidor → `uuid_generado` local.
 
@@ -96,4 +97,4 @@ Al crear un nuevo pedido parcial (`!pedidoUuid`), el formulario de creación rec
 - `app/oportunidades/[id]/cotizaciones/`, `app/pedidos/page.tsx`
 - `components/quotes/PedidosEditor.tsx`, `SendQuoteModal.tsx`
 - `lib/hooks/usePedidos.ts`, `useProducts.ts`, `lib/pdfGenerator.ts`, `lib/db.ts`
-- Migraciones: `20260109_add_es_pedido`, `20260113_volume_discounts`, `20260421_alterar_crm_pedidos`, `20260429_add_pdf_fields_to_quotes_and_orders`, `20260729_required_order_fields.sql`
+- Migraciones: `20260109_add_es_pedido`, `20260113_volume_discounts`, `20260421_alterar_crm_pedidos`, `20260429_add_pdf_fields_to_quotes_and_orders`, `20260729_required_order_fields.sql`, `20260914180000_add_pod_to_orders_and_quotes.sql`

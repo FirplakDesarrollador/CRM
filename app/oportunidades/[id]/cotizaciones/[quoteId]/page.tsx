@@ -132,7 +132,7 @@ export default function QuoteEditorPage() {
                         isOpen={isSendModalOpen} 
                         onClose={() => setIsSendModalOpen(false)} 
                         quote={quote} 
-                        account={sendContext.acc} 
+                        account={sendContext.acc || undefined} 
                         opportunity={sendContext.opp} 
                         quoteItems={sendContext.qItems}
                         advisorName={sendContext.advisorName}
