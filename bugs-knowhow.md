@@ -1428,6 +1428,99 @@ Prevention Rule:
 Tags:
 [handsontable] [HotTable] [filtros] [filter_by_value] [object-object] [toPhysicalRow] [visualRow] [oportunidades] [cuentas]
 
+---
 
+## [Bug ID: 20260915-01]
+
+Context:
+`lib/pdfGenerator.ts`, exportación al PDF formal (formato F-V-29) de cotizaciones y pedidos desde el detalle de oportunidad y submódulo de Pedidos.
+
+What I Did:
+Corregí la lógica de cálculo de precios e IVA en `lib/pdfGenerator.ts`. Eliminé la división forzada `/ 1.19` en los precios unitarios y subtotales de línea. Exporté las funciones puras `calculatePdfItemRow` y `calculatePdfTotals` para garantizar que el precio unitario sea exactamente el de la lista de precios (sin IVA), el subtotal sea el valor neto tras descuento, el IVA (19%) se adicione al final después del descuento, y el Gran Total sea la suma de Subtotal + IVA. Añadí la prueba permanente `tests/pdfGeneratorTotals.test.ts`.
+
+Problem:
+En el PDF formal de cotizaciones/pedidos, los valores unitarios de los productos de la lista de precios se dividían erróneamente por 1.19 (ej. $7.904.580,50 se convertía en $6.642.502,94). El subtotal se dividía también por 1.19 y se calculaba el IVA hacia atrás para que el Gran Total forzara el subtotal de la cotización, recortándole indebidamente el 19% al valor del producto y alterando los precios oficiales de lista.
+
+Root Cause:
+En `lib/pdfGenerator.ts` se introdujo el supuesto erróneo de que todos los precios en la base de datos ya incluían IVA (`unitPriceBase = isExport ? unitPriceWithIva : unitPriceWithIva / 1.19` y `subtotal = isExport ? rawTotal : rawTotal / 1.19`), cuando en Firplak los precios de lista son base sin IVA.
+
+Fix Applied:
+1. Eliminación de `/ 1.19` en `calculatePdfItemRow` y `generateQuotePdf`.
+2. `calculatePdfTotals` suma los subtotales netos de las líneas como `subtotal`, calcula el IVA al 19% al final (`subtotal * 0.19` para COP, 0 para USD), y fija `granTotal = subtotal + iva`.
+3. Creación de la prueba permanente `tests/pdfGeneratorTotals.test.ts`.
+
+Prevention Rule:
+**Cálculo de Precios e IVA en Documentos Formales (PDF/Pedidos)**:
+1. En el CRM Firplak, todos los precios unitarios de las listas de precios (`lista_base_obras`, `lista_base_cop`, `lista_base_exportaciones`, etc.) son base neta SIN IVA.
+2. NUNCA dividir un precio unitario de cotización o ítem por `1.19` para "desglosar" IVA en interfaces o documentos.
+3. El IVA (19%) siempre debe ser adicionado DESPUÉS del descuento sobre el Subtotal neto acumulado de las líneas.
+4. Gran Total = Subtotal + IVA. Para exportaciones en USD, IVA = 0 y Gran Total = Subtotal.
+
+Tags:
+[pdfGenerator] [F-V-29] [cotizaciones] [pedidos] [precios-sin-iva] [iva-19] [subtotal] [gran-total]
+
+---
+
+## [Bug ID: 20260915-02]
+
+Context:
+Edición de cotizaciones en `app/oportunidades/[id]/cotizaciones/[quoteId]/page.tsx`, `lib/hooks/useOpportunities.ts` y control de precios de catálogo.
+
+What I Did:
+Bloqueé la edición manual del precio unitario para productos del catálogo en la interfaz y en la lógica del hook. Creé `lib/quotePricing.ts` con `isQuoteItemPriceEditable` y `sanitizeQuoteItemUpdates`. En la UI, los ítems de catálogo se renderizan como texto estático de solo lectura formateado como moneda, y solo los ítems manuales (`producto_id === null`) tienen input numérico. En `useOpportunities.ts`, `updateItem` descarta cualquier mutación manual de `precio_unitario` para productos de catálogo, preservando el recálculo legítimo por volumen. Añadí la prueba permanente `tests/quotePricingSecurity.test.ts`.
+
+Problem:
+En el editor de cotizaciones, los comerciales podían hacer clic y modificar arbitrariamente el campo `precio_unitario` de cualquier producto del catálogo maestro (`CRM_ListaDePrecios`), alterando el valor unitario, el subtotal y el monto total de la cotización y de la oportunidad en la base de datos, evadiendo las listas oficiales de precios y las políticas comerciales.
+
+Root Cause:
+Al implementar el soporte de "+ Ítem Manual" (`producto_id === null`), el párrafo estático de precio unitario se transformó en un `<input type="number">` genérico sin condicionar su editabilidad (`isQuoteItemPriceEditable`). Además, el hook `useQuoteItems.updateItem` aceptaba mutaciones de `precio_unitario` indiscriminadamente sin verificar si el ítem pertenecía al catálogo.
+
+Fix Applied:
+1. Creación de `lib/quotePricing.ts` con funciones puras `isManualQuoteItem`, `isQuoteItemPriceEditable` y `sanitizeQuoteItemUpdates`.
+2. En `page.tsx` y `page-isazaale.tsx`, renderizado condicional: texto fijo formateado para productos del catálogo vs. `<input type="number">` para ítems manuales.
+3. En `useOpportunities.ts` y `useOpportunities-isazaale.ts`, sanitización en `updateItem` para descartar mutaciones manuales de `precio_unitario` en productos de catálogo.
+4. Creación de prueba permanente `tests/quotePricingSecurity.test.ts` (4/4 tests GREEN).
+
+Prevention Rule:
+**Catalog Items Price Immutability**: Los precios unitarios de productos vinculados al catálogo maestro (`producto_id !== null`) NUNCA deben ser editables en la UI ni aceptados en mutaciones arbitrarias del cliente. Su valor proviene exclusivamente de `CRM_ListaDePrecios` según canal y volumen. Únicamente los ítems manuales (`producto_id === null`) tienen precio unitario editable por el usuario.
+
+Tags:
+[cotizaciones] [quoteItems] [precio_unitario] [seguridad] [catalogo] [precios-inmutables] [items-manuales]
+
+---
+
+## [Bug ID: 20260915-03]
+
+Context:
+Submódulo de Pedidos (`components/quotes/PedidosEditor.tsx`, `lib/hooks/usePedidos.ts`, `lib/sync.ts`, migración `20260904193842_persist_crm_editable_fields.sql`).
+
+What I Did:
+Corregí la persistencia de los formularios de pedidos (tanto en creación como en edición y autoguardado). Apliqué la migración pendiente en Supabase (`CRM_Pedidos` y `CRM_Cotizaciones`), sincronicé bidireccionalmente `fecha_entrega` y `fecha_minima_requerida` hacia `EXTRA_Fecha mínima requerida por comercial/cliente` y columnas nativas, evité la eliminación de las columnas nativas booleanas `cierre_facturacion` y `es_muestra` en el payload, y creé el normalizador `normalizeDateToInput` para adaptar fechas de SAP (`DD/MM/YYYY`) a inputs HTML5 `YYYY-MM-DD`.
+
+Problem:
+Los comerciales reportaron que al modificar campos en el formulario de pedidos, como "Fecha Mínima de Entrega Solicitada", medio de acceso o notas de planos, los cambios no se guardaban o aparecían en blanco al recargar la página.
+
+Root Cause:
+1. Desalineación de nombres: `PedidosEditor.tsx` enviaba `fecha_entrega`, pero el campo histórico en SAP/Supabase es `EXTRA_Fecha mínima requerida por comercial/cliente` (mapeado en `usePedidos.ts` como `fecha_minima_requerida`).
+2. Columnas no aplicadas en Supabase: La migración `20260904193842_persist_crm_editable_fields.sql` que añade `fecha_entrega`, `email_contacto`, `tiene_escaleras` y `planos_hidromasaje` a `CRM_Pedidos` no se había aplicado en Supabase, por lo que el RPC `process_field_updates` las descartaba.
+3. Formato de fecha en HTML5: SAP devuelve fechas en `DD/MM/YYYY`, pero `<input type="date">` exige estrictamente `YYYY-MM-DD`. Al recibir `DD/MM/YYYY`, el input se mostraba en blanco.
+4. Supresión de columnas booleanas: `usePedidos.ts` ejecutaba `delete serverPayload[local]` al mapear `cierre_facturacion` y `es_muestra`, eliminando las columnas nativas de `CRM_Pedidos`.
+
+Fix Applied:
+1. Aplicación de la migración `20260904193842_persist_crm_editable_fields.sql` en la base de datos Supabase con DDL idempotente.
+2. Creación de `lib/pedidoHelpers.ts` con `normalizeDateToInput` y `mapPedidoServerPayload`.
+3. Actualización de `lib/hooks/usePedidos.ts` para sincronizar `fecha_entrega` y `fecha_minima_requerida` y preservar las columnas booleanas nativas.
+4. Actualización de `lib/sync.ts` en el pull de `CRM_Pedidos` para resolver fallback mutuo entre `fecha_entrega` y `EXTRA_Fecha mínima requerida por comercial/cliente`.
+5. Actualización de `components/quotes/PedidosEditor.tsx` con `shouldUnregister: false`, normalización de fechas en defaults/efectos y envío sincronizado de fecha mínima en `pedData`.
+6. Creación de prueba permanente `tests/pedidoPersistence.test.ts` (9/9 tests GREEN).
+
+Prevention Rule:
+**Persistencia de Pedidos y Fechas HTML5**:
+1. Todo input de tipo fecha (`<input type="date">`) debe recibir su valor normalizado en formato `YYYY-MM-DD` mediante `normalizeDateToInput` para soportar tanto strings ISO como formatos SAP `DD/MM/YYYY`.
+2. Los campos de fecha de entrega (`fecha_entrega` y `fecha_minima_requerida` / `EXTRA_Fecha mínima requerida por comercial/cliente`) deben mantenerse siempre sincronizados en Dexie y en Supabase para asegurar compatibilidad total con SAP, informes y CRM.
+3. Al mapear campos locales a campos SAP `EXTRA_`, NUNCA eliminar (`delete`) columnas que existan de forma nativa en las tablas de PostgreSQL (e.g., `cierre_facturacion`, `es_muestra`, `fecha_facturacion`).
+
+Tags:
+[pedidos] [persistencia] [fecha_entrega] [fecha_minima_requerida] [normalizeDateToInput] [cierre_facturacion] [es_muestra] [supabase] [sync]
 
 

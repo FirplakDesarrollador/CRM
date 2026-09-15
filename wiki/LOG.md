@@ -3,7 +3,46 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-09-15 - Ingest: Corrección y Persistencia de Formularios de Pedidos y Normalización de Fechas
+
+- **Persistencia y Sincronización de Pedidos (`lib/pedidoHelpers.ts` y `lib/hooks/usePedidos.ts`):**
+  - Mapeo bidireccional de `fecha_entrega` y `fecha_minima_requerida` hacia `EXTRA_Fecha mínima requerida por comercial/cliente` y columna nativa `fecha_entrega`.
+  - Preservación de columnas nativas booleanas `cierre_facturacion` y `es_muestra` en el payload de sincronización de PostgreSQL en lugar de eliminarlas al mapear a columnas `EXTRA_` de SAP.
+- **Normalización de Fechas HTML5 (`lib/pedidoHelpers.ts`):**
+  - Implementación de `normalizeDateToInput` para adaptar fechas de SAP en formato `DD/MM/YYYY` o ISO con timestamps a cadenas `YYYY-MM-DD` requeridas por `<input type="date">`.
+- **Formularios de Pedidos (`components/quotes/PedidosEditor.tsx`):**
+  - Configuración de `useForm` con `shouldUnregister: false`.
+  - Normalización de fechas en `defaultValues` y `useEffect` de carga del pedido.
+  - Sincronización de `fecha_minima_requerida` y `fecha_entrega` en `pedData` tanto en autoguardado (`onAutoSave`) como en confirmación (`onSubmit`).
+- **Base de Datos (Supabase):**
+  - Aplicación de migración idempotente `20260904193842_persist_crm_editable_fields.sql`, creando las columnas faltantes en `CRM_Pedidos` (`fecha_entrega`, `email_contacto`, `tiene_escaleras`, `planos_hidromasaje`) y 16 columnas en `CRM_Cotizaciones`.
+- **Pruebas:** Suite permanente creada en `tests/pedidoPersistence.test.ts` (9/9 VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/cotizaciones-y-pedidos.md`.
+
+## 2026-09-15 - Ingest: Protección y Bloqueo de Alteración Manual de Precios en Ítems de Catálogo
+
+- **Seguridad y Control de Precios (`lib/quotePricing.ts`):**
+  - Creación de funciones puras `isManualQuoteItem`, `isQuoteItemPriceEditable` y `sanitizeQuoteItemUpdates`.
+  - Regla: los productos del catálogo (`producto_id !== null`) tienen precio unitario protegido; no se permite su alteración manual ni en UI ni a través de mutaciones del hook.
+  - Los **Ítems Manuales** (`producto_id === null`) mantienen edición libre de descripción y precio unitario.
+- **Hook de Ítems de Cotización (`lib/hooks/useOpportunities.ts` y `-isazaale.ts`):**
+  - Invocación de `sanitizeQuoteItemUpdates` en `updateItem` para descartar cualquier modificación arbitraria de `precio_unitario` en ítems de catálogo, preservando el cálculo de escalas de volumen en cambios de cantidad.
+- **Interfaz del Editor de Cotización (`app/oportunidades/[id]/cotizaciones/[quoteId]/page.tsx` y `-isazaale.tsx`):**
+  - Renderizado condicional: texto de solo lectura formateado para productos del catálogo vs. input numérico editable para ítems manuales.
+- **Pruebas:** Suite permanente creada en `tests/quotePricingSecurity.test.ts` (4/4 VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/cotizaciones-y-pedidos.md`.
+
+## 2026-09-15 - Ingest: Corrección de Precios sin IVA y Adición de IVA al Final en Exportación a PDF (F-V-29)
+
+- **Generador de PDF (`lib/pdfGenerator.ts`):**
+  - Eliminación de la deducción indebida `/ 1.19` en precios unitarios y subtotales de líneas de cotización/pedido.
+  - Creación y exportación de funciones puras `calculatePdfItemRow` y `calculatePdfTotals`.
+  - Regla: todos los precios de lista son base neta sin IVA (`VALOR UNITARIO` = precio exacto de lista). El subtotal de línea es el valor neto con descuento. El `SUBTOTAL` del documento es la suma de subtotales de línea. El `IVA 19%` se adiciona al final tras el descuento (`subtotal * 0.19` para COP; 0 para exportación USD). El `GRAN TOTAL` equivale a `SUBTOTAL + IVA`.
+- **Pruebas:** Suite permanente creada en `tests/pdfGeneratorTotals.test.ts` (3/3 VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/cotizaciones-y-pedidos.md`.
+
 ## 2026-09-15 - Ingest: Sincronización Inmediata de Importe de Oportunidad con Cotizaciones y Reconciliación Global
+
 
 - **Módulo de Sincronización (`lib/opportunityQuoteSync.ts`):**
   - Implementación de `resolveActiveQuote`: resolución jerárquica de cotización activa (selección manual de usuario -> `WINNER` -> coincidencia de importe -> cotización más reciente).

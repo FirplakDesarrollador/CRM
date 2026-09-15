@@ -2196,24 +2196,25 @@ export class SyncEngine {
                     // Map SAP fields back to local friendly names
                     const mapped = {
                         ...p,
-                        fecha_minima_requerida: p['EXTRA_Fecha mínima requerida por comercial/cliente'],
-                        fecha_facturacion: p['EXTRA_Fecha de facturación'],
-                        tipo_facturacion: p['EXTRA_Tipo de facturación'],
-                        notas_sap: p['EXTRA_Notas'],
+                        fecha_entrega: p['fecha_entrega'] || p['EXTRA_Fecha mínima requerida por comercial/cliente'] || null,
+                        fecha_minima_requerida: p['EXTRA_Fecha mínima requerida por comercial/cliente'] || p['fecha_entrega'] || null,
+                        fecha_facturacion: p['EXTRA_Fecha de facturación'] || p['fecha_facturacion'] || null,
+                        tipo_facturacion: p['EXTRA_Tipo de facturación'] || p['tipo_facturacion'] || null,
+                        notas_sap: p['EXTRA_Notas'] || p['notas_sap'] || null,
                         formas_pago: p['EXTRA_Formas de pago'],
                         facturacion_electronica: p['EXTRA_Facturación Electrónica'] === 'Si' || p['EXTRA_Facturación Electrónica'] === 'true' || p['EXTRA_Facturación Electrónica'] === true,
                         oc_cot: p['EXTRA_OC/COT'],
-                        cierre_facturacion: p['EXTRA_Cierre Facturación'],
-                        es_muestra: p['EXTRA_¿Es una muestra?'] === 'Si' || p['EXTRA_¿Es una muestra?'] === 'true' || p['EXTRA_¿Es una muestra?'] === true,
+                        cierre_facturacion: p['EXTRA_Cierre Facturación'] ?? p['cierre_facturacion'] ?? false,
+                        es_muestra: p['EXTRA_¿Es una muestra?'] === 'Si' || p['EXTRA_¿Es una muestra?'] === 'true' || p['EXTRA_¿Es una muestra?'] === true || p['es_muestra'] === true,
                         aplica_contrato: p['EXTRA_¿Aplica contrato?'] === 'Si' || p['EXTRA_¿Aplica contrato?'] === 'true' || p['EXTRA_¿Aplica contrato?'] === true,
                         multa_incumplimiento: p['EXTRA_¿Multa por incumplimiento?'] === 'Si' || p['EXTRA_¿Multa por incumplimiento?'] === 'true' || p['EXTRA_¿Multa por incumplimiento?'] === true,
-                        orden_compra: p['EXTRA_Orden de compra/Purchase Order'],
+                        orden_compra: p['EXTRA_Orden de compra/Purchase Order'] || p['orden_compra'] || null,
                         puerto_embarque: p['EXTRA_Puerto embarque/Shipment Port'],
                         terminos_pago: p['EXTRA_Terminos de pago/Pay Terms'],
                         puerto_destino: p['EXTRA_Puerto destino/Destination Port'],
                         via_transporte: p['EXTRA_Via/Type of transport'],
                         flete: p['EXTRA_Flete/Freight'],
-                        incoterm: p['EXTRA_Incoterm/Incoterm'],
+                        incoterm: p['EXTRA_Incoterm/Incoterm'] || p['incoterm'] || null,
                         seguro: p['EXTRA_Seguro/Insurance']
                     };
 
