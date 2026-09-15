@@ -23,6 +23,7 @@ import { useActivities, LocalActivity } from "@/lib/hooks/useActivities";
 import { CreateActivityModal } from "@/components/activities/CreateActivityModal";
 import { supabase } from "@/lib/supabase";
 import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
+import { resolveActiveQuote } from "@/lib/opportunityQuoteSync";
 import { handleEntityLinkClick } from "@/lib/utils/navigation";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { LossReasonModal } from "@/components/oportunidades/LossReasonModal";
@@ -314,6 +315,10 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     const { origins: opportunityOrigins } = useOpportunityOrigins();
     const { quotes } = useQuotes(opportunity.id);
     const [localAmount, setLocalAmount] = useState(opportunity.amount || 0);
+
+    useEffect(() => {
+        setLocalAmount(opportunity?.amount || 0);
+    }, [opportunity?.amount]);
     const [localClosingDate, setLocalClosingDate] = useState(toInputDate(opportunity.fecha_cierre_estimada));
     const [localOrigen, setLocalOrigen] = useState(opportunity.origen_oportunidad || "");
     const [localUrlOrigen, setLocalUrlOrigen] = useState(opportunity.url_origen || "");
@@ -1328,26 +1333,23 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
 }
 
 function ProductsTab({ opportunityId }: { opportunityId: string }) {
-    const { opportunities } = useOpportunities();
+    const { opportunities, updateOpportunity } = useOpportunities();
     const opportunity = opportunities?.find(o => o.id === opportunityId);
-    const { quotes } = useQuotes(opportunityId);
+    const { quotes, updateQuote } = useQuotes(opportunityId);
 
-    // 1. Determine "Active" quote (Winner or Latest)
-    const sortedQuotes = [...(quotes || [])].sort((a, b) =>
-        new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime()
-    );
-    const defaultQuote = sortedQuotes.find(q => q.status === 'WINNER') || sortedQuotes[0];
-
-    // 2. State for User Selection
+    // 1. State for User Selection
     const [selectedQuoteId, setSelectedQuoteId] = useState<string | null>(null);
 
-    // Sync state with default if not yet selected
-    const effectiveQuote = selectedQuoteId
-        ? quotes?.find(q => q.id === selectedQuoteId)
-        : defaultQuote;
+    // 2. Determine "Active" quote (Winner, Selected, Amount match, or Latest)
+    const sortedQuotes = useMemo(() => {
+        return [...(quotes || [])].sort((a, b) =>
+            new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime()
+        );
+    }, [quotes]);
+
+    const effectiveQuote = resolveActiveQuote(quotes, opportunity?.amount, selectedQuoteId);
 
     const { items: quoteItems } = useQuoteItems(effectiveQuote?.id);
-    const { updateOpportunity } = useOpportunities();
 
     const itemsToShow = (quoteItems && quoteItems.length > 0)
         ? quoteItems
@@ -1355,10 +1357,10 @@ function ProductsTab({ opportunityId }: { opportunityId: string }) {
 
     // Effect: Synchronize opportunity amount with effective quote whenever quote changes
     useEffect(() => {
-        if (effectiveQuote && opportunity && effectiveQuote.total_amount !== opportunity.amount) {
+        if (effectiveQuote && opportunity && Math.abs((effectiveQuote.total_amount || 0) - (opportunity.amount || 0)) > 0.01) {
             updateOpportunity(opportunityId, { amount: effectiveQuote.total_amount });
         }
-    }, [effectiveQuote?.id, effectiveQuote?.total_amount, opportunity?.id, opportunity?.amount]);
+    }, [effectiveQuote?.id, effectiveQuote?.total_amount, opportunity?.id, opportunity?.amount, opportunityId, updateOpportunity]);
 
     if (!effectiveQuote && itemsToShow.length === 0) {
         return (
@@ -1386,12 +1388,13 @@ function ProductsTab({ opportunityId }: { opportunityId: string }) {
                                 <select
                                     className="text-xs font-bold text-blue-600 bg-blue-50 border-none rounded-md py-1 pl-2 pr-8 cursor-pointer focus:ring-2 focus:ring-blue-500"
                                     value={effectiveQuote?.id || ''}
-                                    onChange={(e) => {
+                                    onChange={async (e) => {
                                         const qId = e.target.value;
                                         setSelectedQuoteId(qId);
                                         const selected = quotes?.find(q => q.id === qId);
                                         if (selected && opportunity) {
-                                            updateOpportunity(opportunityId, { amount: selected.total_amount });
+                                            await updateOpportunity(opportunityId, { amount: selected.total_amount });
+                                            await updateQuote(selected.id, { updated_at: new Date().toISOString() });
                                         }
                                     }}
                                 >

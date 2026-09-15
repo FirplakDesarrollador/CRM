@@ -10,6 +10,7 @@ es una cotización con `es_pedido = true` (migración `20260109_add_es_pedido`);
 - **Estados:** `DRAFT → SENT → APPROVED / REJECTED → WINNER`.
 - **Ganadora:** `is_winner` marca la cotización que gana la oportunidad; dispara el
   trigger de [[comisiones]] (`20260210_commission_trigger_quotes` + hotfix `is_winner`).
+- **Sincronización con Oportunidad:** Al crear, modificar (`updateQuoteTotal`) o alternar cotizaciones en la pestaña de Productos, el `total_amount` se propaga de inmediato al campo `amount` de la [[oportunidades|oportunidad]] padre vía `lib/opportunityQuoteSync.ts`. Si existe una cotización `WINNER`, esta tiene precedencia estricta.
 - **Aprobación:** permiso `approve_quote` (COORDINADOR/ADMIN).
 - **Envío formal:** `SendQuoteModal` se abre únicamente desde un pedido guardado y
   completo; envía por correo el PDF construido con los datos e ítems de ese pedido
@@ -96,5 +97,5 @@ Al crear un nuevo pedido parcial (`!pedidoUuid`), el formulario de creación rec
 
 - `app/oportunidades/[id]/cotizaciones/`, `app/pedidos/page.tsx`
 - `components/quotes/PedidosEditor.tsx`, `SendQuoteModal.tsx`
-- `lib/hooks/usePedidos.ts`, `useProducts.ts`, `lib/pdfGenerator.ts`, `lib/db.ts`
+- `lib/hooks/usePedidos.ts`, `useProducts.ts`, `lib/pdfGenerator.ts`, `lib/db.ts`, `lib/opportunityQuoteSync.ts`
 - Migraciones: `20260109_add_es_pedido`, `20260113_volume_discounts`, `20260421_alterar_crm_pedidos`, `20260429_add_pdf_fields_to_quotes_and_orders`, `20260729_required_order_fields.sql`, `20260914180000_add_pod_to_orders_and_quotes.sql`

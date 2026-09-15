@@ -3,6 +3,24 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-09-15 - Ingest: Sincronización Inmediata de Importe de Oportunidad con Cotizaciones y Reconciliación Global
+
+- **Módulo de Sincronización (`lib/opportunityQuoteSync.ts`):**
+  - Implementación de `resolveActiveQuote`: resolución jerárquica de cotización activa (selección manual de usuario -> `WINNER` -> coincidencia de importe -> cotización más reciente).
+  - Implementación de `shouldUpdateOpportunityAmount`: garantiza que si una cotización es `WINNER`, esta mande sobre la oportunidad; y si todas están en borrador, la cotización en edición o seleccionada actualice de inmediato el importe padre.
+  - Implementación de `getOpportunityAmountFromQuote`: extracción determinista de montos.
+- **Hooks de Oportunidades (`lib/hooks/useOpportunities.ts`):**
+  - `createQuote`: actualiza atómicamente la oportunidad padre con el importe de la cotización creada dentro del mismo `commitLocalChanges`.
+  - `updateQuote`: propaga inmediatamente el `total_amount` al `amount` de la oportunidad padre en la misma transacción Dexie + Outbox.
+  - `deleteQuote`: reasigna el importe de la oportunidad a la siguiente cotización activa restante (o 0 si no quedan).
+- **Interfaz de Detalle de Oportunidad (`app/oportunidades/[id]/page.tsx`):**
+  - `ProductsTab`: el selector desplegable de cotizaciones actualiza inmediatamente el importe de la oportunidad y el timestamp de la cotización seleccionada, resolviendo la cotización activa sin saltos visuales ni bucles.
+  - `SummaryTab`: sincronización reactiva de `localAmount` con `opportunity?.amount` vía `useEffect`.
+- **Reconciliación Global de Datos:**
+  - Ejecución de actualización en base de datos (`CRM_Oportunidades`) para alinear 185 oportunidades históricas con su cotización activa. Verificación final: 0 oportunidades desalineadas.
+- **Pruebas:** Suite permanente creada en `tests/opportunityQuoteAmountSync.test.ts` (9/9 VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/pages/cotizaciones-y-pedidos.md`.
+
 ## 2026-09-14 - Ingest: Campo desplegable Tipo POD en el Wizard de Pedido Parcial y Mapeo en Supabase
 
 - **Interfaz de Usuario (`components/quotes/PedidosEditor.tsx`):**

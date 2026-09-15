@@ -55,8 +55,8 @@ describe('Campo Tipo POD en pedidos y cotizaciones', () => {
         ];
 
         const result = buildPedidoDocumentData(quote, pedido, quoteItems);
-        expect((result.quote as any).tipo_pod).toBe('POD Parcial');
-        expect((result.quote as any).pod).toBe('POD Parcial');
+        expect(result.quote.tipo_pod).toBe('POD Parcial');
+        expect(result.quote.pod).toBe('POD Parcial');
     });
 
     it('las opciones soportadas de tipo_pod son POD Total, POD Parcial y Sin POD', () => {
