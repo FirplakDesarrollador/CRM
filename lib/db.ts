@@ -106,6 +106,7 @@ export interface LocalQuote {
     currency_id: string;
     status: 'DRAFT' | 'SENT' | 'APPROVED' | 'REJECTED' | 'WINNER';
     is_winner?: boolean;
+    is_deleted?: boolean;
     es_pedido?: boolean; // Nuevo campo para diferenciar pedidos
     segmento_id?: number | null; // Segmento del pedido/cotización
 
