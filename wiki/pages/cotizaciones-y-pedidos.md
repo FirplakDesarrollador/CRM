@@ -22,6 +22,7 @@ es una cotización con `es_pedido = true` (migración `20260109_add_es_pedido`);
 
 - El precio unitario sale de `CRM_ListaDePrecios` según la columna del
   [[canales-de-venta|canal]] de la cuenta.
+- **Protección de precios de catálogo:** Los productos del catálogo (`producto_id !== null`) tienen precio unitario de solo lectura en la interfaz y protegido a nivel de lógica (`lib/quotePricing.ts` / `sanitizeQuoteItemUpdates`), impidiendo manipulaciones arbitrarias por parte de asesores comerciales. Únicamente los **Ítems Manuales** (`producto_id === null`) permiten definir y editar su precio unitario.
 - **Descuentos por volumen:** `20260113_volume_discounts` + `20260114_populate_discounts`
   definen límites; las cuentas con `ignorar_limites_descuento` los omiten.
 - Descuentos por ítem en `20260114_quote_items_discounts`.
@@ -51,6 +52,8 @@ cotización. Antes de habilitarlas, `getMissingPedidoFormalizationFields` verifi
 nueve datos obligatorios y que el pedido tenga productos con cantidades válidas. El
 documento usa las cantidades parciales, descuentos, total y datos logísticos del pedido
 seleccionado.
+
+- **Cálculo de Precios e IVA en PDF (`calculatePdfItemRow` y `calculatePdfTotals`):** Todos los precios de lista son base neta sin IVA (`VALOR UNITARIO` = precio de lista exacto sin deducciones). El valor total de cada línea es el subtotal tras aplicar el porcentaje de descuento (`DTO`). El `SUBTOTAL` del documento corresponde a la suma de los valores totales netos de las líneas. El `IVA 19%` se adiciona al final tras el descuento (`subtotal * 0.19` en COP; 0 en exportación USD). El `GRAN TOTAL` equivale a `SUBTOTAL + IVA`.
 
 ## Campos Obligatorios para Guardar Pedido (Total o Parcial)
 
@@ -87,6 +90,7 @@ Al crear un nuevo pedido parcial (`!pedidoUuid`), el formulario de creación rec
 - `PedidoEditorForm` en `PedidosEditor.tsx` gestiona la creación y edición. La creación se estructuró como un Wizard de 3 pasos (Cantidades a Pedir, Datos Logísticos SAP, Datos Adicionales).
 - En el **Paso 2 (Datos Logísticos SAP)**, se incluye el selector desplegable **Tipo POD** (`tipo_pod` / `pod`), con opciones: `POD Total` (por defecto), `POD Parcial` y `Sin POD`, mapeado y persistido tanto en `CRM_Pedidos` como en `CRM_Cotizaciones`.
 - En edición, se eliminan los botones de guardado manual y se implementa guardado automático (auto-save) debounced (1.5 segundos) con indicador visual (`AutoSaveIndicator`) integrado vía `useFormAutoSave`. Los cambios de ítems se calculan de forma diferencial (`updatePedidoItems` en `usePedidos.ts`) y se encolan al [[sincronizacion-offline|outbox]] (ver `bugs-knowhow.md` §5 por el histórico).
+- **Persistencia y normalización de fechas (`lib/pedidoHelpers.ts`)**: Los campos `fecha_entrega` y `fecha_minima_requerida` (`EXTRA_Fecha mínima requerida por comercial/cliente`) se mantienen sincronizados bidireccionalmente en Dexie y Supabase. El helper `normalizeDateToInput` convierte fechas de SAP (`DD/MM/YYYY`) o ISO con timestamp a formato estricto `YYYY-MM-DD` requerido por `<input type="date">`. Al sincronizar con PostgreSQL, se preservan intactas las columnas nativas booleanas (`cierre_facturacion`, `es_muestra`) junto a sus columnas espejo `EXTRA_` de SAP.
 - ⚠️ El pull de pedidos mapea `id` del servidor → `uuid_generado` local.
 
 ## Notas operativas
@@ -97,5 +101,5 @@ Al crear un nuevo pedido parcial (`!pedidoUuid`), el formulario de creación rec
 
 - `app/oportunidades/[id]/cotizaciones/`, `app/pedidos/page.tsx`
 - `components/quotes/PedidosEditor.tsx`, `SendQuoteModal.tsx`
-- `lib/hooks/usePedidos.ts`, `useProducts.ts`, `lib/pdfGenerator.ts`, `lib/db.ts`, `lib/opportunityQuoteSync.ts`
-- Migraciones: `20260109_add_es_pedido`, `20260113_volume_discounts`, `20260421_alterar_crm_pedidos`, `20260429_add_pdf_fields_to_quotes_and_orders`, `20260729_required_order_fields.sql`, `20260914180000_add_pod_to_orders_and_quotes.sql`
+- `lib/hooks/usePedidos.ts`, `useProducts.ts`, `lib/pdfGenerator.ts`, `lib/db.ts`, `lib/opportunityQuoteSync.ts`, `lib/quotePricing.ts`, `lib/pedidoHelpers.ts`
+- Migraciones: `20260109_add_es_pedido`, `20260113_volume_discounts`, `20260421_alterar_crm_pedidos`, `20260429_add_pdf_fields_to_quotes_and_orders`, `20260729_required_order_fields.sql`, `20260904193842_persist_crm_editable_fields.sql`, `20260914180000_add_pod_to_orders_and_quotes.sql`
