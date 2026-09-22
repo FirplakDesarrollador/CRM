@@ -428,6 +428,31 @@ export class CRMFirplakDB extends Dexie {
             pedidos: 'uuid_generado, cotizacion_id, opportunity_id',
             pedidoItems: 'id, pedido_uuid'
         });
+        this.version(15).stores({
+            outbox: 'id, entity_type, status, field_timestamp, field_name, user_id, next_attempt_at, [entity_type+entity_id+field_name]',
+            fileQueue: 'id, status',
+            syncCursors: 'id, user_id, table_name, updated_at',
+            syncRuns: 'id, kind, trigger, status, started_at',
+            localContext: 'id, user_id, status',
+            accounts: 'id, nit, nit_base, nombre, owner_user_id',
+            opportunities: 'id, account_id, owner_user_id',
+            contacts: 'id, account_id, email',
+            quotes: 'id, opportunity_id, status, es_pedido',
+            quoteItems: 'id, cotizacion_id',
+            activities: 'id, opportunity_id, account_id, user_id, fecha_inicio, tipo_actividad',
+            phases: 'id, canal_id, orden',
+            subclasificaciones: 'id, canal_id',
+            segments: '++id, subclasificacion_id',
+            countries: 'id',
+            departments: 'id, pais_id, nombre',
+            cities: 'id, departamento_id, nombre',
+            activityClassifications: 'id, tipo_actividad',
+            activitySubclassifications: 'id, clasificacion_id',
+            lossReasons: 'id',
+            opportunityCollaborators: 'id, oportunidad_id, usuario_id',
+            pedidos: 'uuid_generado, cotizacion_id, opportunity_id',
+            pedidoItems: 'id, pedido_uuid'
+        });
         registerAuditHooks(this);
     }
 }

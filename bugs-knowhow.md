@@ -1523,4 +1523,51 @@ Prevention Rule:
 Tags:
 [pedidos] [persistencia] [fecha_entrega] [fecha_minima_requerida] [normalizeDateToInput] [cierre_facturacion] [es_muestra] [supabase] [sync]
 
+---
+
+## [Bug ID: 20260922-01]
+
+Context:
+Módulo de Actividades (`app/actividades/page.tsx`, `components/activities/CreateActivityModal.tsx`, `lib/hooks/useActivities.ts`, `lib/db.ts`).
+
+What I Did:
+Auditoría integral y corrección del flujo de edición y visualización de actividades en las vistas Todo, Agenda y Mes.
+
+Problem:
+1. En la vista Mes, hacer clic en una actividad para editarla propagaba el evento al contenedor del día (`<div onClick={() => setView('agenda')}>`), cambiando intempestivamente la vista de Mes a Agenda debajo del modal.
+2. Tooltip hover de la vista Mes no se mostraba porque el día tenía la clase `group` pero el tooltip requería `group/day`.
+3. SchemaError en Dexie: `lib/sync.ts` ejecutaba `db.activities.where('account_id').equals(...)`, pero `account_id` no estaba indexado en el schema de Dexie (v12-14).
+4. El campo `prioridad` se perdía en la sincronización y al crear actividades: no existía columna en `CRM_Actividades` de Supabase, no estaba en `DB_COLUMNS` de `useActivities.ts` y los botones de prioridad no marcaban dirty el formulario.
+5. En `CreateActivityModal.tsx`, un `useEffect` sobreescribía `fecha_fin` sumándole 1 hora a `fecha_inicio` en el montaje, destruyendo la fecha fin original de actividades editadas y disparando el autosave.
+6. `minDate={new Date()}` en `DateTimePicker` impedía editar actividades pasadas o vencidas.
+7. En modo edición, reasignar usuario (`reassignUserId`) o modificar invitados/colaboradores (`attendees`) no persistía porque residían en estado local fuera de react-hook-form y el modo edición no cuenta con botón submit tradicional.
+8. Existían archivos huérfanos/duplicados con sufijo `-isazaale` ocupando más de 110 KB.
+9. Violación de clave foránea `fk_crmact_opp` en `CRM_Actividades (_complete_snapshot_)`: En `lib/sync.ts`, la sección 3.3c de auto-sanación de `opportunity_id` solo evaluaba mutaciones individuales (`u.field === 'opportunity_id'`) y pasaba por alto `_complete_snapshot_` (que es el formato emitido por `useActivities`). Adicionalmente, cadenas vacías `""` o espacios no se saneaban a `null`, y oportunidades huérfanas o eliminadas bloqueaban el Outbox con error `violates foreign key constraint fk_crmact_opp`.
+
+Fix Applied:
+1. Adición de `e.stopPropagation()` en los enlaces y preview de actividades en la vista Mes de `page.tsx`.
+2. Asignación de `group/day` en el contenedor de cada día del calendario mensual.
+3. Migración Supabase para añadir columna `prioridad TEXT DEFAULT 'Media'` a `CRM_Actividades`.
+4. Actualización del schema de Dexie a versión 15 en `lib/db.ts` indexando `account_id`: `'id, opportunity_id, account_id, user_id, fecha_inicio, tipo_actividad'`.
+5. Inclusión de `prioridad` en `DB_COLUMNS` y `createActivity` en `lib/hooks/useActivities.ts`.
+6. Guard en `CreateActivityModal.tsx` para no recalcular `fecha_fin` en edición salvo que el usuario altere activamente `fecha_inicio` o `tipo_actividad`.
+7. Ajuste de `minDate={isEditing ? undefined : new Date()}` en los `DateTimePicker`.
+8. Persistencia inmediata de `reassignUserId` y `attendees` (con `_sync_metadata`) al mutar en modo edición.
+9. Integración del switch de reunión Teams para actividades tipo EVENTO con cuenta Microsoft conectada.
+10. Eliminación de archivos muertos `CreateActivityModal-isazaale.tsx` y `useActivitiesServer-isazaale.ts`.
+11. Auto-sanación proactiva y reactiva de `fk_crmact_opp` y `account_id` en `lib/sync.ts`: extracción y saneamiento en `_complete_snapshot_`, nulificación de referencias huérfanas en Dexie y Outbox, y método de recuperación `healOrphanedActivityOpportunity`.
+
+Prevention Rule:
+**Edición y Modales Autosave en Actividades**:
+1. En modales con autosave (`useFormAutoSave`), ningún `useEffect` debe mutar campos dependientes (como fechas calculadas) en el montaje inicial cuando `isEditing` sea verdadero; solo deben mutarse si el campo origen está marcado como `dirty`.
+2. Los selectores de fecha (`DateTimePicker`) en formularios de edición NUNCA deben restringir `minDate={new Date()}` porque bloquean la visualización y reprogramación de registros históricos o vencidos.
+3. Todo estado interactivo en modales autosave que viva fuera de react-hook-form (como reasignación o listas de asistentes) debe invocar `updateActivity` inmediatamente en su handler de cambio.
+4. Toda consulta indexada de Dexie (e.g., `where('col').equals(...)`) debe contar con su índice declarado en el schema de la base de datos local para evitar `SchemaError`.
+5. Todo filtro de auto-sanación de claves foráneas en `lib/sync.ts` DEBE inspeccionar tanto campos individuales como snapshots completos (`u.field === '_complete_snapshot_'`), sanitizando cadenas vacías `""` a `null` para no romper constraints de PostgreSQL.
+
+Tags:
+[actividades] [dexie] [autosave] [fecha_fin] [minDate] [prioridad] [reassign] [attendees] [stopPropagation] [fk_crmact_opp] [snapshots]
+
+
+
 

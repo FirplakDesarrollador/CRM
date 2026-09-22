@@ -3,6 +3,40 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-09-22 - Ingest: Buscador Interactivo en Desplegable Reasignar Actividad (`CreateActivityModal.tsx`)
+
+- **Modal de Creación y Edición de Actividades (`components/activities/CreateActivityModal.tsx`):**
+  - Sustitución del `<select>` HTML nativo de **Reasignar Actividad** (visible para administradores y coordinadores) por el componente `<SearchableSelect>`.
+  - Soporte de filtrado rápido en memoria por nombre completo y correo electrónico (`searchValue`), normalizado sin distinción de mayúsculas ni acentos.
+  - Conservación de la persistencia inmediata mediante `updateActivity(initialData.id, { user_id: newUserId })`.
+- **Componente Reutilizable (`components/ui/SearchableSelect.tsx`):**
+  - Extensión de la interfaz `SearchableSelectOption` con propiedad opcional `searchValue` para búsquedas multi-campo.
+- **Páginas actualizadas:** `wiki/pages/actividades.md`.
+
+## 2026-09-22 - Ingest: Saneamiento Integral del Módulo de Actividades, Persistencia Autosave, Dexie v15 y Prioridad
+
+- **Saneamiento y Vistas de Actividades (`app/actividades/page.tsx`):**
+  - Corrección de click bubbling en la vista de Mes: inserción de `e.stopPropagation()` en los enlaces y tarjetas de actividad para evitar que la celda del día conmute inesperadamente a la vista 'agenda' al abrir el modal.
+  - Asignación de `group/day` en el contenedor de día mensual para habilitar la visibilidad de los tooltips de actividades en hover.
+  - Eliminación de texto de depuración temporal `"Error L: {act.clasificacion_id}"` en la vista Todo.
+  - Filtrado estricto `!act.is_deleted` en el listado global de actividades.
+- **Modal de Creación y Edición (`components/activities/CreateActivityModal.tsx`):**
+  - Corrección de sobreescritura destructiva de `fecha_fin`: el efecto que calcula `fecha_inicio + 1 hora` ahora ignora el montaje inicial en modo edición y solo actúa si el usuario modifica activamente `fecha_inicio` o `tipo_actividad`.
+  - Habilitación de edición de actividades vencidas e históricas: eliminación de la restricción `minDate={new Date()}` en modo edición en todos los selectores `DateTimePicker`.
+  - Persistencia reactiva de reasignación de usuario (`reassignUserId`) y colaboradores/invitados (`attendees` y `_sync_metadata`) al mutar en modo edición.
+  - Asignación de `{ shouldDirty: true, shouldValidate: true }` en los botones de prioridad.
+  - Incorporación del interruptor de reuniones de Microsoft Teams para eventos con cuenta conectada.
+  - Limpieza de `console.log` de depuración en renders y `useMemo`.
+  - Eliminación de archivo muerto duplicado `components/activities/CreateActivityModal-isazaale.tsx`.
+- **Base de Datos y Hook (`lib/db.ts`, `lib/hooks/useActivities.ts` y Supabase):**
+  - Migración `20260922000000_add_prioridad_to_activities.sql`: adición de columna `prioridad TEXT DEFAULT 'Media'` en `CRM_Actividades`.
+  - Actualización de Dexie a versión 15 indexando `account_id` en la tabla `activities` (`'id, opportunity_id, account_id, user_id, fecha_inicio, tipo_actividad'`), resolviendo el `SchemaError` en `lib/sync.ts`.
+  - Adición de `prioridad` a `DB_COLUMNS` y `createActivity` en `useActivities.ts`, junto con filtro `!a.is_deleted`.
+  - Eliminación de archivo muerto duplicado `lib/hooks/useActivitiesServer-isazaale.ts`.
+- **Pruebas y Verificación:** `pruebas unitarias/actividades.test.ts` (8/8 GREEN), `lib/local-database.test.ts` (2/2 GREEN), `pruebas unitarias/opportunityActivities.test.ts` (8/8 GREEN), `npx tsc --noEmit` (0 errores).
+- **Páginas actualizadas:** `wiki/pages/actividades.md`.
+
+
 ## 2026-09-15 - Ingest: Corrección y Persistencia de Formularios de Pedidos y Normalización de Fechas
 
 - **Persistencia y Sincronización de Pedidos (`lib/pedidoHelpers.ts` y `lib/hooks/usePedidos.ts`):**
