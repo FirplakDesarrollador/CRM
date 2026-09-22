@@ -415,6 +415,8 @@ function ActivitiesContent() {
         const accMap = new Map(accounts.map(a => [a.id, a]));
 
         return activities.filter(act => {
+            if (act.is_deleted) return false;
+
             // Apply role-based filtering: VENDEDOR and similar roles only see their own activities or those of opportunities they collaborate on
             if (!canViewAll) {
                 if (!user) return false; // Prevent leak while loading
@@ -1003,10 +1005,6 @@ function ActivitiesContent() {
                                                                             </span>
                                                                         )}
                                                                     </div>
-                                                                {/* DEBUG INDICATOR */}
-                                                                {act.clasificacion_id && !clsName && (
-                                                                    <div className="text-[10px] text-red-500 font-bold mt-1">Error L: {act.clasificacion_id}</div>
-                                                                )}
                                                             </div>
 
                                                             {act.tipo_actividad === 'EVENTO' ? (
@@ -1114,7 +1112,7 @@ function ActivitiesContent() {
                                                     key={`day-${i}`}
                                                     onClick={() => { setSelectedDate(currentDate); setView('agenda'); }}
                                                     className={cn(
-                                                        "group relative bg-white p-1.5 min-h-[90px] transition-all cursor-pointer flex flex-col",
+                                                        "group/day relative bg-white p-1.5 min-h-[90px] transition-all cursor-pointer flex flex-col",
                                                         isSelected ? "bg-blue-50 ring-2 ring-inset ring-blue-500" : "hover:bg-slate-50",
                                                         isToday && !isSelected && "bg-amber-50/50"
                                                     )}
@@ -1148,7 +1146,10 @@ function ActivitiesContent() {
                                                                 <div key={act.id} className="flex gap-1 group/act">
                                                                     <a
                                                                         href={`/actividades?id=${act.id}`}
-                                                                        onClick={(e) => handleEntityLinkClick(e, `/actividades?id=${act.id}`, () => openActivityModal(act))}
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation();
+                                                                            handleEntityLinkClick(e, `/actividades?id=${act.id}`, () => openActivityModal(act));
+                                                                        }}
                                                                         className={cn(
                                                                             "text-[9px] px-1 py-0.5 rounded truncate font-medium border-l-2 flex-1 cursor-pointer no-underline block",
                                                                             act.is_completed
@@ -1206,7 +1207,10 @@ function ActivitiesContent() {
                                                                         <a 
                                                                             key={act.id} 
                                                                             href={`/actividades?id=${act.id}`}
-                                                                            onClick={(e) => handleEntityLinkClick(e, `/actividades?id=${act.id}`, () => openActivityModal(act))}
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation();
+                                                                                handleEntityLinkClick(e, `/actividades?id=${act.id}`, () => openActivityModal(act));
+                                                                            }}
                                                                             className={cn(
                                                                                 "relative group/tip flex items-center gap-2 p-1.5 rounded border-l-2 transition-all hover:bg-slate-50 cursor-pointer no-underline text-inherit block",
                                                                                 act.is_completed

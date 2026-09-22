@@ -12,12 +12,18 @@ visitas y eventos del equipo comercial. Pueden asociarse a [[oportunidades]] y a
   (`20260127_activity_classifications.sql`, gestionado desde
   `ActivityClassificationManager` en Configuración; hook
   `useActivityClassifications`).
-- **Soft-delete:** `is_deleted` (`20260127_add_is_deleted_to_activities.sql`).
+- **Prioridad:** Campo `prioridad` ('Baja', 'Media', 'Alta', por defecto 'Media') soportado en `CRM_Actividades`, sincronizado en Supabase y Dexie (`20260922000000_add_prioridad_to_activities.sql`).
+- **Base de datos local Dexie (v15):** Indexación de `account_id` en `activities` (`'id, opportunity_id, account_id, user_id, fecha_inicio, tipo_actividad'`) para soporte de búsquedas reactivas por cuenta y sincronización sin SchemaError.
+- **Soft-delete:** `is_deleted` (`20260127_add_is_deleted_to_activities.sql`), filtrado de forma global en `useActivities` y en las vistas del módulo.
 - **Columnas Microsoft:** `20260218_add_activities_ms_columns.sql` añade campos para
   vincular actividades con eventos de calendario Outlook (ver [[integraciones]]).
 
 ## Funcionalidad
 
+- **Vistas del módulo (`/actividades`):**
+  - **Todo:** Listado tabular agrupado con filtros globales por clasificación, fecha, estado y comercial.
+  - **Agenda:** Vista cronológica de actividades por día con selector de fecha y panel lateral de detalle.
+  - **Mes:** Vista de cuadrícula mensual con conteo de actividades por día, tooltip contextual con indicador `group/day` y apertura directa del modal de edición sin cambiar la vista activa gracias a `e.stopPropagation()`.
 - Creación rápida vía `CreateActivityModal` desde varios módulos (también desde tiendas
   con `CreateStoreActivityModal`). La creación se estructura como un Wizard de 3 pasos (Tipo & Asunto, Clasificación & Fechas, Detalles).
 - **Validaciones y obligatoriedad de campos:**
@@ -26,6 +32,10 @@ visitas y eventos del equipo comercial. Pueden asociarse a [[oportunidades]] y a
   - `subclasificacion_id`: Opcional en todos los casos.
   - `asunto`: Se autogenera automáticamente si el usuario lo deja vacío con el formato `[Clasificación] - [Oportunidad o Cuenta]`.
 - En edición, se eliminan los botones de guardado manual y se implementa guardado automático (auto-save) debounced (1.5 segundos) con indicador visual (`AutoSaveIndicator`) integrado vía `useFormAutoSave`.
+  - **Fechas no destructivas:** En modo edición, `fecha_fin` no se sobreescribe en el montaje inicial; solo se recalcula si el usuario modifica activamente `fecha_inicio` o el `tipo_actividad`.
+  - **Edición de actividades pasadas:** Los selectores `DateTimePicker` deshabilitan la restricción `minDate={new Date()}` en modo edición, permitiendo consultar y reprogramar actividades vencidas.
+  - **Reasignación y asistentes persistentes:** El selector de reasignación (`reassignUserId` para ADMIN/COORDINADOR) usa `SearchableSelect` con búsqueda por nombre y correo, y junto a la lista de colaboradores/invitados (`attendees` en `_sync_metadata`) persiste inmediatamente invocando `updateActivity` en sus respectivos handlers.
+  - **Reuniones Teams:** Toggle interactivo para eventos que vincula automáticamente el enlace de Microsoft Teams al sincronizar con Calendar.
 - Vencimiento: las actividades no completadas después de su fecha generan
   [[notificaciones]] de tipo `ACTIVITY_OVERDUE` (Edge Function
   `check-overdue-activities`, ejecutada por cron).
@@ -44,6 +54,8 @@ visitas y eventos del equipo comercial. Pueden asociarse a [[oportunidades]] y a
 
 - `app/actividades/page.tsx`, `components/activities/CreateActivityModal.tsx`
 - `app/e2e/activities-wizard/`, `app/e2e/activities-checklist/`, `e2e/create_activity_wizard.spec.ts`, `e2e/activity_checklist_autosave.spec.ts`
-- `lib/hooks/useActivities.ts`, `useActivitiesServer.ts`, `useActivityClassifications.ts`
+- `lib/db.ts`, `lib/hooks/useActivities.ts`, `useActivityClassifications.ts`
+- `supabase/migrations/20260922000000_add_prioridad_to_activities.sql`
 - `supabase/functions/check-overdue-activities/`
 - `docs/NOTIFICACIONES_ACTIVIDADES_VENCIDAS.md`
+
