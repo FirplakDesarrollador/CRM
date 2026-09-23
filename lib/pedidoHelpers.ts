@@ -42,8 +42,7 @@ export function normalizeDateToInput(dateStr: string | null | undefined): string
  */
 export function mapPedidoServerPayload(merged: Partial<LocalPedido>): {
     localMerged: Partial<LocalPedido>;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    serverPayload: Record<string, any>;
+    serverPayload: Record<string, unknown>;
 } {
     const localMerged: Partial<LocalPedido> = { ...merged };
 
@@ -54,8 +53,7 @@ export function mapPedidoServerPayload(merged: Partial<LocalPedido>): {
         localMerged.fecha_minima_requerida = fechaVal;
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const serverPayload: Record<string, any> = { ...localMerged };
+    const serverPayload: Record<string, unknown> = { ...localMerged };
     delete serverPayload.id;
 
     if (fechaVal !== undefined) {
@@ -96,11 +94,10 @@ export function mapPedidoServerPayload(merged: Partial<LocalPedido>): {
         'notas_sap'
     ]);
 
+    const localRecord = localMerged as Record<string, unknown>;
     Object.entries(sapMapping).forEach(([local, server]) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        if ((localMerged as any)[local] !== undefined) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            serverPayload[server] = (localMerged as any)[local];
+        if (localRecord[local] !== undefined) {
+            serverPayload[server] = localRecord[local];
             if (!preserveNativeKeys.has(local)) {
                 delete serverPayload[local];
             }
