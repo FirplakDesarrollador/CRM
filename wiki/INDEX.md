@@ -26,6 +26,7 @@
 - [notificaciones](pages/notificaciones.md) — Reglas configurables, evento ACTIVITY_OVERDUE, campana in-app, cron con Edge Function.
 - [integraciones](pages/integraciones.md) — Microsoft Graph (correo/calendario/Planner), SAP por cola, lead intake de WordPress, ForceManager.
 - [dashboard-e-indicadores](pages/dashboard-e-indicadores.md) — Dashboard de tiles, embudo, indicadores KPI, informes Excel (ADMIN) y metas con expiración automática.
+- [servidor-mcp](pages/servidor-mcp.md) — Servidor oficial MCP (Model Context Protocol): herramientas operativas duales (stdio/SSE), filtrado dinámico de roles, recursos nativos y política de cero borrado.
 
 ## Páginas pendientes (enlaces `[[...]]` sin página)
 

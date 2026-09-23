@@ -3,6 +3,21 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-09-22 - Ingest: Servidor MCP Oficial del CRM FIRPLAK (`lib/mcp/`, `bin/`, `app/api/mcp/`)
+
+- **Arquitectura Dual y SDK Oficial:**
+  - Implementación con `@modelcontextprotocol/sdk` soportando transporte Stdio local (`bin/crm-mcp.ts` y wrapper `bin/crm-mcp.mjs`) para Claude Desktop, Antigravity IDE y Cursor, y transporte HTTP/SSE (`app/api/mcp/route.ts`) para ChatGPT Custom Actions con autenticación multiusuario vía JWT Bearer de Supabase.
+- **Seguridad y Control de Roles:**
+  - Política categórica de **Cero Borrado (No-Delete)**: exclusión de herramientas destructivas e interceptor de seguridad.
+  - Filtrado dinámico de herramientas en `tools/list` según rol (`VENDEDOR`, `COORDINADOR`, `ADMIN`) para mitigar tool bloat y alucinaciones.
+  - Aislamiento estricto de cartera para vendedores y permisos de reasignación y supervisión para coordinadores.
+  - Paginación obligatoria (máx 30) y prevención de duplicados vía `idempotency_key`.
+- **Recursos Nativos (`crm://`):**
+  - Publicación de canales, fases, clasificaciones, motivos de pérdida, orígenes y métricas de pipeline.
+- **Aseguramiento de Calidad (QA):**
+  - Suite de pruebas completa en `tests/crm-mcp.test.ts` (19/19 casos VERIFIED) validando roles, no-delete, idempotencia, auto-corrección de errores, recursos y resolución forzada de URL pública de producción Vercel (`https://crm-64yu.vercel.app/api/mcp`) incluso en entornos localhost.
+- **Páginas creadas/actualizadas:** `wiki/pages/servidor-mcp.md`, `wiki/INDEX.md`.
+
 ## 2026-09-22 - Ingest: Buscador Interactivo en Desplegable Reasignar Actividad (`CreateActivityModal.tsx`)
 
 - **Modal de Creación y Edición de Actividades (`components/activities/CreateActivityModal.tsx`):**
