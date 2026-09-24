@@ -8,14 +8,14 @@ import { Page1EstadosTiempo } from "@/components/indicadores/reportes/Page1Estad
 import { Page2Clasificaciones } from "@/components/indicadores/reportes/Page2Clasificaciones";
 import { Page3MontoAsesor } from "@/components/indicadores/reportes/Page3MontoAsesor";
 import { Page4Eventos } from "@/components/indicadores/reportes/Page4Eventos";
-import { Page5Leads } from "@/components/indicadores/reportes/Page5Leads";
+import { Page5Cuentas } from "@/components/indicadores/reportes/Page5Cuentas";
 
 const REPORT_TABS = [
-    { id: "estados", label: "Estados y Tiempo", icon: PieChart },
+    { id: "estados", label: "Cohort", icon: PieChart },
     { id: "clasificaciones", label: "Clasificaciones", icon: ListChecks },
     { id: "montoAsesor", label: "Monto por Asesor", icon: LineChart },
     { id: "eventos", label: "Eventos", icon: CalendarCheck2 },
-    { id: "leads", label: "Leads", icon: Users2 },
+    { id: "cuentas", label: "Cuentas", icon: Users2 },
 ] as const;
 
 type ReportTabId = typeof REPORT_TABS[number]["id"];
@@ -97,7 +97,7 @@ export default function IndicadoresPage() {
                     {activeTab === "clasificaciones" && <Page2Clasificaciones />}
                     {activeTab === "montoAsesor" && <Page3MontoAsesor />}
                     {activeTab === "eventos" && <Page4Eventos />}
-                    {activeTab === "leads" && <Page5Leads />}
+                    {activeTab === "cuentas" && <Page5Cuentas />}
                 </div>
             </div>
 
