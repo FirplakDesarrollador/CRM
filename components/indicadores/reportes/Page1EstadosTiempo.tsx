@@ -18,6 +18,7 @@ import {
     getEstadoBucket,
 } from "./estadoUtils";
 import { EChartsCallbackParams } from "./echartsTypes";
+import { isPlausibleYear } from "./dateUtils";
 
 const MONTH_LABELS = [
     "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -124,7 +125,9 @@ export function Page1EstadosTiempo() {
     const yearOptions: SearchableSelectOption[] = useMemo(() => {
         const years = new Set<number>();
         (opportunities || []).forEach(o => {
-            if (o.fecha_cierre_estimada) years.add(new Date(o.fecha_cierre_estimada).getFullYear());
+            if (!o.fecha_cierre_estimada) return;
+            const year = new Date(o.fecha_cierre_estimada).getFullYear();
+            if (isPlausibleYear(year)) years.add(year);
         });
         const currentYear = new Date().getFullYear();
         years.add(currentYear);
@@ -282,6 +285,7 @@ export function Page1EstadosTiempo() {
         filtered.forEach(o => {
             if (!o.fecha_cierre_estimada) return;
             const d = new Date(o.fecha_cierre_estimada);
+            if (!isPlausibleYear(d.getFullYear())) return;
             const key = `${d.getFullYear()}-${String(d.getMonth()).padStart(2, "0")}`;
             if (!byMonth.has(key)) byMonth.set(key, { open: 0, won: 0, lost: 0 });
             byMonth.get(key)![getEstadoBucket(o.estado_id)] += 1;

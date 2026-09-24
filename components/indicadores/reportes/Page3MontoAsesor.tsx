@@ -11,6 +11,7 @@ import { SearchableSelect, SearchableSelectOption } from "@/components/ui/Search
 import { getWeekKey } from "./weekUtils";
 import { getEstadoBucket } from "./estadoUtils";
 import { EChartsCallbackParams } from "./echartsTypes";
+import { isPlausibleYear } from "./dateUtils";
 
 const TIPO_CANAL_OPTIONS: { value: TipoCanalVendedor; label: string }[] = [
     { value: "Fisico", label: "Físico" },
@@ -57,7 +58,9 @@ export function Page3MontoAsesor() {
     const yearOptions: SearchableSelectOption[] = useMemo(() => {
         const years = new Set<number>();
         (opportunities || []).forEach(o => {
-            if (o.fecha_cierre_estimada) years.add(new Date(o.fecha_cierre_estimada).getFullYear());
+            if (!o.fecha_cierre_estimada) return;
+            const year = new Date(o.fecha_cierre_estimada).getFullYear();
+            if (isPlausibleYear(year)) years.add(year);
         });
         years.add(new Date().getFullYear());
         return Array.from(years)

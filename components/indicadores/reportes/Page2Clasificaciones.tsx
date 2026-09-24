@@ -10,6 +10,7 @@ import { useIndicadoresLookups } from "@/lib/hooks/useIndicadoresLookups";
 import { SearchableSelect, SearchableSelectOption } from "@/components/ui/SearchableSelect";
 import { MultiSelect, Option } from "@/components/ui/MultiSelect";
 import { EChartsCallbackParams } from "./echartsTypes";
+import { isPlausibleYear } from "./dateUtils";
 
 const MONTH_LABELS = [
     "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -84,7 +85,9 @@ export function Page2Clasificaciones() {
     const yearOptions: SearchableSelectOption[] = useMemo(() => {
         const years = new Set<number>();
         (activities || []).forEach(a => {
-            if (a.fecha_inicio) years.add(new Date(a.fecha_inicio).getFullYear());
+            if (!a.fecha_inicio) return;
+            const year = new Date(a.fecha_inicio).getFullYear();
+            if (isPlausibleYear(year)) years.add(year);
         });
         years.add(new Date().getFullYear());
         return Array.from(years)

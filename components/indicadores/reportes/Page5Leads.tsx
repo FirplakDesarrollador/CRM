@@ -9,6 +9,7 @@ import { SearchableSelect, SearchableSelectOption } from "@/components/ui/Search
 import { getWeekKey } from "./weekUtils";
 import { EstadoBucket, getEstadoBucket } from "./estadoUtils";
 import { EChartsCallbackParams } from "./echartsTypes";
+import { isPlausibleYear } from "./dateUtils";
 
 const TIPO_CANAL_OPTIONS: { value: TipoCanalVendedor; label: string }[] = [
     { value: "Fisico", label: "Físico" },
@@ -57,7 +58,9 @@ export function Page5Leads() {
     const yearOptions: SearchableSelectOption[] = useMemo(() => {
         const years = new Set<number>();
         (opportunities || []).forEach(o => {
-            if (o.created_at) years.add(new Date(o.created_at).getFullYear());
+            if (!o.created_at) return;
+            const year = new Date(o.created_at).getFullYear();
+            if (isPlausibleYear(year)) years.add(year);
         });
         years.add(new Date().getFullYear());
         return Array.from(years)
