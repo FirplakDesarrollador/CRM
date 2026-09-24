@@ -43,18 +43,21 @@ interface RecentActivityCreation {
 }
 let lastCreatedActivity: RecentActivityCreation | null = null;
 
-export function useActivities(filters?: { opportunity_id?: string, advisor_id?: string | null }) {
+export function useActivities(filters?: { opportunity_id?: string, account_id?: string, advisor_id?: string | null }) {
     const activities = useLiveQuery(
         () => {
             if (filters?.opportunity_id) {
-                return db.activities.where('opportunity_id').equals(filters.opportunity_id).toArray();
+                return db.activities.where('opportunity_id').equals(filters.opportunity_id).filter(a => !a.is_deleted).toArray();
+            }
+            if (filters?.account_id) {
+                return db.activities.where('account_id').equals(filters.account_id).filter(a => !a.is_deleted).toArray();
             }
             if (filters?.advisor_id) {
-                return db.activities.where('user_id').equals(filters.advisor_id).toArray();
+                return db.activities.where('user_id').equals(filters.advisor_id).filter(a => !a.is_deleted).toArray();
             }
-            return db.activities.toArray();
+            return db.activities.filter(a => !a.is_deleted).toArray();
         },
-        [filters?.opportunity_id, filters?.advisor_id]
+        [filters?.opportunity_id, filters?.account_id, filters?.advisor_id]
     );
 
     // Allowlist of columns that actually exist in CRM_Actividades on Supabase.
@@ -63,8 +66,8 @@ export function useActivities(filters?: { opportunity_id?: string, advisor_id?: 
         'id', 'user_id', 'opportunity_id', 'account_id', 'tipo_actividad_id', 'asunto', 'descripcion',
         'fecha_inicio', 'fecha_fin', 'ms_planner_id', 'ms_event_id', 'created_at', 'updated_at',
         'is_completed', 'created_by', 'updated_by', 'is_deleted',
-        'tipo_actividad', 'clasificacion_id', 'subclasificacion_id', 'Tarea_planner',
-        'teams_meeting_url', 'microsoft_attendees', '_sync_metadata'
+        'tipo_actividad', 'clasificacion_id', 'subclasificacion_id', 'prioridad', 'Tarea_planner',
+        'teams_meeting_url', '_sync_metadata'
     ]);
 
     const createActivity = async (data: Partial<LocalActivity>) => {
@@ -102,13 +105,14 @@ export function useActivities(filters?: { opportunity_id?: string, advisor_id?: 
             id,
             user_id: userId,
             tipo_actividad: data.tipo_actividad || 'EVENTO',
+            prioridad: data.prioridad || 'Media',
             asunto: asuntoTrimmed,
             descripcion: data.descripcion || undefined,
             fecha_inicio: toISODateString(data.fecha_inicio),
             fecha_fin: data.fecha_fin ? toISODateString(data.fecha_fin) : undefined,
             is_completed: !!data.is_completed,
-            opportunity_id: data.opportunity_id || undefined,
-            account_id: data.account_id || undefined,
+            opportunity_id: (typeof data.opportunity_id === 'string' && data.opportunity_id.trim() && data.opportunity_id.trim() !== 'null') ? data.opportunity_id.trim() : undefined,
+            account_id: (typeof data.account_id === 'string' && data.account_id.trim() && data.account_id.trim() !== 'null') ? data.account_id.trim() : undefined,
             clasificacion_id: data.clasificacion_id || null,
             subclasificacion_id: data.subclasificacion_id || null,
             // Microsoft integration fields
@@ -154,12 +158,19 @@ export function useActivities(filters?: { opportunity_id?: string, advisor_id?: 
         const updated_at = new Date().toISOString();
 
         // Process dates to handle timezone correctly
-        const rawChanges = {
+        const rawChanges: any = {
             ...data,
             updated_at,
             ...(data.fecha_inicio && { fecha_inicio: toISODateString(data.fecha_inicio) }),
             ...(data.fecha_fin && { fecha_fin: toISODateString(data.fecha_fin) })
         };
+
+        if ('opportunity_id' in data) {
+            rawChanges.opportunity_id = (typeof data.opportunity_id === 'string' && data.opportunity_id.trim() && data.opportunity_id.trim() !== 'null') ? data.opportunity_id.trim() : null;
+        }
+        if ('account_id' in data) {
+            rawChanges.account_id = (typeof data.account_id === 'string' && data.account_id.trim() && data.account_id.trim() !== 'null') ? data.account_id.trim() : null;
+        }
 
         // Strip any fields that don't exist in CRM_Actividades (e.g. microsoft_attendees)
         // to prevent sync errors when Supabase rejects unknown columns.
@@ -177,6 +188,12 @@ export function useActivities(filters?: { opportunity_id?: string, advisor_id?: 
             const current = await db.activities.get(id);
             if (!current) return [];
             const fullActivity = { ...current, ...changes };
+            if ('opportunity_id' in fullActivity) {
+                fullActivity.opportunity_id = (typeof fullActivity.opportunity_id === 'string' && fullActivity.opportunity_id.trim() && fullActivity.opportunity_id.trim() !== 'null') ? fullActivity.opportunity_id.trim() : null;
+            }
+            if ('account_id' in fullActivity) {
+                fullActivity.account_id = (typeof fullActivity.account_id === 'string' && fullActivity.account_id.trim() && fullActivity.account_id.trim() !== 'null') ? fullActivity.account_id.trim() : null;
+            }
             await db.activities.put(fullActivity);
             return [{
                 entityTable: 'CRM_Actividades', entityId: id, changes: fullActivity,

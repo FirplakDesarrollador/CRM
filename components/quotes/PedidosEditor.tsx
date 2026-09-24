@@ -19,6 +19,7 @@ import {
     PedidoWithItems,
 } from "@/lib/pedidoFormalization";
 import { isValidRealNit, isProvisionalNit } from "@/lib/nitUtils";
+import { normalizeDateToInput } from "@/lib/pedidoHelpers";
 
 const PEDIDO_WIZARD_LAST_STEP = 2;
 
@@ -381,8 +382,9 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
     const [canSubmitFinalStep, setCanSubmitFinalStep] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const form = useForm({
+        shouldUnregister: false,
         defaultValues: {
-            fecha_facturacion: ped?.fecha_facturacion || "",
+            fecha_facturacion: normalizeDateToInput(ped?.fecha_facturacion),
             tipo_facturacion: ped?.tipo_facturacion || "",
             tipo_pod: ped?.tipo_pod || "POD Total",
             cierre_facturacion: ped?.cierre_facturacion ?? false,
@@ -403,7 +405,7 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
             tiene_escaleras: ped?.tiene_escaleras ?? false,
             verificacion_previa_firplak: ped?.verificacion_previa_firplak ?? false,
             planos_hidromasaje: ped?.planos_hidromasaje || "",
-            fecha_entrega: ped?.fecha_entrega || "",
+            fecha_entrega: normalizeDateToInput(ped?.fecha_entrega || ped?.fecha_minima_requerida),
             nit_cliente_final: ped?.nit_cliente_final || "",
             entrega_en_obra: ped?.entrega_en_obra || false,
             bodega_externa: ped?.bodega_externa || false,
@@ -433,7 +435,7 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
             }
         }
         const pedData = {
-            fecha_facturacion: data.fecha_facturacion,
+            fecha_facturacion: data.fecha_facturacion || null,
             tipo_facturacion: data.tipo_facturacion,
             tipo_pod: data.tipo_pod || "POD Total",
             pod: data.tipo_pod || "POD Total",
@@ -455,6 +457,7 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
             verificacion_previa_firplak: Boolean(data.verificacion_previa_firplak),
             planos_hidromasaje: data.planos_hidromasaje,
             fecha_entrega: data.fecha_entrega || null,
+            fecha_minima_requerida: data.fecha_entrega || null,
             nit_cliente_final: data.nit_cliente_final,
             entrega_en_obra: data.entrega_en_obra,
             bodega_externa: data.bodega_externa,
@@ -510,7 +513,7 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
     // Populate logistic fields when 'ped' is loaded from local DB
     useEffect(() => {
         if (ped) {
-            setValue('fecha_facturacion', ped.fecha_facturacion || "");
+            setValue('fecha_facturacion', normalizeDateToInput(ped.fecha_facturacion));
             setValue('tipo_facturacion', ped.tipo_facturacion || "");
             setValue('tipo_pod', ped.tipo_pod || "POD Total");
             setValue('cierre_facturacion', ped.cierre_facturacion ?? false);
@@ -531,7 +534,7 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
             setValue('tiene_escaleras', ped.tiene_escaleras ?? false);
             setValue('verificacion_previa_firplak', ped.verificacion_previa_firplak ?? false);
             setValue('planos_hidromasaje', ped.planos_hidromasaje || "");
-            setValue('fecha_entrega', ped.fecha_entrega || "");
+            setValue('fecha_entrega', normalizeDateToInput(ped.fecha_entrega || ped.fecha_minima_requerida));
             setValue('nit_cliente_final', ped.nit_cliente_final || "");
             setValue('entrega_en_obra', ped.entrega_en_obra || false);
             setValue('bodega_externa', ped.bodega_externa || false);
@@ -639,6 +642,7 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
             verificacion_previa_firplak: Boolean(data.verificacion_previa_firplak),
             planos_hidromasaje: data.planos_hidromasaje,
             fecha_entrega: data.fecha_entrega || null,
+            fecha_minima_requerida: data.fecha_entrega || null,
             nit_cliente_final: data.nit_cliente_final,
             entrega_en_obra: data.entrega_en_obra,
             bodega_externa: data.bodega_externa,

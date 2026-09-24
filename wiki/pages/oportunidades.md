@@ -72,9 +72,10 @@ agrupación por fase `20260304`) que agrupan oportunidades por fase. Ver
 
 - `CreateOpportunityWizard` usa `LAST_STEP_INDEX` y una ventana corta de habilitacion para impedir que un doble clic al avanzar cree la oportunidad antes de revisar el ultimo paso de Equipo.
 - **Prevención de Duplicados (Base de datos):** Se implementó un trigger (`trigger_prevent_duplicate_oportunidades`) que lanza una excepción bloqueando la inserción si se detecta otra oportunidad creada hace menos de 10 segundos con el mismo `account_id` y `nombre`. Esto previene la creación de "clones exactos" por errores de red, reintentos de API o clics múltiples.
+- **Sincronización Inmediata de Importe (`lib/opportunityQuoteSync.ts`):** El valor de la oportunidad (`CRM_Oportunidades.amount`) se sincroniza de forma atómica e inmediata cada vez que se crea una cotización, se agregan/editan productos en una cotización (`updateQuoteTotal`), o se alterna entre cotizaciones en la pestaña **Productos** (`resolveActiveQuote`). La cotización `WINNER` tiene precedencia absoluta; si no hay ganadora, la cotización activa define el importe.
 
 ## Fuentes
 
 - `app/oportunidades/` (páginas), `components/oportunidades/`, `components/opportunities/`
-- `lib/hooks/useOpportunities.ts`, `useOpportunitiesServer.ts`, `useSalesFunnel.ts`
+- `lib/hooks/useOpportunities.ts`, `useOpportunitiesServer.ts`, `useSalesFunnel.ts`, `lib/opportunityQuoteSync.ts`
 - Migraciones: fases por canal (`202601xx`), `20260202_add_probability`, `20260205_loss_reasons`, `20260211_add_opportunity_collaborators`

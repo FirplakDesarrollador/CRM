@@ -5,7 +5,7 @@ import {
     OPPORTUNITY_TABLE_COLUMN_KEYS,
     OpportunityInput,
     OpportunityHotRow
-} from '../lib/opportunityTableHelpers';
+} from '@/lib/opportunityTableHelpers';
 
 describe('Filtros internos de tabla de oportunidades', () => {
     it('debe mapear "actividades" a un string legible y no a un objeto [object Object]', () => {

@@ -804,29 +804,63 @@ export class SyncEngine {
         }
 
         if (batches['CRM_Actividades']) {
-            // 3.3c SELF-HEALING: Validate opportunity_id FK for Activities
-            // If the referenced opportunity doesn't exist on the server, set opportunity_id to null
-            // to avoid "violates foreign key constraint fk_crmact_opp" errors.
+            // 3.3c SELF-HEALING: Validate opportunity_id & account_id FK for Activities
+            // If the referenced opportunity or account doesn't exist on the server, set FK to null
+            // to avoid "violates foreign key constraint fk_crmact_opp" errors in both single fields and _complete_snapshot_.
             const actUpdates = batches['CRM_Actividades'];
             const oppIdsFromActivities = new Set<string>();
+            const accountIdsFromActivities = new Set<string>();
+
+            // 1. Sanitize empty strings and gather IDs from both single fields and _complete_snapshot_
             actUpdates.forEach(u => {
-                if (u.field === 'opportunity_id' && u.value && typeof u.value === 'string') {
-                    oppIdsFromActivities.add(u.value);
+                if (u.field === 'opportunity_id') {
+                    if (u.value && typeof u.value === 'string' && u.value.trim() && u.value !== 'null' && u.value !== 'undefined') {
+                        u.value = u.value.trim();
+                        oppIdsFromActivities.add(u.value);
+                    } else {
+                        u.value = null;
+                    }
+                } else if (u.field === 'account_id') {
+                    if (u.value && typeof u.value === 'string' && u.value.trim() && u.value !== 'null' && u.value !== 'undefined') {
+                        u.value = u.value.trim();
+                        accountIdsFromActivities.add(u.value);
+                    } else {
+                        u.value = null;
+                    }
+                } else if (u.field === '_complete_snapshot_' && u.value && typeof u.value === 'object') {
+                    const oppId = u.value.opportunity_id;
+                    if (oppId && typeof oppId === 'string' && oppId.trim() && oppId !== 'null' && oppId !== 'undefined') {
+                        u.value.opportunity_id = oppId.trim();
+                        oppIdsFromActivities.add(u.value.opportunity_id);
+                    } else {
+                        u.value.opportunity_id = null;
+                    }
+
+                    const accId = u.value.account_id;
+                    if (accId && typeof accId === 'string' && accId.trim() && accId !== 'null' && accId !== 'undefined') {
+                        u.value.account_id = accId.trim();
+                        accountIdsFromActivities.add(u.value.account_id);
+                    } else {
+                        u.value.account_id = null;
+                    }
                 }
             });
 
-            // Also check local DB for activities that have opportunity_id but it's not in the batch
+            // Also check local DB for activities that have opportunity_id/account_id
             const actEntityIds = Array.from(new Set(actUpdates.map(u => u.id)));
             for (const actId of actEntityIds) {
-                const hasOppInBatch = actUpdates.some(u => u.id === actId && u.field === 'opportunity_id');
-                if (!hasOppInBatch) {
-                    try {
-                        const localAct = await db.activities.get(actId);
-                        if (localAct?.opportunity_id) oppIdsFromActivities.add(localAct.opportunity_id);
-                    } catch (e) { /* ignore */ }
-                }
+                try {
+                    const localAct = await db.activities.get(actId);
+                    if (localAct?.opportunity_id && typeof localAct.opportunity_id === 'string' && localAct.opportunity_id.trim()) {
+                        oppIdsFromActivities.add(localAct.opportunity_id.trim());
+                    }
+                    if (localAct?.account_id && typeof localAct.account_id === 'string' && localAct.account_id.trim()) {
+                        accountIdsFromActivities.add(localAct.account_id.trim());
+                    }
+                } catch (e) { /* ignore */ }
             }
 
+            // Validate opportunities
             if (oppIdsFromActivities.size > 0) {
                 try {
                     const oppIdsToCheck = Array.from(oppIdsFromActivities);
@@ -858,15 +892,28 @@ export class SyncEngine {
                                         console.log(`[Sync] Nullifying opportunity_id for activity ${update.id} (truly missing opp: ${update.value})`);
                                         update.value = null;
                                     }
+                                    if (update.field === '_complete_snapshot_' && update.value && trulyMissingOppIds.includes(update.value.opportunity_id)) {
+                                        console.log(`[Sync] Nullifying snapshot opportunity_id for activity ${update.id} (truly missing opp: ${update.value.opportunity_id})`);
+                                        update.value.opportunity_id = null;
+                                    }
                                 }
 
-                                // Also update local Dexie to avoid re-queuing with bad FK
+                                // Also update local Dexie and outbox to avoid re-queuing with bad FK
                                 for (const actId of actEntityIds) {
                                     try {
                                         const localAct = await db.activities.get(actId);
                                         if (localAct?.opportunity_id && trulyMissingOppIds.includes(localAct.opportunity_id)) {
                                             await db.activities.update(actId, { opportunity_id: null });
                                             console.log(`[Sync] Updated local activity ${actId}: cleared opportunity_id (replaced with null)`);
+
+                                            const outboxItems = await db.outbox.where('entity_id').equals(actId).and(i => i.entity_type === 'CRM_Actividades').toArray();
+                                            for (const obItem of outboxItems) {
+                                                if (obItem.field_name === '_complete_snapshot_' && obItem.new_value && typeof obItem.new_value === 'object') {
+                                                    await db.outbox.update(obItem.id, {
+                                                        new_value: { ...obItem.new_value, opportunity_id: null }
+                                                    });
+                                                }
+                                            }
                                         }
                                     } catch (e) { 
                                         console.warn(`[Sync] Error updating local activity ${actId} during heal:`, e);
@@ -877,6 +924,67 @@ export class SyncEngine {
                     }
                 } catch (e) {
                     console.warn('[Sync] Failed to validate opportunity FKs for activities:', e);
+                }
+            }
+
+            // Validate accounts
+            if (accountIdsFromActivities.size > 0) {
+                try {
+                    const accIdsToCheck = Array.from(accountIdsFromActivities);
+                    const { data: existingAccs, error: accCheckErr } = await supabase
+                        .from('CRM_Cuentas')
+                        .select('id')
+                        .in('id', accIdsToCheck);
+
+                    if (!accCheckErr && existingAccs) {
+                        const foundAccIds = new Set(existingAccs.map(a => a.id));
+                        const missingAccIds = accIdsToCheck.filter(id => !foundAccIds.has(id));
+
+                        if (missingAccIds.length > 0) {
+                            const pendingAccs = await db.outbox
+                                .where('entity_type').equals('CRM_Cuentas')
+                                .and(i => i.status === 'PENDING' || i.status === 'SYNCING')
+                                .toArray();
+                            const pendingAccIds = new Set(pendingAccs.map(p => p.entity_id));
+
+                            const trulyMissingAccIds = missingAccIds.filter(id => !pendingAccIds.has(id));
+
+                            if (trulyMissingAccIds.length > 0) {
+                                console.warn(`[Sync] Self-healing: Found ${trulyMissingAccIds.length} truly missing accounts referenced by activities:`, trulyMissingAccIds);
+
+                                for (const update of actUpdates) {
+                                    if (update.field === 'account_id' && trulyMissingAccIds.includes(update.value)) {
+                                        update.value = null;
+                                    }
+                                    if (update.field === '_complete_snapshot_' && update.value && trulyMissingAccIds.includes(update.value.account_id)) {
+                                        update.value.account_id = null;
+                                    }
+                                }
+
+                                for (const actId of actEntityIds) {
+                                    try {
+                                        const localAct = await db.activities.get(actId);
+                                        if (localAct?.account_id && trulyMissingAccIds.includes(localAct.account_id)) {
+                                            await db.activities.update(actId, { account_id: null });
+
+                                            const outboxItems = await db.outbox.where('entity_id').equals(actId).and(i => i.entity_type === 'CRM_Actividades').toArray();
+                                            for (const obItem of outboxItems) {
+                                                if (obItem.field_name === '_complete_snapshot_' && obItem.new_value && typeof obItem.new_value === 'object') {
+                                                    await db.outbox.update(obItem.id, {
+                                                        new_value: { ...obItem.new_value, account_id: null }
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    } catch (e) {
+                                        console.warn(`[Sync] Error updating local activity ${actId} account during heal:`, e);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[Sync] Failed to validate account FKs for activities:', e);
                 }
             }
         }
@@ -1022,6 +1130,12 @@ export class SyncEngine {
                                 if (table === 'CRM_Contactos' && result.message.includes('fk_crmcontactos_account')) {
                                     console.warn(`[Sync] Intercepted orphaned contact FK. Triggering repair for contact ID ${result.id}...`);
                                     setTimeout(() => this.healOrphanedContactAccount(result.id), 100);
+                                }
+
+                                // SELF-HEALING: Activity FK Opportunity scenario
+                                if (table === 'CRM_Actividades' && result.message.includes('fk_crmact_opp')) {
+                                    console.warn(`[Sync] Intercepted orphaned activity FK opportunity. Triggering repair for activity ID ${result.id}...`);
+                                    setTimeout(() => this.healOrphanedActivityOpportunity(result.id), 100);
                                 }
 
                                 await db.outbox.update(item.id, buildFailureUpdate(item, result.message));
@@ -1363,6 +1477,47 @@ export class SyncEngine {
             await this.updatePendingCount();
         } catch (e) {
             console.error(`[Sync-Heal] Error healing orphaned contact account:`, e);
+        }
+    }
+
+    /**
+     * SELF-HEALING: Resolves activities whose referenced opportunity violates FK constraint fk_crmact_opp
+     */
+    private async healOrphanedActivityOpportunity(actId: string) {
+        try {
+            console.log(`[Sync-Heal] Resolving orphaned activity opportunity for: ${actId}`);
+            // 1. Clear opportunity_id from local Dexie activity
+            await db.activities.update(actId, { opportunity_id: null });
+
+            // 2. Clear opportunity_id in all outbox items for this activity and reset to PENDING
+            const outboxItems = await db.outbox
+                .where('entity_id').equals(actId)
+                .and(i => i.entity_type === 'CRM_Actividades')
+                .toArray();
+
+            for (const item of outboxItems) {
+                if (item.field_name === '_complete_snapshot_' && typeof item.new_value === 'object' && item.new_value) {
+                    await db.outbox.update(item.id, {
+                        new_value: { ...item.new_value, opportunity_id: null },
+                        status: 'PENDING',
+                        error: undefined,
+                        retry_count: 0
+                    });
+                } else if (item.field_name === 'opportunity_id') {
+                    await db.outbox.update(item.id, {
+                        new_value: null,
+                        status: 'PENDING',
+                        error: undefined,
+                        retry_count: 0
+                    });
+                }
+            }
+
+            console.log(`[Sync-Heal] Repaired activity ${actId}: nullified opportunity_id and queued retry.`);
+            await this.updatePendingCount();
+            void this.triggerPush('self-heal-activity-opportunity');
+        } catch (e) {
+            console.error(`[Sync-Heal] Error healing orphaned activity opportunity:`, e);
         }
     }
 
@@ -2196,24 +2351,25 @@ export class SyncEngine {
                     // Map SAP fields back to local friendly names
                     const mapped = {
                         ...p,
-                        fecha_minima_requerida: p['EXTRA_Fecha mínima requerida por comercial/cliente'],
-                        fecha_facturacion: p['EXTRA_Fecha de facturación'],
-                        tipo_facturacion: p['EXTRA_Tipo de facturación'],
-                        notas_sap: p['EXTRA_Notas'],
+                        fecha_entrega: p['fecha_entrega'] || p['EXTRA_Fecha mínima requerida por comercial/cliente'] || null,
+                        fecha_minima_requerida: p['EXTRA_Fecha mínima requerida por comercial/cliente'] || p['fecha_entrega'] || null,
+                        fecha_facturacion: p['EXTRA_Fecha de facturación'] || p['fecha_facturacion'] || null,
+                        tipo_facturacion: p['EXTRA_Tipo de facturación'] || p['tipo_facturacion'] || null,
+                        notas_sap: p['EXTRA_Notas'] || p['notas_sap'] || null,
                         formas_pago: p['EXTRA_Formas de pago'],
                         facturacion_electronica: p['EXTRA_Facturación Electrónica'] === 'Si' || p['EXTRA_Facturación Electrónica'] === 'true' || p['EXTRA_Facturación Electrónica'] === true,
                         oc_cot: p['EXTRA_OC/COT'],
-                        cierre_facturacion: p['EXTRA_Cierre Facturación'],
-                        es_muestra: p['EXTRA_¿Es una muestra?'] === 'Si' || p['EXTRA_¿Es una muestra?'] === 'true' || p['EXTRA_¿Es una muestra?'] === true,
+                        cierre_facturacion: p['EXTRA_Cierre Facturación'] ?? p['cierre_facturacion'] ?? false,
+                        es_muestra: p['EXTRA_¿Es una muestra?'] === 'Si' || p['EXTRA_¿Es una muestra?'] === 'true' || p['EXTRA_¿Es una muestra?'] === true || p['es_muestra'] === true,
                         aplica_contrato: p['EXTRA_¿Aplica contrato?'] === 'Si' || p['EXTRA_¿Aplica contrato?'] === 'true' || p['EXTRA_¿Aplica contrato?'] === true,
                         multa_incumplimiento: p['EXTRA_¿Multa por incumplimiento?'] === 'Si' || p['EXTRA_¿Multa por incumplimiento?'] === 'true' || p['EXTRA_¿Multa por incumplimiento?'] === true,
-                        orden_compra: p['EXTRA_Orden de compra/Purchase Order'],
+                        orden_compra: p['EXTRA_Orden de compra/Purchase Order'] || p['orden_compra'] || null,
                         puerto_embarque: p['EXTRA_Puerto embarque/Shipment Port'],
                         terminos_pago: p['EXTRA_Terminos de pago/Pay Terms'],
                         puerto_destino: p['EXTRA_Puerto destino/Destination Port'],
                         via_transporte: p['EXTRA_Via/Type of transport'],
                         flete: p['EXTRA_Flete/Freight'],
-                        incoterm: p['EXTRA_Incoterm/Incoterm'],
+                        incoterm: p['EXTRA_Incoterm/Incoterm'] || p['incoterm'] || null,
                         seguro: p['EXTRA_Seguro/Insurance']
                     };
 

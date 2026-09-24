@@ -3,6 +3,112 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-09-22 - Ingest: Servidor MCP Oficial del CRM FIRPLAK (`lib/mcp/`, `bin/`, `app/api/mcp/`)
+
+- **Arquitectura Dual y SDK Oficial:**
+  - Implementación con `@modelcontextprotocol/sdk` soportando transporte Stdio local (`bin/crm-mcp.ts` y wrapper `bin/crm-mcp.mjs`) para Claude Desktop, Antigravity IDE y Cursor, y transporte HTTP/SSE (`app/api/mcp/route.ts`) para ChatGPT Custom Actions con autenticación multiusuario vía JWT Bearer de Supabase.
+- **Seguridad y Control de Roles:**
+  - Política categórica de **Cero Borrado (No-Delete)**: exclusión de herramientas destructivas e interceptor de seguridad.
+  - Filtrado dinámico de herramientas en `tools/list` según rol (`VENDEDOR`, `COORDINADOR`, `ADMIN`) para mitigar tool bloat y alucinaciones.
+  - Aislamiento estricto de cartera para vendedores y permisos de reasignación y supervisión para coordinadores.
+  - Paginación obligatoria (máx 30) y prevención de duplicados vía `idempotency_key`.
+- **Recursos Nativos (`crm://`):**
+  - Publicación de canales, fases, clasificaciones, motivos de pérdida, orígenes y métricas de pipeline.
+- **Aseguramiento de Calidad (QA):**
+  - Suite de pruebas completa en `tests/crm-mcp.test.ts` (19/19 casos VERIFIED) validando roles, no-delete, idempotencia, auto-corrección de errores, recursos y resolución forzada de URL pública de producción Vercel (`https://crm-64yu.vercel.app/api/mcp`) incluso en entornos localhost.
+- **Páginas creadas/actualizadas:** `wiki/pages/servidor-mcp.md`, `wiki/INDEX.md`.
+
+## 2026-09-22 - Ingest: Buscador Interactivo en Desplegable Reasignar Actividad (`CreateActivityModal.tsx`)
+
+- **Modal de Creación y Edición de Actividades (`components/activities/CreateActivityModal.tsx`):**
+  - Sustitución del `<select>` HTML nativo de **Reasignar Actividad** (visible para administradores y coordinadores) por el componente `<SearchableSelect>`.
+  - Soporte de filtrado rápido en memoria por nombre completo y correo electrónico (`searchValue`), normalizado sin distinción de mayúsculas ni acentos.
+  - Conservación de la persistencia inmediata mediante `updateActivity(initialData.id, { user_id: newUserId })`.
+- **Componente Reutilizable (`components/ui/SearchableSelect.tsx`):**
+  - Extensión de la interfaz `SearchableSelectOption` con propiedad opcional `searchValue` para búsquedas multi-campo.
+- **Páginas actualizadas:** `wiki/pages/actividades.md`.
+
+## 2026-09-22 - Ingest: Saneamiento Integral del Módulo de Actividades, Persistencia Autosave, Dexie v15 y Prioridad
+
+- **Saneamiento y Vistas de Actividades (`app/actividades/page.tsx`):**
+  - Corrección de click bubbling en la vista de Mes: inserción de `e.stopPropagation()` en los enlaces y tarjetas de actividad para evitar que la celda del día conmute inesperadamente a la vista 'agenda' al abrir el modal.
+  - Asignación de `group/day` en el contenedor de día mensual para habilitar la visibilidad de los tooltips de actividades en hover.
+  - Eliminación de texto de depuración temporal `"Error L: {act.clasificacion_id}"` en la vista Todo.
+  - Filtrado estricto `!act.is_deleted` en el listado global de actividades.
+- **Modal de Creación y Edición (`components/activities/CreateActivityModal.tsx`):**
+  - Corrección de sobreescritura destructiva de `fecha_fin`: el efecto que calcula `fecha_inicio + 1 hora` ahora ignora el montaje inicial en modo edición y solo actúa si el usuario modifica activamente `fecha_inicio` o `tipo_actividad`.
+  - Habilitación de edición de actividades vencidas e históricas: eliminación de la restricción `minDate={new Date()}` en modo edición en todos los selectores `DateTimePicker`.
+  - Persistencia reactiva de reasignación de usuario (`reassignUserId`) y colaboradores/invitados (`attendees` y `_sync_metadata`) al mutar en modo edición.
+  - Asignación de `{ shouldDirty: true, shouldValidate: true }` en los botones de prioridad.
+  - Incorporación del interruptor de reuniones de Microsoft Teams para eventos con cuenta conectada.
+  - Limpieza de `console.log` de depuración en renders y `useMemo`.
+  - Eliminación de archivo muerto duplicado `components/activities/CreateActivityModal-isazaale.tsx`.
+- **Base de Datos y Hook (`lib/db.ts`, `lib/hooks/useActivities.ts` y Supabase):**
+  - Migración `20260922000000_add_prioridad_to_activities.sql`: adición de columna `prioridad TEXT DEFAULT 'Media'` en `CRM_Actividades`.
+  - Actualización de Dexie a versión 15 indexando `account_id` en la tabla `activities` (`'id, opportunity_id, account_id, user_id, fecha_inicio, tipo_actividad'`), resolviendo el `SchemaError` en `lib/sync.ts`.
+  - Adición de `prioridad` a `DB_COLUMNS` y `createActivity` en `useActivities.ts`, junto con filtro `!a.is_deleted`.
+  - Eliminación de archivo muerto duplicado `lib/hooks/useActivitiesServer-isazaale.ts`.
+- **Pruebas y Verificación:** `pruebas unitarias/actividades.test.ts` (8/8 GREEN), `lib/local-database.test.ts` (2/2 GREEN), `pruebas unitarias/opportunityActivities.test.ts` (8/8 GREEN), `npx tsc --noEmit` (0 errores).
+- **Páginas actualizadas:** `wiki/pages/actividades.md`.
+
+
+## 2026-09-15 - Ingest: Corrección y Persistencia de Formularios de Pedidos y Normalización de Fechas
+
+- **Persistencia y Sincronización de Pedidos (`lib/pedidoHelpers.ts` y `lib/hooks/usePedidos.ts`):**
+  - Mapeo bidireccional de `fecha_entrega` y `fecha_minima_requerida` hacia `EXTRA_Fecha mínima requerida por comercial/cliente` y columna nativa `fecha_entrega`.
+  - Preservación de columnas nativas booleanas `cierre_facturacion` y `es_muestra` en el payload de sincronización de PostgreSQL en lugar de eliminarlas al mapear a columnas `EXTRA_` de SAP.
+- **Normalización de Fechas HTML5 (`lib/pedidoHelpers.ts`):**
+  - Implementación de `normalizeDateToInput` para adaptar fechas de SAP en formato `DD/MM/YYYY` o ISO con timestamps a cadenas `YYYY-MM-DD` requeridas por `<input type="date">`.
+- **Formularios de Pedidos (`components/quotes/PedidosEditor.tsx`):**
+  - Configuración de `useForm` con `shouldUnregister: false`.
+  - Normalización de fechas en `defaultValues` y `useEffect` de carga del pedido.
+  - Sincronización de `fecha_minima_requerida` y `fecha_entrega` en `pedData` tanto en autoguardado (`onAutoSave`) como en confirmación (`onSubmit`).
+- **Base de Datos (Supabase):**
+  - Aplicación de migración idempotente `20260904193842_persist_crm_editable_fields.sql`, creando las columnas faltantes en `CRM_Pedidos` (`fecha_entrega`, `email_contacto`, `tiene_escaleras`, `planos_hidromasaje`) y 16 columnas en `CRM_Cotizaciones`.
+- **Pruebas:** Suite permanente creada en `tests/pedidoPersistence.test.ts` (9/9 VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/cotizaciones-y-pedidos.md`.
+
+## 2026-09-15 - Ingest: Protección y Bloqueo de Alteración Manual de Precios en Ítems de Catálogo
+
+- **Seguridad y Control de Precios (`lib/quotePricing.ts`):**
+  - Creación de funciones puras `isManualQuoteItem`, `isQuoteItemPriceEditable` y `sanitizeQuoteItemUpdates`.
+  - Regla: los productos del catálogo (`producto_id !== null`) tienen precio unitario protegido; no se permite su alteración manual ni en UI ni a través de mutaciones del hook.
+  - Los **Ítems Manuales** (`producto_id === null`) mantienen edición libre de descripción y precio unitario.
+- **Hook de Ítems de Cotización (`lib/hooks/useOpportunities.ts` y `-isazaale.ts`):**
+  - Invocación de `sanitizeQuoteItemUpdates` en `updateItem` para descartar cualquier modificación arbitraria de `precio_unitario` en ítems de catálogo, preservando el cálculo de escalas de volumen en cambios de cantidad.
+- **Interfaz del Editor de Cotización (`app/oportunidades/[id]/cotizaciones/[quoteId]/page.tsx` y `-isazaale.tsx`):**
+  - Renderizado condicional: texto de solo lectura formateado para productos del catálogo vs. input numérico editable para ítems manuales.
+- **Pruebas:** Suite permanente creada en `tests/quotePricingSecurity.test.ts` (4/4 VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/cotizaciones-y-pedidos.md`.
+
+## 2026-09-15 - Ingest: Corrección de Precios sin IVA y Adición de IVA al Final en Exportación a PDF (F-V-29)
+
+- **Generador de PDF (`lib/pdfGenerator.ts`):**
+  - Eliminación de la deducción indebida `/ 1.19` en precios unitarios y subtotales de líneas de cotización/pedido.
+  - Creación y exportación de funciones puras `calculatePdfItemRow` y `calculatePdfTotals`.
+  - Regla: todos los precios de lista son base neta sin IVA (`VALOR UNITARIO` = precio exacto de lista). El subtotal de línea es el valor neto con descuento. El `SUBTOTAL` del documento es la suma de subtotales de línea. El `IVA 19%` se adiciona al final tras el descuento (`subtotal * 0.19` para COP; 0 para exportación USD). El `GRAN TOTAL` equivale a `SUBTOTAL + IVA`.
+- **Pruebas:** Suite permanente creada en `tests/pdfGeneratorTotals.test.ts` (3/3 VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/cotizaciones-y-pedidos.md`.
+
+## 2026-09-15 - Ingest: Sincronización Inmediata de Importe de Oportunidad con Cotizaciones y Reconciliación Global
+
+
+- **Módulo de Sincronización (`lib/opportunityQuoteSync.ts`):**
+  - Implementación de `resolveActiveQuote`: resolución jerárquica de cotización activa (selección manual de usuario -> `WINNER` -> coincidencia de importe -> cotización más reciente).
+  - Implementación de `shouldUpdateOpportunityAmount`: garantiza que si una cotización es `WINNER`, esta mande sobre la oportunidad; y si todas están en borrador, la cotización en edición o seleccionada actualice de inmediato el importe padre.
+  - Implementación de `getOpportunityAmountFromQuote`: extracción determinista de montos.
+- **Hooks de Oportunidades (`lib/hooks/useOpportunities.ts`):**
+  - `createQuote`: actualiza atómicamente la oportunidad padre con el importe de la cotización creada dentro del mismo `commitLocalChanges`.
+  - `updateQuote`: propaga inmediatamente el `total_amount` al `amount` de la oportunidad padre en la misma transacción Dexie + Outbox.
+  - `deleteQuote`: reasigna el importe de la oportunidad a la siguiente cotización activa restante (o 0 si no quedan).
+- **Interfaz de Detalle de Oportunidad (`app/oportunidades/[id]/page.tsx`):**
+  - `ProductsTab`: el selector desplegable de cotizaciones actualiza inmediatamente el importe de la oportunidad y el timestamp de la cotización seleccionada, resolviendo la cotización activa sin saltos visuales ni bucles.
+  - `SummaryTab`: sincronización reactiva de `localAmount` con `opportunity?.amount` vía `useEffect`.
+- **Reconciliación Global de Datos:**
+  - Ejecución de actualización en base de datos (`CRM_Oportunidades`) para alinear 185 oportunidades históricas con su cotización activa. Verificación final: 0 oportunidades desalineadas.
+- **Pruebas:** Suite permanente creada en `tests/opportunityQuoteAmountSync.test.ts` (9/9 VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/pages/cotizaciones-y-pedidos.md`.
+
 ## 2026-09-14 - Ingest: Campo desplegable Tipo POD en el Wizard de Pedido Parcial y Mapeo en Supabase
 
 - **Interfaz de Usuario (`components/quotes/PedidosEditor.tsx`):**
