@@ -3,6 +3,13 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-09-29 - Ingest: Actualización de Contraseñas por Administradores
+
+- **Seguridad y Usuarios (`components/usuarios/UserForm.tsx` y `lib/hooks/useUsers.ts`):**
+  - Implementación de la funcionalidad para que los Administradores puedan actualizar contraseñas de otros usuarios directamente desde el modal de edición.
+  - Se utiliza un RPC de PostgreSQL (`admin_change_password`) con `SECURITY DEFINER` para actualizar la contraseña en `auth.users`, lo que evade la restricción de seguridad del cliente y elimina la dependencia absoluta de la llave maestra (Service Role Key) en el frontend.
+- **Incremento de versión a `1.1.4.8`.**
+
 <<<<<<< Updated upstream
 ## 2026-09-22 - Ingest: Servidor MCP Oficial del CRM FIRPLAK (`lib/mcp/`, `bin/`, `app/api/mcp/`)
 
