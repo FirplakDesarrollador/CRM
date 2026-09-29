@@ -171,10 +171,18 @@ export default function LoginPage() {
                 throw new Error("El email contiene caracteres no permitidos");
             }
 
-            const result = await recoverPasswordAction(cleanEmail, window.location.origin);
+            const cleanOrigin = (window.location.origin || "https://crm-64yu.vercel.app").replace(/\/+$/, "");
+            const redirectUrl = `${cleanOrigin}/auth/callback?next=/update-password`;
 
-            if (!result.success) {
-                throw new Error(result.error);
+            const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+                redirectTo: redirectUrl,
+            });
+
+            if (error) {
+                if (error.status === 504 || error.message?.includes("504") || error.name === "AuthRetryableFetchError") {
+                    throw new Error("El servidor de correo de Supabase no respondió a tiempo (Error 504 / SMTP Timeout). Por favor verifica la configuración SMTP.");
+                }
+                throw error;
             }
 
             setRecoverySent(true);

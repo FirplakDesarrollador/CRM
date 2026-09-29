@@ -3,6 +3,7 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+<<<<<<< Updated upstream
 ## 2026-09-22 - Ingest: Servidor MCP Oficial del CRM FIRPLAK (`lib/mcp/`, `bin/`, `app/api/mcp/`)
 
 - **Arquitectura Dual y SDK Oficial:**
@@ -164,6 +165,11 @@
   - Se configuró una capa interna de etiquetas en `SalesFunnelTile.tsx` (`position: 'inside'`) para desplegar visiblemente dentro de cada sección trapezoidal del embudo la cantidad exacta de oportunidades que contiene cada fase (e.g. `24 oportunidades`).
 - **Pruebas:** Suite de prueba unitaria en `pruebas unitarias/dashboardFilters.test.ts` (**VERIFIED / GREEN**).
 - **Páginas actualizadas:** `wiki/pages/dashboard-e-indicadores.md`.
+=======
+## 2026-09-11 - INGEST - Filtro de Origen y Tasa de Churn en Embudo
+
+- Se actualizó `dashboard-e-indicadores.md` para reflejar la inclusión del filtro por `origen_oportunidad` en el DashboardGrid y el cálculo de la Tasa de Churn (pérdidas) en el `SalesFunnelTile` extrayendo las oportunidades con `estado_id = 3` desde el RPC `get_sales_funnel_data`.
+>>>>>>> Stashed changes
 
 ## 2026-09-08 - Formato Estándar de Moneda con Separadores es-CO en Oportunidades (`formatNumberCO` / `formatOpportunityAmount`)
 

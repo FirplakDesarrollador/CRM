@@ -6,9 +6,16 @@ informes exportables (`/informes`, solo ADMIN) y metas (`/configuracion/metas`).
 ## Dashboard de inicio (`/`)
 
 Grilla de tiles (`DashboardGrid`) con filtros globales (`DashboardFilters`,
+<<<<<<< Updated upstream
 `useDashboardFilters`): canal, asesor, subclasificación, nivel premium, origen de oportunidad (`origen_oportunidad` vía `CRM_OrigenesOportunidad`), búsqueda y rango de fechas:
 
 - **Embudo de ventas** (`SalesFunnelTile`): RPC `get_sales_funnel_data` (con soporte para filtros de canal, asesor, tipo cliente, nivel premium, búsqueda, fechas y origen de oportunidad `20260911`) sobre [[oportunidades]], con visualización del conteo de oportunidades al interior de cada sección del embudo.
+=======
+`useDashboardFilters`): Incluye filtro por `origen_oportunidad`.
+
+- **Embudo de ventas** (`SalesFunnelTile`): RPC `get_sales_funnel_data` (con variante
+  filtrada, fix de agrupacin por fase `20260304` y cǭlculo de Tasa de Churn/PǸrdidas). Se visualizan tanto oportunidades abiertas como perdidas.
+>>>>>>> Stashed changes
 - **Resumen de oportunidades** (`OpportunitySummaryCard`).
 - **Objetivos** (`ObjectivesCard`): avance frente a metas.
 - **Distribución de clientes** (`ClientDistributionTile`) y **cuentas recientes**

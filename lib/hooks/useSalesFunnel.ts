@@ -9,6 +9,8 @@ export interface FunnelStage {
     total_amount: number;
     count: number;
     color: string;
+    lost_amount: number;
+    lost_count: number;
 }
 
 export interface SalesFunnelFilters {

@@ -86,6 +86,10 @@ export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
 
     const totalPipeline = data.reduce((acc, curr) => acc + Number(curr.total_amount), 0);
     const totalCount = data.reduce((acc, curr) => acc + Number(curr.count), 0);
+    const totalLostCount = data.reduce((acc, curr) => acc + Number(curr.lost_count || 0), 0);
+    const overallChurnRate = (totalCount + totalLostCount) > 0 
+        ? ((totalLostCount / (totalCount + totalLostCount)) * 100).toFixed(1) 
+        : "0.0";
 
     // Grouping by normalized phase name (case-insensitive) to merge equivalent stages
     // across channels. This avoids mixing non-equivalent phases that shared the same 'orden'.
@@ -95,9 +99,17 @@ export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
         if (existing) {
             existing.total_amount = Number(existing.total_amount) + Number(curr.total_amount);
             existing.count = Number(existing.count) + Number(curr.count);
+            existing.lost_amount = Number(existing.lost_amount || 0) + Number(curr.lost_amount || 0);
+            existing.lost_count = Number(existing.lost_count || 0) + Number(curr.lost_count || 0);
             return acc;
         }
-        return [...acc, { ...curr, total_amount: Number(curr.total_amount), count: Number(curr.count) }];
+        return [...acc, { 
+            ...curr, 
+            total_amount: Number(curr.total_amount), 
+            count: Number(curr.count),
+            lost_amount: Number(curr.lost_amount || 0),
+            lost_count: Number(curr.lost_count || 0)
+        }];
     }, [] as typeof data).sort((a, b) => a.orden - b.orden);
 
     const maxAmount = Math.max(...groupedData.map(d => d.total_amount));
@@ -133,7 +145,12 @@ interface FunnelCallbackParams {
                     <div style="font-family: var(--font-geist-sans), sans-serif;">
                         <div style="text-transform: uppercase; font-size: 10px; letter-spacing: 0.1em; opacity: 0.7; margin-bottom: 4px;">${name}</div>
                         <div style="font-size: 14px;">${formatCurrency(actualValue)}</div>
+<<<<<<< Updated upstream
                         <div style="font-size: 10px; margin-top: 4px; opacity: 0.8;">${data.count || 0} ${data.count === 1 ? 'oportunidad' : 'oportunidades'} • ${pct}% del total</div>
+=======
+                        <div style="font-size: 10px; margin-top: 4px; opacity: 0.8;">${data.count || 0} Abiertas • ${pct}% Share</div>
+                        ${data.lost_count > 0 ? `<div style="font-size: 10px; margin-top: 2px; color: #f87171;">${data.lost_count} Perdidas</div>` : ''}
+>>>>>>> Stashed changes
                     </div>
                 `;
             }
@@ -151,20 +168,28 @@ interface FunnelCallbackParams {
                 minSize: '2%', // Significant reduction to allow visibility of smaller stages without clamping
                 maxSize: '100%',
                 sort: 'none', // Preservation of stage order
-                gap: 4,
+                gap: 2,
+                labelLayout: {
+                    hideOverlap: true
+                },
                 label: {
                     show: true,
                     position: 'right',
                     formatter: (params: FunnelCallbackParams) => {
                         if (!params.data) return params.name;
-                        return `{name|${params.name}}\n{val|${formatCurrency(params.data.actualValue || 0)}}\n{qty|${params.data.count || 0} oportunidades}`;
+                        const lostCount = params.data.lost_count || 0;
+                        const openCount = params.data.count || 0;
+                        const totalStage = openCount + lostCount;
+                        const stageChurn = totalStage > 0 ? ((lostCount / totalStage) * 100).toFixed(1) : "0.0";
+                        const lostText = lostCount >= 0 ? `\n{lost|${lostCount} perdidas (${stageChurn}% churn)}` : '';
+                        return `{name|${params.name}}\n{val|${formatCurrency(params.data.actualValue || 0)}}\n{qty|${openCount} abiertas}${lostText}`;
                     },
                     rich: {
                         name: {
                             fontSize: 10,
                             fontWeight: 900,
                             color: '#94a3b8',
-                            padding: [0, 0, 4, 0],
+                            padding: [0, 0, 2, 0],
                             textTransform: 'uppercase',
                             fontFamily: 'var(--font-geist-sans), sans-serif'
                         },
@@ -173,18 +198,25 @@ interface FunnelCallbackParams {
                             fontWeight: 'bold',
                             color: '#1e293b',
                             fontFamily: 'var(--font-geist-sans), sans-serif',
-                            padding: [0, 0, 4, 0]
+                            padding: [0, 0, 2, 0]
                         },
                         qty: {
                             fontSize: 10,
                             fontWeight: 'bold',
                             color: '#64748b',
                             fontFamily: 'var(--font-geist-sans), sans-serif'
+                        },
+                        lost: {
+                            fontSize: 10,
+                            fontWeight: 'bold',
+                            color: '#ef4444',
+                            fontFamily: 'var(--font-geist-sans), sans-serif',
+                            padding: [2, 0, 0, 0]
                         }
                     }
                 },
                 labelLine: {
-                    length: 20,
+                    length: 30,
                     lineStyle: {
                         width: 1,
                         type: 'solid'
@@ -215,7 +247,8 @@ interface FunnelCallbackParams {
                         color: item.total_amount === 0 ? '#e2e8f0' : item.color,
                         opacity: item.total_amount === 0 ? 0.4 : 0.9
                     },
-                    count: item.count
+                    count: item.count,
+                    lost_count: item.lost_count
                 }))
             },
             {
@@ -305,19 +338,25 @@ interface FunnelCallbackParams {
                         </div>
                     </div>
                 </div>
-                <div className="flex flex-col items-end mr-8"> {/* mr-8 to avoid overlapping with sync button */}
+                <div className="flex flex-col items-end mr-8">
                     <p className="text-3xl font-black text-[#254153] tracking-tighter tabular-nums">
                         {formatCurrency(totalPipeline)}
                     </p>
-                    <div className="px-3 py-1 bg-slate-50 rounded-full border border-slate-100 flex items-center gap-1.5 mt-2">
-                        <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Total Oportunidades:</span>
-                        <span className="text-[11px] font-bold text-slate-600">{totalCount}</span>
+                    <div className="flex items-center gap-2 mt-2">
+                        <div className="px-3 py-1 bg-slate-50 rounded-full border border-slate-100 flex items-center gap-1.5">
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Activas:</span>
+                            <span className="text-[11px] font-bold text-slate-600">{totalCount}</span>
+                        </div>
+                        <div className="px-3 py-1 bg-red-50 rounded-full border border-red-100 flex items-center gap-1.5" title={`${totalLostCount} oportunidades perdidas de ${totalCount + totalLostCount} totales`}>
+                            <span className="text-[10px] font-black text-red-400 uppercase tracking-widest">Churn Gral:</span>
+                            <span className="text-[11px] font-bold text-red-600">{overallChurnRate}%</span>
+                        </div>
                     </div>
                 </div>
             </div>
 
             {/* Funnel Display with Apache ECharts */}
-            <div className="flex-1 min-h-[400px]">
+            <div className="flex-1 min-h-[500px]">
                 <ReactECharts
                     option={option}
                     style={{ height: '100%', width: '100%' }}
