@@ -32,6 +32,8 @@ export async function GET(request: NextRequest) {
             return response
         }
         console.error('Exchange code error in auth callback:', error)
+        const errorMsg = encodeURIComponent(error?.message || 'Unknown error');
+        return NextResponse.redirect(new URL(`/login?error=auth-code-error&details=${errorMsg}`, origin))
     }
 
     // Return the user to an error page with instructions
