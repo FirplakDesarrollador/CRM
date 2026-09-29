@@ -219,17 +219,16 @@ export function useUsers() {
         return updateUser(userId, { role: newRole });
     };
 
-    // Update user password via API (requires Admin)
+    // Update user password via RPC (requires Admin)
     const updateUserPassword = async (userId: string, newPassword: string): Promise<{ success: boolean; error?: string }> => {
         try {
-            const res = await fetch('/api/users/update-password', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ userId, newPassword })
+            const { error } = await supabase.rpc('admin_change_password', {
+                target_user_id: userId,
+                new_password: newPassword
             });
-            const data = await res.json();
-            if (!res.ok) {
-                throw new Error(data.error || 'Error al cambiar contraseña');
+
+            if (error) {
+                throw new Error(error.message || 'Error al cambiar contraseña');
             }
             return { success: true };
         } catch (err: any) {
