@@ -290,23 +290,36 @@ export default function OpportunityDetailPage() {
 const LOSS_REASONS = [
     "N - No responde 1mer contacto",
     "N- Sin información de contacto",
+    "N- Sin informacion de contacto",
     "N- Inadecuada Segmentación",
+    "N- Inadecuada segmentacion",
+    "N- No va comprar",
     "N- No va a comprar",
+    "RED - Mac",
+    "RED- MAC",
     "RED- Firplak Home",
+    "Red - Ser. Tecnico",
     "RED- Ser. Tecnico",
     "RED- Distribución",
     "RED- Obras",
-    "RED- MAC",
+    "INT- Abandona conversacion",
     "INT - Abandona Conversación",
+    "INT- Precio elevado",
     "INT - Precio Elevado",
+    "INT- Sin cobertura",
     "INT - Sin cobertura",
+    "INT- Tiempos de entrega",
     "INT - Tiempos de entrega",
+    "INT- No se fabrica",
     "INT - No se fabrica",
     "INT- No se tiene medida / Color",
     "INT- Competencia diferente a precio",
+    "INT- Compro Firplak",
     "INT- Compro FIRPLAK",
     "INT- Pago contraentrega",
+    "INT- Lo pospone",
     "INT - Lo pospone",
+    "Compra - HC",
     "INT - Compra en Homcenter"
 ];
 
@@ -1102,6 +1115,9 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                         )}
                                     >
                                         <option value="">Seleccione una razón...</option>
+                                        {localRazonPerdida && !LOSS_REASONS.includes(localRazonPerdida) && (
+                                            <option value={localRazonPerdida}>{localRazonPerdida}</option>
+                                        )}
                                         {LOSS_REASONS.map(r => (
                                             <option key={r} value={r}>{r}</option>
                                         ))}

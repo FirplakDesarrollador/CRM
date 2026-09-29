@@ -180,7 +180,12 @@ export default function LoginPage() {
             setRecoverySent(true);
         } catch (err: any) {
             console.error("Recovery error:", err);
-            setError(err.message || "Error al enviar correo de recuperación");
+            const msg = typeof err === "string" ? err : err?.message;
+            if (!msg || msg === "{}" || msg === "[object Object]") {
+                setError("El servidor de correo no respondió a tiempo (Timeout 504). Por favor verifica la configuración SMTP en Supabase.");
+            } else {
+                setError(msg);
+            }
         } finally {
             setIsLoading(false);
         }
