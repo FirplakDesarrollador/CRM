@@ -692,7 +692,8 @@ export default function InformesPage() {
                     *,
                     cuenta:CRM_Cuentas(nombre, canal_id, pais_id),
                     fase:CRM_FasesOportunidad(nombre, canal_id),
-                    estado_info:CRM_EstadosOportunidad(nombre)
+                    estado_info:CRM_EstadosOportunidad(nombre),
+                    segmento:CRM_Segmentos(nombre)
                 `;
                 columns = [
                     { header: 'ID', key: 'id' },
@@ -702,6 +703,7 @@ export default function InformesPage() {
                     { header: 'CATEGORÍAS DE INTERÉS', key: 'categorias_interes', width: 30 },
                     { header: 'PAÍS', key: 'pais_nombre', width: 20 },
                     { header: 'CANAL', key: 'canal_nombre' },
+                    { header: 'SEGMENTO', key: 'segmento_nombre', width: 25 },
                     { header: 'VENDEDOR', key: 'vendedor_nombre', width: 25 },
                     { header: 'ESTADO', key: 'estado_nombre', width: 15 },
                     { header: 'FASE ACTUAL', key: 'fase_nombre', width: 20 },
@@ -709,7 +711,6 @@ export default function InformesPage() {
                     { header: 'MONEDA', key: 'currency_id', width: 10 },
                     { header: 'PROBABILIDAD (%)', key: 'probabilidad', width: 15 },
                     { header: 'FECHA CIERRE EST.', key: 'fecha_cierre_estimada', width: 18 },
-                    { header: 'SEGMENTO', key: 'segmento_nombre', width: 25 },
                     { header: 'ORIGEN', key: 'origen_oportunidad', width: 20 },
                     { header: 'DEPARTAMENTO', key: 'departamento_nombre', width: 20 },
                     { header: 'CIUDAD', key: 'ciudad_nombre', width: 20 },
@@ -805,8 +806,8 @@ export default function InformesPage() {
             } else if (selectedEntidad === 'actividades') {
                 selectStr = `
                     *,
-                    cuenta:CRM_Cuentas(nombre),
-                    oportunidad:CRM_Oportunidades(nombre, amount, cuenta:CRM_Cuentas(nombre)),
+                    cuenta:CRM_Cuentas(nombre, canal_id),
+                    oportunidad:CRM_Oportunidades(nombre, amount, cuenta:CRM_Cuentas(nombre, canal_id), fase:CRM_FasesOportunidad(canal_id)),
                     usuario:CRM_Usuarios(full_name),
                     clasificacion:CRM_Activity_Clasificacion(nombre),
                     subclasificacion:CRM_Activity_Subclasificacion(nombre),
@@ -814,6 +815,7 @@ export default function InformesPage() {
                 `;
                 columns = [
                     { header: 'ASUNTO', key: 'asunto', width: 35 },
+                    { header: 'CANAL DE VENTA', key: 'canal_nombre', width: 25 },
                     { header: 'CLASIFICACIÓN', key: 'clasificacion_nombre', width: 25 },
                     { header: 'SUBCLASIFICACIÓN', key: 'subclasificacion_nombre', width: 25 },
                     { header: 'CUENTA', key: 'cuenta_nombre', width: 35 },
@@ -830,7 +832,8 @@ export default function InformesPage() {
                     userMap,
                     clasificacionMap,
                     subclasificacionMap,
-                    tipoActividadMap
+                    tipoActividadMap,
+                    canalMap
                 });
             }
 
