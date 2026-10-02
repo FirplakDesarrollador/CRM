@@ -2,14 +2,14 @@
 
 import React, { useCallback, useMemo, useState } from "react";
 import ReactECharts from "echarts-for-react";
-import { CalendarCheck2, CheckCircle2, BarChart3, CalendarClock, AlertTriangle } from "lucide-react";
+import { CalendarCheck2, CheckCircle2, BarChart3, CalendarClock, AlertTriangle, FileWarning } from "lucide-react";
 import { useIndicadoresLookups } from "@/lib/hooks/useIndicadoresLookups";
 import { useCanalPropioVendedores, TipoCanalVendedor } from "@/lib/hooks/useCanalPropioVendedores";
 import { useLiveActivities } from "@/lib/hooks/useLiveActivities";
 import { useLiveOpportunities } from "@/lib/hooks/useLiveOpportunities";
 import { SearchableSelect, SearchableSelectOption } from "@/components/ui/SearchableSelect";
 import { MultiSelect, Option } from "@/components/ui/MultiSelect";
-import { getWeekKey } from "./weekUtils";
+import { currentWeekMarkLine, getISOWeek, getWeekKey, withCurrentWeekMarker } from "./weekUtils";
 import { EChartsCallbackParams } from "./echartsTypes";
 import { isPlausibleYear } from "./dateUtils";
 
@@ -29,6 +29,7 @@ interface Filters {
     year: string;
     month: string;
     day: string;
+    week: string;
     asesorIds: string[]; // also set via chart/table click cross-filter
     clasificacionIds: string[];
     subclasificacionId: string;
@@ -40,11 +41,13 @@ const EMPTY_FILTERS: Filters = {
     year: "",
     month: "",
     day: "",
+    week: "",
     asesorIds: [],
     clasificacionIds: [],
     subclasificacionId: "",
 };
 const CANAL_PROPIO_ID = "PROPIO";
+const WEEK_OPTIONS = Array.from({ length: 53 }, (_, i) => ({ value: String(i + 1), label: String(i + 1) }));
 
 export function Page4Eventos() {
     const { users, channels, accountsMap, subclasificaciones, activityClassifications } = useIndicadoresLookups();
@@ -54,6 +57,7 @@ export function Page4Eventos() {
     const { activities } = useLiveActivities();
     const { opportunities } = useLiveOpportunities();
     const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+    const [overdueDetailAsesorId, setOverdueDetailAsesorId] = useState<string | null>(null);
 
     const setFilter = <K extends keyof Filters>(key: K, value: Filters[K]) => {
         setFilters(prev => ({ ...prev, [key]: value }));
@@ -88,11 +92,17 @@ export function Page4Eventos() {
     const clasificacionOptions: Option[] = useMemo(
         () =>
             activityClassifications
-                .filter(c => !c.is_deleted && c.tipo_actividad === "EVENTO")
+                .filter(c => !c.is_deleted)
                 .sort((a, b) => a.nombre.localeCompare(b.nombre))
                 .map(c => ({ value: String(c.id), label: c.nombre })),
         [activityClassifications]
     );
+
+    const clasificacionMap = useMemo(() => {
+        const map = new Map<number, string>();
+        activityClassifications.forEach(c => map.set(c.id, c.nombre));
+        return map;
+    }, [activityClassifications]);
 
     const subclasOptions: SearchableSelectOption[] = useMemo(
         () =>
@@ -140,20 +150,20 @@ export function Page4Eventos() {
         label: String(i + 1),
     }));
 
-    // Eventos (tipo_actividad = 'EVENTO') matching Canal, Tipo Canal (Canal
-    // Propio only), SubClasificación, Clasificación, Año/Mes/Día and the
-    // Asesor filter/cross-filter.
+    // Actividades (Eventos + Tareas) matching Canal, Tipo Canal (Canal Propio
+    // only), SubClasificación, Clasificación, Año/Mes/Día and the Asesor
+    // filter/cross-filter.
     const eventos = useMemo(() => {
         const yearNum = filters.year ? Number(filters.year) : null;
         const monthNum = filters.month !== "" ? Number(filters.month) : null;
         const dayNum = filters.day ? Number(filters.day) : null;
+        const weekNum = filters.week ? Number(filters.week) : null;
         const tipoSet = isCanalPropio && filters.tiposCanal.length > 0 ? new Set(filters.tiposCanal) : null;
         const asesorSet = filters.asesorIds.length > 0 ? new Set(filters.asesorIds) : null;
         const clasifSet = filters.clasificacionIds.length > 0 ? new Set(filters.clasificacionIds.map(Number)) : null;
         const subclasId = filters.subclasificacionId ? Number(filters.subclasificacionId) : null;
         return (activities || []).filter(a => {
             if (a.is_deleted) return false;
-            if (a.tipo_actividad !== "EVENTO") return false;
             if (asesorSet && (!a.user_id || !asesorSet.has(a.user_id))) return false;
             if (clasifSet && (a.clasificacion_id == null || !clasifSet.has(a.clasificacion_id))) return false;
             const acc = filters.canalId || subclasId ? resolveAccount(a) : undefined;
@@ -163,12 +173,13 @@ export function Page4Eventos() {
                 const tipo = a.user_id ? tipoByVendedor.get(a.user_id) : undefined;
                 if (!tipo || !tipoSet.has(tipo)) return false;
             }
-            if (yearNum != null || monthNum != null || dayNum != null) {
+            if (yearNum != null || monthNum != null || dayNum != null || weekNum != null) {
                 if (!a.fecha_inicio) return false;
                 const d = new Date(a.fecha_inicio);
                 if (yearNum != null && d.getFullYear() !== yearNum) return false;
                 if (monthNum != null && d.getMonth() !== monthNum) return false;
                 if (dayNum != null && d.getDate() !== dayNum) return false;
+                if (weekNum != null && getISOWeek(d) !== weekNum) return false;
             }
             return true;
         });
@@ -184,6 +195,73 @@ export function Page4Eventos() {
     };
     const atrasados = useMemo(() => eventos.filter(isOverdueEvent), [eventos]);
 
+    const overdueDetailRows = useMemo(() => {
+        if (!overdueDetailAsesorId) return [];
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        return atrasados
+            .filter(a => a.user_id === overdueDetailAsesorId)
+            .map(a => {
+                const fecha = a.fecha_inicio ? new Date(a.fecha_inicio) : null;
+                const diasAtraso = fecha ? Math.round((today.getTime() - new Date(fecha).setHours(0, 0, 0, 0)) / 86400000) : null;
+                return {
+                    id: a.id,
+                    asunto: a.asunto?.trim() || "Sin asunto",
+                    tipo: a.tipo_actividad === "EVENTO" ? "Evento" : "Tarea",
+                    clasificacion: a.clasificacion_id != null ? clasificacionMap.get(a.clasificacion_id) || "-" : "-",
+                    cuenta: resolveAccount(a)?.nombre || "Sin cuenta",
+                    fechaLabel: fecha ? fecha.toLocaleDateString("es-CO", { day: "2-digit", month: "short", year: "numeric" }) : "-",
+                    diasAtraso,
+                };
+            })
+            .sort((a, b) => (b.diasAtraso ?? 0) - (a.diasAtraso ?? 0));
+    }, [atrasados, overdueDetailAsesorId, clasificacionMap, resolveAccount]);
+
+    const overdueDetailAsesorName = overdueDetailAsesorId ? userNameMap.get(overdueDetailAsesorId) || "Sin asesor" : null;
+
+    // "Programados" = pendientes por hacer (atrasadas + futuras), no el total
+    // historico de todo lo que se ha programado alguna vez. Mismo criterio
+    // que pendingTotal en lib/opportunityActivities.ts.
+    const pendientes = useMemo(() => eventos.filter(a => !a.is_completed), [eventos]);
+
+    // Oportunidades en el mismo alcance de Canal/Tipo Canal/SubClasificación/
+    // Asesor, pero sin el filtro de fecha de las actividades — "sin actividad"
+    // es un hecho de la oportunidad, no algo acotado a un rango de tiempo.
+    const scopedOpportunitiesForActivity = useMemo(() => {
+        const tipoSet = isCanalPropio && filters.tiposCanal.length > 0 ? new Set(filters.tiposCanal) : null;
+        const asesorSet = filters.asesorIds.length > 0 ? new Set(filters.asesorIds) : null;
+        const subclasId = filters.subclasificacionId ? Number(filters.subclasificacionId) : null;
+        return (opportunities || []).filter(o => {
+            if (o.is_deleted) return false;
+            if (asesorSet && (!o.owner_user_id || !asesorSet.has(o.owner_user_id))) return false;
+            const acc = o.account_id ? accountsMap.get(o.account_id) : undefined;
+            if (filters.canalId && acc?.canal_id !== filters.canalId) return false;
+            if (subclasId && acc?.subclasificacion_id !== subclasId) return false;
+            if (tipoSet) {
+                const tipo = o.owner_user_id ? tipoByVendedor.get(o.owner_user_id) : undefined;
+                if (!tipo || !tipoSet.has(tipo)) return false;
+            }
+            return true;
+        });
+    }, [opportunities, filters.canalId, filters.subclasificacionId, filters.asesorIds, filters.tiposCanal, isCanalPropio, accountsMap, tipoByVendedor]);
+
+    // Mismo criterio que computeOpportunityActivitySummary (lib/opportunityActivities.ts):
+    // una oportunidad "tiene actividad" si existe al menos una actividad no
+    // eliminada ligada a ella, sin importar su tipo o fecha.
+    const activityCountByOpportunity = useMemo(() => {
+        const map = new Map<string, number>();
+        (activities || []).forEach(a => {
+            if (a.is_deleted || !a.opportunity_id) return;
+            map.set(a.opportunity_id, (map.get(a.opportunity_id) || 0) + 1);
+        });
+        return map;
+    }, [activities]);
+
+    const oportunidadesSinActividad = useMemo(
+        () => scopedOpportunitiesForActivity.filter(o => !activityCountByOpportunity.has(o.id)),
+        [scopedOpportunitiesForActivity, activityCountByOpportunity]
+    );
+
     const toggleAsesorFilter = (asesorId: string) => {
         setFilters(prev => {
             const isOnlySelected = prev.asesorIds.length === 1 && prev.asesorIds[0] === asesorId;
@@ -191,20 +269,34 @@ export function Page4Eventos() {
         });
     };
 
-    // --- Table: Asesor | Eventos Completados | Eventos Programados | Atrasados
+    // --- Table: Asesor | Completadas | Pendientes | Atrasadas ----------------
     const advisorRows = useMemo(() => {
-        const map = new Map<string, { asesor: string; programados: number; completados: number; atrasados: number }>();
+        const map = new Map<string, { asesor: string; programados: number; completados: number; atrasados: number; sinActividad: number }>();
+        const getOrCreate = (id: string) => {
+            let entry = map.get(id);
+            if (!entry) {
+                entry = { asesor: userNameMap.get(id) || "Sin asesor", programados: 0, completados: 0, atrasados: 0, sinActividad: 0 };
+                map.set(id, entry);
+            }
+            return entry;
+        };
         eventos.forEach(a => {
-            const id = a.user_id!;
-            const name = userNameMap.get(id) || "Sin asesor";
-            const existing = map.get(id) || { asesor: name, programados: 0, completados: 0, atrasados: 0 };
-            existing.programados += 1;
-            if (a.is_completed) existing.completados += 1;
-            if (isOverdueEvent(a)) existing.atrasados += 1;
-            map.set(id, existing);
+            const entry = getOrCreate(a.user_id!);
+            if (a.is_completed) {
+                entry.completados += 1;
+            } else {
+                entry.programados += 1;
+                if (isOverdueEvent(a)) entry.atrasados += 1;
+            }
+        });
+        // Oportunidades sin actividad, agrupadas por el asesor dueño de la
+        // oportunidad (no necesariamente el mismo que registra la actividad).
+        scopedOpportunitiesForActivity.forEach(o => {
+            if (!o.owner_user_id || activityCountByOpportunity.has(o.id)) return;
+            getOrCreate(o.owner_user_id).sinActividad += 1;
         });
         return Array.from(map.entries()).map(([id, v]) => ({ id, ...v }));
-    }, [eventos, userNameMap]);
+    }, [eventos, userNameMap, scopedOpportunitiesForActivity, activityCountByOpportunity]);
 
     const advisorRowsAlpha = useMemo(
         () => [...advisorRows].sort((a, b) => a.asesor.localeCompare(b.asesor)),
@@ -260,12 +352,16 @@ export function Page4Eventos() {
             if (!a.fecha_inicio) return;
             const { key, week } = getWeekKey(new Date(a.fecha_inicio));
             weekLabel.set(key, week);
-            programadosByWeek.set(key, (programadosByWeek.get(key) || 0) + 1);
-            if (a.is_completed) completadosByWeek.set(key, (completadosByWeek.get(key) || 0) + 1);
-            if (isOverdueEvent(a)) atrasadosByWeek.set(key, (atrasadosByWeek.get(key) || 0) + 1);
+            if (a.is_completed) {
+                completadosByWeek.set(key, (completadosByWeek.get(key) || 0) + 1);
+            } else {
+                // "Programadas" = pendientes por hacer (atrasadas + futuras).
+                programadosByWeek.set(key, (programadosByWeek.get(key) || 0) + 1);
+                if (isOverdueEvent(a)) atrasadosByWeek.set(key, (atrasadosByWeek.get(key) || 0) + 1);
+            }
         });
 
-        const weekKeys = Array.from(weekLabel.keys()).sort();
+        const { weekKeys, currentIndex } = withCurrentWeekMarker(weekLabel);
         return {
             textStyle: { fontFamily: "var(--font-geist-sans), sans-serif" },
             tooltip: { trigger: "axis", axisPointer: { type: "shadow" }, backgroundColor: "#254153", borderWidth: 0, textStyle: { color: "#fff", fontSize: 12 } },
@@ -307,13 +403,14 @@ export function Page4Eventos() {
                     barMaxWidth: 14,
                     itemStyle: { color: "#ef4444", borderRadius: [2, 2, 0, 0] },
                     data: weekKeys.map(k => atrasadosByWeek.get(k) || 0),
+                    markLine: currentWeekMarkLine(currentIndex),
                 },
             ],
         };
     }, [eventos]);
 
     const hasActiveFilters =
-        filters.canalId || filters.tiposCanal.length > 0 || filters.year || filters.month || filters.day ||
+        filters.canalId || filters.tiposCanal.length > 0 || filters.year || filters.month || filters.day || filters.week ||
         filters.asesorIds.length > 0 || filters.clasificacionIds.length > 0 || filters.subclasificacionId;
 
     return (
@@ -374,6 +471,10 @@ export function Page4Eventos() {
                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Día</label>
                         <SearchableSelect options={dayOptions} value={filters.day} onChange={v => setFilter("day", v)} placeholder="Todas" />
                     </div>
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Semana</label>
+                        <SearchableSelect options={WEEK_OPTIONS} value={filters.week} onChange={v => setFilter("week", v)} placeholder="Todas" />
+                    </div>
                 </div>
                 {hasActiveFilters && (
                     <button onClick={() => setFilters(EMPTY_FILTERS)} className="mt-3 text-xs font-bold text-slate-400 hover:text-[#254153] transition-colors underline">
@@ -383,13 +484,13 @@ export function Page4Eventos() {
             </div>
 
             {/* KPI cards */}
-            <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-5 flex items-center gap-4">
                     <div className="w-11 h-11 rounded-xl bg-[#254153] flex items-center justify-center text-white shrink-0">
                         <CalendarClock className="w-5 h-5" />
                     </div>
                     <div>
-                        <p className="text-2xl font-black text-slate-900 tracking-tight tabular-nums">{eventos.length}</p>
+                        <p className="text-2xl font-black text-slate-900 tracking-tight tabular-nums">{pendientes.length}</p>
                         <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Eventos Programados</p>
                     </div>
                 </div>
@@ -411,6 +512,15 @@ export function Page4Eventos() {
                         <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Eventos Atrasados</p>
                     </div>
                 </div>
+                <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-5 flex items-center gap-4">
+                    <div className="w-11 h-11 rounded-xl bg-amber-500 flex items-center justify-center text-white shrink-0">
+                        <FileWarning className="w-5 h-5" />
+                    </div>
+                    <div>
+                        <p className="text-2xl font-black text-slate-900 tracking-tight tabular-nums">{oportunidadesSinActividad.length}</p>
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Oportunidades sin actividad</p>
+                    </div>
+                </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -425,6 +535,7 @@ export function Page4Eventos() {
                                     <th className="px-3 py-2 text-right">Completados</th>
                                     <th className="px-3 py-2 text-right">Programados</th>
                                     <th className="px-3 py-2 text-right">Atrasados</th>
+                                    <th className="px-3 py-2 text-right">Sin actividad</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-50">
@@ -437,12 +548,23 @@ export function Page4Eventos() {
                                         <td className="px-3 py-2 text-blue-700 font-medium">{row.asesor}</td>
                                         <td className="px-3 py-2 text-right text-slate-700 tabular-nums">{row.completados}</td>
                                         <td className="px-3 py-2 text-right text-slate-800 font-semibold tabular-nums">{row.programados}</td>
-                                        <td className={`px-3 py-2 text-right tabular-nums ${row.atrasados > 0 ? "text-red-600 font-semibold" : "text-slate-400"}`}>{row.atrasados}</td>
+                                        <td
+                                            className={`px-3 py-2 text-right tabular-nums ${row.atrasados > 0 ? "text-red-600 font-semibold underline decoration-dotted cursor-pointer hover:text-red-800" : "text-slate-400"}`}
+                                            onClick={e => {
+                                                if (row.atrasados === 0) return;
+                                                e.stopPropagation();
+                                                setOverdueDetailAsesorId(row.id);
+                                            }}
+                                            title={row.atrasados > 0 ? "Ver actividades atrasadas" : undefined}
+                                        >
+                                            {row.atrasados}
+                                        </td>
+                                        <td className={`px-3 py-2 text-right tabular-nums ${row.sinActividad > 0 ? "text-amber-600 font-semibold" : "text-slate-400"}`}>{row.sinActividad}</td>
                                     </tr>
                                 ))}
                                 {advisorRowsAlpha.length === 0 && (
                                     <tr>
-                                        <td colSpan={4} className="px-3 py-8 text-center text-slate-400">Sin datos para estos filtros.</td>
+                                        <td colSpan={5} className="px-3 py-8 text-center text-slate-400">Sin datos para estos filtros.</td>
                                     </tr>
                                 )}
                             </tbody>
@@ -451,8 +573,9 @@ export function Page4Eventos() {
                                     <tr className="font-black text-slate-900">
                                         <td className="px-3 py-2">Total</td>
                                         <td className="px-3 py-2 text-right tabular-nums">{completados.length}</td>
-                                        <td className="px-3 py-2 text-right tabular-nums">{eventos.length}</td>
+                                        <td className="px-3 py-2 text-right tabular-nums">{pendientes.length}</td>
                                         <td className="px-3 py-2 text-right tabular-nums text-red-600">{atrasados.length}</td>
+                                        <td className="px-3 py-2 text-right tabular-nums text-amber-600">{oportunidadesSinActividad.length}</td>
                                     </tr>
                                 </tfoot>
                             )}
@@ -497,6 +620,62 @@ export function Page4Eventos() {
                     )}
                 </div>
             </div>
+
+            {/* Overdue detail modal */}
+            {overdueDetailAsesorId && (
+                <div
+                    className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
+                    onClick={() => setOverdueDetailAsesorId(null)}
+                >
+                    <div
+                        className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[80vh] flex flex-col overflow-hidden"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+                            <div>
+                                <h3 className="font-bold text-slate-900">Atrasadas de {overdueDetailAsesorName}</h3>
+                                <p className="text-xs text-slate-400">{overdueDetailRows.length} actividad{overdueDetailRows.length === 1 ? "" : "es"} atrasada{overdueDetailRows.length === 1 ? "" : "s"}</p>
+                            </div>
+                            <button
+                                onClick={() => setOverdueDetailAsesorId(null)}
+                                className="text-slate-400 hover:text-slate-700 text-xl leading-none px-2"
+                                aria-label="Cerrar"
+                            >
+                                ×
+                            </button>
+                        </div>
+                        <div className="overflow-y-auto">
+                            <table className="w-full text-sm">
+                                <thead className="sticky top-0 bg-slate-50 z-10">
+                                    <tr className="text-left text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                                        <th className="px-4 py-2">Asunto</th>
+                                        <th className="px-4 py-2">Cuenta</th>
+                                        <th className="px-4 py-2">Clasificación</th>
+                                        <th className="px-4 py-2">Fecha</th>
+                                        <th className="px-4 py-2 text-right">Días atraso</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-50">
+                                    {overdueDetailRows.map(row => (
+                                        <tr key={row.id} className="hover:bg-slate-50/60">
+                                            <td className="px-4 py-2 text-slate-800 font-medium">{row.asunto}</td>
+                                            <td className="px-4 py-2 text-slate-600">{row.cuenta}</td>
+                                            <td className="px-4 py-2 text-slate-600">{row.clasificacion}</td>
+                                            <td className="px-4 py-2 text-slate-600">{row.fechaLabel}</td>
+                                            <td className="px-4 py-2 text-right text-red-600 font-semibold tabular-nums">{row.diasAtraso ?? "-"}</td>
+                                        </tr>
+                                    ))}
+                                    {overdueDetailRows.length === 0 && (
+                                        <tr>
+                                            <td colSpan={5} className="px-4 py-8 text-center text-slate-400">Sin actividades atrasadas.</td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

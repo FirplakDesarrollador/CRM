@@ -23,3 +23,37 @@ export function getWeekKey(date: Date): { key: string; week: number } {
     const year = getISOWeekYear(date);
     return { key: `${year}-W${String(week).padStart(2, "0")}`, week };
 }
+
+/**
+ * Ensures the current ISO week is present in a weekly chart's category axis
+ * (even if it has no data yet) and returns its index, so the chart can mark
+ * "we are here" instead of only showing weeks that already have data.
+ * Mutates `weekLabel` in place (adding the current week if missing) and
+ * returns the final sorted key list — use it in place of the usual
+ * `Array.from(weekLabel.keys()).sort()` line.
+ */
+export function withCurrentWeekMarker(weekLabel: Map<string, number>): { weekKeys: string[]; currentIndex: number } {
+    const current = getWeekKey(new Date());
+    if (!weekLabel.has(current.key)) {
+        weekLabel.set(current.key, current.week);
+    }
+    const weekKeys = Array.from(weekLabel.keys()).sort();
+    return { weekKeys, currentIndex: weekKeys.indexOf(current.key) };
+}
+
+/** ECharts markLine config that draws a vertical "Semana actual" marker at a category index. */
+export function currentWeekMarkLine(currentIndex: number) {
+    return {
+        symbol: "none" as const,
+        silent: true,
+        lineStyle: { color: "#f97316", width: 2, type: "dashed" as const },
+        label: {
+            formatter: "Semana actual",
+            position: "insideEndTop" as const,
+            color: "#f97316",
+            fontWeight: 700 as const,
+            fontSize: 10,
+        },
+        data: [{ xAxis: currentIndex }],
+    };
+}
