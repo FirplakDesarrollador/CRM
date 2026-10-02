@@ -6,7 +6,7 @@ import { useActivities, LocalActivity } from '@/lib/hooks/useActivities';
 import { useInfiniteScroll } from '@/lib/hooks/useInfiniteScroll';
 import { useDebounce } from '@/lib/hooks/useDebounce';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '@/lib/db';
+import { db, getActiveLocalUserId } from '@/lib/db';
 import { syncEngine } from '@/lib/sync';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { hasPermission } from '@/lib/permissions';
@@ -49,10 +49,13 @@ function ActivitiesContent() {
     const { user, role } = useCurrentUser();
     const canViewAll = hasPermission(role, 'view_all_activities');
 
+    // Keep active user id across quick session/token revalidations to prevent calendar flickers
+    const activeUserId = user?.id || getActiveLocalUserId();
+
     // Load collaborators to know which opportunities the user collaborates in
     const userCollaborations = useLiveQuery(
-        () => user ? db.opportunityCollaborators.where('usuario_id').equals(user.id).toArray() : [],
-        [user]
+        () => activeUserId ? db.opportunityCollaborators.where('usuario_id').equals(activeUserId).toArray() : [],
+        [activeUserId]
     ) || [];
 
     const collaborativeOppIds = useMemo(() => {
@@ -65,13 +68,7 @@ function ActivitiesContent() {
     const classifications = useLiveQuery(() => db.activityClassifications.toArray().then(arr => arr.filter(c => !c.is_deleted)), []) || [];
     const subclassifications = useLiveQuery(() => db.activitySubclassifications.toArray().then(arr => arr.filter(s => !s.is_deleted)), []) || [];
 
-    // PROACTIVE SYNC: If catalogs are empty, trigger a pull
-    useEffect(() => {
-        if (classifications.length === 0 && navigator.onLine) {
-            console.log("[ActivitiesPage] Catalogs empty, triggering sync...");
-            syncEngine.triggerSync();
-        }
-    }, [classifications.length]);
+// Catalogs are managed by global sync
 
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [view, setView] = useState<ActivityView>(() => {
@@ -405,23 +402,28 @@ function ActivitiesContent() {
         return subclassifications.filter(s => s.clasificacion_id === Number(filterClassification));
     }, [subclassifications, filterClassification]);
 
+    const prevActivitiesRef = useRef<LocalActivity[]>([]);
+
     // PERF FIX: Apply global filters once, then derive views from the result
     const globallyFilteredActivities = useMemo(() => {
-        if (!activities) return [];
+        const sourceActivities = activities || prevActivitiesRef.current;
+        if (!sourceActivities || sourceActivities.length === 0) return [];
         const lowerQuery = debouncedSearchQuery.toLowerCase();
 
         // Optimize lookup for search matches (O(1) instead of O(N))
         const oppMap = new Map(opportunities.map(o => [o.id, o]));
         const accMap = new Map(accounts.map(a => [a.id, a]));
 
-        return activities.filter(act => {
+        const effectiveUserId = user?.id || activeUserId;
+
+        const filtered = sourceActivities.filter(act => {
             if (act.is_deleted) return false;
 
             // Apply role-based filtering: VENDEDOR and similar roles only see their own activities or those of opportunities they collaborate on
             if (!canViewAll) {
-                if (!user) return false; // Prevent leak while loading
+                if (!effectiveUserId) return false; // Prevent leak if identity is genuinely unknown
                 
-                const isOwner = act.user_id === user.id;
+                const isOwner = act.user_id === effectiveUserId;
                 const isCollaborator = act.opportunity_id ? collaborativeOppIds.has(act.opportunity_id) : false;
                 if (!isOwner && !isCollaborator) {
                     return false;
@@ -481,16 +483,23 @@ function ActivitiesContent() {
 
             return true;
         });
-    }, [activities, filterType, filterClassification, filterSubclassification, debouncedSearchQuery, canViewAll, user, collaborativeOppIds, filterUser, filterStatus, filterChannel, filterDateFrom, filterDateTo, opportunities, accounts]);
+
+        if (sourceActivities.length > 0) {
+            prevActivitiesRef.current = sourceActivities;
+        }
+        return filtered;
+    }, [activities, filterType, filterClassification, filterSubclassification, debouncedSearchQuery, canViewAll, user, activeUserId, collaborativeOppIds, filterUser, filterStatus, filterChannel, filterDateFrom, filterDateTo, opportunities, accounts]);
 
     // Count overdue activities for badge (computed from role-filtered but ignoring current status filter)
     const overdueCount = useMemo(() => {
-        if (!activities) return 0;
+        const sourceActivities = activities || prevActivitiesRef.current;
+        if (!sourceActivities) return 0;
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        return activities.filter(act => {
-            if (!canViewAll && user) {
-                const isOwner = act.user_id === user.id;
+        const effectiveUserId = user?.id || activeUserId;
+        return sourceActivities.filter(act => {
+            if (!canViewAll && effectiveUserId) {
+                const isOwner = act.user_id === effectiveUserId;
                 const isCollaborator = act.opportunity_id ? collaborativeOppIds.has(act.opportunity_id) : false;
                 if (!isOwner && !isCollaborator) return false;
             }
@@ -500,7 +509,7 @@ function ActivitiesContent() {
             actDate.setHours(0, 0, 0, 0);
             return actDate < today;
         }).length;
-    }, [activities, canViewAll, user, collaborativeOppIds]);
+    }, [activities, canViewAll, user, activeUserId, collaborativeOppIds]);
 
     // For agenda/all views: filter by selected date + sort
     const filteredActivities = useMemo(() => {

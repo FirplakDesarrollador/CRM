@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, getActiveLocalUserId, LocalActivity } from '../db';
 import { syncEngine } from '../sync';
@@ -44,7 +45,7 @@ interface RecentActivityCreation {
 let lastCreatedActivity: RecentActivityCreation | null = null;
 
 export function useActivities(filters?: { opportunity_id?: string, account_id?: string, advisor_id?: string | null }) {
-    const activities = useLiveQuery(
+    const rawActivities = useLiveQuery(
         () => {
             if (filters?.opportunity_id) {
                 return db.activities.where('opportunity_id').equals(filters.opportunity_id).filter(a => !a.is_deleted).toArray();
@@ -59,6 +60,13 @@ export function useActivities(filters?: { opportunity_id?: string, account_id?: 
         },
         [filters?.opportunity_id, filters?.account_id, filters?.advisor_id]
     );
+
+    // Retain previous activities in cache so live query recalculations or sync bulk-puts do not flicker empty
+    const cachedActivitiesRef = useRef<LocalActivity[] | undefined>(undefined);
+    if (rawActivities !== undefined) {
+        cachedActivitiesRef.current = rawActivities;
+    }
+    const activities = rawActivities !== undefined ? rawActivities : cachedActivitiesRef.current;
 
     // Allowlist of columns that actually exist in CRM_Actividades on Supabase.
     // See migration: 20260218_add_activities_ms_columns.sql for the full schema.

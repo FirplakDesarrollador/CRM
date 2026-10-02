@@ -113,10 +113,15 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             }
         }, 5 * 60 * 1000);
 
-        // 3. Sync when user returns to tab
+        // 3. Sync when user returns to tab (throttled to at most once every 2 minutes to prevent thrashing)
+        let lastVisibilitySync = Date.now();
         const handleVisibilityChange = () => {
             if (document.visibilityState === 'visible' && navigator.onLine) {
-                syncEngine.triggerSync('visibility');
+                const now = Date.now();
+                if (now - lastVisibilitySync > 2 * 60 * 1000) {
+                    lastVisibilitySync = now;
+                    syncEngine.triggerSync('visibility');
+                }
             }
         };
         document.addEventListener('visibilitychange', handleVisibilityChange);
