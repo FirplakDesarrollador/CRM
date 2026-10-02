@@ -9,7 +9,7 @@ import { useLiveOpportunities } from "@/lib/hooks/useLiveOpportunities";
 import { formatCurrency } from "@/lib/utils";
 import { SearchableSelect, SearchableSelectOption } from "@/components/ui/SearchableSelect";
 import { MultiSelect, Option } from "@/components/ui/MultiSelect";
-import { getWeekKey } from "./weekUtils";
+import { currentWeekMarkLine, getISOWeek, getWeekKey, withCurrentWeekMarker } from "./weekUtils";
 import { getEstadoBucket } from "./estadoUtils";
 import { EChartsCallbackParams } from "./echartsTypes";
 import { isPlausibleYear } from "./dateUtils";
@@ -31,6 +31,7 @@ interface Filters {
     tiposCanal: TipoCanalVendedor[];
     year: string;
     month: string;
+    week: string;
     asesorIds: string[]; // also set via chart/table click cross-filter
     subclasificacionId: string;
     segmentoId: string;
@@ -41,11 +42,13 @@ const EMPTY_FILTERS: Filters = {
     tiposCanal: [],
     year: "",
     month: "",
+    week: "",
     asesorIds: [],
     subclasificacionId: "",
     segmentoId: "",
 };
 const CANAL_PROPIO_ID = "PROPIO";
+const WEEK_OPTIONS = Array.from({ length: 53 }, (_, i) => ({ value: String(i + 1), label: String(i + 1) }));
 
 export function Page3MontoAsesor() {
     const { users, channels, accountsMap, subclasificaciones, segments } = useIndicadoresLookups();
@@ -123,6 +126,7 @@ export function Page3MontoAsesor() {
     const scopedOpportunities = useMemo(() => {
         const yearNum = filters.year ? Number(filters.year) : null;
         const monthNum = filters.month !== "" ? Number(filters.month) : null;
+        const weekNum = filters.week ? Number(filters.week) : null;
         const tipoSet = isCanalPropio && filters.tiposCanal.length > 0 ? new Set(filters.tiposCanal) : null;
         const asesorSet = filters.asesorIds.length > 0 ? new Set(filters.asesorIds) : null;
         const subclasId = filters.subclasificacionId ? Number(filters.subclasificacionId) : null;
@@ -138,11 +142,12 @@ export function Page3MontoAsesor() {
                 const tipo = o.owner_user_id ? tipoByVendedor.get(o.owner_user_id) : undefined;
                 if (!tipo || !tipoSet.has(tipo)) return false;
             }
-            if (yearNum != null || monthNum != null) {
+            if (yearNum != null || monthNum != null || weekNum != null) {
                 if (!o.fecha_cierre_estimada) return false;
                 const d = new Date(o.fecha_cierre_estimada);
                 if (yearNum != null && d.getFullYear() !== yearNum) return false;
                 if (monthNum != null && d.getMonth() !== monthNum) return false;
+                if (weekNum != null && getISOWeek(d) !== weekNum) return false;
             }
             return true;
         });
@@ -210,10 +215,10 @@ export function Page3MontoAsesor() {
             advisorMap.set(key, (advisorMap.get(key) || 0) + Number(o.amount ?? 0));
         });
 
-        const weekKeys = Array.from(weekLabel.keys()).sort();
+        const { weekKeys, currentIndex } = withCurrentWeekMarker(weekLabel);
         const categories = weekKeys.map(k => String(weekLabel.get(k)));
 
-        const series = advisorRows.map(row => ({
+        const series = advisorRows.map((row, idx) => ({
             name: row.asesor,
             type: "line",
             smooth: true,
@@ -222,6 +227,7 @@ export function Page3MontoAsesor() {
             lineStyle: { width: 2, color: advisorColorMap.get(row.id) },
             itemStyle: { color: advisorColorMap.get(row.id) },
             data: weekKeys.map(k => byAdvisorWeek.get(row.id)?.get(k) || 0),
+            ...(idx === 0 ? { markLine: currentWeekMarkLine(currentIndex) } : {}),
         }));
 
         return {
@@ -269,7 +275,7 @@ export function Page3MontoAsesor() {
             weekLabel.set(key, week);
             byWeek.set(key, (byWeek.get(key) || 0) + 1);
         });
-        const weekKeys = Array.from(byWeek.keys()).sort();
+        const { weekKeys, currentIndex } = withCurrentWeekMarker(weekLabel);
         return {
             textStyle: { fontFamily: "var(--font-geist-sans), sans-serif" },
             tooltip: { trigger: "axis", axisPointer: { type: "shadow" }, backgroundColor: "#254153", borderWidth: 0, textStyle: { color: "#fff", fontSize: 12 } },
@@ -298,13 +304,14 @@ export function Page3MontoAsesor() {
                     barMaxWidth: 24,
                     itemStyle: { color: "#3b82f6", borderRadius: [3, 3, 0, 0] },
                     data: weekKeys.map(k => byWeek.get(k) || 0),
+                    markLine: currentWeekMarkLine(currentIndex),
                 },
             ],
         };
     }, [closedOpportunities]);
 
     const hasActiveFilters =
-        filters.canalId || filters.tiposCanal.length > 0 || filters.year || filters.month ||
+        filters.canalId || filters.tiposCanal.length > 0 || filters.year || filters.month || filters.week ||
         filters.asesorIds.length > 0 || filters.subclasificacionId || filters.segmentoId;
 
     return (
@@ -360,6 +367,10 @@ export function Page3MontoAsesor() {
                     <div>
                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Mes</label>
                         <SearchableSelect options={monthOptions} value={filters.month} onChange={v => setFilter("month", v)} placeholder="Todas" />
+                    </div>
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Semana</label>
+                        <SearchableSelect options={WEEK_OPTIONS} value={filters.week} onChange={v => setFilter("week", v)} placeholder="Todas" />
                     </div>
                 </div>
                 {hasActiveFilters && (

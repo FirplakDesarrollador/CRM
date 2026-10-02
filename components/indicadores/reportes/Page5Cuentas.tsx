@@ -9,7 +9,7 @@ import { useLiveAccounts } from "@/lib/hooks/useLiveAccounts";
 import { useLiveOpportunities } from "@/lib/hooks/useLiveOpportunities";
 import { SearchableSelect, SearchableSelectOption } from "@/components/ui/SearchableSelect";
 import { MultiSelect, Option } from "@/components/ui/MultiSelect";
-import { getWeekKey } from "./weekUtils";
+import { currentWeekMarkLine, getWeekKey, withCurrentWeekMarker } from "./weekUtils";
 import { EstadoBucket, getEstadoBucket } from "./estadoUtils";
 import { EChartsCallbackParams } from "./echartsTypes";
 import { isPlausibleYear } from "./dateUtils";
@@ -195,7 +195,7 @@ export function Page5Cuentas() {
             weekLabel.set(key, week);
             byWeek.set(key, (byWeek.get(key) || 0) + 1);
         });
-        const weekKeys = Array.from(byWeek.keys()).sort();
+        const { weekKeys, currentIndex } = withCurrentWeekMarker(weekLabel);
         return {
             textStyle: { fontFamily: "var(--font-geist-sans), sans-serif" },
             tooltip: { trigger: "axis", backgroundColor: "#254153", borderWidth: 0, textStyle: { color: "#fff", fontSize: 12 } },
@@ -227,6 +227,7 @@ export function Page5Cuentas() {
                     lineStyle: { width: 2, color: "#3b82f6" },
                     itemStyle: { color: "#3b82f6" },
                     data: weekKeys.map(k => byWeek.get(k) || 0),
+                    markLine: currentWeekMarkLine(currentIndex),
                 },
             ],
         };

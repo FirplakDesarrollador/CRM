@@ -20,11 +20,15 @@ async function fetchAllAccounts(): Promise<LiveAccount[]> {
     const rows: LiveAccount[] = [];
     let from = 0;
     // Supabase caps a single response at PAGE_SIZE rows; page through until a
-    // short page tells us we've reached the end.
+    // short page tells us we've reached the end. Postgres doesn't guarantee a
+    // stable row order across requests without an explicit ORDER BY, so an
+    // unordered .range() pagination can silently skip or duplicate rows
+    // between pages — order by the primary key to keep pages consistent.
     while (true) {
         const { data, error } = await supabase
             .from("CRM_Cuentas")
             .select(SELECT_COLUMNS)
+            .order("id", { ascending: true })
             .range(from, from + PAGE_SIZE - 1);
         if (error) throw error;
         const page = (data as LiveAccount[]) || [];

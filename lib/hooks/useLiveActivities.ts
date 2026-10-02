@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase";
 
 export interface LiveActivity {
     id: string;
+    asunto: string | null;
     user_id: string | null;
     account_id: string | null;
     opportunity_id: string | null;
@@ -15,18 +16,22 @@ export interface LiveActivity {
     is_deleted: boolean | null;
 }
 
-const SELECT_COLUMNS = "id, user_id, account_id, opportunity_id, tipo_actividad, clasificacion_id, is_completed, fecha_inicio, is_deleted";
+const SELECT_COLUMNS = "id, asunto, user_id, account_id, opportunity_id, tipo_actividad, clasificacion_id, is_completed, fecha_inicio, is_deleted";
 const PAGE_SIZE = 1000;
 
 async function fetchAllActivities(): Promise<LiveActivity[]> {
     const rows: LiveActivity[] = [];
     let from = 0;
     // Supabase caps a single response at PAGE_SIZE rows; page through until a
-    // short page tells us we've reached the end.
+    // short page tells us we've reached the end. Postgres doesn't guarantee a
+    // stable row order across requests without an explicit ORDER BY, so an
+    // unordered .range() pagination can silently skip or duplicate rows
+    // between pages — order by the primary key to keep pages consistent.
     while (true) {
         const { data, error } = await supabase
             .from("CRM_Actividades")
             .select(SELECT_COLUMNS)
+            .order("id", { ascending: true })
             .range(from, from + PAGE_SIZE - 1);
         if (error) throw error;
         const page = (data as LiveActivity[]) || [];
