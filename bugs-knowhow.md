@@ -1565,8 +1565,38 @@ Prevention Rule:
 4. Toda consulta indexada de Dexie (e.g., `where('col').equals(...)`) debe contar con su índice declarado en el schema de la base de datos local para evitar `SchemaError`.
 5. Todo filtro de auto-sanación de claves foráneas en `lib/sync.ts` DEBE inspeccionar tanto campos individuales como snapshots completos (`u.field === '_complete_snapshot_'`), sanitizando cadenas vacías `""` a `null` para no romper constraints de PostgreSQL.
 
+---
+
+## [Bug ID: 20261002-01]
+
+Context:
+Módulo de Actividades en vista "Mes" (`app/actividades/page.tsx`, `lib/hooks/useActivities.ts`, `lib/db.ts`, `components/layout/AppLayout.tsx`).
+
+What I Did:
+Diagnóstico y corrección de la pérdida de visualización de actividades en la vista Mes tras recargar la página (F5) en producción.
+
+Problem:
+Al refrescar la página en `/actividades?view=month`, la grilla de días 1 a 31 aparecía completamente en blanco. En la barra superior figuraba "Guardado" y abajo "Sincronizado", pero el calendario no mostraba ninguna actividad. En la navegación interna entre rutas el problema no se reproducía; solo ocurría en recargas en frío (*cold reload*).
+
+Root Cause:
+1. **Condición de carrera al recargar:** En recargas completas, la memoria JS se reinicia de cero; `lib/db.ts` inicia con `activeUserId = null` y `activeDatabase = CRMFirplakDB::anonymous`.
+2. **Montaje prematuro:** `AppLayout.tsx` renderizaba `{children}` inmediatamente sin esperar a que `isLocalDataReady` fuera `true`.
+3. **Suscripción huérfana en `useLiveQuery`:** `useActivities.ts` ejecutaba `useLiveQuery` contra la base anónima vacía y sus dependencias eran estáticas `[filters?.opportunity_id, ...]`. Al resolver la sesión asíncrona, `switchLocalDatabase` abría la base del usuario y cerraba la anónima. Al no cambiar las dependencias de `useLiveQuery` y estar cerrada la base original, el hook nunca re-ejecutaba la consulta y quedaba congelado con `activities = []`.
+4. **Impacto en vista Mes:** La vista calculaba `activitiesByDay` a partir de un arreglo vacío, dibujando 31 celdas desiertas sin error en consola.
+
+Fix Applied:
+1. `lib/db.ts`: Se implementó un bus de eventos reactivo (`onDatabaseChange`, `useActiveLocalUserId`, `useActiveDatabaseVersion`, `activeDatabaseVersion++`) que notifica a React cada vez que la base activa cambia de usuario.
+2. `lib/hooks/useActivities.ts`: Se agregaron `[activeUserId, dbVersion, ...]` a las dependencias de `useLiveQuery` para re-vincular la consulta automáticamente a la nueva base activa.
+3. `components/layout/AppLayout.tsx`: Se condicionó el renderizado de `{children}` en páginas protegidas a que `isLocalDataReady === true`, mostrando un spinner elegante durante los ~100 ms de inicialización de sesión.
+4. `app/actividades/page.tsx`: Se vincularon `activeUserId` y `dbVersion` a los `useLiveQuery` de catálogos secundarios (`classifications`, `subclassifications`, `accounts`, `opportunities`).
+5. `lib/activities-database-reactivity.test.ts`: Se añadió prueba automatizada que verifica la notificación y el cambio efectivo de base en Dexie.
+
+Prevention Rule:
+**Dexie Multi-User / Lifecycle Reactivity**: En aplicaciones Local-First donde la instancia subyacente de la base de datos se cambia dinámicamente según la sesión del usuario (`switchLocalDatabase`), NUNCA asumas que un Proxy `db` re-suscribe automáticamente a `useLiveQuery`. Todo hook que consuma Dexie debe incluir en las dependencias de `useLiveQuery` el usuario activo (`activeUserId`) o la versión de la base (`dbVersion`). Adicionalmente, el layout principal (`AppLayout`) DEBE retrasar el montaje de las rutas protegidas hasta que la base de datos del usuario esté confirmada (`isLocalDataReady === true`).
+
 Tags:
-[actividades] [dexie] [autosave] [fecha_fin] [minDate] [prioridad] [reassign] [attendees] [stopPropagation] [fk_crmact_opp] [snapshots]
+[actividades] [vista-mes] [dexie] [useLiveQuery] [switchLocalDatabase] [AppLayout] [cold-reload] [reactivity]
+
 
 
 

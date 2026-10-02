@@ -3,6 +3,19 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-10-02 - Ingest: Reactividad de Base Local en useLiveQuery y Protección de Recarga en AppLayout (v1.1.4.9)
+
+- **Módulo de Actividades y Ciclo de Vida Local-First (`lib/db.ts`, `lib/hooks/useActivities.ts`, `components/layout/AppLayout.tsx`, `app/actividades/page.tsx`):**
+  - Corrección de la condición de carrera en recargas en frío (F5 / reload) que provocaba la desaparición de actividades en la vista "Mes".
+  - Implementación de un bus reactivo de cambio de base (`onDatabaseChange`, `useActiveLocalUserId`, `useActiveDatabaseVersion` vía `useSyncExternalStore`) en `lib/db.ts` con incremento de versión en `switchLocalDatabase`.
+  - Vinculación de `activeUserId` y `dbVersion` en las dependencias de `useLiveQuery` en `useActivities` y en catálogos de `app/actividades/page.tsx` (`classifications`, `subclassifications`, `accounts`, `opportunities`).
+  - Protección en `AppLayout.tsx` para retrasar el montaje de `{children}` hasta que `isLocalDataReady === true` con feedback visual de carga.
+  - Creación de prueba de regresión `lib/activities-database-reactivity.test.ts` (VERIFIED).
+  - Limpieza de marcadores de conflicto de stash en `SalesFunnelTile.tsx` y `dashboard-e-indicadores.md`.
+  - Corrección de tipo en `informes.ts` (`segmentMap`).
+  - **Incremento de versión a `1.1.4.9`.**
+- **Páginas actualizadas:** `wiki/pages/actividades.md`, `wiki/pages/dashboard-e-indicadores.md`.
+
 ## 2026-09-29 - Ingest: Actualización de Contraseñas por Administradores
 
 - **Seguridad y Usuarios (`components/usuarios/UserForm.tsx` y `lib/hooks/useUsers.ts`):**
@@ -10,7 +23,6 @@
   - Se utiliza un RPC de PostgreSQL (`admin_change_password`) con `SECURITY DEFINER` para actualizar la contraseña en `auth.users`, lo que evade la restricción de seguridad del cliente y elimina la dependencia absoluta de la llave maestra (Service Role Key) en el frontend.
 - **Incremento de versión a `1.1.4.8`.**
 
-<<<<<<< Updated upstream
 ## 2026-09-22 - Ingest: Servidor MCP Oficial del CRM FIRPLAK (`lib/mcp/`, `bin/`, `app/api/mcp/`)
 
 - **Arquitectura Dual y SDK Oficial:**

@@ -7,7 +7,6 @@ import { useRouter } from "next/navigation";
 import { Lock, Mail, Loader2, ShieldAlert, RefreshCw, Eye, EyeOff } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
-import { recoverPasswordAction } from "./actions";
 import { FirplakIsotipo } from "@/components/layout/FirplakLogo";
 import packageJson from "../../package.json";
 

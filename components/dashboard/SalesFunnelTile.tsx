@@ -122,6 +122,7 @@ interface FunnelCallbackParams {
         value?: number;
         actualValue?: number;
         count?: number;
+        lost_count?: number;
     };
 }
 
@@ -145,12 +146,8 @@ interface FunnelCallbackParams {
                     <div style="font-family: var(--font-geist-sans), sans-serif;">
                         <div style="text-transform: uppercase; font-size: 10px; letter-spacing: 0.1em; opacity: 0.7; margin-bottom: 4px;">${name}</div>
                         <div style="font-size: 14px;">${formatCurrency(actualValue)}</div>
-<<<<<<< Updated upstream
-                        <div style="font-size: 10px; margin-top: 4px; opacity: 0.8;">${data.count || 0} ${data.count === 1 ? 'oportunidad' : 'oportunidades'} • ${pct}% del total</div>
-=======
                         <div style="font-size: 10px; margin-top: 4px; opacity: 0.8;">${data.count || 0} Abiertas • ${pct}% Share</div>
-                        ${data.lost_count > 0 ? `<div style="font-size: 10px; margin-top: 2px; color: #f87171;">${data.lost_count} Perdidas</div>` : ''}
->>>>>>> Stashed changes
+                        ${(data.lost_count || 0) > 0 ? `<div style="font-size: 10px; margin-top: 2px; color: #f87171;">${data.lost_count} Perdidas</div>` : ''}
                     </div>
                 `;
             }

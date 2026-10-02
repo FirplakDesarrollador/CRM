@@ -391,7 +391,7 @@ export const downloadSopExcel = async (
 
 export interface OpportunityFlattenLookups {
   userMap: Map<string, string>;
-  segmentMap: Map<number, string>;
+  segmentMap: Map<number | string, string>;
   lossReasonMap: Map<number, string>;
   deptMap: Map<number, string>;
   cityMap: Map<number, string>;

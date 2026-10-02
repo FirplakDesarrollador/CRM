@@ -1,6 +1,5 @@
-import { useRef } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, getActiveLocalUserId, LocalActivity } from '../db';
+import { db, getActiveLocalUserId, useActiveLocalUserId, useActiveDatabaseVersion, LocalActivity } from '../db';
 import { syncEngine } from '../sync';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../supabase';
@@ -45,7 +44,10 @@ interface RecentActivityCreation {
 let lastCreatedActivity: RecentActivityCreation | null = null;
 
 export function useActivities(filters?: { opportunity_id?: string, account_id?: string, advisor_id?: string | null }) {
-    const rawActivities = useLiveQuery(
+    const activeUserId = useActiveLocalUserId();
+    const dbVersion = useActiveDatabaseVersion();
+
+    const activities = useLiveQuery(
         () => {
             if (filters?.opportunity_id) {
                 return db.activities.where('opportunity_id').equals(filters.opportunity_id).filter(a => !a.is_deleted).toArray();
@@ -58,15 +60,8 @@ export function useActivities(filters?: { opportunity_id?: string, account_id?: 
             }
             return db.activities.filter(a => !a.is_deleted).toArray();
         },
-        [filters?.opportunity_id, filters?.account_id, filters?.advisor_id]
+        [activeUserId, dbVersion, filters?.opportunity_id, filters?.account_id, filters?.advisor_id]
     );
-
-    // Retain previous activities in cache so live query recalculations or sync bulk-puts do not flicker empty
-    const cachedActivitiesRef = useRef<LocalActivity[] | undefined>(undefined);
-    if (rawActivities !== undefined) {
-        cachedActivitiesRef.current = rawActivities;
-    }
-    const activities = rawActivities !== undefined ? rawActivities : cachedActivitiesRef.current;
 
     // Allowlist of columns that actually exist in CRM_Actividades on Supabase.
     // See migration: 20260218_add_activities_ms_columns.sql for the full schema.
@@ -166,7 +161,7 @@ export function useActivities(filters?: { opportunity_id?: string, account_id?: 
         const updated_at = new Date().toISOString();
 
         // Process dates to handle timezone correctly
-        const rawChanges: any = {
+        const rawChanges: Record<string, unknown> = {
             ...data,
             updated_at,
             ...(data.fecha_inicio && { fecha_inicio: toISODateString(data.fecha_inicio) }),
