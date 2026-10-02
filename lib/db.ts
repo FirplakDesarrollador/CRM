@@ -1,4 +1,5 @@
 import Dexie, { Table } from 'dexie';
+import { useSyncExternalStore } from 'react';
 import { registerAuditHooks } from './auditHooks';
 
 // Define Types for Local Tables (Mirroring Server)
@@ -525,7 +526,44 @@ export function localDatabaseNameForUser(userId: string | null): string {
 
 let activeUserId: string | null = null;
 let activeDatabase = new CRMFirplakDB(ANONYMOUS_DATABASE_NAME);
+let activeDatabaseVersion = 0;
 let activationQueue: Promise<void> = Promise.resolve();
+
+type DatabaseChangeListener = (userId: string | null, database: CRMFirplakDB) => void;
+const databaseChangeListeners = new Set<DatabaseChangeListener>();
+
+export function onDatabaseChange(listener: DatabaseChangeListener): () => void {
+    databaseChangeListeners.add(listener);
+    return () => {
+        databaseChangeListeners.delete(listener);
+    };
+}
+
+export function getActiveDatabaseVersion(): number {
+    return activeDatabaseVersion;
+}
+
+function subscribeDatabaseChange(callback: () => void): () => void {
+    return onDatabaseChange(() => {
+        callback();
+    });
+}
+
+export function useActiveLocalUserId(): string | null {
+    return useSyncExternalStore(
+        subscribeDatabaseChange,
+        () => activeUserId,
+        () => null
+    );
+}
+
+export function useActiveDatabaseVersion(): number {
+    return useSyncExternalStore(
+        subscribeDatabaseChange,
+        () => activeDatabaseVersion,
+        () => 0
+    );
+}
 
 async function legacyHasData(legacy: CRMFirplakDB): Promise<boolean> {
     for (const table of legacy.tables) {
@@ -613,7 +651,16 @@ async function switchLocalDatabase(userId: string | null): Promise<void> {
     const previousDatabase = activeDatabase;
     activeDatabase = nextDatabase;
     activeUserId = userId;
+    activeDatabaseVersion++;
     previousDatabase.close();
+
+    databaseChangeListeners.forEach((listener) => {
+        try {
+            listener(userId, activeDatabase);
+        } catch (e) {
+            console.error('[DB] Error en listener de cambio de base de datos:', e);
+        }
+    });
 }
 
 export function activateLocalDatabase(userId: string): Promise<void> {

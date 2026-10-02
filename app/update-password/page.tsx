@@ -20,34 +20,12 @@ const updatePasswordSchema = z.object({
 export default function UpdatePasswordPage() {
     const router = useRouter();
     const [isLoading, setIsLoading] = useState(false);
-    const [isCheckingSession, setIsCheckingSession] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState(false);
-    const [sessionReady, setSessionReady] = useState(false);
 
     useEffect(() => {
-        // Check current session or listen to auth state changes (for PASSWORD_RECOVERY event)
-        const checkAuth = async () => {
-            try {
-                const { data: { session } } = await supabase.auth.getSession();
-                if (session) {
-                    setSessionReady(true);
-                }
-            } catch (err) {
-                console.error("Error checking session:", err);
-            } finally {
-                setIsCheckingSession(false);
-            }
-        };
-
-        checkAuth();
-
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-            if (event === "PASSWORD_RECOVERY" || event === "SIGNED_IN" || session) {
-                setSessionReady(true);
-                setIsCheckingSession(false);
-            }
-        });
+        // Listen to auth state changes (for PASSWORD_RECOVERY event)
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {});
 
         return () => {
             subscription.unsubscribe();

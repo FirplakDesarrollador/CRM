@@ -7,6 +7,7 @@ import { NetworkStatusLine } from "./NetworkStatusLine";
 import { OfflineBanner } from "./OfflineBanner";
 import { useSyncStore } from "@/lib/stores/useSyncStore";
 import { useEffect, useState, useCallback } from "react";
+import { Loader2 } from "lucide-react";
 import { syncEngine } from "@/lib/sync";
 import { deactivateLocalDatabase } from "@/lib/db";
 import { usePathname } from "next/navigation";
@@ -155,7 +156,16 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 <NetworkStatusLine />
 
                 <main id="main-content" className="flex-1 overflow-y-auto p-4 md:p-6 pb-20 md:pb-6 scroll-smooth">
-                    {children}
+                    {isLocalDataReady ? (
+                        children
+                    ) : (
+                        <div className="flex h-full min-h-[300px] items-center justify-center p-8">
+                            <div className="flex flex-col items-center gap-3 text-slate-400">
+                                <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+                                <span className="text-sm font-semibold text-slate-500">Cargando datos locales...</span>
+                            </div>
+                        </div>
+                    )}
                 </main>
             </div>
 

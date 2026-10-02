@@ -6,11 +6,10 @@ import { useActivities, LocalActivity } from '@/lib/hooks/useActivities';
 import { useInfiniteScroll } from '@/lib/hooks/useInfiniteScroll';
 import { useDebounce } from '@/lib/hooks/useDebounce';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, getActiveLocalUserId } from '@/lib/db';
+import { db, getActiveLocalUserId, useActiveDatabaseVersion } from '@/lib/db';
 import { syncEngine } from '@/lib/sync';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { hasPermission } from '@/lib/permissions';
-import { useUsers } from '@/lib/hooks/useUsers';
 import {
     Calendar as CalendarIcon,
     ChevronLeft,
@@ -49,13 +48,14 @@ function ActivitiesContent() {
     const { user, role } = useCurrentUser();
     const canViewAll = hasPermission(role, 'view_all_activities');
 
-    // Keep active user id across quick session/token revalidations to prevent calendar flickers
+    // Keep active user id and db version across quick session/token revalidations to prevent calendar flickers
     const activeUserId = user?.id || getActiveLocalUserId();
+    const dbVersion = useActiveDatabaseVersion();
 
     // Load collaborators to know which opportunities the user collaborates in
     const userCollaborations = useLiveQuery(
         () => activeUserId ? db.opportunityCollaborators.where('usuario_id').equals(activeUserId).toArray() : [],
-        [activeUserId]
+        [activeUserId, dbVersion]
     ) || [];
 
     const collaborativeOppIds = useMemo(() => {
@@ -65,8 +65,8 @@ function ActivitiesContent() {
 
 
     // Catalogs
-    const classifications = useLiveQuery(() => db.activityClassifications.toArray().then(arr => arr.filter(c => !c.is_deleted)), []) || [];
-    const subclassifications = useLiveQuery(() => db.activitySubclassifications.toArray().then(arr => arr.filter(s => !s.is_deleted)), []) || [];
+    const classifications = useLiveQuery(() => db.activityClassifications.toArray().then(arr => arr.filter(c => !c.is_deleted)), [activeUserId, dbVersion]) || [];
+    const subclassifications = useLiveQuery(() => db.activitySubclassifications.toArray().then(arr => arr.filter(s => !s.is_deleted)), [activeUserId, dbVersion]) || [];
 
 // Catalogs are managed by global sync
 
@@ -296,9 +296,8 @@ function ActivitiesContent() {
     const [displayLimit, setDisplayLimit] = useState(20);
 
     // Hook data for filters
-    const { users } = useUsers();
-    const accounts = useLiveQuery(() => db.accounts.toArray()) || [];
-    const opportunities = useLiveQuery(() => db.opportunities.toArray()) || [];
+    const accounts = useLiveQuery(() => db.accounts.toArray(), [activeUserId, dbVersion]) || [];
+    const opportunities = useLiveQuery(() => db.opportunities.toArray(), [activeUserId, dbVersion]) || [];
 
 
 
@@ -402,12 +401,10 @@ function ActivitiesContent() {
         return subclassifications.filter(s => s.clasificacion_id === Number(filterClassification));
     }, [subclassifications, filterClassification]);
 
-    const prevActivitiesRef = useRef<LocalActivity[]>([]);
-
     // PERF FIX: Apply global filters once, then derive views from the result
     const globallyFilteredActivities = useMemo(() => {
-        const sourceActivities = activities || prevActivitiesRef.current;
-        if (!sourceActivities || sourceActivities.length === 0) return [];
+        const sourceActivities = activities || [];
+        if (sourceActivities.length === 0) return [];
         const lowerQuery = debouncedSearchQuery.toLowerCase();
 
         // Optimize lookup for search matches (O(1) instead of O(N))
@@ -484,16 +481,13 @@ function ActivitiesContent() {
             return true;
         });
 
-        if (sourceActivities.length > 0) {
-            prevActivitiesRef.current = sourceActivities;
-        }
         return filtered;
     }, [activities, filterType, filterClassification, filterSubclassification, debouncedSearchQuery, canViewAll, user, activeUserId, collaborativeOppIds, filterUser, filterStatus, filterChannel, filterDateFrom, filterDateTo, opportunities, accounts]);
 
     // Count overdue activities for badge (computed from role-filtered but ignoring current status filter)
     const overdueCount = useMemo(() => {
-        const sourceActivities = activities || prevActivitiesRef.current;
-        if (!sourceActivities) return 0;
+        const sourceActivities = activities || [];
+        if (sourceActivities.length === 0) return 0;
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         const effectiveUserId = user?.id || activeUserId;
@@ -858,7 +852,7 @@ function ActivitiesContent() {
                                                     if ('showPicker' in e.target) {
                                                         (e.target as HTMLInputElement).showPicker();
                                                     }
-                                                } catch (err) {}
+                                                } catch {}
                                             }}
                                             value={
                                                 view === 'agenda'
