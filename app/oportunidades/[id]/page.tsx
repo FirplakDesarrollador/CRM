@@ -307,8 +307,7 @@ const LOSS_REASONS = [
     "INT- Compro FIRPLAK",
     "INT- Pago contraentrega",
     "INT - Lo pospone",
-    "INT - Compra en Homcenter",
-    "Otro"
+    "INT - Compra en Homcenter"
 ];
 
 function SummaryTab({ opportunity }: { opportunity: any }) {
