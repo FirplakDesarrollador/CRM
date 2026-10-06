@@ -242,7 +242,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             nombre_oportunidad: "",
             fase_id: "",
             comentarios: "",
-            origen_oportunidad: "",
+            origen_oportunidad: "feria",
             categoria_oportunidad: [],
             venta_feria: false,
             fecha_fin: getDefaultDueDate(),
@@ -702,7 +702,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             nombre_oportunidad: "",
             fase_id: defaultPhaseId,
             comentarios: "",
-            origen_oportunidad: origins.find(o => o.is_default && o.is_active)?.codigo || origins.find(o => o.is_active)?.codigo || "",
+            origen_oportunidad: origins.find(o => o.codigo === "feria" || includesNormalized(o.nombre, "feria"))?.codigo || "feria",
             categoria_oportunidad: [],
             venta_feria: false,
             fecha_fin: getDefaultDueDate(),
@@ -807,7 +807,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
     useEffect(() => {
         const currentOrigin = watch("origen_oportunidad");
         if (origins.length > 0) {
-            const defaultOrigin = origins.find(o => o.is_default && o.is_active) || origins.find(o => o.is_active) || origins[0];
+            const defaultOrigin = origins.find(o => o.codigo === "feria" || includesNormalized(o.nombre, "feria")) || origins.find(o => o.is_default && o.is_active) || origins[0];
             if (!currentOrigin || !origins.some(origin => origin.codigo === currentOrigin)) {
                 setValue("origen_oportunidad", defaultOrigin.codigo);
             }
@@ -1079,7 +1079,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             const defaultOppName = data.nombre_cuenta ? `Venta - ${data.nombre_cuenta}` : "Venta en Tienda";
             const oppName = data.nombre_oportunidad?.trim() || defaultOppName;
             const finalFaseId = data.fase_id ? Number(data.fase_id) : (phasesList[0]?.id ? Number(phasesList[0].id) : 1);
-            const finalOrigen = data.origen_oportunidad || (origins[0]?.codigo || "visita");
+            const finalOrigen = data.origen_oportunidad || (origins.find(o => o.codigo === "feria" || includesNormalized(o.nombre, "feria"))?.codigo || "feria");
 
             const opportunityData = {
                 account_id: accountId,
