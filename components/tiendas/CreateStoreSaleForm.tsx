@@ -20,6 +20,9 @@ import { reserveFairInventory, useInventorySummary } from "@/lib/hooks/useInvent
 import { getProductPrice, SALES_CHANNELS } from "@/lib/salesChannels";
 import { cn, includesNormalized, matchesSearchTokens, removeAccents } from "@/lib/utils";
 import { MultiSelect } from "@/components/ui/MultiSelect";
+import { useCloudDraft } from "@/lib/hooks/useCloudDraft";
+import { DraftPromptModal } from "@/components/ui/DraftPromptModal";
+import { AutoSaveIndicator } from "@/components/ui/AutoSaveIndicator";
 import { SearchableSelect } from "@/components/ui/SearchableSelect";
 import { OPPORTUNITY_CATEGORIES, formatOpportunityCategories, parseOpportunityCategories } from "@/lib/opportunityCategories";
 
@@ -215,14 +218,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
     const classifications = useLiveQuery(() => db.activityClassifications.toArray().then(arr => arr.filter(c => !c.is_deleted)), []) || [];
     const eventClassifications = classifications.filter(c => c.tipo_actividad === "EVENTO");
 
-    const {
-        register,
-        handleSubmit,
-        watch,
-        setValue,
-        reset,
-        formState: { errors }
-    } = useForm<StoreSaleFormData>({
+    const form = useForm<StoreSaleFormData>({
         resolver: zodResolver(storeSaleSchema),
         defaultValues: {
             nombre_cuenta: "",
@@ -257,6 +253,15 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             asesor_id: ""
         }
     });
+    const {
+        register,
+        handleSubmit,
+        watch,
+        setValue,
+        reset,
+        formState: { errors }
+    } = form;
+
 
     const isFairSale = watch("venta_feria") || false;
     const { summary: globalInventorySummary } = useInventorySummary();
@@ -709,6 +714,78 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         });
     }, [reset, displayCountries, phasesList, origins, user, users]);
 
+    interface StoreSaleExtraDraft {
+        selectedAccount: LocalCuenta | null;
+        accountSearchQuery: string;
+        isContactExpanded: boolean;
+        isActivityExpanded: boolean;
+    }
+    // Configuración de borrador persistente en la nube (multi-dispositivo y recargas)
+    const extraDraftState = useMemo(() => ({
+        selectedAccount,
+        accountSearchQuery,
+        isContactExpanded,
+        isActivityExpanded,
+    }), [selectedAccount, accountSearchQuery, isContactExpanded, isActivityExpanded]);
+
+    const hasDraftContent = useCallback((values: StoreSaleFormData, extra?: any) => {
+        if (!values) return false;
+        const hasName = Boolean(values.nombre_cuenta && values.nombre_cuenta.trim().length > 0);
+        const hasNit = Boolean(values.nit_base && values.nit_base.trim().length > 0 && values.nit_base !== "*****");
+        const hasPhone = Boolean(values.telefono && values.telefono.trim().length > 0 && values.telefono !== "*****");
+        const hasEmail = Boolean(values.email && values.email.trim().length > 0 && values.email !== "*****");
+        const hasItems = Boolean(values.items && values.items.length > 0);
+        const hasComments = Boolean(values.comentarios && values.comentarios.trim().length > 0);
+        const hasOppName = Boolean(values.nombre_oportunidad && values.nombre_oportunidad.trim().length > 0);
+        const hasContact = Boolean(values.contacto_nombre && values.contacto_nombre.trim().length > 0);
+        const hasSelectedAccount = Boolean(extra?.selectedAccount);
+
+        return hasName || hasNit || hasPhone || hasEmail || hasItems || hasComments || hasOppName || hasContact || hasSelectedAccount;
+    }, []);
+
+    const onRestoreDraft = useCallback((draft: any) => {
+        if (draft.formValues) {
+            reset(draft.formValues);
+        }
+        if (draft.extraState?.selectedAccount) {
+            setSelectedAccount(draft.extraState.selectedAccount);
+        }
+        if (draft.extraState?.accountSearchQuery) {
+            setAccountSearchQuery(draft.extraState.accountSearchQuery);
+        }
+        if (draft.extraState?.isContactExpanded !== undefined) {
+            setIsContactExpanded(draft.extraState.isContactExpanded);
+        }
+        if (draft.extraState?.isActivityExpanded !== undefined) {
+            setIsActivityExpanded(draft.extraState.isActivityExpanded);
+        }
+    }, [reset]);
+
+    const onDiscardDraft = useCallback(() => {
+        resetStoreForm();
+        setSearchTerm("");
+    }, [resetStoreForm]);
+
+    const {
+        showPrompt,
+        pendingDraft,
+        saveStatus,
+        isDiscarding,
+        continueExistingDraft,
+        discardAndCreateNew,
+        clearDraft
+    } = useCloudDraft<StoreSaleFormData, StoreSaleExtraDraft>({
+        form,
+        formKey: "tiendas_store_sale",
+        userId: user?.id,
+        extraState: extraDraftState,
+        hasContent: hasDraftContent,
+        onRestore: onRestoreDraft,
+        onDiscard: onDiscardDraft,
+        debounceMs: 800,
+        enabled: true
+    });
+
     const watchedItems = watch("items");
     const items = useMemo(() => watchedItems || [], [watchedItems]);
 
@@ -1051,6 +1128,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
             } satisfies Partial<LocalActivity>;
             await createActivity(activityData);
 
+            await clearDraft();
             if (onSuccess) onSuccess();
             resetStoreForm();
             setSearchTerm("");
@@ -1074,10 +1152,25 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
 
     return (
         <div className="w-full flex flex-col">
+            <DraftPromptModal
+                isOpen={showPrompt}
+                onContinue={continueExistingDraft}
+                onDiscard={discardAndCreateNew}
+                isDiscarding={isDiscarding}
+                draftInfo={pendingDraft ? {
+                    updatedAt: pendingDraft.updatedAt,
+                    clientName: (pendingDraft.extraState as any)?.selectedAccount?.nombre || pendingDraft.formValues?.nombre_cuenta,
+                    itemsCount: pendingDraft.formValues?.items?.length || 0,
+                    totalAmount: pendingDraft.formValues?.amount || 0
+                } : null}
+            />
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200/60 w-full flex flex-col overflow-hidden">
-                <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50">
+                <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
                     <h2 className="text-xl font-bold text-slate-800">Registrar Venta / Cliente</h2>
                     <p className="text-sm text-slate-500">Crea un cliente y su oportunidad al mismo tiempo.</p>
+                    </div>
+                    <AutoSaveIndicator status={saveStatus} />
                 </div>
 
                 <div className="p-6 flex-1">
@@ -1990,7 +2083,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                 <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
                     <button 
                         type="button" 
-                        onClick={() => { resetStoreForm(); setSearchTerm(""); }}
+                        onClick={() => { clearDraft(); resetStoreForm(); setSearchTerm(""); }}
                         className="px-4 py-2 text-slate-600 font-medium hover:bg-slate-200 rounded-lg transition-colors"
                         disabled={isSubmitting}
                     >
