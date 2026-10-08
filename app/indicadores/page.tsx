@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { BarChart3, Info, PieChart, ListChecks, LineChart, CalendarCheck2, Users2 } from "lucide-react";
+import { BarChart3, Info, PieChart, ListChecks, LineChart, CalendarCheck2, Users2, Sprout } from "lucide-react";
 import { cn } from "@/components/ui/utils";
 import { VentasGanadasTile } from "@/components/indicadores/VentasGanadasTile";
 import { Page1EstadosTiempo } from "@/components/indicadores/reportes/Page1EstadosTiempo";
@@ -9,6 +9,7 @@ import { Page2Clasificaciones } from "@/components/indicadores/reportes/Page2Cla
 import { Page3MontoAsesor } from "@/components/indicadores/reportes/Page3MontoAsesor";
 import { Page4Eventos } from "@/components/indicadores/reportes/Page4Eventos";
 import { Page5Cuentas } from "@/components/indicadores/reportes/Page5Cuentas";
+import { Page6Prospectos } from "@/components/indicadores/reportes/Page6Prospectos";
 
 const REPORT_TABS = [
     { id: "estados", label: "Cohort", icon: PieChart },
@@ -16,6 +17,7 @@ const REPORT_TABS = [
     { id: "montoAsesor", label: "Monto por Asesor", icon: LineChart },
     { id: "eventos", label: "Eventos", icon: CalendarCheck2 },
     { id: "cuentas", label: "Cuentas", icon: Users2 },
+    { id: "prospectos", label: "Prospectos", icon: Sprout },
 ] as const;
 
 type ReportTabId = typeof REPORT_TABS[number]["id"];
@@ -98,6 +100,7 @@ export default function IndicadoresPage() {
                     {activeTab === "montoAsesor" && <Page3MontoAsesor />}
                     {activeTab === "eventos" && <Page4Eventos />}
                     {activeTab === "cuentas" && <Page5Cuentas />}
+                    {activeTab === "prospectos" && <Page6Prospectos />}
                 </div>
             </div>
 
