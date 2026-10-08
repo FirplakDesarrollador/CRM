@@ -44,6 +44,8 @@ const PEDIDO_DOCUMENT_FIELDS: Array<keyof LocalQuote & keyof LocalPedido> = [
     "entrega_en_obra",
     "bodega_externa",
     "bodega_firplak",
+    "tipo_pod",
+    "pod",
 ];
 
 /**

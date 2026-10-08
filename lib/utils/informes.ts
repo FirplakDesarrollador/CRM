@@ -391,7 +391,7 @@ export const downloadSopExcel = async (
 
 export interface OpportunityFlattenLookups {
   userMap: Map<string, string>;
-  segmentMap: Map<number, string>;
+  segmentMap: Map<number | string, string>;
   lossReasonMap: Map<number, string>;
   deptMap: Map<number, string>;
   cityMap: Map<number, string>;
@@ -409,6 +409,12 @@ export function mapOpportunityReportRow(
   const estadoObj = getJoinedSingle(item.estado_info);
   const paisId = cuentaObj?.pais_id ?? item.pais_id;
   
+  const segObj = getJoinedSingle(item.segmento);
+  const segId = item.segmento_id;
+  const segmentoNombre = segObj?.nombre
+    || (segId ? (lookups.segmentMap.get(segId) || lookups.segmentMap.get(Number(segId)) || lookups.segmentMap.get(String(segId))) : null)
+    || '-';
+
   return {
     ...item,
     cuenta_nombre: cuentaObj?.nombre || '-',
@@ -417,7 +423,7 @@ export function mapOpportunityReportRow(
     estado_nombre: estadoObj?.nombre || '-',
     vendedor_nombre: lookups.userMap.get(item.owner_user_id) || '-',
     creador_nombre: lookups.userMap.get(item.created_by) || '-',
-    segmento_nombre: lookups.segmentMap.get(item.segmento_id) || '-',
+    segmento_nombre: segmentoNombre,
     canal_nombre: lookups.canalMap.get(faseObj?.canal_id || cuentaObj?.canal_id) || '-',
     departamento_nombre: lookups.deptMap.get(item.departamento_id) || '-',
     ciudad_nombre: lookups.cityMap.get(item.ciudad_id) || '-',
@@ -433,6 +439,7 @@ export interface ActivityFlattenLookups {
   clasificacionMap: Map<number, string>;
   subclasificacionMap: Map<number, string>;
   tipoActividadMap: Map<number, string>;
+  canalMap?: Map<string, string>;
 }
 
 export function mapActivityReportRow(
@@ -450,10 +457,14 @@ export function mapActivityReportRow(
 
   const cuentaNombre = cuentaObj?.nombre || oppCuentaObj?.nombre || '-';
   const oppNombre = oppObj?.nombre || '-';
+  const oppFaseObj = oppObj ? getJoinedSingle(oppObj.fase) : null;
+  const canalId = cuentaObj?.canal_id || oppCuentaObj?.canal_id || oppFaseObj?.canal_id || null;
+  const canalNombre = canalId ? (lookups.canalMap?.get(canalId) || canalId) : '-';
 
   return {
     ...item,
     asunto: item.asunto || '-',
+    canal_nombre: canalNombre,
     clasificacion_nombre: clasifObj?.nombre || lookups.clasificacionMap.get(item.clasificacion_id) || '-',
     subclasificacion_nombre: subclasifObj?.nombre || lookups.subclasificacionMap.get(item.subclasificacion_id) || '-',
     cuenta_nombre: cuentaNombre,

@@ -1392,5 +1392,212 @@ Prevention Rule:
 Tags:
 [oportunidades] [currency] [es-CO] [formatNumberCO] [formatOpportunityAmount] [ui]
 
+---
+
+## [Bug ID: 20260914-01]
+
+Context:
+`app/oportunidades/page.tsx`, `app/cuentas/page.tsx`, `components/HotTableWrapper.tsx`, `lib/opportunityTableHelpers.ts`. Tablas interactivas con Handsontable y filtros internos por valor (`dropdownMenu: ['filter_by_value', 'filter_action_bar']`).
+
+What I Did:
+Corregí el mapeo de datos para la columna de actividades en la vista tabular de oportunidades (`actividades: actSummary.label`), asegurando que todos los valores pasados a las columnas sean strings o números primitivos. Implementé la resolución de filas físicas (`instance.toPhysicalRow(row)`) en renderers personalizados y en `afterOnCellMouseDown` (tanto en Oportunidades como en Cuentas). Corregí el desfase de columnas en `handleColumnResize` integrando `OPPORTUNITY_TABLE_COLUMN_KEYS`. Registré el diccionario de idioma `es-MX` de `handsontable/i18n` en `HotTableWrapper` para internacionalizar los controles del dropdown de filtros al español. Añadí la prueba permanente `tests/opportunityTableFilters.test.ts`.
+
+Problem:
+1. En el dropdown de la columna "Actividad", todas las opciones de filtro seleccionable mostraban `[object Object]` en lugar de las etiquetas legibles ("Sin actividad", "1 atrasada", etc.) y la barra interna "Search" no encontraba resultados.
+2. Al filtrar u ordenar cualquier columna en Handsontable, hacer clic en una fila o renderizar enlaces de celdas (`cuenta`, `nombre`, `cierre`, `_original`) navegaba u obtenía datos de la fila física original desalineada en vez de la oportunidad/cuenta visible filtrada.
+3. Al redimensionar columnas manualmente, la columna `actividades` no estaba en `activeKeys`, desfasando los anchos guardados en `localStorage`.
+4. Los botones y etiquetas del filtro se mostraban en inglés ("Filter by value:", "Search", "Select all", "Clear", "OK", "Cancel").
+
+Root Cause:
+1. En `hotData`, la propiedad `actividades` recibía el objeto complejo `actSummary` en lugar de una cadena primitiva. El plugin de filtros de Handsontable convierte los valores a string con `String(cellValue)`, resultando en `"[object Object]"`.
+2. En Handsontable, el argumento `row` en renderers y `coords.row` en `afterOnCellMouseDown` representan el índice visual (`visualRow`), el cual difiere del índice físico en los datos cuando hay filtros o reordenamientos activos si no se traduce con `instance.toPhysicalRow(visualRow)`.
+3. Ausencia del registro del diccionario de idioma en `HotTableWrapper`.
+
+Fix Applied:
+1. Creación de `lib/opportunityTableHelpers.ts` con `buildOpportunityHotRow` (que asigna `actividades: actSummary.label || 'Sin actividad'` y `actividades_status: actSummary.status`) y `resolveHotRowData`.
+2. Traducción a fila física mediante `instance.toPhysicalRow(row)` en todos los renderers y clics de fila.
+3. Uso de `OPPORTUNITY_TABLE_COLUMN_KEYS` en `handleColumnResize` y `hotColumns`.
+4. Registro de `esMX` en `HotTableWrapper` con `language: props?.language || esMX.languageCode`.
+5. Creación de `tests/opportunityTableFilters.test.ts`.
+
+Prevention Rule:
+**Handsontable Filterable Data & Physical Row Translation**:
+1. Toda propiedad mapeada en `hotData` para una columna de Handsontable DEBE ser un valor primitivo (`string` o `number`), NUNCA un objeto complejo. Los metadatos secundarios deben guardarse en propiedades auxiliares separadas (ej. `actividades_status`).
+2. En tablas con filtros o plugins de ordenamiento, NUNCA indexar directamente `hotData[coords.row]` ni llamar a `getSourceDataAtRow(row)` con el índice visual. SIEMPRE traducir primero mediante `instance.toPhysicalRow(row)` o usar `resolveHotRowData`.
+
+Tags:
+[handsontable] [HotTable] [filtros] [filter_by_value] [object-object] [toPhysicalRow] [visualRow] [oportunidades] [cuentas]
+
+---
+
+## [Bug ID: 20260915-01]
+
+Context:
+`lib/pdfGenerator.ts`, exportación al PDF formal (formato F-V-29) de cotizaciones y pedidos desde el detalle de oportunidad y submódulo de Pedidos.
+
+What I Did:
+Corregí la lógica de cálculo de precios e IVA en `lib/pdfGenerator.ts`. Eliminé la división forzada `/ 1.19` en los precios unitarios y subtotales de línea. Exporté las funciones puras `calculatePdfItemRow` y `calculatePdfTotals` para garantizar que el precio unitario sea exactamente el de la lista de precios (sin IVA), el subtotal sea el valor neto tras descuento, el IVA (19%) se adicione al final después del descuento, y el Gran Total sea la suma de Subtotal + IVA. Añadí la prueba permanente `tests/pdfGeneratorTotals.test.ts`.
+
+Problem:
+En el PDF formal de cotizaciones/pedidos, los valores unitarios de los productos de la lista de precios se dividían erróneamente por 1.19 (ej. $7.904.580,50 se convertía en $6.642.502,94). El subtotal se dividía también por 1.19 y se calculaba el IVA hacia atrás para que el Gran Total forzara el subtotal de la cotización, recortándole indebidamente el 19% al valor del producto y alterando los precios oficiales de lista.
+
+Root Cause:
+En `lib/pdfGenerator.ts` se introdujo el supuesto erróneo de que todos los precios en la base de datos ya incluían IVA (`unitPriceBase = isExport ? unitPriceWithIva : unitPriceWithIva / 1.19` y `subtotal = isExport ? rawTotal : rawTotal / 1.19`), cuando en Firplak los precios de lista son base sin IVA.
+
+Fix Applied:
+1. Eliminación de `/ 1.19` en `calculatePdfItemRow` y `generateQuotePdf`.
+2. `calculatePdfTotals` suma los subtotales netos de las líneas como `subtotal`, calcula el IVA al 19% al final (`subtotal * 0.19` para COP, 0 para USD), y fija `granTotal = subtotal + iva`.
+3. Creación de la prueba permanente `tests/pdfGeneratorTotals.test.ts`.
+
+Prevention Rule:
+**Cálculo de Precios e IVA en Documentos Formales (PDF/Pedidos)**:
+1. En el CRM Firplak, todos los precios unitarios de las listas de precios (`lista_base_obras`, `lista_base_cop`, `lista_base_exportaciones`, etc.) son base neta SIN IVA.
+2. NUNCA dividir un precio unitario de cotización o ítem por `1.19` para "desglosar" IVA en interfaces o documentos.
+3. El IVA (19%) siempre debe ser adicionado DESPUÉS del descuento sobre el Subtotal neto acumulado de las líneas.
+4. Gran Total = Subtotal + IVA. Para exportaciones en USD, IVA = 0 y Gran Total = Subtotal.
+
+Tags:
+[pdfGenerator] [F-V-29] [cotizaciones] [pedidos] [precios-sin-iva] [iva-19] [subtotal] [gran-total]
+
+---
+
+## [Bug ID: 20260915-02]
+
+Context:
+Edición de cotizaciones en `app/oportunidades/[id]/cotizaciones/[quoteId]/page.tsx`, `lib/hooks/useOpportunities.ts` y control de precios de catálogo.
+
+What I Did:
+Bloqueé la edición manual del precio unitario para productos del catálogo en la interfaz y en la lógica del hook. Creé `lib/quotePricing.ts` con `isQuoteItemPriceEditable` y `sanitizeQuoteItemUpdates`. En la UI, los ítems de catálogo se renderizan como texto estático de solo lectura formateado como moneda, y solo los ítems manuales (`producto_id === null`) tienen input numérico. En `useOpportunities.ts`, `updateItem` descarta cualquier mutación manual de `precio_unitario` para productos de catálogo, preservando el recálculo legítimo por volumen. Añadí la prueba permanente `tests/quotePricingSecurity.test.ts`.
+
+Problem:
+En el editor de cotizaciones, los comerciales podían hacer clic y modificar arbitrariamente el campo `precio_unitario` de cualquier producto del catálogo maestro (`CRM_ListaDePrecios`), alterando el valor unitario, el subtotal y el monto total de la cotización y de la oportunidad en la base de datos, evadiendo las listas oficiales de precios y las políticas comerciales.
+
+Root Cause:
+Al implementar el soporte de "+ Ítem Manual" (`producto_id === null`), el párrafo estático de precio unitario se transformó en un `<input type="number">` genérico sin condicionar su editabilidad (`isQuoteItemPriceEditable`). Además, el hook `useQuoteItems.updateItem` aceptaba mutaciones de `precio_unitario` indiscriminadamente sin verificar si el ítem pertenecía al catálogo.
+
+Fix Applied:
+1. Creación de `lib/quotePricing.ts` con funciones puras `isManualQuoteItem`, `isQuoteItemPriceEditable` y `sanitizeQuoteItemUpdates`.
+2. En `page.tsx` y `page-isazaale.tsx`, renderizado condicional: texto fijo formateado para productos del catálogo vs. `<input type="number">` para ítems manuales.
+3. En `useOpportunities.ts` y `useOpportunities-isazaale.ts`, sanitización en `updateItem` para descartar mutaciones manuales de `precio_unitario` en productos de catálogo.
+4. Creación de prueba permanente `tests/quotePricingSecurity.test.ts` (4/4 tests GREEN).
+
+Prevention Rule:
+**Catalog Items Price Immutability**: Los precios unitarios de productos vinculados al catálogo maestro (`producto_id !== null`) NUNCA deben ser editables en la UI ni aceptados en mutaciones arbitrarias del cliente. Su valor proviene exclusivamente de `CRM_ListaDePrecios` según canal y volumen. Únicamente los ítems manuales (`producto_id === null`) tienen precio unitario editable por el usuario.
+
+Tags:
+[cotizaciones] [quoteItems] [precio_unitario] [seguridad] [catalogo] [precios-inmutables] [items-manuales]
+
+---
+
+## [Bug ID: 20260915-03]
+
+Context:
+Submódulo de Pedidos (`components/quotes/PedidosEditor.tsx`, `lib/hooks/usePedidos.ts`, `lib/sync.ts`, migración `20260904193842_persist_crm_editable_fields.sql`).
+
+What I Did:
+Corregí la persistencia de los formularios de pedidos (tanto en creación como en edición y autoguardado). Apliqué la migración pendiente en Supabase (`CRM_Pedidos` y `CRM_Cotizaciones`), sincronicé bidireccionalmente `fecha_entrega` y `fecha_minima_requerida` hacia `EXTRA_Fecha mínima requerida por comercial/cliente` y columnas nativas, evité la eliminación de las columnas nativas booleanas `cierre_facturacion` y `es_muestra` en el payload, y creé el normalizador `normalizeDateToInput` para adaptar fechas de SAP (`DD/MM/YYYY`) a inputs HTML5 `YYYY-MM-DD`.
+
+Problem:
+Los comerciales reportaron que al modificar campos en el formulario de pedidos, como "Fecha Mínima de Entrega Solicitada", medio de acceso o notas de planos, los cambios no se guardaban o aparecían en blanco al recargar la página.
+
+Root Cause:
+1. Desalineación de nombres: `PedidosEditor.tsx` enviaba `fecha_entrega`, pero el campo histórico en SAP/Supabase es `EXTRA_Fecha mínima requerida por comercial/cliente` (mapeado en `usePedidos.ts` como `fecha_minima_requerida`).
+2. Columnas no aplicadas en Supabase: La migración `20260904193842_persist_crm_editable_fields.sql` que añade `fecha_entrega`, `email_contacto`, `tiene_escaleras` y `planos_hidromasaje` a `CRM_Pedidos` no se había aplicado en Supabase, por lo que el RPC `process_field_updates` las descartaba.
+3. Formato de fecha en HTML5: SAP devuelve fechas en `DD/MM/YYYY`, pero `<input type="date">` exige estrictamente `YYYY-MM-DD`. Al recibir `DD/MM/YYYY`, el input se mostraba en blanco.
+4. Supresión de columnas booleanas: `usePedidos.ts` ejecutaba `delete serverPayload[local]` al mapear `cierre_facturacion` y `es_muestra`, eliminando las columnas nativas de `CRM_Pedidos`.
+
+Fix Applied:
+1. Aplicación de la migración `20260904193842_persist_crm_editable_fields.sql` en la base de datos Supabase con DDL idempotente.
+2. Creación de `lib/pedidoHelpers.ts` con `normalizeDateToInput` y `mapPedidoServerPayload`.
+3. Actualización de `lib/hooks/usePedidos.ts` para sincronizar `fecha_entrega` y `fecha_minima_requerida` y preservar las columnas booleanas nativas.
+4. Actualización de `lib/sync.ts` en el pull de `CRM_Pedidos` para resolver fallback mutuo entre `fecha_entrega` y `EXTRA_Fecha mínima requerida por comercial/cliente`.
+5. Actualización de `components/quotes/PedidosEditor.tsx` con `shouldUnregister: false`, normalización de fechas en defaults/efectos y envío sincronizado de fecha mínima en `pedData`.
+6. Creación de prueba permanente `tests/pedidoPersistence.test.ts` (9/9 tests GREEN).
+
+Prevention Rule:
+**Persistencia de Pedidos y Fechas HTML5**:
+1. Todo input de tipo fecha (`<input type="date">`) debe recibir su valor normalizado en formato `YYYY-MM-DD` mediante `normalizeDateToInput` para soportar tanto strings ISO como formatos SAP `DD/MM/YYYY`.
+2. Los campos de fecha de entrega (`fecha_entrega` y `fecha_minima_requerida` / `EXTRA_Fecha mínima requerida por comercial/cliente`) deben mantenerse siempre sincronizados en Dexie y en Supabase para asegurar compatibilidad total con SAP, informes y CRM.
+3. Al mapear campos locales a campos SAP `EXTRA_`, NUNCA eliminar (`delete`) columnas que existan de forma nativa en las tablas de PostgreSQL (e.g., `cierre_facturacion`, `es_muestra`, `fecha_facturacion`).
+
+Tags:
+[pedidos] [persistencia] [fecha_entrega] [fecha_minima_requerida] [normalizeDateToInput] [cierre_facturacion] [es_muestra] [supabase] [sync]
+
+---
+
+## [Bug ID: 20260922-01]
+
+Context:
+Módulo de Actividades (`app/actividades/page.tsx`, `components/activities/CreateActivityModal.tsx`, `lib/hooks/useActivities.ts`, `lib/db.ts`).
+
+What I Did:
+Auditoría integral y corrección del flujo de edición y visualización de actividades en las vistas Todo, Agenda y Mes.
+
+Problem:
+1. En la vista Mes, hacer clic en una actividad para editarla propagaba el evento al contenedor del día (`<div onClick={() => setView('agenda')}>`), cambiando intempestivamente la vista de Mes a Agenda debajo del modal.
+2. Tooltip hover de la vista Mes no se mostraba porque el día tenía la clase `group` pero el tooltip requería `group/day`.
+3. SchemaError en Dexie: `lib/sync.ts` ejecutaba `db.activities.where('account_id').equals(...)`, pero `account_id` no estaba indexado en el schema de Dexie (v12-14).
+4. El campo `prioridad` se perdía en la sincronización y al crear actividades: no existía columna en `CRM_Actividades` de Supabase, no estaba en `DB_COLUMNS` de `useActivities.ts` y los botones de prioridad no marcaban dirty el formulario.
+5. En `CreateActivityModal.tsx`, un `useEffect` sobreescribía `fecha_fin` sumándole 1 hora a `fecha_inicio` en el montaje, destruyendo la fecha fin original de actividades editadas y disparando el autosave.
+6. `minDate={new Date()}` en `DateTimePicker` impedía editar actividades pasadas o vencidas.
+7. En modo edición, reasignar usuario (`reassignUserId`) o modificar invitados/colaboradores (`attendees`) no persistía porque residían en estado local fuera de react-hook-form y el modo edición no cuenta con botón submit tradicional.
+8. Existían archivos huérfanos/duplicados con sufijo `-isazaale` ocupando más de 110 KB.
+9. Violación de clave foránea `fk_crmact_opp` en `CRM_Actividades (_complete_snapshot_)`: En `lib/sync.ts`, la sección 3.3c de auto-sanación de `opportunity_id` solo evaluaba mutaciones individuales (`u.field === 'opportunity_id'`) y pasaba por alto `_complete_snapshot_` (que es el formato emitido por `useActivities`). Adicionalmente, cadenas vacías `""` o espacios no se saneaban a `null`, y oportunidades huérfanas o eliminadas bloqueaban el Outbox con error `violates foreign key constraint fk_crmact_opp`.
+
+Fix Applied:
+1. Adición de `e.stopPropagation()` en los enlaces y preview de actividades en la vista Mes de `page.tsx`.
+2. Asignación de `group/day` en el contenedor de cada día del calendario mensual.
+3. Migración Supabase para añadir columna `prioridad TEXT DEFAULT 'Media'` a `CRM_Actividades`.
+4. Actualización del schema de Dexie a versión 15 en `lib/db.ts` indexando `account_id`: `'id, opportunity_id, account_id, user_id, fecha_inicio, tipo_actividad'`.
+5. Inclusión de `prioridad` en `DB_COLUMNS` y `createActivity` en `lib/hooks/useActivities.ts`.
+6. Guard en `CreateActivityModal.tsx` para no recalcular `fecha_fin` en edición salvo que el usuario altere activamente `fecha_inicio` o `tipo_actividad`.
+7. Ajuste de `minDate={isEditing ? undefined : new Date()}` en los `DateTimePicker`.
+8. Persistencia inmediata de `reassignUserId` y `attendees` (con `_sync_metadata`) al mutar en modo edición.
+9. Integración del switch de reunión Teams para actividades tipo EVENTO con cuenta Microsoft conectada.
+10. Eliminación de archivos muertos `CreateActivityModal-isazaale.tsx` y `useActivitiesServer-isazaale.ts`.
+11. Auto-sanación proactiva y reactiva de `fk_crmact_opp` y `account_id` en `lib/sync.ts`: extracción y saneamiento en `_complete_snapshot_`, nulificación de referencias huérfanas en Dexie y Outbox, y método de recuperación `healOrphanedActivityOpportunity`.
+
+Prevention Rule:
+**Edición y Modales Autosave en Actividades**:
+1. En modales con autosave (`useFormAutoSave`), ningún `useEffect` debe mutar campos dependientes (como fechas calculadas) en el montaje inicial cuando `isEditing` sea verdadero; solo deben mutarse si el campo origen está marcado como `dirty`.
+2. Los selectores de fecha (`DateTimePicker`) en formularios de edición NUNCA deben restringir `minDate={new Date()}` porque bloquean la visualización y reprogramación de registros históricos o vencidos.
+3. Todo estado interactivo en modales autosave que viva fuera de react-hook-form (como reasignación o listas de asistentes) debe invocar `updateActivity` inmediatamente en su handler de cambio.
+4. Toda consulta indexada de Dexie (e.g., `where('col').equals(...)`) debe contar con su índice declarado en el schema de la base de datos local para evitar `SchemaError`.
+5. Todo filtro de auto-sanación de claves foráneas en `lib/sync.ts` DEBE inspeccionar tanto campos individuales como snapshots completos (`u.field === '_complete_snapshot_'`), sanitizando cadenas vacías `""` a `null` para no romper constraints de PostgreSQL.
+
+---
+
+## [Bug ID: 20261002-01]
+
+Context:
+Módulo de Actividades en vista "Mes" (`app/actividades/page.tsx`, `lib/hooks/useActivities.ts`, `lib/db.ts`, `components/layout/AppLayout.tsx`).
+
+What I Did:
+Diagnóstico y corrección de la pérdida de visualización de actividades en la vista Mes tras recargar la página (F5) en producción.
+
+Problem:
+Al refrescar la página en `/actividades?view=month`, la grilla de días 1 a 31 aparecía completamente en blanco. En la barra superior figuraba "Guardado" y abajo "Sincronizado", pero el calendario no mostraba ninguna actividad. En la navegación interna entre rutas el problema no se reproducía; solo ocurría en recargas en frío (*cold reload*).
+
+Root Cause:
+1. **Condición de carrera al recargar:** En recargas completas, la memoria JS se reinicia de cero; `lib/db.ts` inicia con `activeUserId = null` y `activeDatabase = CRMFirplakDB::anonymous`.
+2. **Montaje prematuro:** `AppLayout.tsx` renderizaba `{children}` inmediatamente sin esperar a que `isLocalDataReady` fuera `true`.
+3. **Suscripción huérfana en `useLiveQuery`:** `useActivities.ts` ejecutaba `useLiveQuery` contra la base anónima vacía y sus dependencias eran estáticas `[filters?.opportunity_id, ...]`. Al resolver la sesión asíncrona, `switchLocalDatabase` abría la base del usuario y cerraba la anónima. Al no cambiar las dependencias de `useLiveQuery` y estar cerrada la base original, el hook nunca re-ejecutaba la consulta y quedaba congelado con `activities = []`.
+4. **Impacto en vista Mes:** La vista calculaba `activitiesByDay` a partir de un arreglo vacío, dibujando 31 celdas desiertas sin error en consola.
+
+Fix Applied:
+1. `lib/db.ts`: Se implementó un bus de eventos reactivo (`onDatabaseChange`, `useActiveLocalUserId`, `useActiveDatabaseVersion`, `activeDatabaseVersion++`) que notifica a React cada vez que la base activa cambia de usuario.
+2. `lib/hooks/useActivities.ts`: Se agregaron `[activeUserId, dbVersion, ...]` a las dependencias de `useLiveQuery` para re-vincular la consulta automáticamente a la nueva base activa.
+3. `components/layout/AppLayout.tsx`: Se condicionó el renderizado de `{children}` en páginas protegidas a que `isLocalDataReady === true`, mostrando un spinner elegante durante los ~100 ms de inicialización de sesión.
+4. `app/actividades/page.tsx`: Se vincularon `activeUserId` y `dbVersion` a los `useLiveQuery` de catálogos secundarios (`classifications`, `subclassifications`, `accounts`, `opportunities`).
+5. `lib/activities-database-reactivity.test.ts`: Se añadió prueba automatizada que verifica la notificación y el cambio efectivo de base en Dexie.
+
+Prevention Rule:
+**Dexie Multi-User / Lifecycle Reactivity**: En aplicaciones Local-First donde la instancia subyacente de la base de datos se cambia dinámicamente según la sesión del usuario (`switchLocalDatabase`), NUNCA asumas que un Proxy `db` re-suscribe automáticamente a `useLiveQuery`. Todo hook que consuma Dexie debe incluir en las dependencias de `useLiveQuery` el usuario activo (`activeUserId`) o la versión de la base (`dbVersion`). Adicionalmente, el layout principal (`AppLayout`) DEBE retrasar el montaje de las rutas protegidas hasta que la base de datos del usuario esté confirmada (`isLocalDataReady === true`).
+
+Tags:
+[actividades] [vista-mes] [dexie] [useLiveQuery] [switchLocalDatabase] [AppLayout] [cold-reload] [reactivity]
+
+
+
 
 

@@ -52,6 +52,7 @@ const BulkAccountUploader = dynamic(() => import('@/components/config/BulkAccoun
     ssr: false
 });
 import { ConfirmationModal } from '@/components/ui/ConfirmationModal';
+import { McpIntegrationCard } from '@/components/config/McpIntegrationCard';
 import packageJson from '../../package.json';
 
 // Use a safe wrapper for version to avoid hydration issues if it changes between environments
@@ -667,11 +668,7 @@ function ConfigPageContent() {
                             </div>
                         </div>
 
-                        <div className="flex flex-col justify-center gap-2">
-                             <p className="text-xs text-slate-500 font-medium bg-slate-50 p-4 rounded-xl border border-slate-100 italic">
-                                Puedes cambiar entre modo Administrador y Vendedor para previsualizar cómo ven la plataforma tus colaboradores.
-                             </p>
-                        </div>
+                        <McpIntegrationCard user={user} role={role} />
                     </div>
                 </div>
 

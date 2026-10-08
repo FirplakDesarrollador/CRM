@@ -1,4 +1,5 @@
 import Dexie, { Table } from 'dexie';
+import { useSyncExternalStore } from 'react';
 import { registerAuditHooks } from './auditHooks';
 
 // Define Types for Local Tables (Mirroring Server)
@@ -106,6 +107,7 @@ export interface LocalQuote {
     currency_id: string;
     status: 'DRAFT' | 'SENT' | 'APPROVED' | 'REJECTED' | 'WINNER';
     is_winner?: boolean;
+    is_deleted?: boolean;
     es_pedido?: boolean; // Nuevo campo para diferenciar pedidos
     segmento_id?: number | null; // Segmento del pedido/cotización
 
@@ -148,6 +150,8 @@ export interface LocalQuote {
     entrega_en_obra?: boolean;
     bodega_externa?: boolean;
     bodega_firplak?: boolean;
+    tipo_pod?: string;
+    pod?: string;
 
     created_by?: string;
     updated_by?: string;
@@ -228,6 +232,8 @@ export interface LocalPedido {
     entrega_en_obra?: boolean;
     bodega_externa?: boolean;
     bodega_firplak?: boolean;
+    tipo_pod?: string;
+    pod?: string;
 
     created_by?: string;
     updated_by?: string;
@@ -423,6 +429,31 @@ export class CRMFirplakDB extends Dexie {
             pedidos: 'uuid_generado, cotizacion_id, opportunity_id',
             pedidoItems: 'id, pedido_uuid'
         });
+        this.version(15).stores({
+            outbox: 'id, entity_type, status, field_timestamp, field_name, user_id, next_attempt_at, [entity_type+entity_id+field_name]',
+            fileQueue: 'id, status',
+            syncCursors: 'id, user_id, table_name, updated_at',
+            syncRuns: 'id, kind, trigger, status, started_at',
+            localContext: 'id, user_id, status',
+            accounts: 'id, nit, nit_base, nombre, owner_user_id',
+            opportunities: 'id, account_id, owner_user_id',
+            contacts: 'id, account_id, email',
+            quotes: 'id, opportunity_id, status, es_pedido',
+            quoteItems: 'id, cotizacion_id',
+            activities: 'id, opportunity_id, account_id, user_id, fecha_inicio, tipo_actividad',
+            phases: 'id, canal_id, orden',
+            subclasificaciones: 'id, canal_id',
+            segments: '++id, subclasificacion_id',
+            countries: 'id',
+            departments: 'id, pais_id, nombre',
+            cities: 'id, departamento_id, nombre',
+            activityClassifications: 'id, tipo_actividad',
+            activitySubclassifications: 'id, clasificacion_id',
+            lossReasons: 'id',
+            opportunityCollaborators: 'id, oportunidad_id, usuario_id',
+            pedidos: 'uuid_generado, cotizacion_id, opportunity_id',
+            pedidoItems: 'id, pedido_uuid'
+        });
         registerAuditHooks(this);
     }
 }
@@ -495,7 +526,44 @@ export function localDatabaseNameForUser(userId: string | null): string {
 
 let activeUserId: string | null = null;
 let activeDatabase = new CRMFirplakDB(ANONYMOUS_DATABASE_NAME);
+let activeDatabaseVersion = 0;
 let activationQueue: Promise<void> = Promise.resolve();
+
+type DatabaseChangeListener = (userId: string | null, database: CRMFirplakDB) => void;
+const databaseChangeListeners = new Set<DatabaseChangeListener>();
+
+export function onDatabaseChange(listener: DatabaseChangeListener): () => void {
+    databaseChangeListeners.add(listener);
+    return () => {
+        databaseChangeListeners.delete(listener);
+    };
+}
+
+export function getActiveDatabaseVersion(): number {
+    return activeDatabaseVersion;
+}
+
+function subscribeDatabaseChange(callback: () => void): () => void {
+    return onDatabaseChange(() => {
+        callback();
+    });
+}
+
+export function useActiveLocalUserId(): string | null {
+    return useSyncExternalStore(
+        subscribeDatabaseChange,
+        () => activeUserId,
+        () => null
+    );
+}
+
+export function useActiveDatabaseVersion(): number {
+    return useSyncExternalStore(
+        subscribeDatabaseChange,
+        () => activeDatabaseVersion,
+        () => 0
+    );
+}
 
 async function legacyHasData(legacy: CRMFirplakDB): Promise<boolean> {
     for (const table of legacy.tables) {
@@ -583,7 +651,16 @@ async function switchLocalDatabase(userId: string | null): Promise<void> {
     const previousDatabase = activeDatabase;
     activeDatabase = nextDatabase;
     activeUserId = userId;
+    activeDatabaseVersion++;
     previousDatabase.close();
+
+    databaseChangeListeners.forEach((listener) => {
+        try {
+            listener(userId, activeDatabase);
+        } catch (e) {
+            console.error('[DB] Error en listener de cambio de base de datos:', e);
+        }
+    });
 }
 
 export function activateLocalDatabase(userId: string): Promise<void> {

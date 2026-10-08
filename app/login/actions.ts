@@ -10,18 +10,34 @@ export async function recoverPasswordAction(email: string, origin: string) {
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     try {
-        const { error } = await supabase.auth.resetPasswordForEmail(email, {
-            redirectTo: `${origin}/auth/callback?next=/update-password`,
+        const cleanOrigin = (origin || process.env.NEXT_PUBLIC_SITE_URL || "https://crm-64yu.vercel.app").replace(/\/+$/, "");
+        const redirectUrl = `${cleanOrigin}/auth/callback?next=/update-password`;
+
+        const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+            redirectTo: redirectUrl,
         });
 
         if (error) {
             console.error("Supabase Recovery Error:", error);
-            return { success: false, error: error.message };
+            if (error.status === 504 || error.message?.includes("504") || error.name === "AuthRetryableFetchError") {
+                return {
+                    success: false,
+                    error: "El servidor de correo de Supabase no respondió a tiempo (Error 504 / SMTP Timeout). Por favor verifica la configuración SMTP en Supabase."
+                };
+            }
+            return { success: false, error: error.message || "Error al solicitar recuperación de contraseña" };
         }
 
         return { success: true };
     } catch (e: any) {
         console.error("Server Action Error:", e);
-        return { success: false, error: e.message || "Error desconocido en el servidor" };
+        const errMsg = e.message || "";
+        if (errMsg.includes("504") || e.status === 504 || e.name === "AuthRetryableFetchError") {
+            return {
+                success: false,
+                error: "El servidor de correo de Supabase no respondió a tiempo (Error 504 / SMTP Timeout). Por favor verifica la configuración SMTP en Supabase."
+            };
+        }
+        return { success: false, error: errMsg || "Error desconocido en el servidor de autenticación" };
     }
 }

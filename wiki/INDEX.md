@@ -16,7 +16,7 @@
 - [oportunidades](pages/oportunidades.md) — Negocios en curso: fases por canal, estados, colaboradores, transferencias, motivos de pérdida, embudo.
 - [cuentas](pages/cuentas.md) — Clientes/empresas: canal obligatorio, jerarquía de sucursales, niveles premium, propietario, carga masiva, auditoría.
 - [contactos](pages/contactos.md) — Personas de las cuentas; importación vCard y auto-contacto del canal Propio.
-- [actividades](pages/actividades.md) — Tareas/eventos con clasificaciones configurables, vínculo a Outlook y alertas de vencimiento.
+- [actividades](pages/actividades.md) — Tareas y eventos con vistas Todo/Agenda/Mes, clasificaciones configurables, autosave, Dexie v15 e integración con Microsoft.
 - [cotizaciones-y-pedidos](pages/cotizaciones-y-pedidos.md) — Ciclo DRAFT→WINNER, precios por canal, descuentos por volumen, campos SAP `EXTRA_`, PDF F-V-29, módulo Pedidos.
 - [comisiones](pages/comisiones.md) — Motor en PostgreSQL: regla "lowest wins", reglas/categorías/ledger/bonos, trigger por cotización ganadora, reparto con colaboradores.
 - [canales-de-venta](pages/canales-de-venta.md) — Los 5 canales inmutables (OBRAS_NAC/INT, DIST_NAC/INT, PROPIO) y cómo determinan precios, fases y subclasificaciones.
@@ -26,6 +26,7 @@
 - [notificaciones](pages/notificaciones.md) — Reglas configurables, evento ACTIVITY_OVERDUE, campana in-app, cron con Edge Function.
 - [integraciones](pages/integraciones.md) — Microsoft Graph (correo/calendario/Planner), SAP por cola, lead intake de WordPress, ForceManager.
 - [dashboard-e-indicadores](pages/dashboard-e-indicadores.md) — Dashboard de tiles, embudo, indicadores KPI, informes Excel (ADMIN) y metas con expiración automática.
+- [servidor-mcp](pages/servidor-mcp.md) — Servidor oficial MCP (Model Context Protocol): herramientas operativas duales (stdio/SSE), filtrado dinámico de roles, recursos nativos y política de cero borrado.
 
 ## Páginas pendientes (enlaces `[[...]]` sin página)
 

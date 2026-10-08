@@ -6,11 +6,10 @@ import { useActivities, LocalActivity } from '@/lib/hooks/useActivities';
 import { useInfiniteScroll } from '@/lib/hooks/useInfiniteScroll';
 import { useDebounce } from '@/lib/hooks/useDebounce';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '@/lib/db';
+import { db, getActiveLocalUserId, useActiveDatabaseVersion } from '@/lib/db';
 import { syncEngine } from '@/lib/sync';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { hasPermission } from '@/lib/permissions';
-import { useUsers } from '@/lib/hooks/useUsers';
 import {
     Calendar as CalendarIcon,
     ChevronLeft,
@@ -32,6 +31,7 @@ import {
     CheckCircle,
     AlertTriangle
 } from 'lucide-react';
+import { handleEntityLinkClick } from '@/lib/utils/navigation';
 
 import { cn } from '@/components/ui/utils';
 import { CreateActivityModal } from '@/components/activities/CreateActivityModal';
@@ -48,10 +48,14 @@ function ActivitiesContent() {
     const { user, role } = useCurrentUser();
     const canViewAll = hasPermission(role, 'view_all_activities');
 
+    // Keep active user id and db version across quick session/token revalidations to prevent calendar flickers
+    const activeUserId = user?.id || getActiveLocalUserId();
+    const dbVersion = useActiveDatabaseVersion();
+
     // Load collaborators to know which opportunities the user collaborates in
     const userCollaborations = useLiveQuery(
-        () => user ? db.opportunityCollaborators.where('usuario_id').equals(user.id).toArray() : [],
-        [user]
+        () => activeUserId ? db.opportunityCollaborators.where('usuario_id').equals(activeUserId).toArray() : [],
+        [activeUserId, dbVersion]
     ) || [];
 
     const collaborativeOppIds = useMemo(() => {
@@ -61,16 +65,10 @@ function ActivitiesContent() {
 
 
     // Catalogs
-    const classifications = useLiveQuery(() => db.activityClassifications.toArray().then(arr => arr.filter(c => !c.is_deleted)), []) || [];
-    const subclassifications = useLiveQuery(() => db.activitySubclassifications.toArray().then(arr => arr.filter(s => !s.is_deleted)), []) || [];
+    const classifications = useLiveQuery(() => db.activityClassifications.toArray().then(arr => arr.filter(c => !c.is_deleted)), [activeUserId, dbVersion]) || [];
+    const subclassifications = useLiveQuery(() => db.activitySubclassifications.toArray().then(arr => arr.filter(s => !s.is_deleted)), [activeUserId, dbVersion]) || [];
 
-    // PROACTIVE SYNC: If catalogs are empty, trigger a pull
-    useEffect(() => {
-        if (classifications.length === 0 && navigator.onLine) {
-            console.log("[ActivitiesPage] Catalogs empty, triggering sync...");
-            syncEngine.triggerSync();
-        }
-    }, [classifications.length]);
+// Catalogs are managed by global sync
 
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [view, setView] = useState<ActivityView>(() => {
@@ -298,9 +296,8 @@ function ActivitiesContent() {
     const [displayLimit, setDisplayLimit] = useState(20);
 
     // Hook data for filters
-    const { users } = useUsers();
-    const accounts = useLiveQuery(() => db.accounts.toArray()) || [];
-    const opportunities = useLiveQuery(() => db.opportunities.toArray()) || [];
+    const accounts = useLiveQuery(() => db.accounts.toArray(), [activeUserId, dbVersion]) || [];
+    const opportunities = useLiveQuery(() => db.opportunities.toArray(), [activeUserId, dbVersion]) || [];
 
 
 
@@ -343,15 +340,24 @@ function ActivitiesContent() {
             return;
         }
 
-        if (id && activities) {
-            const act = activities.find(a => a.id === id);
+        const findAndOpen = async () => {
+            let act = activities?.find(a => a.id === id);
+            if (!act) {
+                try {
+                    act = await db.activities.get(id);
+                } catch (e) {
+                    console.warn("[ActivitiesPage] local DB fetch failed", e);
+                }
+            }
             if (act) {
                 lastProcessedUrlIdRef.current = id;
-                setSelectedDate(new Date(act.fecha_inicio));
+                if (act.fecha_inicio) setSelectedDate(new Date(act.fecha_inicio));
                 setSelectedActivity(act);
                 setIsModalOpen(true);
             }
-        }
+        };
+
+        findAndOpen();
     }, [searchParams, activities, isModalOpen]);
 
 
@@ -397,19 +403,24 @@ function ActivitiesContent() {
 
     // PERF FIX: Apply global filters once, then derive views from the result
     const globallyFilteredActivities = useMemo(() => {
-        if (!activities) return [];
+        const sourceActivities = activities || [];
+        if (sourceActivities.length === 0) return [];
         const lowerQuery = debouncedSearchQuery.toLowerCase();
 
         // Optimize lookup for search matches (O(1) instead of O(N))
         const oppMap = new Map(opportunities.map(o => [o.id, o]));
         const accMap = new Map(accounts.map(a => [a.id, a]));
 
-        return activities.filter(act => {
+        const effectiveUserId = user?.id || activeUserId;
+
+        const filtered = sourceActivities.filter(act => {
+            if (act.is_deleted) return false;
+
             // Apply role-based filtering: VENDEDOR and similar roles only see their own activities or those of opportunities they collaborate on
             if (!canViewAll) {
-                if (!user) return false; // Prevent leak while loading
+                if (!effectiveUserId) return false; // Prevent leak if identity is genuinely unknown
                 
-                const isOwner = act.user_id === user.id;
+                const isOwner = act.user_id === effectiveUserId;
                 const isCollaborator = act.opportunity_id ? collaborativeOppIds.has(act.opportunity_id) : false;
                 if (!isOwner && !isCollaborator) {
                     return false;
@@ -469,16 +480,20 @@ function ActivitiesContent() {
 
             return true;
         });
-    }, [activities, filterType, filterClassification, filterSubclassification, debouncedSearchQuery, canViewAll, user, collaborativeOppIds, filterUser, filterStatus, filterChannel, filterDateFrom, filterDateTo, opportunities, accounts]);
+
+        return filtered;
+    }, [activities, filterType, filterClassification, filterSubclassification, debouncedSearchQuery, canViewAll, user, activeUserId, collaborativeOppIds, filterUser, filterStatus, filterChannel, filterDateFrom, filterDateTo, opportunities, accounts]);
 
     // Count overdue activities for badge (computed from role-filtered but ignoring current status filter)
     const overdueCount = useMemo(() => {
-        if (!activities) return 0;
+        const sourceActivities = activities || [];
+        if (sourceActivities.length === 0) return 0;
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        return activities.filter(act => {
-            if (!canViewAll && user) {
-                const isOwner = act.user_id === user.id;
+        const effectiveUserId = user?.id || activeUserId;
+        return sourceActivities.filter(act => {
+            if (!canViewAll && effectiveUserId) {
+                const isOwner = act.user_id === effectiveUserId;
                 const isCollaborator = act.opportunity_id ? collaborativeOppIds.has(act.opportunity_id) : false;
                 if (!isOwner && !isCollaborator) return false;
             }
@@ -488,7 +503,7 @@ function ActivitiesContent() {
             actDate.setHours(0, 0, 0, 0);
             return actDate < today;
         }).length;
-    }, [activities, canViewAll, user, collaborativeOppIds]);
+    }, [activities, canViewAll, user, activeUserId, collaborativeOppIds]);
 
     // For agenda/all views: filter by selected date + sort
     const filteredActivities = useMemo(() => {
@@ -837,7 +852,7 @@ function ActivitiesContent() {
                                                     if ('showPicker' in e.target) {
                                                         (e.target as HTMLInputElement).showPicker();
                                                     }
-                                                } catch (err) {}
+                                                } catch {}
                                             }}
                                             value={
                                                 view === 'agenda'
@@ -937,10 +952,12 @@ function ActivitiesContent() {
                                         const subName = subclassificationNode?.nombre;
 
                                         return (
-                                            <div
+                                            <a
                                                 key={act.id}
+                                                href={`/actividades?id=${act.id}`}
+                                                onClick={(e) => handleEntityLinkClick(e, `/actividades?id=${act.id}`, () => openActivityModal(act))}
                                                 className={cn(
-                                                    "group p-4 bg-white rounded-2xl border transition-all hover:shadow-md cursor-pointer",
+                                                    "group p-4 bg-white rounded-2xl border transition-all hover:shadow-md cursor-pointer block no-underline text-inherit",
                                                     act.is_completed
                                                         ? "border-slate-100 opacity-75"
                                                         : isOverdue
@@ -949,7 +966,6 @@ function ActivitiesContent() {
                                                                 ? "border-emerald-200 hover:border-emerald-300 hover:shadow-emerald-100"
                                                                 : "border-blue-200 hover:border-blue-300 hover:shadow-blue-100"
                                                 )}
-                                                onClick={() => openActivityModal(act)}
                                             >
                                                 <div className="flex items-start gap-4">
                                                     <button
@@ -992,10 +1008,6 @@ function ActivitiesContent() {
                                                                             </span>
                                                                         )}
                                                                     </div>
-                                                                {/* DEBUG INDICATOR */}
-                                                                {act.clasificacion_id && !clsName && (
-                                                                    <div className="text-[10px] text-red-500 font-bold mt-1">Error L: {act.clasificacion_id}</div>
-                                                                )}
                                                             </div>
 
                                                             {act.tipo_actividad === 'EVENTO' ? (
@@ -1037,7 +1049,7 @@ function ActivitiesContent() {
                                                         </div>
                                                     </div>
                                                 </div>
-                                            </div>
+                                            </a>
                                         );
                                     })}
 
@@ -1103,7 +1115,7 @@ function ActivitiesContent() {
                                                     key={`day-${i}`}
                                                     onClick={() => { setSelectedDate(currentDate); setView('agenda'); }}
                                                     className={cn(
-                                                        "group relative bg-white p-1.5 min-h-[90px] transition-all cursor-pointer flex flex-col",
+                                                        "group/day relative bg-white p-1.5 min-h-[90px] transition-all cursor-pointer flex flex-col",
                                                         isSelected ? "bg-blue-50 ring-2 ring-inset ring-blue-500" : "hover:bg-slate-50",
                                                         isToday && !isSelected && "bg-amber-50/50"
                                                     )}
@@ -1135,10 +1147,14 @@ function ActivitiesContent() {
                                                             const isOverdueAct = !act.is_completed && new Date(act.fecha_inicio).setHours(0, 0, 0, 0) < new Date().setHours(0, 0, 0, 0);
                                                             return (
                                                                 <div key={act.id} className="flex gap-1 group/act">
-                                                                    <div
-                                                                        onClick={() => openActivityModal(act)}
+                                                                    <a
+                                                                        href={`/actividades?id=${act.id}`}
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation();
+                                                                            handleEntityLinkClick(e, `/actividades?id=${act.id}`, () => openActivityModal(act));
+                                                                        }}
                                                                         className={cn(
-                                                                            "text-[9px] px-1 py-0.5 rounded truncate font-medium border-l-2 flex-1 cursor-pointer",
+                                                                            "text-[9px] px-1 py-0.5 rounded truncate font-medium border-l-2 flex-1 cursor-pointer no-underline block",
                                                                             act.is_completed
                                                                                 ? "bg-slate-50 text-slate-400 border-slate-300 line-through"
                                                                                 : isOverdueAct
@@ -1150,7 +1166,7 @@ function ActivitiesContent() {
                                                                         title={act.asunto}
                                                                     >
                                                                         {act.asunto}
-                                                                    </div>
+                                                                    </a>
                                                                     <button
                                                                         onClick={(e) => {
                                                                             e.stopPropagation();
@@ -1191,11 +1207,15 @@ function ActivitiesContent() {
                                                                     const cName = classifications.find(c => String(c.id) === String(act.clasificacion_id))?.nombre;
 
                                                                     return (
-                                                                        <div 
+                                                                        <a 
                                                                             key={act.id} 
-                                                                            onClick={() => openActivityModal(act)}
+                                                                            href={`/actividades?id=${act.id}`}
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation();
+                                                                                handleEntityLinkClick(e, `/actividades?id=${act.id}`, () => openActivityModal(act));
+                                                                            }}
                                                                             className={cn(
-                                                                                "relative group/tip flex items-center gap-2 p-1.5 rounded border-l-2 transition-all hover:bg-slate-50 cursor-pointer",
+                                                                                "relative group/tip flex items-center gap-2 p-1.5 rounded border-l-2 transition-all hover:bg-slate-50 cursor-pointer no-underline text-inherit block",
                                                                                 act.is_completed
                                                                                     ? "bg-slate-50/50 text-slate-400 border-slate-300"
                                                                                     : isOverdueAct
@@ -1236,7 +1256,7 @@ function ActivitiesContent() {
                                                                             >
                                                                                 <CheckCircle2 className="w-4 h-4" />
                                                                             </button>
-                                                                        </div>
+                                                                        </a>
                                                                     );
                                                                 })}
                                                             </div>

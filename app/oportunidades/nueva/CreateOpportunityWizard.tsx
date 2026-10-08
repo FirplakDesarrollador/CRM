@@ -759,7 +759,7 @@ export default function CreateOpportunityWizard() {
                                 disabled={!selectedAccount?.subclasificacion_id}
                             >
                                 <option value="">Seleccione un segmento...</option>
-                                {segments
+                                {displaySegments
                                     .filter((seg: any) => selectedAccount?.subclasificacion_id && seg.subclasificacion_id === Number(selectedAccount.subclasificacion_id))
                                     .map((seg: any) => (
                                         <option key={seg.id} value={seg.id}>

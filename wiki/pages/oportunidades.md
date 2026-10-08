@@ -54,7 +54,7 @@ solo COORDINADOR/ADMIN); el historial queda en `CRM_TransferenciasOportunidad`.
   - **Sin actividad:** Indicador tenue cuando la oportunidad no registra tareas ni eventos.
 - **Formato de Moneda y Separadores (`lib/utils.ts`):** Todos los valores de oportunidad (en el encabezado `DetailHeader`, tarjetas de importe, previsualización de entradas manuales, vista rápida `OpportunityQuickView` y listados) aplican el formato estándar de Colombia (`es-CO`: punto para miles, coma para decimales, ej. `COP 152.266.785,2`) mediante `formatNumberCO` y `formatOpportunityAmount`.
 - **Vista móvil:** Tarjetas responsivas con detalles de la cuenta (País, Ciudad, Canal), badges de fase, estado, indicador de actividad, valor en COP, cierre estimado, avatar del vendedor y acceso directo al detalle.
-- **Vista desktop:** Tabla interactiva (Handsontable) que inicia con la columna **OPORTUNIDAD** (nombre del negocio), seguida de **CUENTA**, **ACTIVIDAD**, **PAÍS**, **CIUDAD** y **CANAL**, con soporte de redimensionamiento manual (`manualColumnResize`), selector de columnas visibles (`ALL_COLUMNS`), ordenamiento dinámico por cabecera y selección por clic de fila para navegar al detalle con persistencia de estado en `sessionStorage`/URL.
+- **Vista desktop:** Tabla interactiva (Handsontable) que inicia con la columna **OPORTUNIDAD** (nombre del negocio), seguida de **CUENTA**, **ACTIVIDAD**, **PAÍS**, **CIUDAD** y **CANAL**, con soporte de redimensionamiento manual (`manualColumnResize`), selector de columnas visibles (`ALL_COLUMNS`), ordenamiento dinámico por cabecera y filtros internos por valor (`dropdownMenu`). Para evitar el error `[object Object]` en filtros, los datos de cada columna se normalizan a tipos primitivos (`string` / `number` vía `lib/opportunityTableHelpers.ts`) y los renderers y clics traducen el índice visual a fila física (`instance.toPhysicalRow`) garantizando navegación y enlaces correctos cuando la tabla está filtrada. Además, los controles de filtro incorporan localización oficial en español (`esMX`).
 
 ## Visibilidad
 
@@ -72,9 +72,10 @@ agrupación por fase `20260304`) que agrupan oportunidades por fase. Ver
 
 - `CreateOpportunityWizard` usa `LAST_STEP_INDEX` y una ventana corta de habilitacion para impedir que un doble clic al avanzar cree la oportunidad antes de revisar el ultimo paso de Equipo.
 - **Prevención de Duplicados (Base de datos):** Se implementó un trigger (`trigger_prevent_duplicate_oportunidades`) que lanza una excepción bloqueando la inserción si se detecta otra oportunidad creada hace menos de 10 segundos con el mismo `account_id` y `nombre`. Esto previene la creación de "clones exactos" por errores de red, reintentos de API o clics múltiples.
+- **Sincronización Inmediata de Importe (`lib/opportunityQuoteSync.ts`):** El valor de la oportunidad (`CRM_Oportunidades.amount`) se sincroniza de forma atómica e inmediata cada vez que se crea una cotización, se agregan/editan productos en una cotización (`updateQuoteTotal`), o se alterna entre cotizaciones en la pestaña **Productos** (`resolveActiveQuote`). La cotización `WINNER` tiene precedencia absoluta; si no hay ganadora, la cotización activa define el importe.
 
 ## Fuentes
 
 - `app/oportunidades/` (páginas), `components/oportunidades/`, `components/opportunities/`
-- `lib/hooks/useOpportunities.ts`, `useOpportunitiesServer.ts`, `useSalesFunnel.ts`
+- `lib/hooks/useOpportunities.ts`, `useOpportunitiesServer.ts`, `useSalesFunnel.ts`, `lib/opportunityQuoteSync.ts`
 - Migraciones: fases por canal (`202601xx`), `20260202_add_probability`, `20260205_loss_reasons`, `20260211_add_opportunity_collaborators`

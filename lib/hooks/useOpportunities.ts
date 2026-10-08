@@ -6,6 +6,8 @@ import { supabase } from "@/lib/supabase";
 import { v4 as uuidv4 } from 'uuid';
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { sendOpportunityDeletionEmail } from "@/lib/services/notifications";
+import { shouldUpdateOpportunityAmount, getOpportunityAmountFromQuote, resolveActiveQuote } from "@/lib/opportunityQuoteSync";
+import { sanitizeQuoteItemUpdates } from "@/lib/quotePricing";
 
 // Helper to fetch pricing from server
 async function fetchPricing(productId: string, channelId: string, qty: number) {
@@ -475,15 +477,40 @@ export function useQuotes(opportunityId?: string) {
             }))
             : [];
 
-        await syncEngine.commitLocalChanges([db.quotes, db.quoteItems], async () => {
+        let updatedOpp: LocalOportunidad | null = null;
+        if (oppId) {
+            const opp = await db.opportunities.get(oppId);
+            if (opp) {
+                const existingQuotes = await db.quotes.where('opportunity_id').equals(oppId).toArray();
+                if (shouldUpdateOpportunityAmount(newQuote, {}, existingQuotes)) {
+                    const nextAmount = getOpportunityAmountFromQuote(newQuote);
+                    if (opp.amount !== nextAmount) {
+                        updatedOpp = {
+                            ...opp,
+                            amount: nextAmount,
+                            updated_at: new Date().toISOString()
+                        };
+                    }
+                }
+            }
+        }
+
+        await syncEngine.commitLocalChanges([db.quotes, db.quoteItems, ...(updatedOpp ? [db.opportunities] : [])], async () => {
             await db.quotes.add(newQuote);
             if (newItems.length > 0) await db.quoteItems.bulkAdd(newItems);
+            if (updatedOpp) await db.opportunities.put(updatedOpp);
             return [
                 { entityTable: 'CRM_Cotizaciones', entityId: id, changes: newQuote, options: { isSnapshot: true } },
                 ...newItems.map(item => {
                     const { subtotal, ...itemData } = item;
                     return { entityTable: 'CRM_CotizacionItems', entityId: item.id, changes: itemData, options: { isSnapshot: true } };
-                })
+                }),
+                ...(updatedOpp ? [{
+                    entityTable: 'CRM_Oportunidades',
+                    entityId: updatedOpp.id,
+                    changes: sanitizeOpportunityForSync(updatedOpp),
+                    options: { isSnapshot: true }
+                }] : [])
             ];
         });
 
@@ -498,16 +525,37 @@ export function useQuotes(opportunityId?: string) {
             return;
         }
 
-        const updatedQuote = { ...currentQuote, ...updates, updated_at: new Date().toISOString() };
+        const updatedQuote = { ...currentQuote, ...updates, updated_at: updates.updated_at || new Date().toISOString() };
         let updatedOpp: LocalOportunidad | null = null;
-        if (updates.segmento_id !== undefined && currentQuote.opportunity_id) {
+        if (currentQuote.opportunity_id) {
             const opp = await db.opportunities.get(currentQuote.opportunity_id);
-            if (opp && opp.segmento_id !== updates.segmento_id) {
-                updatedOpp = { ...opp, segmento_id: updates.segmento_id, updated_at: new Date().toISOString() };
+            if (opp) {
+                let needsOppUpdate = false;
+                const oppChanges: Partial<LocalOportunidad> = {};
+
+                if (updates.segmento_id !== undefined && opp.segmento_id !== updates.segmento_id) {
+                    oppChanges.segmento_id = updates.segmento_id;
+                    needsOppUpdate = true;
+                }
+
+                if (updates.total_amount !== undefined) {
+                    const allQuotes = await db.quotes.where('opportunity_id').equals(currentQuote.opportunity_id).toArray();
+                    if (shouldUpdateOpportunityAmount(currentQuote, updates, allQuotes)) {
+                        const nextAmount = getOpportunityAmountFromQuote(currentQuote, updates);
+                        if (opp.amount !== nextAmount) {
+                            oppChanges.amount = nextAmount;
+                            needsOppUpdate = true;
+                        }
+                    }
+                }
+
+                if (needsOppUpdate) {
+                    updatedOpp = { ...opp, ...oppChanges, updated_at: new Date().toISOString() };
+                }
             }
         }
 
-        await syncEngine.commitLocalChanges([db.quotes, db.opportunities], async () => {
+        await syncEngine.commitLocalChanges([db.quotes, ...(updatedOpp ? [db.opportunities] : [])], async () => {
             await db.quotes.put(updatedQuote);
             if (updatedOpp) await db.opportunities.put(updatedOpp);
             return [
@@ -566,21 +614,42 @@ export function useQuotes(opportunityId?: string) {
         if (!quote) return;
 
         const items = await db.quoteItems.where('cotizacion_id').equals(id).toArray();
-        await syncEngine.commitLocalChanges([db.quotes, db.quoteItems], async () => {
+        let updatedOpp: LocalOportunidad | null = null;
+
+        if (quote.opportunity_id) {
+            const opp = await db.opportunities.get(quote.opportunity_id);
+            if (opp) {
+                const remainingQuotes = (await db.quotes.where('opportunity_id').equals(quote.opportunity_id).toArray())
+                    .filter(q => q.id !== id && !q.is_deleted);
+                const nextActiveQuote = resolveActiveQuote(remainingQuotes);
+                const nextAmount = nextActiveQuote ? (nextActiveQuote.total_amount || 0) : 0;
+                if (opp.amount !== nextAmount) {
+                    updatedOpp = { ...opp, amount: nextAmount, updated_at: new Date().toISOString() };
+                }
+            }
+        }
+
+        await syncEngine.commitLocalChanges([db.quotes, db.quoteItems, ...(updatedOpp ? [db.opportunities] : [])], async () => {
             if (items.length > 0) await db.quoteItems.bulkDelete(items.map(item => item.id));
             await db.quotes.delete(id);
+            if (updatedOpp) await db.opportunities.put(updatedOpp);
             return [
                 ...items.map(item => {
                     const { subtotal, ...itemData } = item;
                     return { entityTable: 'CRM_CotizacionItems', entityId: item.id, changes: { ...itemData, is_deleted: true }, options: { isSnapshot: true } };
                 }),
-                { entityTable: 'CRM_Cotizaciones', entityId: id, changes: { ...quote, is_deleted: true }, options: { isSnapshot: true } }
+                { entityTable: 'CRM_Cotizaciones', entityId: id, changes: { ...quote, is_deleted: true }, options: { isSnapshot: true } },
+                ...(updatedOpp ? [{
+                    entityTable: 'CRM_Oportunidades', entityId: updatedOpp.id,
+                    changes: sanitizeOpportunityForSync(updatedOpp), options: { isSnapshot: true }
+                }] : [])
             ];
         });
     };
 
     return { quotes, createQuote, updateQuote, updateQuoteTotal, markAsWinner, deleteQuote };
 }
+
 
 export function useQuoteItems(quoteId?: string) {
     const items = useLiveQuery(
@@ -685,10 +754,11 @@ export function useQuoteItems(quoteId?: string) {
         const current = await db.quoteItems.get(itemId);
         if (!current) return;
 
-        const updated = { ...current, ...updates };
+        const safeUpdates = sanitizeQuoteItemUpdates(current, updates);
+        const updated = { ...current, ...safeUpdates };
 
         // If quantity changed, re-calculate pricing ONLY for linked products
-        if (updates.cantidad !== undefined && updates.cantidad !== current.cantidad && current.producto_id) {
+        if (safeUpdates.cantidad !== undefined && safeUpdates.cantidad !== current.cantidad && current.producto_id) {
             let pricing = null;
             try {
                 const parentQuote = await db.quotes.get(current.cotizacion_id);

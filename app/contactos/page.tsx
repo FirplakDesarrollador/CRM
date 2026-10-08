@@ -18,6 +18,7 @@ import dynamic from 'next/dynamic';
 import { AccountCombobox } from "@/components/accounts/AccountCombobox";
 import { ArrowUpDown, ChevronDown, ChevronUp, X } from "lucide-react";
 import { DataListToolbar } from "@/components/ui/DataListToolbar";
+import { handleEntityLinkClick } from "@/lib/utils/navigation";
 
 const HotTable = dynamic(() => import('@/components/HotTableWrapper'), { ssr: false });
 
@@ -430,19 +431,23 @@ function ContactsContent() {
 
     const hotColumns = [
         { data: 'nombre', title: 'Contacto', readOnly: true, width: colWidths['nombre'] || 200, wordWrap: false,
-            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+            renderer(instance: any, td: HTMLTableCellElement, row: number, col: number, prop: string, value: any) {
                 const v = value || '';
                 const safe = v.replace(/"/g, '&quot;');
-                td.innerHTML = `<div style="font-weight:700;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</div>`;
+                const contact = instance.getSourceDataAtRow(row)?._original;
+                const url = contact?.id ? `/contactos?id=${contact.id}` : '#';
+                td.innerHTML = `<a href="${url}" onclick="if (!event.ctrlKey && !event.metaKey && event.button === 0) { event.preventDefault(); }" style="font-weight:700;color:#0f172a;text-decoration:none;display:block;width:100%;height:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</a>`;
                 td.style.overflow = 'hidden';
                 return td;
             }
         },
         { data: 'cargo', title: 'Cargo', readOnly: true, width: colWidths['cargo'] || 160, wordWrap: false,
-            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+            renderer(instance: any, td: HTMLTableCellElement, row: number, col: number, prop: string, value: any) {
                 const v = value || '';
                 const safe = v.replace(/"/g, '&quot;');
-                td.innerHTML = `<div style="color:#475569;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</div>`;
+                const contact = instance.getSourceDataAtRow(row)?._original;
+                const url = contact?.id ? `/contactos?id=${contact.id}` : '#';
+                td.innerHTML = `<a href="${url}" onclick="if (!event.ctrlKey && !event.metaKey && event.button === 0) { event.preventDefault(); }" style="color:#475569;text-decoration:none;display:block;width:100%;height:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</a>`;
                 td.style.overflow = 'hidden';
                 return td;
             }
@@ -458,10 +463,12 @@ function ContactsContent() {
             }
         },
         { data: 'cuenta', title: 'Cuenta', readOnly: true, width: colWidths['cuenta'] || 180, wordWrap: false,
-            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+            renderer(instance: any, td: HTMLTableCellElement, row: number, col: number, prop: string, value: any) {
                 const v = value || '';
                 const safe = v.replace(/"/g, '&quot;');
-                td.innerHTML = `<div style="font-weight:600;color:#3b82f6;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</div>`;
+                const contact = instance.getSourceDataAtRow(row)?._original;
+                const url = contact?.account_id ? `/cuentas?id=${contact.account_id}` : (contact?.id ? `/contactos?id=${contact.id}` : '#');
+                td.innerHTML = `<a href="${url}" onclick="if (!event.ctrlKey && !event.metaKey && event.button === 0) { event.preventDefault(); }" style="font-weight:600;color:#3b82f6;text-decoration:none;display:block;width:100%;height:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</a>`;
                 td.style.overflow = 'hidden';
                 return td;
             }
@@ -574,10 +581,11 @@ function ContactsContent() {
                         {contacts.map((contact) => {
                             const accountName = contact.account_name || accountMap.get(contact.account_id) || "Sin cuenta";
                             return (
-                                <div 
+                                <a 
                                     key={contact.id}
-                                    onClick={() => handleEdit(contact)}
-                                    className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col hover:border-blue-300 active:scale-[0.99] transition-all relative cursor-pointer"
+                                    href={`/contactos?id=${contact.id}`}
+                                    onClick={(e) => handleEntityLinkClick(e, `/contactos?id=${contact.id}`, () => handleEdit(contact))}
+                                    className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col hover:border-blue-300 active:scale-[0.99] transition-all relative cursor-pointer no-underline text-inherit block"
                                 >
                                     <div className="p-4 border-b border-slate-100 flex justify-between items-start gap-3">
                                         <div className="flex-1 min-w-0">
@@ -614,7 +622,7 @@ function ContactsContent() {
                                             </div>
                                         </div>
                                     </div>
-                                </div>
+                                </a>
                             );
                         })}
                     </div>
@@ -794,7 +802,20 @@ function ContactsContent() {
                                         return;
                                     }
                                     if (coords.row >= 0) {
+                                        const mouseEvent = event as MouseEvent;
                                         const contact = hotData[coords.row]?._original;
+                                        if (mouseEvent?.button === 2) {
+                                            // Clic derecho: permitir menú contextual nativo del enlace
+                                            return;
+                                        }
+                                        if (mouseEvent?.button === 1 || mouseEvent?.ctrlKey || mouseEvent?.metaKey) {
+                                            if (coords.col === 3 && contact?.account_id) {
+                                                window.open(`/cuentas?id=${contact.account_id}`, '_blank');
+                                            } else if (contact?.id) {
+                                                window.open(`/contactos?id=${contact.id}`, '_blank');
+                                            }
+                                            return;
+                                        }
                                         if (contact) {
                                             handleEdit(contact);
                                         }

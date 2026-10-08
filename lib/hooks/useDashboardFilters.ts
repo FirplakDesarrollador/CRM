@@ -6,6 +6,7 @@ export interface FilterOptions {
     channels: { id: string, nombre: string }[];
     advisors: { id: string, full_name: string }[];
     clientTypes: { id: number, nombre: string }[];
+    origins: { id: string, codigo: string, nombre: string }[];
 }
 
 export function useDashboardFilters() {
@@ -13,7 +14,8 @@ export function useDashboardFilters() {
     const [options, setOptions] = useState<FilterOptions>({
         channels: [],
         advisors: [],
-        clientTypes: []
+        clientTypes: [],
+        origins: []
     });
     const [isLoading, setIsLoading] = useState(true);
 
@@ -50,10 +52,19 @@ export function useDashboardFilters() {
                     .select('id, nombre')
                     .order('nombre');
 
+                // 4. Fetch Opportunity Origins
+                const { data: origins } = await supabase
+                    .from('CRM_OrigenesOportunidad')
+                    .select('id, codigo, nombre, orden')
+                    .eq('is_active', true)
+                    .order('orden')
+                    .order('nombre');
+
                 setOptions({
                     channels: channels || [],
                     advisors: advisors || [],
-                    clientTypes: clientTypes || []
+                    clientTypes: clientTypes || [],
+                    origins: origins || []
                 });
             } catch (error) {
                 console.error('Error fetching filter options:', error);
