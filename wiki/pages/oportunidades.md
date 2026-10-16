@@ -17,6 +17,7 @@ oportunidad pertenece a una [[cuentas|cuenta]], tiene un vendedor propietario, a
 - **Estados:** `CRM_EstadosOportunidad` (p. ej. "Contacto Inicial" = id 8, usado por el
   lead intake de WordPress — ver [[integraciones]]).
 - **Probabilidad:** campo añadido en `20260202_add_probability.sql`.
+- **Fecha de Entrega:** Campo `fecha_entrega` (`DATE` nullable) registrado en `CRM_Oportunidades` (migración `20261016000000_add_fecha_entrega_to_oportunidades.sql`) para estimar y coordinar los despachos desde la oportunidad. Editable inline con guardado automático en `/oportunidades/[id]` en la grilla junto a "Fecha Cierre Estimada" y "Moneda", seleccionable en el wizard `/oportunidades/nueva` y exportable a Excel en `/informes`.
 - **Cierre perdido:** requiere motivo de pérdida (`20260205_loss_reasons.sql`,
   `LossReasonModal.tsx`).
 - **Cierre ganado:** la cotización marcada `is_winner` dispara el cálculo de
@@ -73,6 +74,15 @@ agrupación por fase `20260304`) que agrupan oportunidades por fase. Ver
 - `CreateOpportunityWizard` usa `LAST_STEP_INDEX` y una ventana corta de habilitacion para impedir que un doble clic al avanzar cree la oportunidad antes de revisar el ultimo paso de Equipo.
 - **Prevención de Duplicados (Base de datos):** Se implementó un trigger (`trigger_prevent_duplicate_oportunidades`) que lanza una excepción bloqueando la inserción si se detecta otra oportunidad creada hace menos de 10 segundos con el mismo `account_id` y `nombre`. Esto previene la creación de "clones exactos" por errores de red, reintentos de API o clics múltiples.
 - **Sincronización Inmediata de Importe (`lib/opportunityQuoteSync.ts`):** El valor de la oportunidad (`CRM_Oportunidades.amount`) se sincroniza de forma atómica e inmediata cada vez que se crea una cotización, se agregan/editan productos en una cotización (`updateQuoteTotal`), o se alterna entre cotizaciones en la pestaña **Productos** (`resolveActiveQuote`). La cotización `WINNER` tiene precedencia absoluta; si no hay ganadora, la cotización activa define el importe.
+- **Protocolo Estándar de Migración/Homologación desde vTiger (`directives/migracion_completa_oportunidades_vtiger.md` / `execution/migrate_vtiger_opportunities.mjs`):**
+  1. *Fases Canal Propio:* 0% $\rightarrow$ NULL; 10% $\rightarrow$ Primer contacto; 20-30% $\rightarrow$ Presentación de propuesta; 40% $\rightarrow$ Acuerdo de precios; 50% $\rightarrow$ Negociación final; 60% $\rightarrow$ Esperando pedido; 80%/Ganada/Pedido Enviado $\rightarrow$ Cerrada ganada; Cerrada perdida/Prospecto frío $\rightarrow$ Cerrada Perdida.
+  2. *Fechas de Cierre:* ISO `YYYY-MM-DD` estricto desde `vtiger_potential.closingdate`.
+  3. *Tipo de Cliente / Cargo:* Homologación simultánea entre `CRM_Contactos.cargo` y `CRM_Cuentas.subclasificacion_id` (Arquitecto = 19, Cliente final = 17, Decoradores = 18, Carpintero = 20).
+  4. *Bitácora y Comentarios:* Extracción completa de `vtiger_modcomments` concatenados cronológicamente `[YYYY-MM-DD]` + `description` original. En pérdida, poblar `comentarios_perdida` y razón pareto.
+  5. *Actividades Históricas:* Migración de `vtiger_activity` a `CRM_Actividades` con fechas/horas exactas, tipo de actividad y estado completado.
+  6. *Categorías Comerciales:* Normalización de `cf_1152` a `Hidromasajes`, `Baños`, `Cocinas`, `Zona de Labores`, `Institucional`.
+  7. *Correos:* Propagación bidireccional entre contactos y cuentas.
+  8. *Sincronización PWA:* Siempre actualizar `updated_at = NOW()` en todas las entidades modificadas.
 
 ## Fuentes
 

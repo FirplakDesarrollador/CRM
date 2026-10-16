@@ -125,6 +125,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
     const productDropdownRef = useRef<HTMLDivElement>(null);
     const [isActivityExpanded, setIsActivityExpanded] = useState(false);
     const [isContactExpanded, setIsContactExpanded] = useState(false);
+    const [isBusinessExpanded, setIsBusinessExpanded] = useState(false);
 
     // Estados para búsqueda y selección de cuentas existentes
     const [selectedAccount, setSelectedAccount] = useState<LocalCuenta | null>(null);
@@ -597,13 +598,36 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         const activeUsers = users?.filter(u => u.is_active) || [];
         
         return activeUsers.filter(u => {
-            // 1. Verificar Canal de Venta: Si el vendedor tiene canales asignados específicos, verificar que incluya el seleccionado
+            const fullName = (u.full_name || "").trim();
+            const email = (u.email || "").trim().toLowerCase();
+
+            // 1. Regla comercial: Excluir usuarios que no tengan nombre real (correos como nombre, vacíos o con @)
+            if (!fullName || fullName.includes("@") || fullName.toLowerCase() === email) {
+                return false;
+            }
+
+            // 2. Excluir cuentas técnicas, de desarrollo, calidad o servicios
+            if (
+                email.startsWith("tecnico") ||
+                email.startsWith("servicio") ||
+                email.startsWith("oficialde") ||
+                email.includes("calidad") ||
+                email.includes("desarrollador") ||
+                email.includes("desarrollo") ||
+                email.includes("ensamblemodular") ||
+                email.includes("digitacion") ||
+                email.includes("plomeria")
+            ) {
+                return false;
+            }
+
+            // 3. Verificar Canal de Venta: Si el vendedor tiene canales asignados específicos, verificar que incluya el seleccionado
             const userChannels = u.canales || [];
             if (userChannels.length > 0 && !userChannels.includes(selectedChannel)) {
                 return false;
             }
 
-            // 2. Verificar País: Si el vendedor tiene países asignados específicos, verificar que incluya el seleccionado
+            // 4. Verificar País: Si el vendedor tiene países asignados específicos, verificar que incluya el seleccionado
             if (selectedPais) {
                 const userPaises = u.paises && u.paises.length > 0 ? u.paises : (u.pais ? [String(u.pais)] : []);
                 if (userPaises.length > 0 && !userPaises.includes(String(selectedPais))) {
@@ -611,7 +635,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                 }
             }
 
-            // 3. Verificar Departamento: Si el vendedor tiene departamentos asignados específicos, verificar que incluya el seleccionado
+            // 5. Verificar Departamento: Si el vendedor tiene departamentos asignados específicos, verificar que incluya el seleccionado
             if (selectedDept) {
                 const userDepts = u.departamentos && u.departamentos.length > 0 ? u.departamentos : (u.departamento ? [String(u.departamento)] : []);
                 if (userDepts.length > 0 && !userDepts.includes(String(selectedDept))) {
@@ -630,19 +654,21 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         // 1. Si hay una cuenta vinculada con asesor dueño asignado, incluirlo prioritariamente
         if (selectedAccount?.owner_user_id) {
             const assignedUser = users?.find(u => u.id === selectedAccount.owner_user_id);
+            const assignedName = assignedUser?.full_name?.trim();
+            const validName = assignedName && !assignedName.includes("@") ? assignedName : null;
             list.push({
                 value: selectedAccount.owner_user_id,
-                label: assignedUser?.full_name || assignedUser?.email || "Asesor Asignado a la Cuenta"
+                label: validName || "Asesor Asignado a la Cuenta"
             });
             seenIds.add(selectedAccount.owner_user_id);
         }
 
-        // 2. Incluir únicamente los asesores que cumplen con el filtro de canal, país y departamento
+        // 2. Incluir únicamente los asesores comerciales que cumplen los filtros
         filteredAdvisors.forEach(u => {
             if (!seenIds.has(u.id)) {
                 list.push({
                     value: u.id,
-                    label: u.full_name || u.email || `Usuario ${u.id}`
+                    label: u.full_name?.trim() || "Asesor Comercial"
                 });
                 seenIds.add(u.id);
             }
@@ -718,6 +744,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         selectedAccount: LocalCuenta | null;
         accountSearchQuery: string;
         isContactExpanded: boolean;
+        isBusinessExpanded: boolean;
         isActivityExpanded: boolean;
     }
     // Configuración de borrador persistente en la nube (multi-dispositivo y recargas)
@@ -725,8 +752,9 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         selectedAccount,
         accountSearchQuery,
         isContactExpanded,
+        isBusinessExpanded,
         isActivityExpanded,
-    }), [selectedAccount, accountSearchQuery, isContactExpanded, isActivityExpanded]);
+    }), [selectedAccount, accountSearchQuery, isContactExpanded, isBusinessExpanded, isActivityExpanded]);
 
     const hasDraftContent = useCallback((values: StoreSaleFormData, extra?: any) => {
         if (!values) return false;
@@ -755,6 +783,9 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
         }
         if (draft.extraState?.isContactExpanded !== undefined) {
             setIsContactExpanded(draft.extraState.isContactExpanded);
+        }
+        if (draft.extraState?.isBusinessExpanded !== undefined) {
+            setIsBusinessExpanded(draft.extraState.isBusinessExpanded);
         }
         if (draft.extraState?.isActivityExpanded !== undefined) {
             setIsActivityExpanded(draft.extraState.isActivityExpanded);
@@ -1416,36 +1447,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                 Datos de Ubicación y Cuenta
                             </h3>
 
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                    <label className="text-sm font-medium text-slate-700 flex items-center justify-between">
-                                        <span>Cédula / NIT</span>
-                                        {selectedAccount && !isAdmin && !!selectedAccount.nit_base && <Lock className="w-3 h-3 text-slate-400" />}
-                                    </label>
-                                    <input 
-                                        {...register("nit_base")} 
-                                        disabled={!isAdmin && !!selectedAccount && !!selectedAccount.nit_base}
-                                        className="w-full mt-1 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed" 
-                                        placeholder="123456789" 
-                                    />
-                                    {duplicateAccountByNit && (
-                                        <div className="mt-1.5 p-2 bg-amber-50 border border-amber-200 rounded-lg flex items-center justify-between gap-2 text-xs">
-                                            <div className="text-amber-800 font-medium flex items-center gap-1.5 truncate">
-                                                <span>⚠️ Ya existe:</span>
-                                                <span className="font-bold truncate">{duplicateAccountByNit.nombre}</span>
-                                            </div>
-                                            <button
-                                                type="button"
-                                                onClick={() => handleSelectAccount(duplicateAccountByNit)}
-                                                className="shrink-0 bg-amber-600 hover:bg-amber-700 text-white font-semibold px-2 py-0.5 rounded text-[11px] shadow-sm transition-colors flex items-center gap-1"
-                                            >
-                                                ⚡ Vincular
-                                            </button>
-                                        </div>
-                                    )}
-                                    {errors.nit_base && <p className="text-red-500 text-xs mt-1">{errors.nit_base.message}</p>}
-                                </div>
-                            </div>
+
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 rounded-xl border border-blue-100 bg-blue-50/50">
                                 <div>
@@ -1597,8 +1599,8 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                 </div>
                             </div>
                             
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-slate-100">
-                                <div>
+                            <div className="pt-2 border-t border-slate-100">
+                                <div className="w-full">
                                     <label className="text-sm font-semibold text-blue-900 flex items-center justify-between">
                                         <span>Asesor Encargado del Cliente *</span>
                                         {selectedAccount && !isAdmin && !!selectedAccount.owner_user_id && <Lock className="w-3 h-3 text-slate-400" />}
@@ -1629,18 +1631,6 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                     {errors.asesor_id && (
                                         <p className="text-red-500 text-xs mt-1">{errors.asesor_id.message}</p>
                                     )}
-                                </div>
-                                <div>
-                                    <label className="text-sm font-medium text-slate-700 flex items-center justify-between">
-                                        <span>Dirección (Opcional)</span>
-                                        {selectedAccount && !isAdmin && !!selectedAccount.direccion && <Lock className="w-3 h-3 text-slate-400" />}
-                                    </label>
-                                    <input 
-                                        {...register("direccion")} 
-                                        disabled={!isAdmin && !!selectedAccount && !!selectedAccount.direccion}
-                                        className="w-full mt-1 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed" 
-                                        placeholder="Calle/Carrera" 
-                                    />
                                 </div>
                             </div>
                         </section>
@@ -1798,71 +1788,105 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                             )}
                         </section>
 
-                        {/* SECCIÓN OPORTUNIDAD */}
-                        <section className="space-y-4">
-                            <h3 className="text-lg font-semibold flex items-center gap-2 text-green-700 border-b pb-2">
-                                <DollarSign className="w-5 h-5" /> Datos del Negocio (Oportunidad)
-                            </h3>
-                            
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div className="md:col-span-2">
-                                    <label className="text-sm font-medium text-slate-700 flex items-center justify-between">
-                                        <span>Nombre de la Oportunidad</span>
-                                        <span className="text-[11px] text-slate-400 font-normal">(Opcional · Autogenerado)</span>
-                                    </label>
-                                    <input 
-                                        {...register("nombre_oportunidad")} 
-                                        className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-green-500 outline-none" 
-                                        placeholder={watch("nombre_cuenta") ? `Venta - ${watch("nombre_cuenta")}` : "Venta en Tienda"} 
-                                    />
-                                    {errors.nombre_oportunidad && <p className="text-red-500 text-xs mt-1">{errors.nombre_oportunidad.message}</p>}
+                        {/* SECCIÓN OPORTUNIDAD (Colapsable como Contacto del Cliente) */}
+                        <section className="space-y-4 rounded-xl border border-emerald-200 bg-emerald-50/40 p-4 transition-all">
+                            <div 
+                                onClick={() => setIsBusinessExpanded(!isBusinessExpanded)}
+                                className="flex items-center justify-between cursor-pointer select-none"
+                            >
+                                <div className="flex items-center gap-2">
+                                    <DollarSign className="w-5 h-5 text-emerald-700" />
+                                    <div>
+                                        <h3 className="text-lg font-semibold text-emerald-950">
+                                            Datos del Negocio (Oportunidad)
+                                        </h3>
+                                        <p className="text-xs text-emerald-700">
+                                            Configuración de fase, origen y modalidad del negocio.
+                                        </p>
+                                    </div>
                                 </div>
-
-                                <div>
-                                    <label className="text-sm font-medium text-slate-700">Fase de Oportunidad *</label>
-                                    <select 
-                                        {...register("fase_id")} 
-                                        className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-green-500 outline-none"
+                                <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
+                                    {!isBusinessExpanded && (
+                                        <span className="hidden sm:inline-block bg-emerald-100/80 text-emerald-800 px-2.5 py-1 rounded-full border border-emerald-200/70 font-semibold text-[11px]">
+                                            {phasesList.find(p => String(p.id) === watch("fase_id"))?.nombre || "Primer contacto"} · {origins.find(o => o.codigo === watch("origen_oportunidad"))?.nombre || watch("origen_oportunidad") || "Feria"}{watch("venta_feria") ? " · Venta de feria" : ""}
+                                        </span>
+                                    )}
+                                    <button
+                                        type="button"
+                                        className="p-1 hover:bg-emerald-200/60 rounded-lg text-emerald-700 transition-colors"
+                                        aria-label="Expandir o colapsar sección de oportunidad"
                                     >
-                                        <option value="">Seleccione fase...</option>
-                                        {phasesList.map(fase => (
-                                            <option key={fase.id} value={String(fase.id)}>{fase.nombre}</option>
-                                        ))}
-                                    </select>
-                                    {errors.fase_id && <p className="text-red-500 text-xs mt-1">{errors.fase_id.message}</p>}
-                                </div>
-                                
-                                <div>
-                                    <label className="text-sm font-medium text-slate-700">Origen de Oportunidad *</label>
-                                    <select 
-                                        {...register("origen_oportunidad")} 
-                                        className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-green-500 outline-none"
-                                    >
-                                        {isLoadingOrigins && <option value="">Cargando...</option>}
-                                        {!isLoadingOrigins && origins.length === 0 && (
-                                            <>
-                                                <option value="visita">Visita</option>
-                                                <option value="wp">WhatsApp</option>
-                                            </>
-                                        )}
-                                        {origins.map(origin => <option key={origin.id} value={origin.codigo}>{origin.nombre}</option>)}
-                                    </select>
-                                    {errors.origen_oportunidad && <p className="text-red-500 text-xs mt-1">{errors.origen_oportunidad.message}</p>}
+                                        {isBusinessExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                                    </button>
                                 </div>
                             </div>
+                            
+                            {isBusinessExpanded && (
+                                <div className="space-y-4 pt-3 border-t border-emerald-200/60">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div className="md:col-span-2">
+                                            <label className="text-sm font-medium text-slate-700 flex items-center justify-between">
+                                                <span>Nombre de la Oportunidad</span>
+                                                <span className="text-[11px] text-slate-400 font-normal">(Opcional · Autogenerado)</span>
+                                            </label>
+                                            <input 
+                                                {...register("nombre_oportunidad")} 
+                                                className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-emerald-500 outline-none" 
+                                                placeholder={watch("nombre_cuenta") ? `Venta - ${watch("nombre_cuenta")}` : "Venta en Tienda"} 
+                                            />
+                                            {errors.nombre_oportunidad && <p className="text-red-500 text-xs mt-1">{errors.nombre_oportunidad.message}</p>}
+                                        </div>
 
-                            <label className="flex items-start gap-3 p-4 rounded-xl border-2 border-amber-200 bg-amber-50 cursor-pointer">
-                                <input type="checkbox" {...register("venta_feria")} className="mt-1 w-5 h-5 rounded border-amber-400 text-amber-600" />
-                                <TicketCheck className="w-5 h-5 text-amber-700 mt-0.5" />
-                                <span>
-                                    <span className="block font-bold text-amber-900">Venta de feria</span>
-                                    <span className="block text-xs text-amber-700">Usa el precio de feria y reserva el inventario seleccionado al crear la oportunidad.</span>
-                                </span>
-                            </label>
+                                        <div>
+                                            <label className="text-sm font-medium text-slate-700">Fase de Oportunidad *</label>
+                                            <select 
+                                                {...register("fase_id")} 
+                                                className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-emerald-500 outline-none"
+                                            >
+                                                <option value="">Seleccione fase...</option>
+                                                {phasesList.map(fase => (
+                                                    <option key={fase.id} value={String(fase.id)}>{fase.nombre}</option>
+                                                ))}
+                                            </select>
+                                            {errors.fase_id && <p className="text-red-500 text-xs mt-1">{errors.fase_id.message}</p>}
+                                        </div>
+                                        
+                                        <div>
+                                            <label className="text-sm font-medium text-slate-700">Origen de Oportunidad *</label>
+                                            <select 
+                                                {...register("origen_oportunidad")} 
+                                                className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-emerald-500 outline-none"
+                                            >
+                                                {isLoadingOrigins && <option value="">Cargando...</option>}
+                                                {!isLoadingOrigins && origins.length === 0 && (
+                                                    <>
+                                                        <option value="feria">Feria</option>
+                                                        <option value="visita">Visita</option>
+                                                        <option value="wp">WhatsApp</option>
+                                                    </>
+                                                )}
+                                                {origins.map(origin => <option key={origin.id} value={origin.codigo}>{origin.nombre}</option>)}
+                                            </select>
+                                            {errors.origen_oportunidad && <p className="text-red-500 text-xs mt-1">{errors.origen_oportunidad.message}</p>}
+                                        </div>
+                                    </div>
 
-                            {/* BUSCADOR DE PRODUCTOS */}
+                                    <label className="flex items-start gap-3 p-4 rounded-xl border-2 border-amber-200 bg-amber-50 cursor-pointer">
+                                        <input type="checkbox" {...register("venta_feria")} className="mt-1 w-5 h-5 rounded border-amber-400 text-amber-600" />
+                                        <TicketCheck className="w-5 h-5 text-amber-700 mt-0.5" />
+                                        <span>
+                                            <span className="block font-bold text-amber-900">Venta de feria</span>
+                                            <span className="block text-xs text-amber-700">Usa el precio de feria y reserva el inventario seleccionado al crear la oportunidad.</span>
+                                        </span>
+                                    </label>
+                                </div>
+                            )}
+                        </section>
+
+                        {/* SECCIÓN PRODUCTOS (Permanece abierta para interacción inmediata) */}
+                        <section className="space-y-4">
                             <div className="pt-2">
-                                <label className="text-sm font-medium text-slate-700">Productos de la Oportunidad</label>
+                                <label className="text-sm font-semibold text-slate-700 block">Productos de la Oportunidad</label>
                                 <div className="relative mt-1 mb-3" ref={productDropdownRef}>
                                     <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                                         <Search className="w-4 h-4 text-slate-400" />

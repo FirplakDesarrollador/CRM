@@ -347,10 +347,12 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
             ...sanitizedUpdates,
             updated_at: new Date().toISOString(),
             // Sanitize critical dates (Postgres dislikes empty strings for DATE type)
-            fecha_cierre_estimada: (updates.fecha_cierre_estimada === "" ? null : (updates.fecha_cierre_estimada ?? current.fecha_cierre_estimada))
+            fecha_cierre_estimada: (updates.fecha_cierre_estimada === "" ? null : (updates.fecha_cierre_estimada ?? current.fecha_cierre_estimada)),
+            fecha_entrega: (updates.fecha_entrega === "" ? null : (updates.fecha_entrega ?? current.fecha_entrega))
         };
         // Double check if the merged result is still "" (from current)
         if (updated.fecha_cierre_estimada === "") updated.fecha_cierre_estimada = null;
+        if (updated.fecha_entrega === "") updated.fecha_entrega = null;
 
         const quoteUpdates: LocalQuote[] = [];
         if (updates.segmento_id !== undefined) {

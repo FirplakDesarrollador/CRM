@@ -37,6 +37,7 @@ const schema = z.object({
     departamento_id: z.coerce.number().nullable().optional(),
     ciudad_id: z.coerce.number().nullable().optional(),
     fecha_cierre_estimada: z.string().optional().nullable(),
+    fecha_entrega: z.string().optional().nullable(),
     origen_oportunidad: z.string().optional().nullable(),
     url_origen: z.string().optional().nullable(),
     fuente_conversion: z.string().optional().nullable(),
@@ -533,6 +534,8 @@ export default function CreateOpportunityWizard() {
                 categoria_oportunidad: formatOpportunityCategories(data.categoria_oportunidad as any) || undefined,
                 contactos_ids: data.contactos_ids || [],
                 clientes_atendidos: data.clientes_atendidos !== undefined && data.clientes_atendidos !== null && data.clientes_atendidos !== "" ? Number(data.clientes_atendidos) : 0,
+                fecha_entrega: data.fecha_entrega || null,
+                fecha_cierre_estimada: data.fecha_cierre_estimada || null,
                 collaborators: collaborators
             };
 
@@ -842,7 +845,7 @@ export default function CreateOpportunityWizard() {
                             </p>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                             <div>
                                 <label className="text-sm font-medium">Valor Estimado</label>
                                 <input type="number" {...register("amount")} className="w-full p-2 border rounded-lg" />
@@ -851,6 +854,10 @@ export default function CreateOpportunityWizard() {
                             <div>
                                 <label className="text-sm font-medium">Fecha Cierre Estimada</label>
                                 <input type="date" {...register("fecha_cierre_estimada")} className="w-full p-2 border rounded-lg" />
+                            </div>
+                            <div>
+                                <label className="text-sm font-medium">Fecha de Entrega</label>
+                                <input type="date" {...register("fecha_entrega")} className="w-full p-2 border rounded-lg" />
                             </div>
                         </div>
 

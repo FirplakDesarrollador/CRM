@@ -3,6 +3,32 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-10-16 - Feature: Campo Fecha de Entrega en Oportunidades (Detalle, Wizard, Informes, DB)
+
+- **Módulo de Oportunidades (`CRM_Oportunidades`, `app/oportunidades/[id]/page.tsx`, `CreateOpportunityWizard.tsx`, `app/informes/page.tsx`):**
+  - Adición de la columna `fecha_entrega DATE` en PostgreSQL `CRM_Oportunidades` (`lnphhmowklqiomownurw`) mediante migración `20261016000000_add_fecha_entrega_to_oportunidades.sql`.
+  - Integración en el modelo Dexie/Local-first (`lib/db.ts`) y sanitización en `useOpportunities.ts` (string vacío normalizado a `null` para prevenir errores de casteo en Postgres).
+  - En la vista de detalle (`/oportunidades/[id]`), inclusión del selector de fecha en la grilla superior (`grid-cols-1 sm:grid-cols-3`) junto a "Fecha Cierre Estimada" y "Moneda", con feedback visual de guardado y auto-guardado en `onBlur`.
+  - Integración en el formulario de creación `/oportunidades/nueva` (`CreateOpportunityWizard`).
+  - Inclusión de la columna `FECHA ENTREGA` en el reporte Excel de oportunidades (`/informes`).
+  - Suite de pruebas de regresión y contrato verificada en `tests/opportunityFechaEntrega.test.ts` (6/6 casos pasados).
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+
+## 2026-10-15 - Migración: Oportunidades Asesor Juan Diego Giraldo (Excel Escritorio + vTiger MySQL)
+
+- **Migración de Oportunidades Juan Diego Giraldo (`MIGRACION JUAN DIGO (2).xlsx`, MySQL `cfirplak_crmv`):**
+  - Homologación completa de las 21 oportunidades del asesor comercial Juan Diego Giraldo desde la base de datos MySQL vTiger (`cfirplak_crmv`) hacia Supabase CRM Firplak (`lnphhmowklqiomownurw`).
+  - Mapeo estricto de etapas a fases (`fase_id` 119, 120, 121, 122) y estados (`estado_id` 1, 2, 3) conforme al embudo de Canal Propio.
+  - Sincronización de 31 actividades (`CRM_Actividades`), incluyendo seguimientos recientes.
+  - Normalización de categorías de producto (`Hidromasajes`, `Baños`, `Cocinas`, `Zona de Labores`), subclasificación de cuentas (`subclasificacion_id = 17` Cliente final), y propagación de teléfonos WhatsApp a contactos y cuentas.
+  - Aplicación de regla Local-First con `updated_at = NOW()` para descarga inmediata en clientes PWA.
+
+## 2026-10-08 - Ingest: Protocolo Estándar de Migración y Homologación de Oportunidades (vTiger → CRM Firplak)
+
+- **Protocolo de Migración Integral de Oportunidades (`directives/migracion_completa_oportunidades_vtiger.md`, `execution/migrate_vtiger_opportunities.mjs`):**
+  - Estandarización de las 8 reglas obligatorias de migración: homologación de fases según embudo del Canal Propio, formato estricto ISO `YYYY-MM-DD` en fechas de cierre, sincronización de cargo en `CRM_Contactos` y `subclasificacion_id` en `CRM_Cuentas`, concatenación cronológica de bitácora (`vtiger_modcomments`), backfill de actividades históricas (`CRM_Actividades`), normalización de categorías comerciales (`cf_1152`), propagación bidireccional de correos y actualización con `updated_at = NOW()` para sincronización offline/PWA.
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`.
+
 ## 2026-10-02 - Ingest: Reactividad de Base Local en useLiveQuery y Protección de Recarga en AppLayout (v1.1.4.9)
 
 - **Módulo de Actividades y Ciclo de Vida Local-First (`lib/db.ts`, `lib/hooks/useActivities.ts`, `components/layout/AppLayout.tsx`, `app/actividades/page.tsx`):**

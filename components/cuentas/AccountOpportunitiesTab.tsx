@@ -15,7 +15,7 @@ import { formatNumberCO } from "@/lib/utils";
 type StatusFilter = 'all' | 'open' | 'won' | 'lost';
 
 export default function AccountOpportunitiesTab({ accountId }: { accountId: string }) {
-    const [currentStatus, setCurrentStatus] = useState<StatusFilter>('open');
+    const [currentStatus, setCurrentStatus] = useState<StatusFilter>('all');
     const { deleteOpportunity } = useOpportunities();
     const { isAdmin } = useCurrentUser();
     const [oppToDelete, setOppToDelete] = useState<any | null>(null);
@@ -27,13 +27,38 @@ export default function AccountOpportunitiesTab({ accountId }: { accountId: stri
         setAccountIdFilter,
         setStatusFilter,
         setUserFilter,
+        setSearchTerm,
+        setChannelFilter,
+        setSubclassificationFilter,
+        setSegmentFilter,
+        setPhaseFilter,
+        setOriginFilter,
+        setAccountOwnerIds,
         refresh
-    } = useOpportunitiesServer({ pageSize: 100 });
+    } = useOpportunitiesServer({ pageSize: 100, initialStatus: 'all' });
 
     useEffect(() => {
         setAccountIdFilter(accountId);
         setUserFilter('unrestricted'); // Asegurar que vemos todas las oportunidades de la cuenta, sin restricciones de usuario
-    }, [accountId, setAccountIdFilter, setUserFilter]);
+        setSearchTerm('');
+        setChannelFilter(null);
+        setSubclassificationFilter(null);
+        setSegmentFilter(null);
+        setPhaseFilter(null);
+        setOriginFilter(null);
+        setAccountOwnerIds([]);
+    }, [
+        accountId, 
+        setAccountIdFilter, 
+        setUserFilter, 
+        setSearchTerm, 
+        setChannelFilter, 
+        setSubclassificationFilter, 
+        setSegmentFilter, 
+        setPhaseFilter, 
+        setOriginFilter, 
+        setAccountOwnerIds
+    ]);
 
     useEffect(() => {
         setStatusFilter(currentStatus);

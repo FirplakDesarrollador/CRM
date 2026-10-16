@@ -153,14 +153,14 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
 
     return (
         <div className="space-y-4">
-            <div className="flex justify-between items-center bg-white p-4 rounded-xl border shadow-sm">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white p-4 rounded-xl border shadow-sm">
                 <div>
                     <h3 className="font-bold text-lg text-slate-800">Pedidos Vinculados</h3>
                     <p className="text-sm text-slate-500">Maneja múltiples pedidos facturables para esta cotización.</p>
                 </div>
                 <button
                     onClick={() => setIsCreating(true)}
-                    className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition"
+                    className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition w-full sm:w-auto justify-center"
                 >
                     <Plus className="w-4 h-4" /> Nuevo Pedido Parcial
                 </button>
@@ -211,7 +211,7 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
                             </div>
 
                             {/* Detalle solicitado por el usuario */}
-                            <div className="flex-1 grid grid-cols-2 gap-x-6 gap-y-2 border-l pl-6 ml-2">
+                            <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 border-t pt-3 md:border-t-0 md:pt-0 md:border-l md:pl-6 md:ml-2">
                                 <div className="col-span-2 space-y-1">
                                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Productos y Cantidades</p>
                                     <div className="flex flex-wrap gap-2">

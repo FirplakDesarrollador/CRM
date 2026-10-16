@@ -321,6 +321,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
         setLocalAmount(opportunity?.amount || 0);
     }, [opportunity?.amount]);
     const [localClosingDate, setLocalClosingDate] = useState(toInputDate(opportunity.fecha_cierre_estimada));
+    const [localDeliveryDate, setLocalDeliveryDate] = useState(toInputDate(opportunity.fecha_entrega));
     const [localOrigen, setLocalOrigen] = useState(opportunity.origen_oportunidad || "");
     const [localUrlOrigen, setLocalUrlOrigen] = useState(opportunity.url_origen || "");
     const [localFuente, setLocalFuente] = useState(opportunity.fuente_conversion || "");
@@ -330,6 +331,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     const [isSaving, setIsSaving] = useState(false);
     const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
     const [isSavingDate, setIsSavingDate] = useState(false);
+    const [isSavingDeliveryDate, setIsSavingDeliveryDate] = useState(false);
     const [isSavingOrigen, setIsSavingOrigen] = useState(false);
     const [isSavingUrl, setIsSavingUrl] = useState(false);
     const [isSavingFuente, setIsSavingFuente] = useState(false);
@@ -385,6 +387,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     useEffect(() => {
         setLocalSegmentId(opportunity.segmento_id ? String(opportunity.segmento_id) : "");
         setLocalClosingDate(toInputDate(opportunity.fecha_cierre_estimada));
+        setLocalDeliveryDate(toInputDate(opportunity.fecha_entrega));
         setLocalOrigen(opportunity.origen_oportunidad || "");
         setLocalUrlOrigen(opportunity.url_origen || "");
         setLocalFuente(opportunity.fuente_conversion || "");
@@ -395,7 +398,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
         setLocalCategoriaOportunidad(opportunity.categoria_oportunidad || "");
         setLocalContactosIds(opportunity.contactos_ids || []);
         setLocalClientesAtendidos(opportunity.clientes_atendidos || 0);
-    }, [opportunity.segmento_id, opportunity.fecha_cierre_estimada, opportunity.origen_oportunidad, opportunity.url_origen, opportunity.fuente_conversion, opportunity.razon_perdida, opportunity.comentarios_perdida, opportunity.comentarios, opportunity.direccion_entrega, opportunity.categoria_oportunidad, opportunity.contactos_ids, opportunity.clientes_atendidos]);
+    }, [opportunity.segmento_id, opportunity.fecha_cierre_estimada, opportunity.fecha_entrega, opportunity.origen_oportunidad, opportunity.url_origen, opportunity.fuente_conversion, opportunity.razon_perdida, opportunity.comentarios_perdida, opportunity.comentarios, opportunity.direccion_entrega, opportunity.categoria_oportunidad, opportunity.contactos_ids, opportunity.clientes_atendidos]);
 
     useEffect(() => {
         const fetchSegments = async () => {
@@ -812,7 +815,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                             )}
                         </div>
 
-                        <div className="pt-4 border-t border-slate-100 grid grid-cols-2 gap-4">
+                        <div className="pt-4 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-3 gap-4">
                             <div>
                                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Fecha Cierre Estimada</label>
                                 <div className="relative group">
@@ -830,6 +833,29 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                         className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-bold text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none"
                                     />
                                     {isSavingDate && (
+                                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                            <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Fecha de Entrega</label>
+                                <div className="relative group">
+                                    <input
+                                        type="date"
+                                        value={localDeliveryDate}
+                                        onChange={(e) => setLocalDeliveryDate(e.target.value)}
+                                        onBlur={async () => {
+                                            if (localDeliveryDate !== opportunity.fecha_entrega) {
+                                                setIsSavingDeliveryDate(true);
+                                                await updateOpportunity(opportunity.id, { fecha_entrega: localDeliveryDate ? localDeliveryDate : null });
+                                                setIsSavingDeliveryDate(false);
+                                            }
+                                        }}
+                                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-bold text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none"
+                                    />
+                                    {isSavingDeliveryDate && (
                                         <div className="absolute right-3 top-1/2 -translate-y-1/2">
                                             <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
                                         </div>

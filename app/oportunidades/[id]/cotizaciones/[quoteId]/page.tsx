@@ -69,7 +69,7 @@ export default function QuoteEditorPage() {
     if (!quote) return <div className="p-8">Cargando cotización...</div>;
 
     return (
-        <div className="min-h-screen bg-slate-50 pb-20">
+        <div className="min-h-screen bg-slate-50 pb-24 overflow-x-hidden w-full">
             <DetailHeader
                 title={`Editor: ${quote.numero_cotizacion}`}
                 subtitle="Borrador"
@@ -87,28 +87,28 @@ export default function QuoteEditorPage() {
                 ]}
             />
 
-            <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
+            <div className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-6 space-y-4 sm:space-y-6 w-full">
 
                 {/* Section Tabs */}
                 <div className="flex bg-white rounded-lg p-1 shadow-sm border border-slate-200">
                     <button
                         onClick={() => setActiveSection('items')}
                         className={cn(
-                            "flex-1 py-2 text-sm font-medium rounded-md transition-colors flex items-center justify-center gap-2",
-                            activeSection === 'items' ? "bg-blue-50 text-blue-700" : "text-slate-500 hover:text-slate-800"
+                            "flex-1 py-2 sm:py-2.5 text-xs sm:text-sm font-medium rounded-md transition-colors flex items-center justify-center gap-1.5 sm:gap-2",
+                            activeSection === 'items' ? "bg-blue-50 text-blue-700 font-bold" : "text-slate-500 hover:text-slate-800"
                         )}
                     >
-                        <Package className="w-4 h-4" />
+                        <Package className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                         Ítems y Productos
                     </button>
                     <button
                         onClick={() => setActiveSection('sap')}
                         className={cn(
-                            "flex-1 py-2 text-sm font-medium rounded-md transition-colors flex items-center justify-center gap-2",
-                            activeSection === 'sap' ? "bg-blue-50 text-blue-700" : "text-slate-500 hover:text-slate-800"
+                            "flex-1 py-2 sm:py-2.5 text-xs sm:text-sm font-medium rounded-md transition-colors flex items-center justify-center gap-1.5 sm:gap-2",
+                            activeSection === 'sap' ? "bg-blue-50 text-blue-700 font-bold" : "text-slate-500 hover:text-slate-800"
                         )}
                     >
-                        Pedido <Truck className="w-4 h-4" />
+                        Pedido <Truck className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                     </button>
                 </div>
 
@@ -311,12 +311,12 @@ function QuoteItemsEditor({ quote, onItemsChange, onSaveQuote }: {
     };
 
     return (
-        <div className="space-y-6">
-            <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                <div className="flex items-center justify-between mb-6">
-                    <div>
-                        <h3 className="font-bold text-lg">Productos de la Cotización</h3>
-                        <p className="text-xs text-slate-500 italic mt-0.5">
+        <div className="space-y-4 sm:space-y-6 w-full max-w-full">
+            <div className="bg-white p-4 sm:p-6 rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 mb-5 sm:mb-6">
+                    <div className="min-w-0">
+                        <h3 className="font-bold text-base sm:text-lg text-slate-900 truncate">Productos de la Cotización</h3>
+                        <p className="text-xs text-slate-500 italic mt-0.5 truncate">
                             Lista de Precios: {
                                 {
                                     'OBRAS_NAC': 'Obras Nacional',
@@ -328,19 +328,19 @@ function QuoteItemsEditor({ quote, onItemsChange, onSaveQuote }: {
                             }
                         </p>
                     </div>
-                    <div className="flex flex-col items-end">
-                        <span className="text-xs text-slate-500 uppercase font-bold tracking-wider">Canal: {context?.channel}</span>
-                        <div className="text-2xl font-black text-blue-600">
+                    <div className="flex flex-row sm:flex-col items-center sm:items-end justify-between sm:justify-start gap-1 bg-slate-50 sm:bg-transparent p-2.5 sm:p-0 rounded-lg sm:rounded-none border sm:border-0 border-slate-100">
+                        <span className="text-[10px] sm:text-xs text-slate-500 uppercase font-bold tracking-wider">Canal: {context?.channel}</span>
+                        <div className="text-lg sm:text-2xl font-black text-blue-600 whitespace-nowrap">
                             {quote.currency_id} {new Intl.NumberFormat(quote.currency_id === 'USD' ? 'en-US' : 'es-CO', { style: 'currency', currency: quote.currency_id || 'COP' }).format(quote.total_amount || 0)}
                         </div>
                     </div>
                 </div>
 
                 {/* Add Product Search */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4 mb-5 sm:mb-6">
                     <div className="md:col-span-1">
                         <select
-                            className="w-full p-3 border border-slate-200 rounded-xl bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500 transition-all text-sm outline-none"
+                            className="w-full p-2.5 sm:p-3 border border-slate-200 rounded-xl bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500 transition-all text-xs sm:text-sm outline-none"
                             value={selectedPrefix}
                             onChange={(e) => setSelectedPrefix(e.target.value)}
                         >
@@ -357,15 +357,15 @@ function QuoteItemsEditor({ quote, onItemsChange, onSaveQuote }: {
                         </div>
                         <input
                             type="text"
-                            className="block w-full pl-10 pr-3 py-3 border border-slate-200 rounded-xl bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500 transition-all text-sm"
-                            placeholder="Buscar más productos para agregar..."
+                            className="block w-full pl-10 pr-28 sm:pr-24 py-2.5 sm:py-3 border border-slate-200 rounded-xl bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500 transition-all text-xs sm:text-sm"
+                            placeholder="Buscar productos..."
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                         />
-                        <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
+                        <div className="absolute inset-y-0 right-0 pr-2 sm:pr-3 flex items-center">
                             <button 
                                 onClick={handleAddManualItem}
-                                className="text-[10px] bg-slate-200 hover:bg-slate-300 text-slate-700 px-2 py-1 rounded-md font-bold uppercase transition-colors"
+                                className="text-[9px] sm:text-[10px] bg-slate-200 hover:bg-slate-300 text-slate-700 px-1.5 sm:px-2 py-1 rounded-md font-bold uppercase transition-colors whitespace-nowrap"
                                 title="Agregar ítem que no está en la lista"
                             >
                                 + Ítem Manual
@@ -432,119 +432,141 @@ function QuoteItemsEditor({ quote, onItemsChange, onSaveQuote }: {
                 {/* Items List */}
                 <div className="space-y-3">
                     {(!items || items.length === 0) ? (
-                        <div className="text-center py-12 bg-slate-50 rounded-xl border-2 border-dashed border-slate-200 text-slate-400">
+                        <div className="text-center py-10 sm:py-12 bg-slate-50 rounded-xl border-2 border-dashed border-slate-200 text-slate-400 text-xs sm:text-sm">
                             No hay productos agregados.
                         </div>
                     ) : (
                         items.map((item) => (
-                            <div key={item.id} className="flex flex-col md:flex-row md:items-center gap-4 p-4 bg-white border border-slate-200 rounded-xl hover:shadow-md transition-all group">
-                                <div className="flex-1 min-w-0">
-                                    {item.producto_id === null ? (
-                                        <input 
-                                            type="text"
-                                            className="font-semibold text-slate-800 w-full bg-slate-50 border-b border-slate-200 focus:outline-none focus:border-blue-500 rounded px-1 mb-1"
-                                            defaultValue={item.descripcion_linea}
-                                            onBlur={(e) => updateItem(item.id, { descripcion_linea: e.target.value })}
-                                        />
-                                    ) : (
-                                        <h4 className="font-semibold text-slate-800 line-clamp-2 leading-tight">{item.descripcion_linea}</h4>
-                                    )}
-                                    
-                                    <div className="flex items-center gap-1 mt-1">
-                                        <span className="text-xs text-slate-500">Precio Unitario: $</span>
-                                        {isQuoteItemPriceEditable(item) ? (
+                            <div key={item.id} className="p-3.5 sm:p-4 bg-white border border-slate-200 rounded-xl hover:shadow-md transition-all group space-y-3">
+                                {/* Top row: Description, Price, and Mobile Delete Button */}
+                                <div className="flex items-start justify-between gap-2">
+                                    <div className="flex-1 min-w-0">
+                                        {item.producto_id === null ? (
                                             <input 
-                                                type="number"
-                                                className="text-xs font-medium bg-slate-50 border border-slate-200 focus:border-blue-500 focus:outline-none w-28 px-1.5 py-0.5 rounded transition-all"
-                                                defaultValue={item.precio_unitario}
-                                                key={`${item.id}-price-${item.precio_unitario}`}
-                                                onBlur={(e) => {
-                                                    const val = parseFloat(e.target.value) || 0;
-                                                    if (val !== item.precio_unitario) {
-                                                        updateItem(item.id, { precio_unitario: val });
-                                                        onItemsChange();
-                                                    }
-                                                }}
+                                                type="text"
+                                                className="font-semibold text-xs sm:text-sm text-slate-800 w-full bg-slate-50 border-b border-slate-200 focus:outline-none focus:border-blue-500 rounded px-1.5 py-0.5 mb-1"
+                                                defaultValue={item.descripcion_linea}
+                                                onBlur={(e) => updateItem(item.id, { descripcion_linea: e.target.value })}
                                             />
                                         ) : (
-                                            <span className="text-xs font-semibold text-slate-700 select-all">
-                                                {new Intl.NumberFormat(quote.currency_id === 'USD' ? 'en-US' : 'es-CO', {
-                                                    minimumFractionDigits: Number.isInteger(item.precio_unitario) ? 0 : 2,
-                                                    maximumFractionDigits: 2
-                                                }).format(item.precio_unitario || 0)}
-                                            </span>
+                                            <h4 className="font-semibold text-xs sm:text-sm text-slate-800 line-clamp-2 leading-snug">{item.descripcion_linea}</h4>
                                         )}
-                                    </div>
-                                </div>
-                                <div className="flex items-center justify-between md:justify-end gap-6">
-                                    <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg">
-                                        <button
-                                            onClick={() => handleUpdateQty(item.id, item.cantidad - 1)}
-                                            className="w-8 h-8 flex items-center justify-center bg-white rounded-md shadow-sm border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
-                                        >
-                                            -
-                                        </button>
-                                        <input
-                                            type="number"
-                                            defaultValue={item.cantidad}
-                                            key={`${item.id}-${item.cantidad}`}
-                                            onBlur={(e) => {
-                                                const val = parseInt(e.target.value);
-                                                if (!isNaN(val) && val >= 1) {
-                                                    handleUpdateQty(item.id, val);
-                                                } else {
-                                                    // Reset UI if invalid
-                                                    e.target.value = item.cantidad.toString();
-                                                }
-                                            }}
-                                            className="w-12 text-center font-bold text-slate-800 bg-transparent border-none focus:ring-0 p-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                        />
-                                        <button
-                                            onClick={() => handleUpdateQty(item.id, item.cantidad + 1)}
-                                            className="w-8 h-8 flex items-center justify-center bg-white rounded-md shadow-sm border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
-                                        >
-                                            +
-                                        </button>
-                                    </div>
-
-                                    {/* Discount Input */}
-                                    <div className="flex flex-col items-end">
-                                        <div className="text-xs text-slate-400 font-bold text-[9px] mb-1">
-                                            {context?.ignorar_limites_descuento 
-                                                ? 'Descuento (Límite ignorado)' 
-                                                : item.max_discount_pct 
-                                                    ? `Descuento max. ${item.max_discount_pct}%` 
-                                                    : 'Descuento (sin escala)'}
-                                        </div>
-                                        <div className="flex items-center gap-1">
-                                            <input
-                                                type="number"
-                                                min="0"
-                                                max={item.max_discount_pct || 100}
-                                                defaultValue={item.discount_pct || 0}
-                                                key={`${item.id}-${item.discount_pct}`}
-                                                onBlur={(e) => handleUpdateDiscount(item.id, parseFloat(e.target.value) || 0)}
-                                                className={cn(
-                                                    "w-16 text-right font-medium text-slate-800 border rounded-md py-1 px-2 text-sm focus:ring-2 focus:ring-blue-500",
-                                                    !context?.ignorar_limites_descuento && (item.discount_pct || 0) > (item.max_discount_pct || 0) && item.max_discount_pct ? "border-red-500 text-red-600 bg-red-50" : "border-slate-200"
-                                                )}
-                                            />
-                                            <span className="text-slate-500 text-sm">%</span>
+                                        
+                                        <div className="flex flex-wrap items-center gap-1.5 mt-1 text-[11px] sm:text-xs text-slate-500">
+                                            <span>Unitario: $</span>
+                                            {isQuoteItemPriceEditable(item) ? (
+                                                <input 
+                                                    type="number"
+                                                    className="text-xs font-medium bg-slate-50 border border-slate-200 focus:border-blue-500 focus:outline-none w-24 sm:w-28 px-1.5 py-0.5 rounded transition-all"
+                                                    defaultValue={item.precio_unitario}
+                                                    key={`${item.id}-price-${item.precio_unitario}`}
+                                                    onBlur={(e) => {
+                                                        const val = parseFloat(e.target.value) || 0;
+                                                        if (val !== item.precio_unitario) {
+                                                            updateItem(item.id, { precio_unitario: val });
+                                                            onItemsChange();
+                                                        }
+                                                    }}
+                                                />
+                                            ) : (
+                                                <span className="font-semibold text-slate-700 select-all">
+                                                    {new Intl.NumberFormat(quote.currency_id === 'USD' ? 'en-US' : 'es-CO', {
+                                                        minimumFractionDigits: Number.isInteger(item.precio_unitario) ? 0 : 2,
+                                                        maximumFractionDigits: 2
+                                                    }).format(item.precio_unitario || 0)}
+                                                </span>
+                                            )}
                                         </div>
                                     </div>
 
-                                    <div className="min-w-[120px] text-right">
-                                        <div className="text-xs text-slate-400 uppercase font-bold text-[9px]">Subtotal</div>
-                                        <div className="font-bold text-slate-900">
-                                            ${new Intl.NumberFormat().format(item.subtotal)}
-                                        </div>
-                                    </div>
+                                    {/* Mobile Delete Button (top-right for easy tap) */}
                                     <button
                                         onClick={() => handleRemove(item.id)}
-                                        className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                        className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors md:hidden shrink-0"
+                                        title="Eliminar producto"
                                     >
-                                        <Trash2 className="w-5 h-5" />
+                                        <Trash2 className="w-4 h-4 text-red-500" />
                                     </button>
+                                </div>
+
+                                {/* Controls Row: Responsive wrap without horizontal overflow */}
+                                <div className="pt-2 border-t border-slate-100 flex flex-wrap md:flex-nowrap items-center justify-between gap-3 md:gap-6">
+                                    {/* Left cluster: Stepper & Discount */}
+                                    <div className="flex items-center gap-2.5 sm:gap-4 flex-wrap">
+                                        {/* Stepper */}
+                                        <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg">
+                                            <button
+                                                onClick={() => handleUpdateQty(item.id, item.cantidad - 1)}
+                                                className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center bg-white rounded-md shadow-sm border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors font-bold text-sm"
+                                            >
+                                                -
+                                            </button>
+                                            <input
+                                                type="number"
+                                                defaultValue={item.cantidad}
+                                                key={`${item.id}-${item.cantidad}`}
+                                                onBlur={(e) => {
+                                                    const val = parseInt(e.target.value);
+                                                    if (!isNaN(val) && val >= 1) {
+                                                        handleUpdateQty(item.id, val);
+                                                    } else {
+                                                        // Reset UI if invalid
+                                                        e.target.value = item.cantidad.toString();
+                                                    }
+                                                }}
+                                                className="w-9 sm:w-12 text-center font-bold text-xs sm:text-sm text-slate-800 bg-transparent border-none focus:ring-0 p-0 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                            />
+                                            <button
+                                                onClick={() => handleUpdateQty(item.id, item.cantidad + 1)}
+                                                className="w-7 h-7 sm:w-8 sm:h-8 flex items-center justify-center bg-white rounded-md shadow-sm border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors font-bold text-sm"
+                                            >
+                                                +
+                                            </button>
+                                        </div>
+
+                                        {/* Discount Input */}
+                                        <div className="flex flex-col items-start sm:items-end">
+                                            <div className="text-[9px] text-slate-400 font-bold mb-0.5 truncate max-w-[130px]">
+                                                {context?.ignorar_limites_descuento 
+                                                    ? 'Desc. (ignorado)' 
+                                                    : item.max_discount_pct 
+                                                        ? `Desc. max ${item.max_discount_pct}%` 
+                                                        : 'Desc. (sin escala)'}
+                                            </div>
+                                            <div className="flex items-center gap-1">
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    max={item.max_discount_pct || 100}
+                                                    defaultValue={item.discount_pct || 0}
+                                                    key={`${item.id}-${item.discount_pct}`}
+                                                    onBlur={(e) => handleUpdateDiscount(item.id, parseFloat(e.target.value) || 0)}
+                                                    className={cn(
+                                                        "w-12 sm:w-16 text-right font-medium text-slate-800 border rounded-md py-1 px-1.5 text-xs sm:text-sm focus:ring-2 focus:ring-blue-500",
+                                                        !context?.ignorar_limites_descuento && (item.discount_pct || 0) > (item.max_discount_pct || 0) && item.max_discount_pct ? "border-red-500 text-red-600 bg-red-50" : "border-slate-200"
+                                                    )}
+                                                />
+                                                <span className="text-slate-500 text-xs sm:text-sm">%</span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Right cluster: Subtotal and Desktop Delete */}
+                                    <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-4 ml-auto">
+                                        <div className="text-right">
+                                            <div className="text-[9px] text-slate-400 uppercase font-bold tracking-wider">Subtotal</div>
+                                            <div className="font-bold text-xs sm:text-base text-slate-900 whitespace-nowrap">
+                                                ${new Intl.NumberFormat().format(item.subtotal)}
+                                            </div>
+                                        </div>
+                                        <button
+                                            onClick={() => handleRemove(item.id)}
+                                            className="hidden md:flex p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors shrink-0"
+                                            title="Eliminar producto"
+                                        >
+                                            <Trash2 className="w-5 h-5" />
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         ))
@@ -553,9 +575,9 @@ function QuoteItemsEditor({ quote, onItemsChange, onSaveQuote }: {
             </div>
 
             {/* Comentarios de la Cotización */}
-            <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-                <div className="flex items-center justify-between mb-4">
-                    <h3 className="font-bold text-lg flex items-center gap-2">
+            <div className="bg-white p-4 sm:p-6 rounded-xl shadow-sm border border-slate-200">
+                <div className="flex items-center justify-between mb-3 sm:mb-4">
+                    <h3 className="font-bold text-base sm:text-lg flex items-center gap-2">
                         Comentarios / Notas Internas
                         {isSaving && <Loader2 className="w-3 h-3 animate-spin text-blue-500" />}
                     </h3>
@@ -564,7 +586,7 @@ function QuoteItemsEditor({ quote, onItemsChange, onSaveQuote }: {
                     value={comentarios}
                     onChange={(e) => setComentarios(e.target.value)}
                     onBlur={handleSaveComments}
-                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 transition-all text-sm outline-none resize-none"
+                    className="w-full p-3 sm:p-4 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 transition-all text-xs sm:text-sm outline-none resize-none"
                     placeholder="Agregue notas adicionales sobre esta cotización..."
                     rows={4}
                 />

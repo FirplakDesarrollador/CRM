@@ -302,6 +302,7 @@ export interface LocalOportunidad {
     status?: string; // Legacy field
     fecha_cierre?: string;
     fecha_cierre_estimada?: string; // Alias
+    fecha_entrega?: string | null;
     items?: any[];
     owner_user_id?: string;
     segmento_id?: number | null;
