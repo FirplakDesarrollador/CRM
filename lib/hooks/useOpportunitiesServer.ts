@@ -87,8 +87,12 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
     const [startClosingDate, setStartClosingDate] = useState<string | null>(() => getInitialParam('startClose'));
     const [endClosingDate, setEndClosingDate] = useState<string | null>(() => getInitialParam('endClose'));
 
-    // Sorting
-    const [sortField, setSortField] = useState<string>(() => getInitialParam('sort') || 'updated_at');
+    // Sorting - Default to created_at descending (newest to oldest)
+    const [sortField, setSortField] = useState<string>(() => {
+        const p = getInitialParam('sort');
+        if (p && p !== 'updated_at') return p;
+        return 'created_at';
+    });
     const [sortAsc, setSortAsc] = useState<boolean>(() => getInitialParam('dir') === 'asc');
 
     // PERF FIX: Phase IDs only stored in refs (not state) to avoid triggering refetches

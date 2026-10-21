@@ -3,6 +3,19 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-10-21 - Feature: Filtros de Fecha Históricos ("Hasta la fecha"), Popover Flotante y Ordenamiento por Creación Descendente
+
+- **Módulo de Oportunidades (`app/oportunidades/page.tsx`, `components/oportunidades/QuickDateFilter.tsx`, `components/HotTableWrapper.tsx`, `lib/hooks/useOpportunitiesServer.ts`, `lib/dateFilterHelpers.ts`, `lib/opportunityTableHelpers.ts`):**
+  - Ordenamiento predeterminado cambiado a `sortField = 'created_at'` y `sortAsc = false` (descendente: de la más nueva a la más antigua), tanto en PostgreSQL online como en el respaldo local Dexie.
+  - En la cabecera de la columna Creada, la flecha de ordenamiento indica activamente `Creada ↓`.
+  - Reemplazo del menú genérico de la tabla en columnas de fecha por `FloatingDateFilterPopover`, un panel intuitivo y moderno anclado a la cabecera.
+  - Botón principal de 1 clic: "Hasta la fecha (Anteriores a hoy)" con corte hasta hoy y consulta histórica completa.
+  - Opciones rápidas adicionales ("Creadas hoy", "Últimos 7 días", "Últimos 30 días", "Este mes", "Año actual", "Todo el historial") y rango manual.
+  - Checkbox para "Traer todos los datos (incluir ganadas y perdidas)" cambiando `statusFilter: 'all'`.
+  - Ajuste de ancho mínimo a 125px para evitar truncamiento de texto a `CR...`.
+  - Suite de pruebas ampliada en `tests/opportunityTableFilters.test.ts` (9/9 VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+
 ## 2026-10-16 - Feature: Campo Fecha de Entrega en Oportunidades (Detalle, Wizard, Informes, DB)
 
 - **Módulo de Oportunidades (`CRM_Oportunidades`, `app/oportunidades/[id]/page.tsx`, `CreateOpportunityWizard.tsx`, `app/informes/page.tsx`):**

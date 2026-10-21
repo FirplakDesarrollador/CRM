@@ -97,7 +97,7 @@ export function buildOpportunityHotRow(
             : '-',
         valor: opp.amount || 0,
         cierre: opp.fecha_cierre_estimada
-            ? new Date(opp.fecha_cierre_estimada).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' })
+            ? new Date(opp.fecha_cierre_estimada).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })
             : '-',
         cierre_overdue: opp.fecha_cierre_estimada
             ? new Date(opp.fecha_cierre_estimada) < new Date()

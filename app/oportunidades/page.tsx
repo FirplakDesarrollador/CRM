@@ -10,6 +10,8 @@ import { cn } from "@/components/ui/utils";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { UserPickerFilter } from "@/components/cuentas/UserPickerFilter";
 import { OpportunityFilters } from "@/components/oportunidades/OpportunityFilters";
+import { QuickDateFilter, FloatingDateFilterPopover } from "@/components/oportunidades/QuickDateFilter";
+import { parseHandsontableDate } from "@/lib/dateFilterHelpers";
 import { computeOpportunityActivitySummary } from "@/lib/opportunityActivities";
 import { buildOpportunityHotRow, resolveHotRowData, OPPORTUNITY_TABLE_COLUMN_KEYS } from "@/lib/opportunityTableHelpers";
 import { supabase } from "@/lib/supabase";
@@ -102,13 +104,21 @@ function OpportunitiesContent() {
         }
         return [];
     });
+    const [headerDateFilterAnchor, setHeaderDateFilterAnchor] = useState<{
+        top: number;
+        left: number;
+        title?: string;
+        colKey: 'creada' | 'cierre';
+    } | null>(null);
 
     const handleSort = (field: string) => {
         if (sortField === field) {
             setSortAsc(!sortAsc);
         } else {
             setSortField(field);
-            setSortAsc(true);
+            // Para fechas (created_at, fecha_cierre_estimada) y montos (amount), el primer clic ordena de más nuevo/mayor a menor (descendente)
+            const isDescByDefault = field === 'created_at' || field === 'fecha_cierre_estimada' || field === 'amount';
+            setSortAsc(!isDescByDefault);
         }
     };
 
@@ -235,8 +245,9 @@ function OpportunitiesContent() {
         const initialPhase = searchParams.get('phase') || saved.get('phase') || null;
         const initialStatus = searchParams.get('status') || saved.get('status') || 'open';
         const initialOrigin = searchParams.get('origin') || saved.get('origin') || null;
-        const initialSort = searchParams.get('sort') || saved.get('sort');
-        const initialDirection = searchParams.get('dir') || saved.get('dir');
+        const rawSort = searchParams.get('sort') || saved.get('sort');
+        const initialSort = (rawSort && rawSort !== 'updated_at') ? rawSort : 'created_at';
+        const initialDirection = searchParams.get('dir') || saved.get('dir') || 'desc';
         const start = searchParams.get('start') || saved.get('start') || null;
         const end = searchParams.get('end') || saved.get('end') || null;
         const startClose = searchParams.get('startClose') || saved.get('startClose') || null;
@@ -270,8 +281,8 @@ function OpportunitiesContent() {
         setStartClosingDateState(startClose);
         setEndClosingDate(endClose);
         setEndClosingDateState(endClose);
-        if (initialSort) setSortField(initialSort);
-        if (initialDirection) setSortAsc(initialDirection === 'asc');
+        setSortField(initialSort);
+        setSortAsc(initialDirection === 'asc');
         setUserFilter(initialTab as any);
         setTab(initialTab as any);
     }, [searchParams]);
@@ -359,7 +370,7 @@ function OpportunitiesContent() {
         if (endClosingDate) params.set('endClose', endClosingDate);
         else params.delete('endClose');
 
-        if (sortField !== 'updated_at') params.set('sort', sortField);
+        if (sortField !== 'created_at') params.set('sort', sortField);
         else params.delete('sort');
         if (sortAsc) params.set('dir', 'asc');
         else params.delete('dir');
@@ -692,7 +703,14 @@ function OpportunitiesContent() {
             }
         },
         creada: {
-            data: 'creada', title: 'Creada', readOnly: true, width: colWidths['creada'] || 105, wordWrap: false,
+            data: 'creada',
+            type: 'date',
+            dateFormat: 'DD/MM/YYYY',
+            correctFormat: true,
+            title: 'Creada',
+            readOnly: true,
+            width: Math.max(colWidths['creada'] || 125, 120),
+            wordWrap: false,
             renderer(_: unknown, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 td.innerHTML = `<span style="font-size:12.5px;color:#64748b;font-weight:500;font-variant-numeric:tabular-nums;">${value || '-'}</span>`;
                 return td;
@@ -709,7 +727,14 @@ function OpportunitiesContent() {
             }
         },
         cierre: {
-            data: 'cierre', title: 'Cierre', readOnly: true, width: colWidths['cierre'] || 90, wordWrap: false,
+            data: 'cierre',
+            type: 'date',
+            dateFormat: 'DD/MM/YYYY',
+            correctFormat: true,
+            title: 'Cierre',
+            readOnly: true,
+            width: Math.max(colWidths['cierre'] || 120, 115),
+            wordWrap: false,
             renderer(instance: any, td: HTMLTableCellElement, row: number, ___: number, ____: string, value: any) {
                 const physicalRow = instance.toPhysicalRow ? instance.toPhysicalRow(row) : row;
                 const rowData = instance.getSourceDataAtRow(physicalRow);
@@ -837,6 +862,23 @@ function OpportunitiesContent() {
                             multiple={true}
                             selectedUserIds={selectedAccountOwnerIds}
                             onUsersSelect={handleUsersSelect}
+                        />
+                    </div>
+                    <div>
+                        <QuickDateFilter
+                            startDate={startDate}
+                            endDate={endDate}
+                            statusFilter={statusFilter}
+                            onDateChange={({ startDate: sD, endDate: eD, statusFilter: newStatus }) => {
+                                setStartDateState(sD);
+                                setStartDate(sD);
+                                setEndDateState(eD);
+                                setEndDate(eD);
+                                if (newStatus) {
+                                    setStatusFilterState(newStatus);
+                                    setStatusFilter(newStatus);
+                                }
+                            }}
                         />
                     </div>
                     <div className="relative flex-1">
@@ -1259,7 +1301,41 @@ function OpportunitiesContent() {
                                     text-overflow: ellipsis !important;
                                 }
                             `}</style>
-                            <div ref={tableContainerRef} className="w-full relative z-0 opp-hot-wrap" style={{ minHeight: '400px' }}>
+                            <div
+                                ref={tableContainerRef}
+                                className="w-full relative z-0 opp-hot-wrap"
+                                style={{ minHeight: '400px' }}
+                                onClickCapture={(e) => {
+                                    const target = e.target as HTMLElement;
+                                    const btn = target.closest('.changeType');
+                                    if (btn) {
+                                        const th = btn.closest('th');
+                                        const colKey = th?.getAttribute('data-col-key');
+                                        if (colKey === 'creada' || colKey === 'cierre') {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            const rect = btn.getBoundingClientRect();
+                                            setHeaderDateFilterAnchor({
+                                                top: rect.bottom + 6,
+                                                left: Math.max(16, Math.min(rect.left - 120, window.innerWidth - 360)),
+                                                title: colKey === 'creada' ? 'Fecha de Creación' : 'Fecha de Cierre',
+                                                colKey: colKey as 'creada' | 'cierre'
+                                            });
+                                        }
+                                    }
+                                }}
+                                onMouseDownCapture={(e) => {
+                                    const target = e.target as HTMLElement;
+                                    const btn = target.closest('.changeType');
+                                    if (btn) {
+                                        const th = btn.closest('th');
+                                        const colKey = th?.getAttribute('data-col-key');
+                                        if (colKey === 'creada' || colKey === 'cierre') {
+                                            e.stopPropagation();
+                                        }
+                                    }
+                                }}
+                            >
                                 <HotTable
                                     ref={hotTableRef}
                                     data={hotData}
@@ -1271,6 +1347,61 @@ function OpportunitiesContent() {
                                     manualColumnResize={true}
                                     afterColumnResize={(width: number, col: number) => handleColumnResize(width, col)}
                                     afterScrollVertically={triggerLoadMore}
+                                    beforeDropdownMenuShow={(instance: any) => {
+                                        const activeRange = instance.hot?.getSelectedRangeActive();
+                                        const col = activeRange ? activeRange.highlight?.col : -1;
+                                        const activeKeys = OPPORTUNITY_TABLE_COLUMN_KEYS.filter(key => visibleColumns.includes(key));
+                                        const colKey = activeKeys[col];
+                                        if (colKey === 'creada' || colKey === 'cierre') {
+                                            setTimeout(() => {
+                                                instance.close();
+                                            }, 0);
+                                        }
+                                    }}
+                                    afterFilter={(conditionsStack: any[]) => {
+                                        if (!conditionsStack || !Array.isArray(conditionsStack)) return;
+                                        const activeKeys = OPPORTUNITY_TABLE_COLUMN_KEYS.filter(key => visibleColumns.includes(key));
+                                        for (const colFilter of conditionsStack) {
+                                            const colKey = activeKeys[colFilter.column];
+                                            if (colKey === 'creada' && colFilter.conditions && colFilter.conditions.length > 0) {
+                                                const cond = colFilter.conditions[0];
+                                                const condName = (cond.name || '').toLowerCase();
+                                                const args = cond.args || [];
+                                                if (condName.includes('before') || condName.includes('antes') || condName.includes('less')) {
+                                                    const d = parseHandsontableDate(args[0]);
+                                                    if (d) {
+                                                        setEndDateState(d);
+                                                        setEndDate(d);
+                                                        setStartDateState(null);
+                                                        setStartDate(null);
+                                                    }
+                                                } else if (condName.includes('after') || condName.includes('despues') || condName.includes('greater')) {
+                                                    const d = parseHandsontableDate(args[0]);
+                                                    if (d) {
+                                                        setStartDateState(d);
+                                                        setStartDate(d);
+                                                        setEndDateState(null);
+                                                        setEndDate(null);
+                                                    }
+                                                } else if (condName.includes('between') || condName.includes('entre')) {
+                                                    const d1 = parseHandsontableDate(args[0]);
+                                                    const d2 = parseHandsontableDate(args[1]);
+                                                    if (d1 && d2) {
+                                                        setStartDateState(d1);
+                                                        setStartDate(d1);
+                                                        setEndDateState(d2);
+                                                        setEndDate(d2);
+                                                    }
+                                                } else if (condName === 'today' || condName === 'hoy') {
+                                                    const todayStr = new Date().toISOString().split('T')[0];
+                                                    setStartDateState(todayStr);
+                                                    setStartDate(todayStr);
+                                                    setEndDateState(todayStr);
+                                                    setEndDate(todayStr);
+                                                }
+                                            }
+                                        }
+                                    }}
                                     width="100%"
                                     height={showAdvancedFilters ? "calc(100vh - 490px)" : "calc(100vh - 280px)"}
                                     autoColumnSize={false}
@@ -1324,6 +1455,8 @@ function OpportunitiesContent() {
                                     afterGetColHeader={(column: number, TH: HTMLTableCellElement) => {
                                         const colDef = hotColumns[column];
                                         if (colDef) {
+                                            TH.setAttribute('data-col-key', colDef.data);
+                                            TH.setAttribute('data-col-index', String(column));
                                             const fieldSortMap: Record<string, string> = {
                                                 'cuenta': 'account_nombre',
                                                 'nombre': 'nombre',
@@ -1336,12 +1469,33 @@ function OpportunitiesContent() {
                                                 TH.style.cursor = 'pointer';
                                                 TH.title = 'Clic para ordenar ascendente o descendente';
                                                 const header = TH.querySelector('.colHeader');
-                                                if (header) header.textContent = `${colDef.title} ${sortField === sortKey ? (sortAsc ? '↑' : '↓') : '↕'}`;
+                                                const isFiltered = (colDef.data === 'creada' && (startDate || endDate));
+                                                const filterBadge = isFiltered ? ' 🔵' : '';
+                                                if (header) header.textContent = `${colDef.title} ${sortField === sortKey ? (sortAsc ? '↑' : '↓') : '↕'}${filterBadge}`;
                                             }
                                         }
                                     }}
                                     stretchH="all"
                                     className="text-sm font-sans"
+                                />
+
+                                {/* Popover flotante intuitivo anclado a la cabecera de la columna Creada / Cierre */}
+                                <FloatingDateFilterPopover
+                                    anchor={headerDateFilterAnchor}
+                                    startDate={startDate}
+                                    endDate={endDate}
+                                    statusFilter={statusFilter}
+                                    onDateChange={({ startDate: sD, endDate: eD, statusFilter: newStatus }) => {
+                                        setStartDateState(sD);
+                                        setStartDate(sD);
+                                        setEndDateState(eD);
+                                        setEndDate(eD);
+                                        if (newStatus) {
+                                            setStatusFilterState(newStatus);
+                                            setStatusFilter(newStatus);
+                                        }
+                                    }}
+                                    onClose={() => setHeaderDateFilterAnchor(null)}
                                 />
                             </div>
 

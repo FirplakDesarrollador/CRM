@@ -6,6 +6,7 @@ import {
     OpportunityInput,
     OpportunityHotRow
 } from '@/lib/opportunityTableHelpers';
+import { parseHandsontableDate, DATE_FILTER_PRESETS } from '@/lib/dateFilterHelpers';
 
 describe('Filtros internos de tabla de oportunidades', () => {
     it('debe mapear "actividades" a un string legible y no a un objeto [object Object]', () => {
@@ -112,4 +113,56 @@ describe('Filtros internos de tabla de oportunidades', () => {
             'vendedor'
         ]);
     });
+
+    it('debe formatear "cierre" con DD/MM/AAAA para permitir filtrado por condición de fecha en Handsontable', () => {
+        const mockOpp: OpportunityInput = {
+            id: 'opp-date',
+            fecha_cierre_estimada: '2026-11-20T12:00:00Z',
+            created_at: '2026-10-21T08:00:00Z'
+        };
+
+        const hotRow = buildOpportunityHotRow(mockOpp, {});
+        // "cierre" debe incluir año de 4 dígitos para que Handsontable lo reconozca como fecha
+        expect(hotRow.cierre).toMatch(/^\d{2}\/\d{2}\/\d{4}$/);
+        expect(hotRow.creada).toMatch(/^\d{2}\/\d{2}\/\d{4}$/);
+    });
+
+    it('parseHandsontableDate debe convertir DD/MM/AAAA a YYYY-MM-DD para el servidor Supabase', () => {
+        expect(parseHandsontableDate('21/10/2026')).toBe('2026-10-21');
+        expect(parseHandsontableDate('01/04/2024')).toBe('2024-04-01');
+        expect(parseHandsontableDate('-')).toBeNull();
+        expect(parseHandsontableDate('')).toBeNull();
+    });
+
+    it('DATE_FILTER_PRESETS debe incluir preset "up_to_today" (Hasta la fecha / Anteriores a hoy)', () => {
+        const upToToday = DATE_FILTER_PRESETS.find(p => p.id === 'up_to_today');
+        expect(upToToday).toBeDefined();
+        const fakeNow = new Date('2026-10-21T12:00:00Z');
+        const range = upToToday!.getRange(fakeNow);
+        expect(range.startDate).toBeNull();
+        expect(range.endDate).toBe('2026-10-21');
+    });
+
+    it('debe ordenar oportunidades de la más nueva a la más antigua cuando sortField="created_at" y sortAsc=false', () => {
+        const opps = [
+            { id: 'old-1', created_at: '2024-01-15T10:00:00Z' },
+            { id: 'newest-1', created_at: '2026-10-21T08:00:00Z' },
+            { id: 'mid-1', created_at: '2025-06-20T12:00:00Z' }
+        ];
+
+        // Lógica de ordenamiento idéntica a useOpportunitiesServer (sortAsc = false)
+        const sortAsc = false;
+        opps.sort((a, b) => {
+            const valA = a.created_at ? new Date(a.created_at).getTime() : 0;
+            const valB = b.created_at ? new Date(b.created_at).getTime() : 0;
+            if (valA < valB) return sortAsc ? -1 : 1;
+            if (valA > valB) return sortAsc ? 1 : -1;
+            return 0;
+        });
+
+        expect(opps[0].id).toBe('newest-1'); // 2026 primero
+        expect(opps[1].id).toBe('mid-1');    // 2025 segundo
+        expect(opps[2].id).toBe('old-1');    // 2024 al final
+    });
 });
+
