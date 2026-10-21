@@ -3,6 +3,20 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-10-21 - Feature: Vista Agenda con Filtro "Hasta la fecha" Acumulativo y Control de "Omitir terminadas"
+
+- **Módulo de Actividades (`app/actividades/page.tsx`, `lib/filterUtils.ts`, `pruebas unitarias/actividades.test.ts`):**
+  - Implementación del modo `agendaDateMode` ("Hasta la fecha" por defecto vs "Solo este día"):
+    - "Hasta la fecha" (`up_to`): filtra todas las actividades con `fecha_inicio <= endOfSelectedDay`, trayendo todas las actividades pendientes y vencidas acumuladas hasta el día actual o seleccionado, evitando que las actividades atrasadas queden ocultas al consultar la agenda del día.
+    - "Solo este día" (`exact`): acota los resultados estrictamente al día seleccionado (`actDate === selectedDate`).
+  - Control visual interactivo tipo píldora segmentada `[ Hasta la fecha | Solo este día ]` integrado en la barra de navegación de fecha de la Vista Agenda.
+  - Indicador de cabecera dinámico: muestra `Hasta: Mié, 21 Oct` cuando está activo el modo acumulativo, o la fecha sin prefijo en modo exacto.
+  - Casilla de verificación `[x] Omitir terminadas` (`omitCompleted`): activa por defecto para excluir las actividades finalizadas (`act.is_completed`) y evitar que los miles de registros completados históricos inunden la agenda de trabajo diaria. Permite desmarcarla en cualquier momento para visualizar el historial completo.
+  - Al hacer clic en el botón de acceso rápido `Atrasadas`, si el modo estaba en `Solo este día`, se conmuta automáticamente a `Hasta la fecha` para garantizar la visualización de las actividades vencidas. Al pulsar `Hechas`, se desmarca automáticamente `Omitir terminadas`.
+  - Persistencia de `agendaDateMode` y `omitCompleted` en URL y en `sessionStorage` para mantener la preferencia al navegar entre módulos.
+  - Pruebas unitarias ampliadas y verificadas en `pruebas unitarias/actividades.test.ts` (11/11 VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/actividades.md`, `wiki/LOG.md`.
+
 ## 2026-10-21 - Feature: Filtros de Fecha Históricos ("Hasta la fecha"), Popover Flotante y Ordenamiento por Creación Descendente
 
 - **Módulo de Oportunidades (`app/oportunidades/page.tsx`, `components/oportunidades/QuickDateFilter.tsx`, `components/HotTableWrapper.tsx`, `lib/hooks/useOpportunitiesServer.ts`, `lib/dateFilterHelpers.ts`, `lib/opportunityTableHelpers.ts`):**

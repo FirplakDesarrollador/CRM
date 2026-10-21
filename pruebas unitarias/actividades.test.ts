@@ -159,6 +159,62 @@ describe("Filtrado de Actividades", () => {
         const page2 = filtered.slice(pageSize, pageSize * 2);
         expect(page2).toHaveLength(50);
     });
+
+    it("en Vista Agenda con agendaDateMode 'up_to' filtra actividades hasta la fecha seleccionada", () => {
+        // fixedNow es 2026-09-02: act-1 (08-20), act-3 (08-15) son <= fixedNow; act-2 (09-10) es futura (> fixedNow)
+        const hastaHoy = filterActivities(mockActivities, {
+            view: "agenda",
+            selectedDate: fixedNow,
+            agendaDateMode: "up_to"
+        }, { canViewAll: true, now: fixedNow });
+
+        expect(hastaHoy.map(a => a.id)).toEqual(["act-1", "act-3"]);
+
+        // Con filtro overdue y agendaDateMode 'up_to' devuelve la vencida sin conflicto
+        const overdueHastaHoy = filterActivities(mockActivities, {
+            view: "agenda",
+            selectedDate: fixedNow,
+            agendaDateMode: "up_to",
+            filterStatus: "overdue"
+        }, { canViewAll: true, now: fixedNow });
+
+        expect(overdueHastaHoy).toHaveLength(1);
+        expect(overdueHastaHoy[0].id).toBe("act-1");
+    });
+
+    it("en Vista Agenda con agendaDateMode 'exact' filtra únicamente las actividades del día exacto", () => {
+        const diaExacto = filterActivities(mockActivities, {
+            view: "agenda",
+            selectedDate: new Date("2026-08-20T12:00:00Z"),
+            agendaDateMode: "exact"
+        }, { canViewAll: true, now: fixedNow });
+
+        expect(diaExacto).toHaveLength(1);
+        expect(diaExacto[0].id).toBe("act-1");
+    });
+
+    it("filtra u omite actividades terminadas cuando omitCompleted es true", () => {
+        // En mockActivities, act-1 es no completada, act-3 es completada (ambas <= fixedNow)
+        const conOmitir = filterActivities(mockActivities, {
+            view: "agenda",
+            selectedDate: fixedNow,
+            agendaDateMode: "up_to",
+            omitCompleted: true
+        }, { canViewAll: true, now: fixedNow });
+
+        // Debe incluir únicamente act-1 y omitir act-3 (terminada)
+        expect(conOmitir.map(a => a.id)).toEqual(["act-1"]);
+
+        const sinOmitir = filterActivities(mockActivities, {
+            view: "agenda",
+            selectedDate: fixedNow,
+            agendaDateMode: "up_to",
+            omitCompleted: false
+        }, { canViewAll: true, now: fixedNow });
+
+        // Sin omitir debe incluir ambas
+        expect(sinOmitir.map(a => a.id)).toEqual(["act-1", "act-3"]);
+    });
 });
 
 describe("Deep Link y Estado de Modal de Actividades", () => {

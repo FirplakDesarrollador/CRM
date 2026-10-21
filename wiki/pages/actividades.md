@@ -22,7 +22,7 @@ visitas y eventos del equipo comercial. Pueden asociarse a [[oportunidades]] y a
 
 - **Vistas del módulo (`/actividades`):**
   - **Todo:** Listado tabular agrupado con filtros globales por clasificación, fecha, estado y comercial.
-  - **Agenda:** Vista cronológica de actividades por día con selector de fecha y panel lateral de detalle.
+  - **Agenda:** Vista cronológica de actividades con selector de fecha, control de rango (`agendaDateMode`: "Hasta la fecha" por defecto para incluir actividades pendientes y vencidas acumuladas hasta el día seleccionado, o "Solo este día" para acotar al día exacto), casilla interactiva `[x] Omitir terminadas` (`omitCompleted`: activa por defecto para excluir tareas ya completadas y evitar sobrecargar la lista con el historial histórico finalizado) y panel lateral de detalle. Al activar el filtro rápido de actividades vencidas (*Atrasadas*), el selector conmuta automáticamente a "Hasta la fecha" para prevenir listas vacías.
   - **Mes:** Vista de cuadrícula mensual con conteo de actividades por día, tooltip contextual con indicador `group/day` y apertura directa del modal de edición sin cambiar la vista activa gracias a `e.stopPropagation()`.
 - Creación rápida vía `CreateActivityModal` desde varios módulos (también desde tiendas
   con `CreateStoreActivityModal`). La creación se estructura como un Wizard de 3 pasos (Tipo & Asunto, Clasificación & Fechas, Detalles).
