@@ -46,6 +46,8 @@ solo COORDINADOR/ADMIN); el historial queda en `CRM_TransferenciasOportunidad`.
 (`/oportunidades/[id]/cotizaciones/[quoteId]`), actividades, colaboradores, asignados.
 `OpportunityQuickView` ofrece vista rápida desde listados.
 
+- **Información de Negocio:** En la tarjeta principal de negocio, el campo **Categorías de Interés** (`categoria_oportunidad` con `MultiSelect`) está ubicado inmediatamente antes de **Valor de la Oportunidad (Importe)** para agilizar la calificación comercial de las líneas de producto (Baños, Cocinas, Hidromasajes, etc.) antes de registrar o editar el valor de la negociación.
+
 ## Interfaz y Listado
 
 - **Columna de Actividades (`lib/opportunityActivities.ts`):** En la vista general (desktop y móvil), cada oportunidad muestra el estado y conteo de sus actividades vinculadas:

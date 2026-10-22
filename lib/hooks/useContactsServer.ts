@@ -4,6 +4,7 @@ import { db } from '@/lib/db';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useSyncStore } from '@/lib/stores/useSyncStore';
 import { matchesSearchTokens, getSearchTokens } from '@/lib/utils';
+import { shouldRestrictContactsByAccountOwner, filterContactsForUser } from '@/lib/contactVisibility';
 
 export type ContactServer = {
     id: string;
@@ -73,8 +74,8 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
             console.log("[useContactsServer] Device is offline or server query failed. Falling back to local Dexie database...");
             let localContacts = (await db.contacts.toArray()).filter(c => !c.is_deleted);
             
-            // Seller restriction for offline
-            if ((isVendedor || userRole === 'COORDINADOR') && currentUserId) {
+            // Contact visibility policy
+            if (shouldRestrictContactsByAccountOwner(userRole) && currentUserId) {
                 const idsToMatch = isVendedor ? [currentUserId] : [currentUserId, ...subordinateIds];
 
                 // Get my accounts: Owner OR (No owner and I am creator)
@@ -94,7 +95,7 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
                 collabOpps.filter(o => !o.is_deleted && o.account_id).forEach(o => myAccountIds.add(o.account_id));
                 
                 // Filter contacts: MUST belong to my accounts
-                localContacts = localContacts.filter(c => myAccountIds.has(c.account_id));
+                localContacts = filterContactsForUser(localContacts, { role: userRole, userAccountIds: myAccountIds });
             }
 
             if (accountId) {
@@ -148,8 +149,7 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
             }
 
             // Build query
-            // Use !inner join when filtering by account owner to enforce security
-            const needsAccountFilter = isVendedor || userRole === 'COORDINADOR';
+            const needsAccountFilter = shouldRestrictContactsByAccountOwner(userRole);
             const accountSelect = needsAccountFilter ? 'account:CRM_Cuentas!inner(nombre, owner_user_id)' : 'account:CRM_Cuentas(nombre)';
             
             const selectFields = `
@@ -171,7 +171,7 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
                 .select(selectFields, { count: 'exact' })
                 .eq('is_deleted', false);
 
-            if ((isVendedor || userRole === 'COORDINADOR') && currentUserId) {
+            if (needsAccountFilter && currentUserId) {
                 const idsToMatch = isVendedor ? [currentUserId] : [currentUserId, ...subordinateIds].filter(Boolean);
                 const idsString = idsToMatch.join(',');
 

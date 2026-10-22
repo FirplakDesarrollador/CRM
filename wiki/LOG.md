@@ -3,6 +3,23 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-10-22 - Feature: Visibilidad y Búsqueda Global de Contactos para Rol VENDEDOR
+
+- **Módulo de Contactos (`lib/contactVisibility.ts`, `lib/hooks/useContactsServer.ts`, `tests/contactVisibility.test.ts`):**
+  - **Problema Detectado:** Los usuarios con rol `VENDEDOR` (asesores comerciales) no podían encontrar contactos en `/contactos` (p. ej. al buscar por teléfono `3007367088`) si la cuenta asociada pertenecía a otro usuario, debido a un filtro restrictivo por `owner_user_id` de cuentas en `useContactsServer.ts`.
+  - **Alineación de Negocio:** Según el modelo de permisos de [[contactos]] y [[roles-y-permisos]], todos los roles tienen permiso de lectura y búsqueda en el directorio de contactos para evitar duplicidad de prospectos y agilizar la atención.
+  - **Solución Implementada:** Se introdujo `lib/contactVisibility.ts` con la función `shouldRestrictContactsByAccountOwner` (que retorna `false`) y `filterContactsForUser`. Se eliminó el filtro forzado `inner` join en `useContactsServer.ts` tanto para la consulta online a Supabase como para el fallback local de Dexie.
+  - **Validación:** 5/5 pruebas unitarias en `tests/contactVisibility.test.ts` aprobadas (VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/contactos.md`, `wiki/LOG.md`.
+
+## 2026-10-22 - UI/UX: Reubicación de Categorías de Interés antes de Valor de Oportunidad
+
+- **Detalle de Oportunidad (`app/oportunidades/[id]/page.tsx`):**
+  - Se trasladó el campo **Categorías de Interés** (`categoria_oportunidad` con componente `MultiSelect` y opciones `OPPORTUNITY_CATEGORIES`) a la tarjeta principal de **Información de Negocio**, situándose inmediatamente antes del campo **Valor de la Oportunidad (Importe)**.
+  - Se eliminó la ocurrencia duplicada inferior en la sección de orígenes para simplificar el flujo visual y permitir que el usuario califique comercialmente las líneas de interés antes de ingresar el valor estimado de negociación.
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+
+
 ## 2026-10-22 - Fix: Corrección de Zona Horaria en Filtro de Fechas (UTC vs Colombia) y Alineación UX con Contactos
 
 - **Módulo de Oportunidades (`lib/dateFilterHelpers.ts`, `lib/hooks/useOpportunitiesServer.ts`, `app/oportunidades/page.tsx`, `tests/opportunityTableFilters.test.ts`):**

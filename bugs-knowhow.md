@@ -1906,6 +1906,31 @@ NUNCA uses `new Date("YYYY-MM-DD").setHours(23, 59, 59, 999)` para calcular lím
 Tags:
 [date-filter] [timezone] [utc-offset] [opportunities] [today-filter]
 
+---
 
+## [Bug ID: 20261022-09]
 
+Context:
+Búsqueda y visualización de contactos en `/contactos` para usuarios con rol `VENDEDOR` (`lib/hooks/useContactsServer.ts`, `lib/contactVisibility.ts`, `tests/contactVisibility.test.ts`).
 
+Problem:
+Los usuarios comerciales con rol `VENDEDOR` (por ejemplo `comercialbogota@firplak.com`) no obtenían resultados al buscar contactos por número de celular (p. ej. `3007367088`) u otros campos cuando la cuenta asociada al contacto pertenecía a otro asesor (ej. cuenta asignada a `claudia.granada@firplak.com`). La interfaz indicaba "No se encontraron coincidencias" a pesar de que el contacto existía en la base de datos.
+
+Root Cause:
+En `useContactsServer.ts`, la variable `needsAccountFilter` se definía como `isVendedor || userRole === 'COORDINADOR'`.
+Al ser `true`, la consulta a Supabase forzaba una cláusula `.not('account_id', 'is', null)` y un inner join `.select('*, CRM_Cuentas!inner(...)')` filtrando exclusivamente por cuentas donde `owner_user_id` coincidiera con el usuario autenticado (`account_id IN (myAccountIds)`).
+De igual manera, el fallback de Dexie aplicaba `c.account_id && myAccountIds.includes(c.account_id)`.
+Esto contradecía la regla de negocio del directorio de contactos (`wiki/pages/contactos.md`), según la cual todos los roles comerciales tienen visibilidad de los contactos para facilitar la prospección, validación de clientes y evitar duplicados entre canales y ferias.
+
+Fix Applied:
+1. Se creó el helper desacoplado `lib/contactVisibility.ts` con la función `shouldRestrictContactsByAccountOwner`, configurada para devolver `false` (visibilidad global de directorio de contactos) y `filterContactsForUser` para escenarios donde se requiera filtrado en memoria.
+2. Se actualizó `useContactsServer.ts` para condicionar `needsAccountFilter` a `shouldRestrictContactsByAccountOwner(userRole)`.
+3. Se garantizó que tanto la consulta online a Supabase como el fallback local de Dexie muestren y permitan buscar en la totalidad de contactos para el rol `VENDEDOR`.
+4. Se incorporó suite de pruebas permanente `tests/contactVisibility.test.ts` con 5 casos que validan que el rol `VENDEDOR` no restrinja contactos por dueño de cuenta y mantenga accesibles todos los registros en búsquedas.
+
+Prevention Rule:
+**Separate Entity Directory Lookup from Account-Ownership Restrictions**:
+No restrinjas la búsqueda de personas de contacto (`CRM_Contactos`) por el propietario de la cuenta mercantil (`CRM_Cuentas.owner_user_id`) a menos que exista un requerimiento de privacidad explícito. Los asesores comerciales necesitan poder consultar teléfonos o correos de personas para saber si ya han sido atendidos o si están vinculados a ferias/canales corporativos, evitando crear prospectos duplicados.
+
+Tags:
+[contactos] [vendedor] [roles-y-permisos] [account-owner] [search-filter] [directory-visibility]

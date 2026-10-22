@@ -760,6 +760,35 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                             />
                         </div>
 
+                        {/* Categorías de Interés */}
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                                Categorías de Interés
+                            </label>
+                            <div className="relative group">
+                                <MultiSelect
+                                    options={OPPORTUNITY_CATEGORIES}
+                                    selected={parseOpportunityCategories(localCategoriaOportunidad)}
+                                    onChange={async (selected) => {
+                                        const formatted = formatOpportunityCategories(selected);
+                                        setLocalCategoriaOportunidad(formatted);
+                                        if (formatted !== (opportunity.categoria_oportunidad || "")) {
+                                            setIsSavingCategoria(true);
+                                            await updateOpportunity(opportunity.id, { categoria_oportunidad: formatted });
+                                            setIsSavingCategoria(false);
+                                        }
+                                    }}
+                                    placeholder="Seleccionar categorías..."
+                                    className="bg-slate-50 border-slate-200 text-sm"
+                                />
+                                {isSavingCategoria && (
+                                    <div className="absolute right-8 top-1/2 -translate-y-1/2">
+                                        <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
                         <div>
                             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
                                 Valor de la Oportunidad (Importe)
@@ -1026,34 +1055,6 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                     />
                                     {isSavingFuente && (
                                         <div className="absolute right-3 top-1/2 -translate-y-1/2">
-                                            <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-
-                            <div>
-                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                                    Categorías de Interés (Categoría Oportunidad)
-                                </label>
-                                <div className="relative group">
-                                    <MultiSelect
-                                        options={OPPORTUNITY_CATEGORIES}
-                                        selected={parseOpportunityCategories(localCategoriaOportunidad)}
-                                        onChange={async (selected) => {
-                                            const formatted = formatOpportunityCategories(selected);
-                                            setLocalCategoriaOportunidad(formatted);
-                                            if (formatted !== (opportunity.categoria_oportunidad || "")) {
-                                                setIsSavingCategoria(true);
-                                                await updateOpportunity(opportunity.id, { categoria_oportunidad: formatted });
-                                                setIsSavingCategoria(false);
-                                            }
-                                        }}
-                                        placeholder="Seleccionar categorías..."
-                                        className="bg-slate-50 border-slate-200 text-sm"
-                                    />
-                                    {isSavingCategoria && (
-                                        <div className="absolute right-8 top-1/2 -translate-y-1/2">
                                             <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
                                         </div>
                                     )}
