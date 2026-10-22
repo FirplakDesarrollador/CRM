@@ -3,6 +3,19 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-10-22 - Fix: Corrección de Zona Horaria en Filtro de Fechas (UTC vs Colombia) y Alineación UX con Contactos
+
+- **Módulo de Oportunidades (`lib/dateFilterHelpers.ts`, `lib/hooks/useOpportunitiesServer.ts`, `app/oportunidades/page.tsx`, `tests/opportunityTableFilters.test.ts`):**
+  - **Bug de Zona Horaria en Fecha Fin:** `new Date("YYYY-MM-DD")` en JavaScript interpreta medianoche UTC (`00:00:00Z`), lo que en Colombia (UTC-5) correspondía a las 7:00 PM del día anterior. Al aplicar `end.setHours(23, 59, 59, 999)`, el límite superior se transformaba en las 11:59:59 PM de **ayer**, excluyendo sistemáticamente todas las oportunidades creadas hoy.
+  - **Helpers `toStartOfDayISO` y `toEndOfDayISO`:** Descomponen la fecha en componentes numéricos locales y calculan con precisión el inicio (00:00:00.000) y fin (23:59:59.999) del día local en ISO UTC (`2026-10-23T04:59:59.999Z` para Colombia), asegurando que todas las oportunidades ingresadas hoy queden dentro del filtro.
+  - **Alineación con Módulo Contactos:**
+    - Contador superior unificado visible en escritorio y móvil: `Total de registros: X` y `Total valor: $Y`.
+    - Skeleton loader estilizado de 6 filas idéntico a contactos.
+    - Paginación de 100 registros (`pageSize: 100`).
+    - Botones de "Cargar más oportunidades" con animación `Loader2`.
+  - 15/15 pruebas unitarias verificadas (15/15 VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+
 ## 2026-10-22 - Perf: Carga Progresiva de Oportunidades y Consulta de Totales Desacoplada
 
 - **Módulo de Oportunidades (`app/oportunidades/page.tsx`, `lib/hooks/useOpportunitiesServer.ts`, `lib/opportunityColumnFilterHelpers.ts`, `tests/opportunityTableFilters.test.ts`):**

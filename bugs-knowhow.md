@@ -1873,5 +1873,39 @@ En vistas de alto volumen con joins relacionales (especialmente tablas uno-a-muc
 Tags:
 [performance] [progressive-loading] [supabase] [postgrest] [decoupled-count] [head-request] [handsontable] [totals]
 
+---
+
+## [Bug ID: 20261022-08]
+
+Context:
+Filtro de fechas (creación y fecha de cierre estimada) en el módulo de Oportunidades (`useOpportunitiesServer.ts`, `lib/dateFilterHelpers.ts`, `app/oportunidades/page.tsx`).
+
+Problem:
+Al seleccionar como fecha de fin el día de hoy (o rangos como "Hoy" o "Creadas hoy"), no aparecía ninguna de las oportunidades creadas durante el día de hoy, arrojando 0 resultados o excluyendo los negocios más recientes.
+
+Root Cause:
+En JavaScript, `new Date("YYYY-MM-DD")` se analiza según la especificación ECMAScript como medianoche UTC (`YYYY-MM-DDT00:00:00.000Z`).
+En Colombia (UTC-5), esa medianoche UTC corresponde a las 19:00 (7:00 PM) del día **anterior**.
+Al invocar `end.setHours(23, 59, 59, 999)`, JavaScript modificaba las horas del día local anterior (ej: 21 de octubre a las 23:59:59.999-05:00), cuya conversión con `end.toISOString()` resultaba en `2026-10-22T04:59:59.999Z` (11:59:59 PM de **ayer** en hora local de Colombia).
+Por consiguiente, la cláusula enviada a Supabase PostgreSQL:
+`q.lte('created_at', '2026-10-22T04:59:59.999Z')`
+excluía sistemáticamente cualquier oportunidad creada hoy después de las 00:00 AM hora Colombia (05:00:00Z en adelante).
+
+Fix Applied:
+1. Se crearon los helpers `toStartOfDayISO(dateStr)` y `toEndOfDayISO(dateStr)` en `lib/dateFilterHelpers.ts`.
+   - Descomponen la cadena en `[year, month, day]` numéricos para instanciar el objeto `Date` en la zona horaria local exacta (`new Date(year, month - 1, day, 23, 59, 59, 999)`).
+   - Para hoy `2026-10-22`, genera `2026-10-23T04:59:59.999Z` (23:59:59.999 hora Colombia), cubriendo el día entero.
+2. Se reemplazó el cálculo erróneo en `useOpportunitiesServer.ts` tanto para la consulta online de Supabase (`startDate`, `endDate`, `startClosingDate`, `endClosingDate`) como para el fallback offline de Dexie.
+3. Se actualizó `formatLocalDateToYMD` en `DATE_FILTER_PRESETS` para evitar que `toISOString().split('T')[0]` devuelva el día de mañana después de las 7:00 PM hora Colombia.
+4. Se incorporó prueba permanente en `tests/opportunityTableFilters.test.ts` que valida que las oportunidades creadas en el transcurso del día de hoy (ej: 08:11 AM y 01:25 PM) queden estrictamente dentro del rango de `toStartOfDayISO` y `toEndOfDayISO`.
+
+Prevention Rule:
+**Timezone-Aware Date Boundary Helpers**:
+NUNCA uses `new Date("YYYY-MM-DD").setHours(23, 59, 59, 999)` para calcular límites de fecha finales en clientes que operan en husos horarios negativos respecto a UTC (como UTC-5 Colombia). Siempre descompón la fecha en componentes numéricos `(year, month - 1, day, 23, 59, 59, 999)` o usa `toEndOfDayISO` / `toStartOfDayISO` para que el límite superior represente el final del día local real y no el final del día anterior.
+
+Tags:
+[date-filter] [timezone] [utc-offset] [opportunities] [today-filter]
+
+
 
 

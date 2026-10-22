@@ -143,6 +143,28 @@ describe('Filtros internos de tabla de oportunidades', () => {
         expect(range.endDate).toBe('2026-10-21');
     });
 
+    it('toStartOfDayISO y toEndOfDayISO deben abarcar el día completo local y no excluir oportunidades creadas hoy por desajuste UTC', async () => {
+        const { toStartOfDayISO, toEndOfDayISO } = await import('@/lib/dateFilterHelpers');
+
+        const testDate = '2026-10-22';
+        const startISO = toStartOfDayISO(testDate);
+        const endISO = toEndOfDayISO(testDate);
+
+        expect(startISO).toBeDefined();
+        expect(endISO).toBeDefined();
+
+        // Oportunidad real creada hoy a las 08:11 AM hora Colombia (13:11:00 UTC)
+        const oppToday1 = '2026-10-22T13:11:00.000Z';
+        // Oportunidad real creada hoy a las 01:25 PM hora Colombia (18:25:00 UTC)
+        const oppToday2 = '2026-10-22T18:25:00.000Z';
+
+        // La fecha de fin convertida a ISO DEBE ser mayor o igual a las oportunidades creadas hoy
+        expect(new Date(oppToday1).getTime()).toBeLessThanOrEqual(new Date(endISO!).getTime());
+        expect(new Date(oppToday2).getTime()).toBeLessThanOrEqual(new Date(endISO!).getTime());
+        expect(new Date(oppToday1).getTime()).toBeGreaterThanOrEqual(new Date(startISO!).getTime());
+        expect(new Date(oppToday2).getTime()).toBeGreaterThanOrEqual(new Date(startISO!).getTime());
+    });
+
     it('debe ordenar oportunidades de la más nueva a la más antigua cuando sortField="created_at" y sortAsc=false', () => {
         const opps = [
             { id: 'old-1', created_at: '2024-01-15T10:00:00Z' },

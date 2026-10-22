@@ -7,6 +7,7 @@ import { useSyncStore } from '@/lib/stores/useSyncStore';
 import { matchesSearchTokens, getSearchTokens } from '@/lib/utils';
 import { computeOpportunityActivitySummary, OpportunityActivitySummary } from '@/lib/opportunityActivities';
 import { PROSPECTO_PHASE_ID, getEquivalentPhaseIds, PhaseCatalogItem, calculateTotalAmount, computeProgressiveBatch, DEFAULT_OPPORTUNITIES_PAGE_SIZE } from '@/lib/opportunityColumnFilterHelpers';
+import { toStartOfDayISO, toEndOfDayISO } from '@/lib/dateFilterHelpers';
 
 export type OpportunityServer = {
     id: string;
@@ -290,21 +291,21 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
             }
 
             if (startDate) {
-                localOpps = localOpps.filter(o => o.created_at && new Date(o.created_at) >= new Date(startDate));
+                const startISO = toStartOfDayISO(startDate);
+                localOpps = localOpps.filter(o => o.created_at && (!startISO || new Date(o.created_at) >= new Date(startISO)));
             }
             if (endDate) {
-                const end = new Date(endDate);
-                end.setHours(23, 59, 59, 999);
-                localOpps = localOpps.filter(o => o.created_at && new Date(o.created_at) <= end);
+                const endISO = toEndOfDayISO(endDate);
+                localOpps = localOpps.filter(o => o.created_at && (!endISO || new Date(o.created_at) <= new Date(endISO)));
             }
 
             if (startClosingDate) {
-                localOpps = localOpps.filter(o => o.fecha_cierre_estimada && new Date(o.fecha_cierre_estimada) >= new Date(startClosingDate));
+                const startCloseISO = toStartOfDayISO(startClosingDate);
+                localOpps = localOpps.filter(o => o.fecha_cierre_estimada && (!startCloseISO || new Date(o.fecha_cierre_estimada) >= new Date(startCloseISO)));
             }
             if (endClosingDate) {
-                const end = new Date(endClosingDate);
-                end.setHours(23, 59, 59, 999);
-                localOpps = localOpps.filter(o => o.fecha_cierre_estimada && new Date(o.fecha_cierre_estimada) <= end);
+                const endCloseISO = toEndOfDayISO(endClosingDate);
+                localOpps = localOpps.filter(o => o.fecha_cierre_estimada && (!endCloseISO || new Date(o.fecha_cierre_estimada) <= new Date(endCloseISO)));
             }
 
             if (accountOwnerIds && accountOwnerIds.length > 0) {
@@ -540,23 +541,23 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 }
 
                 if (startDate) {
-                    q = q.gte('created_at', startDate);
+                    const startISO = toStartOfDayISO(startDate);
+                    if (startISO) q = q.gte('created_at', startISO);
                 }
 
                 if (endDate) {
-                    const end = new Date(endDate);
-                    end.setHours(23, 59, 59, 999);
-                    q = q.lte('created_at', end.toISOString());
+                    const endISO = toEndOfDayISO(endDate);
+                    if (endISO) q = q.lte('created_at', endISO);
                 }
 
                 if (startClosingDate) {
-                    q = q.gte('fecha_cierre_estimada', startClosingDate);
+                    const startCloseISO = toStartOfDayISO(startClosingDate);
+                    if (startCloseISO) q = q.gte('fecha_cierre_estimada', startCloseISO);
                 }
 
                 if (endClosingDate) {
-                    const end = new Date(endClosingDate);
-                    end.setHours(23, 59, 59, 999);
-                    q = q.lte('fecha_cierre_estimada', end.toISOString());
+                    const endCloseISO = toEndOfDayISO(endClosingDate);
+                    if (endCloseISO) q = q.lte('fecha_cierre_estimada', endCloseISO);
                 }
 
                 if (accountOwnerIds && accountOwnerIds.length > 0) {
