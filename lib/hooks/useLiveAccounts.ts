@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { fetchAllRowsCached, getCachedRows } from "./liveDataCache";
 
 export interface LiveAccount {
     id: string;
@@ -13,43 +13,25 @@ export interface LiveAccount {
     is_deleted: boolean | null;
 }
 
+const TABLE = "CRM_Cuentas";
 const SELECT_COLUMNS = "id, nombre, canal_id, subclasificacion_id, owner_user_id, created_at, is_deleted";
-const PAGE_SIZE = 1000;
-
-async function fetchAllAccounts(): Promise<LiveAccount[]> {
-    const rows: LiveAccount[] = [];
-    let from = 0;
-    // Supabase caps a single response at PAGE_SIZE rows; page through until a
-    // short page tells us we've reached the end. Postgres doesn't guarantee a
-    // stable row order across requests without an explicit ORDER BY, so an
-    // unordered .range() pagination can silently skip or duplicate rows
-    // between pages — order by the primary key to keep pages consistent.
-    while (true) {
-        const { data, error } = await supabase
-            .from("CRM_Cuentas")
-            .select(SELECT_COLUMNS)
-            .order("id", { ascending: true })
-            .range(from, from + PAGE_SIZE - 1);
-        if (error) throw error;
-        const page = (data as LiveAccount[]) || [];
-        rows.push(...page);
-        if (page.length < PAGE_SIZE) break;
-        from += PAGE_SIZE;
-    }
-    return rows;
-}
 
 /**
  * Live (non-offline-cached) accounts. Same rationale as useLiveOpportunities:
  * the offline Dexie mirror can be stale even right after a manual sync, so
- * this indicadores report page queries Supabase directly.
+ * this indicadores report page queries Supabase directly. Fetched in
+ * parallel pages and cached for a few minutes (see liveDataCache.ts) so
+ * switching between indicadores tabs doesn't re-download the whole table
+ * every time.
  */
 export function useLiveAccounts() {
-    const [accounts, setAccounts] = useState<LiveAccount[]>([]);
+    const [accounts, setAccounts] = useState<LiveAccount[]>(
+        () => getCachedRows<LiveAccount>(TABLE) || []
+    );
 
     useEffect(() => {
         let active = true;
-        fetchAllAccounts()
+        fetchAllRowsCached<LiveAccount>(TABLE, SELECT_COLUMNS)
             .then(rows => {
                 if (active) setAccounts(rows);
             })
