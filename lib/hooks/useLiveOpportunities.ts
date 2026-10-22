@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { fetchAllRowsCached, getCachedRows } from "./liveDataCache";
 
 export interface LiveOpportunity {
     id: string;
@@ -16,45 +16,26 @@ export interface LiveOpportunity {
     is_deleted: boolean | null;
 }
 
+const TABLE = "CRM_Oportunidades";
 const SELECT_COLUMNS = "id, account_id, owner_user_id, estado_id, fase_id, segmento_id, amount, fecha_cierre_estimada, created_at, is_deleted";
-const PAGE_SIZE = 1000;
-
-async function fetchAllOpportunities(): Promise<LiveOpportunity[]> {
-    const rows: LiveOpportunity[] = [];
-    let from = 0;
-    // Supabase caps a single response at PAGE_SIZE rows; page through until a
-    // short page tells us we've reached the end. Postgres doesn't guarantee a
-    // stable row order across requests without an explicit ORDER BY, so an
-    // unordered .range() pagination can silently skip or duplicate rows
-    // between pages — order by the primary key to keep pages consistent.
-    while (true) {
-        const { data, error } = await supabase
-            .from("CRM_Oportunidades")
-            .select(SELECT_COLUMNS)
-            .order("id", { ascending: true })
-            .range(from, from + PAGE_SIZE - 1);
-        if (error) throw error;
-        const page = (data as LiveOpportunity[]) || [];
-        rows.push(...page);
-        if (page.length < PAGE_SIZE) break;
-        from += PAGE_SIZE;
-    }
-    return rows;
-}
 
 /**
  * Live (non-offline-cached) opportunities. Some indicadores report pages
  * compare their totals against a source BI report and found the local Dexie
  * mirror can be stale/incomplete even right after a manual sync — so those
  * pages query Supabase directly instead of going through the offline-first
- * cache used elsewhere in the app.
+ * cache used elsewhere in the app. Fetched in parallel pages and cached for
+ * a few minutes (see liveDataCache.ts) so switching between indicadores tabs
+ * doesn't re-download the whole table every time.
  */
 export function useLiveOpportunities() {
-    const [opportunities, setOpportunities] = useState<LiveOpportunity[]>([]);
+    const [opportunities, setOpportunities] = useState<LiveOpportunity[]>(
+        () => getCachedRows<LiveOpportunity>(TABLE) || []
+    );
 
     useEffect(() => {
         let active = true;
-        fetchAllOpportunities()
+        fetchAllRowsCached<LiveOpportunity>(TABLE, SELECT_COLUMNS)
             .then(rows => {
                 if (active) setOpportunities(rows);
             })
