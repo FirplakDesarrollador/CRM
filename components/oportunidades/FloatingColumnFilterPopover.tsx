@@ -20,10 +20,14 @@ import {
     RotateCcw
 } from 'lucide-react';
 import { cn } from '@/components/ui/utils';
+import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import {
     SALES_CHANNEL_OPTIONS,
     OPPORTUNITY_STATUS_OPTIONS,
-    ACTIVITY_STATUS_OPTIONS
+    ACTIVITY_STATUS_OPTIONS,
+    PROSPECTO_PHASE_ID,
+    getAvailablePhasesForChannel,
+    PhaseCatalogItem
 } from '@/lib/opportunityColumnFilterHelpers';
 
 export interface FloatingColumnFilterAnchor {
@@ -77,10 +81,34 @@ export function FloatingColumnFilterPopover({
     const popoverRef = useRef<HTMLDivElement>(null);
 
     // Catalogs state loaded on-demand
-    const [phases, setPhases] = useState<Array<{ id: number; nombre: string; canal_id?: string }>>([]);
+    const [phases, setPhases] = useState<PhaseCatalogItem[]>([]);
     const [users, setUsers] = useState<Array<{ id: string; full_name: string; email?: string }>>([]);
     const [origins, setOrigins] = useState<Array<{ id: string; nombre: string }>>([]);
     const [loadingCatalog, setLoadingCatalog] = useState(false);
+
+    // Current user assigned channels (vendors only see their channel phases)
+    const { user } = useCurrentUser();
+    const userCanales = useMemo(() => {
+        if (!user?.canales || !Array.isArray(user.canales) || user.canales.length === 0) return null;
+        return user.canales as string[];
+    }, [user?.canales]);
+
+    const [selectedChannelOverride, setSelectedChannelOverride] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (selectedChannel) {
+            setSelectedChannelOverride(selectedChannel);
+        }
+    }, [selectedChannel]);
+
+    // Active funnel channel: explicit selectedChannel > override > user's single assigned channel > null
+    const activeFunnelChannel = selectedChannel || selectedChannelOverride || (userCanales && userCanales.length === 1 ? userCanales[0] : null);
+
+    // Filter available phases strictly for the active channel, excluding closed phases and deduplicating by name
+    const channelPhases = useMemo(() => {
+        if (!activeFunnelChannel) return [];
+        return getAvailablePhasesForChannel(phases, activeFunnelChannel);
+    }, [phases, activeFunnelChannel]);
 
     // Internal search term for lists inside the popover
     const [searchText, setSearchText] = useState('');
@@ -133,7 +161,7 @@ export function FloatingColumnFilterPopover({
                 try {
                     const { data } = await supabase
                         .from('CRM_FasesOportunidad')
-                        .select('id, nombre, canal_id')
+                        .select('id, nombre, canal_id, orden')
                         .eq('is_active', true)
                         .order('orden', { ascending: true });
                     if (data && data.length > 0) setPhases(data);
@@ -178,11 +206,10 @@ export function FloatingColumnFilterPopover({
 
     if (!anchor) return null;
 
-    // Filter phases if channel is active
-    const filteredPhases = phases.filter(p => {
-        const matchesChannel = !selectedChannel || p.canal_id === selectedChannel;
-        const matchesSearch = !searchText.trim() || p.nombre.toLowerCase().includes(searchText.toLowerCase());
-        return matchesChannel && matchesSearch;
+    // Filter phases if search text is applied
+    const filteredPhases = channelPhases.filter(p => {
+        if (!searchText.trim()) return true;
+        return p.nombre.toLowerCase().includes(searchText.toLowerCase());
     });
 
     const filteredUsers = users.filter(u => {
@@ -282,13 +309,97 @@ export function FloatingColumnFilterPopover({
                 )}
 
                 {/* 2. FASE */}
-                {anchor.colKey === 'fase' && (
+                {anchor.colKey === 'fase' && !activeFunnelChannel && (
+                    <div className="space-y-3">
+                        <div className="p-2.5 rounded-xl bg-amber-50/80 border border-amber-200/70 text-xs text-amber-800">
+                            <p className="font-bold flex items-center gap-1.5 mb-1 text-amber-900">
+                                <Filter className="w-3.5 h-3.5 text-amber-600" />
+                                Fases por canal de venta
+                            </p>
+                            <p className="text-[11px] text-amber-800/90 leading-relaxed">
+                                Cada canal comercial tiene su propio embudo. Selecciona un canal para explorar sus etapas:
+                            </p>
+                        </div>
+
+                        {/* Botón directo para filtrar por Prospectos */}
+                        <button
+                            onClick={() => {
+                                onSelectPhase(selectedPhase === PROSPECTO_PHASE_ID ? null : PROSPECTO_PHASE_ID);
+                                onClose();
+                            }}
+                            className={cn(
+                                "w-full px-3 py-2 text-left text-xs font-semibold rounded-xl transition-all flex items-center justify-between cursor-pointer border",
+                                selectedPhase === PROSPECTO_PHASE_ID
+                                    ? "bg-purple-50 text-purple-700 border-purple-200 font-bold"
+                                    : "bg-slate-50 text-slate-700 border-slate-200/80 hover:bg-slate-100"
+                            )}
+                        >
+                            <div className="flex items-center gap-2">
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-100 text-purple-700 border border-purple-200">
+                                    Pros.
+                                </span>
+                                <span>Prospectos (Sin fase asignada)</span>
+                            </div>
+                            {selectedPhase === PROSPECTO_PHASE_ID && <Check className="w-4 h-4 text-purple-600 shrink-0" />}
+                        </button>
+
+                        {/* Canales disponibles para el usuario */}
+                        <div className="space-y-1">
+                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                                Canales disponibles
+                            </p>
+                            {SALES_CHANNEL_OPTIONS
+                                .filter(ch => !userCanales || userCanales.includes(ch.id))
+                                .map(ch => (
+                                    <button
+                                        key={ch.id}
+                                        onClick={() => {
+                                            onSelectChannel(ch.id);
+                                            setSelectedChannelOverride(ch.id);
+                                        }}
+                                        className="w-full px-3 py-2 text-left text-xs font-medium rounded-xl hover:bg-blue-50/70 hover:text-blue-700 transition-colors border border-slate-100 flex items-center justify-between cursor-pointer"
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <span className={cn("px-2 py-0.5 rounded-md text-[10px] font-bold border", ch.badgeClass)}>
+                                                {ch.id}
+                                            </span>
+                                            <span className="font-semibold text-slate-700">{ch.label}</span>
+                                        </div>
+                                        <span className="text-[10px] text-blue-600 font-bold">Ver etapas →</span>
+                                    </button>
+                                ))
+                            }
+                        </div>
+                    </div>
+                )}
+
+                {anchor.colKey === 'fase' && activeFunnelChannel && (
                     <div className="space-y-2">
+                        {/* Selector / indicador del canal activo */}
+                        <div className="px-2.5 py-1.5 bg-slate-50 rounded-xl border border-slate-200/80 flex items-center justify-between text-xs">
+                            <div className="flex items-center gap-1.5">
+                                <span className="text-[10px] font-bold text-slate-400 uppercase">Canal:</span>
+                                <span className="font-bold text-blue-700">{activeFunnelChannel}</span>
+                            </div>
+                            {(!userCanales || userCanales.length > 1) && (
+                                <button
+                                    onClick={() => {
+                                        setSelectedChannelOverride(null);
+                                        onSelectChannel(null);
+                                    }}
+                                    className="text-[10px] font-semibold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
+                                >
+                                    Cambiar canal
+                                </button>
+                            )}
+                        </div>
+
+                        {/* Buscador de fases dentro del canal */}
                         <div className="relative">
                             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
                             <input
                                 type="text"
-                                placeholder="Buscar fase..."
+                                placeholder={`Buscar fase en ${activeFunnelChannel}...`}
                                 value={searchText}
                                 onChange={(e) => setSearchText(e.target.value)}
                                 className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-white"
@@ -299,6 +410,7 @@ export function FloatingColumnFilterPopover({
                             <div className="py-6 text-center text-xs text-slate-400">Cargando fases...</div>
                         ) : (
                             <div className="space-y-1 max-h-56 overflow-y-auto pr-1">
+                                {/* Opción: Todas las fases */}
                                 <button
                                     onClick={() => {
                                         onSelectPhase(null);
@@ -309,10 +421,34 @@ export function FloatingColumnFilterPopover({
                                         !selectedPhase ? "bg-blue-50 text-blue-700 font-bold" : "hover:bg-slate-50 text-slate-600"
                                     )}
                                 >
-                                    <span>Todas las fases</span>
+                                    <span>Todas las etapas de {activeFunnelChannel}</span>
                                     {!selectedPhase && <Check className="w-3.5 h-3.5 text-blue-600" />}
                                 </button>
-                                {filteredPhases.map((ph) => {
+
+                                {/* Opción: Prospecto (Sin fase) */}
+                                <button
+                                    onClick={() => {
+                                        onSelectPhase(selectedPhase === PROSPECTO_PHASE_ID ? null : PROSPECTO_PHASE_ID);
+                                        onClose();
+                                    }}
+                                    className={cn(
+                                        "w-full px-2.5 py-1.5 text-left text-xs font-medium rounded-lg transition-colors flex items-center justify-between cursor-pointer border border-transparent",
+                                        selectedPhase === PROSPECTO_PHASE_ID
+                                            ? "bg-purple-50 text-purple-700 font-bold border-purple-200/60"
+                                            : "hover:bg-slate-50 text-slate-700"
+                                    )}
+                                >
+                                    <div className="flex items-center gap-2">
+                                        <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-100 text-purple-700">
+                                            Pros.
+                                        </span>
+                                        <span>Prospecto (Sin fase)</span>
+                                    </div>
+                                    {selectedPhase === PROSPECTO_PHASE_ID && <Check className="w-3.5 h-3.5 text-purple-600 shrink-0" />}
+                                </button>
+
+                                {/* Etapas activas del embudo del canal */}
+                                {filteredPhases.map((ph, idx) => {
                                     const isSelected = selectedPhase === ph.id;
                                     return (
                                         <button
@@ -326,11 +462,11 @@ export function FloatingColumnFilterPopover({
                                                 isSelected ? "bg-blue-50 text-blue-700 font-bold" : "hover:bg-slate-50 text-slate-700"
                                             )}
                                         >
-                                            <div className="flex flex-col truncate pr-2">
+                                            <div className="flex items-center gap-2 truncate pr-2">
+                                                <span className="w-4 h-4 rounded-full bg-slate-100 flex items-center justify-center text-[9px] font-bold text-slate-500 shrink-0">
+                                                    {idx + 1}
+                                                </span>
                                                 <span className="truncate">{ph.nombre}</span>
-                                                {ph.canal_id && (
-                                                    <span className="text-[9px] text-slate-400 uppercase">{ph.canal_id}</span>
-                                                )}
                                             </div>
                                             {isSelected && <Check className="w-3.5 h-3.5 text-blue-600 shrink-0" />}
                                         </button>

@@ -40,6 +40,71 @@ export const OPPORTUNITY_STATUS_OPTIONS = [
     { id: 'lost', label: 'Perdidas', description: 'Descartadas o no concretadas', icon: '❌' }
 ];
 
+export const PROSPECTO_PHASE_ID = -1;
+
+export interface PhaseCatalogItem {
+    id: number;
+    nombre: string;
+    canal_id?: string | null;
+    orden?: number;
+}
+
+/**
+ * Filtra las fases según el canal seleccionado, excluyendo fases de cierre ('cerrada'),
+ * y deduplicando por nombre para que cada etapa única del embudo aparezca una sola vez.
+ */
+export function getAvailablePhasesForChannel(
+    phases: PhaseCatalogItem[],
+    selectedChannel: string | null
+): PhaseCatalogItem[] {
+    if (!selectedChannel) return [];
+
+    // 1. Filtrar por canal y descartar estados cerrados (manejados por filtro ESTADO)
+    const channelPhases = phases.filter(p =>
+        p.canal_id === selectedChannel &&
+        !p.nombre.toLowerCase().includes('cerrada')
+    );
+
+    // 2. Ordenar por 'orden' si existe
+    channelPhases.sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
+
+    // 3. Deduplicar por nombre (si hay múltiples IDs para el mismo nombre en el mismo canal)
+    const seenNames = new Set<string>();
+    const deduplicated: PhaseCatalogItem[] = [];
+
+    for (const ph of channelPhases) {
+        const cleanName = ph.nombre.trim().toLowerCase();
+        if (!seenNames.has(cleanName)) {
+            seenNames.add(cleanName);
+            deduplicated.push(ph);
+        }
+    }
+
+    return deduplicated;
+}
+
+/**
+ * Obtiene todos los IDs equivalentes (duplicados de BD) para una fase dada dentro de su canal
+ */
+export function getEquivalentPhaseIds(
+    phases: PhaseCatalogItem[],
+    targetPhaseId: number
+): number[] {
+    if (targetPhaseId <= 0) return [targetPhaseId];
+    const target = phases.find(p => p.id === targetPhaseId);
+    if (!target) return [targetPhaseId];
+
+    const targetName = target.nombre?.trim().toLowerCase();
+    const targetChannel = target.canal_id;
+
+    const matches = phases.filter(p =>
+        p.nombre?.trim().toLowerCase() === targetName &&
+        (!targetChannel || p.canal_id === targetChannel)
+    );
+
+    return matches.length > 0 ? matches.map(p => p.id) : [targetPhaseId];
+}
+
 export const ACTIVITY_STATUS_OPTIONS = [
     { id: 'all', label: 'Todas las actividades', icon: '📋' },
     { id: 'overdue', label: 'Atrasada', icon: '🔴', desc: 'Con tareas vencidas pendientes' },

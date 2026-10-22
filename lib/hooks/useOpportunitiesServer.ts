@@ -6,6 +6,7 @@ import { db } from '@/lib/db';
 import { useSyncStore } from '@/lib/stores/useSyncStore';
 import { matchesSearchTokens, getSearchTokens } from '@/lib/utils';
 import { computeOpportunityActivitySummary, OpportunityActivitySummary } from '@/lib/opportunityActivities';
+import { PROSPECTO_PHASE_ID, getEquivalentPhaseIds, PhaseCatalogItem } from '@/lib/opportunityColumnFilterHelpers';
 
 export type OpportunityServer = {
     id: string;
@@ -104,6 +105,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
     const wonPhaseIdsRef = useRef<number[]>([]);
     const lostPhaseIdsRef = useRef<number[]>([]);
     const closedPhaseIdsRef = useRef<number[]>([]);
+    const allPhasesRef = useRef<PhaseCatalogItem[]>([]);
     const phasesLoadedRef = useRef(false);
     const [phasesReady, setPhasesReady] = useState(false); // State to trigger re-render
 
@@ -136,7 +138,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
     useEffect(() => {
         if (phasesLoadedRef.current) return;
         const loadClosedPhases = async () => {
-            let phases: { id: number; nombre: string }[] = [];
+            let phases: PhaseCatalogItem[] = [];
 
             if (!navigator.onLine) {
                 const localPhases = await db.phases.toArray();
@@ -145,7 +147,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                 try {
                     const { data, error } = await supabase
                         .from('CRM_FasesOportunidad')
-                        .select('id, nombre');
+                        .select('id, nombre, canal_id, orden');
                     if (!error && data && data.length > 0) {
                         phases = data;
                     } else {
@@ -157,6 +159,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
             }
 
             if (phases && phases.length > 0) {
+                allPhasesRef.current = phases;
                 const won: number[] = [];
                 const lost: number[] = [];
 
@@ -237,7 +240,12 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
             }
 
             if (phaseFilter) {
-                localOpps = localOpps.filter(o => o.fase_id === phaseFilter);
+                if (phaseFilter === PROSPECTO_PHASE_ID) {
+                    localOpps = localOpps.filter(o => !o.fase_id);
+                } else {
+                    const equivalentIds = getEquivalentPhaseIds(allPhasesRef.current, phaseFilter);
+                    localOpps = localOpps.filter(o => o.fase_id && equivalentIds.includes(Number(o.fase_id)));
+                }
             }
 
             if (statusFilter === 'won' && wonPhaseIdsRef.current.length > 0) {
@@ -508,7 +516,16 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
             }
 
             if (phaseFilter) {
-                query = query.eq('fase_id', phaseFilter);
+                if (phaseFilter === PROSPECTO_PHASE_ID) {
+                    query = query.is('fase_id', null);
+                } else {
+                    const equivalentIds = getEquivalentPhaseIds(allPhasesRef.current, phaseFilter);
+                    if (equivalentIds.length > 1) {
+                        query = query.in('fase_id', equivalentIds);
+                    } else {
+                        query = query.eq('fase_id', equivalentIds[0]);
+                    }
+                }
             }
 
             if (accountIdFilter) {

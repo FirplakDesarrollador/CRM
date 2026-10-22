@@ -3,6 +3,18 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-10-22 - Fix: Embudo de Fases por Canal Comercial, Deduplicación y Filtro de Prospectos en Oportunidades
+
+- **Módulo de Oportunidades (`components/oportunidades/FloatingColumnFilterPopover.tsx`, `lib/opportunityColumnFilterHelpers.ts`, `lib/hooks/useOpportunitiesServer.ts`, `tests/opportunityTableFilters.test.ts`):**
+  - **Alcance del Embudo por Canal:** El filtro de cabecera de la columna **FASE** restringe sus opciones al canal activo (`selectedChannel` o canales asignados al usuario en `CRM_Usuarios.canales`), impidiendo que se listen fases combinadas de todos los canales.
+  - **Eliminación de Estados Cerrados Repetidos:** Se excluyen del embudo comercial de fases las etapas de cierre ("Cerrada Ganada", "Cerrada Perdida"), ya que corresponden al filtro de **ESTADO**.
+  - **Deduplicación Limpia:** Se deduplican los nombres de etapas repetidas en base de datos (ej. ID 56 y 97 para "Visita" en `OBRAS_NAC`) mostrando cada paso una sola vez ordenado y numerado.
+  - **Mapeo de IDs Equivalentes (`getEquivalentPhaseIds`):** La consulta en Supabase/Dexie busca todos los IDs equivalentes asociados a la fase elegida mediante `.in('fase_id', equivalentIds)` sin alterar registros en base de datos.
+  - **Filtro Explícito de Prospectos (`PROSPECTO_PHASE_ID = -1`):** Adición de la opción "Prospectos (Sin fase)" que consulta en Supabase `.is('fase_id', null)` y en local `!o.fase_id`, permitiendo filtrar las 1.292 oportunidades en etapa de prospección.
+  - **Selector de Canales en Popover:** Si no hay canal activo, el popover orienta al usuario para elegir su canal comercial o filtrar directamente por prospectos.
+  - 11 pruebas unitarias pasando (11/11 VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+
 ## 2026-10-22 - Feature: Filtros Flotantes por Catálogo Maestro en Cabeceras de Oportunidades
 
 - **Módulo de Oportunidades (`app/oportunidades/page.tsx`, `components/oportunidades/FloatingColumnFilterPopover.tsx`, `lib/opportunityColumnFilterHelpers.ts`, `lib/hooks/useOpportunitiesServer.ts`, `tests/opportunityTableFilters.test.ts`):**

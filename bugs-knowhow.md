@@ -1786,4 +1786,45 @@ En tablas con carga progresiva o paginada en servidor, NUNCA permitas que el usu
 Tags:
 [handsontable] [server-side-filtering] [catalogs] [progressive-loading] [popover] [opportunities] [active-filters]
 
+---
+
+## [Bug ID: 20261022-06]
+
+Context:
+Filtro de cabecera de la columna "FASE" en la tabla interactiva de oportunidades (`components/oportunidades/FloatingColumnFilterPopover.tsx`, `lib/opportunityColumnFilterHelpers.ts`, `lib/hooks/useOpportunitiesServer.ts`).
+
+What I Did:
+Restricción del embudo de fases en el popover para que dependa estrictamente del canal comercial del usuario (`selectedChannel` o `user.canales`), deduplicación por nombre de etapa, exclusión de estados terminales cerrados ("Cerrada Ganada", "Cerrada Perdida") y adición de la opción "Prospectos (Sin fase)" (`fase_id IS NULL`), resolviendo el problema puramente a nivel de aplicación sin alterar la base de datos de Supabase.
+
+Problem:
+Al abrir el filtro flotante de la columna "FASE", se mostraban indiscriminadamente todas las fases de todos los canales mezcladas (más de 70 filas de `CRM_FasesOportunidad`), ocasionando que aparecieran 5 veces opciones repetidas como "Cerrada Perdida" y "Cerrada ganada" (una por cada canal: FERIA, PROPIO, OBRAS_INT, OBRAS_NAC, DIST_INT, DIST_NAC), además de duplicados de fases activas como "Visita" que en la base de datos tienen dos IDs distintos para el mismo canal. Tampoco existía forma de filtrar por "Prospectos" (las 1.292 oportunidades que tienen `fase_id: null`).
+
+Root Cause:
+1. `CRM_FasesOportunidad` almacena las etapas separadas por `canal_id`. Al consultar la tabla sin restringir por canal, se obtenían las etapas de todos los canales combinadas.
+2. Las fases "Cerrada Perdida" y "Cerrada Ganada" son estados terminales de cierre manejados por el filtro `ESTADO` (`statusFilter: 'won' | 'lost' | 'open'`), por lo que no deben contaminar el embudo comercial activo de fases.
+3. Existían registros históricos duplicados por canal en `CRM_FasesOportunidad` (ej. ID 56 e ID 97 ambos con nombre "Visita" y canal "OBRAS_NAC").
+4. El usuario solicitó explícitamente resolverlo en la aplicación sin tocar ni dañar la base de datos de Supabase.
+
+Fix Applied:
+1. **Filtrado Estricto por Canal y Exclusión de Fases Cerradas (`getAvailablePhasesForChannel`):**
+   Solo se extraen las fases del canal activo (`selectedChannel` o el canal asignado al usuario en `CRM_Usuarios.canales`). Se filtran las que contienen "cerrada" (`!nombre.includes('cerrada')`) y se ordenan por su campo `orden`.
+2. **Deduplicación Limpia en Interfaz:**
+   Se deduplican las etapas por nombre para que cada paso del embudo (ej. "Visita") aparezca una sola vez numerado (Paso 1, 2, ...).
+3. **Mapeo de IDs Equivalentes en Consultas (`getEquivalentPhaseIds`):**
+   Al filtrar una etapa, `useOpportunitiesServer.ts` busca todos los IDs asociados a ese nombre y canal (ej. `[56, 97]`) y realiza la consulta con `.in('fase_id', equivalentIds)`, de modo que captura todas las oportunidades sin importar cuál ID tengan asignado, sin tocar la BD.
+4. **Soporte de "Prospectos (Sin fase)" (`PROSPECTO_PHASE_ID = -1`):**
+   Se agregó una opción explícita y visible para "Prospectos (Sin fase asignada)", que en backend consulta `.is('fase_id', null)` y en local filtra `!o.fase_id`.
+5. **Selector de Canal en el Popover:**
+   Si el usuario no ha seleccionado canal aún (ej. rol ADMIN), el popover le explica que las fases dependen del canal y le permite elegir el canal deseado con un clic para desplegar su embudo específico.
+6. **Validación:**
+   Pruebas unitarias en `tests/opportunityTableFilters.test.ts` (11/11 VERIFIED / GREEN).
+
+Prevention Rule:
+**Channel-Scoped Funnel Hierarchy**:
+Las etapas de un embudo de ventas NUNCA deben mostrarse como una lista plana global si en el modelo de negocio pertenecen a canales comerciales diferenciados. Si la base de datos contiene duplicidades o variaciones por canal, deben aislarse mediante el canal del contexto/usuario, excluir los estados cerrados (que pertenecen al estado del negocio) y deduplicar a nivel de lógica de presentación sin ejecutar mutaciones destructivas en la base de datos en producción.
+
+Tags:
+[sales-funnel] [channels] [phases] [deduplication] [prospectos] [no-db-damage] [opportunities] [handsontable]
+
+
 
