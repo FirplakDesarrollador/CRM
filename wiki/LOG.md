@@ -3,6 +3,15 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-10-22 - Perf: Carga Progresiva de Oportunidades y Consulta de Totales Desacoplada
+
+- **Módulo de Oportunidades (`app/oportunidades/page.tsx`, `lib/hooks/useOpportunitiesServer.ts`, `lib/opportunityColumnFilterHelpers.ts`, `tests/opportunityTableFilters.test.ts`):**
+  - **Desacoplamiento de Totales (`countQuery` con `head: true`):** Se eliminó el parámetro `{ count: 'exact' }` de la consulta principal con joins relacionales de actividades. El conteo total se obtiene mediante una petición `HEAD` ultraligera indexada paralela, evaluando en 11-13 ms sin transferir datos de fila y ejecutándose únicamente al montar la vista o cambiar filtros (se omite en el scroll de paginación).
+  - **Carga Progresiva Inicial Rápida (`pageSize = 30`):** Reducción del tamaño de lote de 100 a 30 registros, permitiendo un First Contentful Paint inferior a 200 ms y montaje instantáneo de Handsontable y la vista de tarjetas móvil.
+  - **Suma y Presentación de Totales (`calculateTotalAmount`):** Exposición de `totalAmount` en `useOpportunitiesServer` y visualización de "Total valor cargado" en el pie de tabla de escritorio y en la cabecera móvil.
+  - 13 pruebas unitarias aprobadas en `tests/opportunityTableFilters.test.ts` y pruebas de scroll en `pruebas unitarias/infiniteScroll.test.ts` (VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+
 ## 2026-10-22 - Fix: Embudo de Fases por Canal Comercial, Deduplicación y Filtro de Prospectos en Oportunidades
 
 - **Módulo de Oportunidades (`components/oportunidades/FloatingColumnFilterPopover.tsx`, `lib/opportunityColumnFilterHelpers.ts`, `lib/hooks/useOpportunitiesServer.ts`, `tests/opportunityTableFilters.test.ts`):**

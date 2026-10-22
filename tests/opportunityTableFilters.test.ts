@@ -263,5 +263,67 @@ describe('Filtros internos de tabla de oportunidades', () => {
         // 5. Para PROSPECTO_PHASE_ID (-1), debe devolver [-1]
         expect(getEquivalentPhaseIds(mockPhases, PROSPECTO_PHASE_ID)).toEqual([-1]);
     });
+
+    it('calculateTotalAmount debe sumar montos ignorando valores nulos o inválidos', async () => {
+        const { calculateTotalAmount } = await import('@/lib/opportunityColumnFilterHelpers');
+
+        const opps = [
+            { amount: 1500000 },
+            { amount: 2500000 },
+            { amount: null },
+            { amount: undefined },
+            { amount: 0 },
+            { amount: '3000000' as any }
+        ];
+
+        expect(calculateTotalAmount(opps)).toBe(7000000);
+        expect(calculateTotalAmount([])).toBe(0);
+        expect(calculateTotalAmount(null as any)).toBe(0);
+    });
+
+    it('computeProgressiveBatch debe calcular correctamente rangos from/to y hasMore para carga progresiva', async () => {
+        const { computeProgressiveBatch } = await import('@/lib/opportunityColumnFilterHelpers');
+
+        // Lote 1 de 30 elementos
+        const batch1 = computeProgressiveBatch({ page: 1, pageSize: 30, totalCount: 75, receivedCount: 30 });
+        expect(batch1.from).toBe(0);
+        expect(batch1.to).toBe(29);
+        expect(batch1.hasMore).toBe(true);
+
+        // Lote 2 de 30 elementos (total 60)
+        const batch2 = computeProgressiveBatch({ page: 2, pageSize: 30, totalCount: 75, receivedCount: 30 });
+        expect(batch2.from).toBe(30);
+        expect(batch2.to).toBe(59);
+        expect(batch2.hasMore).toBe(true);
+
+        // Lote 3 (últimos 15 elementos para completar los 75)
+        const batch3 = computeProgressiveBatch({ page: 3, pageSize: 30, totalCount: 75, receivedCount: 15 });
+        expect(batch3.from).toBe(60);
+        expect(batch3.to).toBe(89);
+        expect(batch3.hasMore).toBe(false);
+
+        // Caso donde totalCount no está disponible aún pero receivedCount < pageSize
+        const batchEnd = computeProgressiveBatch({ page: 1, pageSize: 30, totalCount: null, receivedCount: 12 });
+        expect(batchEnd.hasMore).toBe(false);
+    });
+
+    it('debe seguir el contrato de contactos con pageSize=100 y cálculo directo de hasMore', async () => {
+        const { computeProgressiveBatch, DEFAULT_OPPORTUNITIES_PAGE_SIZE } = await import('@/lib/opportunityColumnFilterHelpers');
+
+        expect(DEFAULT_OPPORTUNITIES_PAGE_SIZE).toBe(100);
+
+        // Simulando primera página con 100 elementos de un total de 350 (igual a useContactsServer)
+        const batchPage1 = computeProgressiveBatch({ page: 1, pageSize: DEFAULT_OPPORTUNITIES_PAGE_SIZE, totalCount: 350, receivedCount: 100 });
+        expect(batchPage1.from).toBe(0);
+        expect(batchPage1.to).toBe(99);
+        expect(batchPage1.hasMore).toBe(true);
+
+        // Simulando cuarta página (últimos 50 elementos)
+        const batchPage4 = computeProgressiveBatch({ page: 4, pageSize: DEFAULT_OPPORTUNITIES_PAGE_SIZE, totalCount: 350, receivedCount: 50 });
+        expect(batchPage4.from).toBe(300);
+        expect(batchPage4.to).toBe(399);
+        expect(batchPage4.hasMore).toBe(false);
+    });
 });
+
 

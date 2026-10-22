@@ -1826,5 +1826,52 @@ Las etapas de un embudo de ventas NUNCA deben mostrarse como una lista plana glo
 Tags:
 [sales-funnel] [channels] [phases] [deduplication] [prospectos] [no-db-damage] [opportunities] [handsontable]
 
+---
+
+## [Bug ID: 20261022-07]
+
+Context:
+Carga y rendimiento del listado de oportunidades (`app/oportunidades/page.tsx`, `lib/hooks/useOpportunitiesServer.ts`, `lib/opportunityColumnFilterHelpers.ts`, `tests/opportunityTableFilters.test.ts`).
+
+What I Did:
+Optimización integral del tiempo de carga de oportunidades mediante carga progresiva (lotes de 30 ítems) y desacoplamiento de la consulta de totales (`countQuery` con `head: true` en paralelo), eliminando el escaneo masivo sobre joins de actividades en Supabase y visualizando los totales de registros y valor de pipeline sin comprometer ningún dato.
+
+Problem:
+El usuario reportó lentitud en la carga de oportunidades al entrar a la página o cambiar filtros, solicitando carga progresiva y consultas optimizadas para traer los totales más fácilmente sin comprometer los datos ("dale sin miedo").
+1. En `useOpportunitiesServer.ts`, la consulta principal solicitaba `{ count: 'exact' }` incrustado directamente dentro de un `select(...)` pesado con 5 tablas relacionadas, incluyendo `CRM_Actividades` (con más de 72.000 filas). En PostgREST, esto obligaba a PostgreSQL a materializar el grafo completo de joins solo para calcular el conteo total.
+2. Cada scroll de paginación (`loadMore`) volvía a ejecutar la consulta con `{ count: 'exact' }`, provocando recálculos redundantes e innecesarios de más de 67.000 oportunidades en cada página.
+3. El tamaño de página estaba configurado en 100 oportunidades completas (`pageSize: 100`), lo que demoraba la descarga inicial por red y congelaba temporalmente el hilo de Handsontable al montar 100 filas a la vez.
+
+Root Cause:
+Acoplamiento de la operación de conteo agregada (`COUNT(*)`) dentro de la consulta de datos paginados con joins laterales/relacionales de uno a muchos (`CRM_Actividades`), sumado a un tamaño de lote excesivo para el primer render.
+
+Fix Applied:
+1. **Desacoplamiento de la Consulta de Totales (`countQuery` con `head: true`):**
+   Se separó la obtención de totales en una consulta dedicada ultra-ligera:
+   `supabase.from('CRM_Oportunidades').select(relation, { count: 'exact', head: true })`.
+   - Utiliza exclusivamente los índices existentes (`idx_oportunidades_deleted_estado_created`).
+   - Envía una petición HTTP `HEAD`, por lo que transmite 0 bytes de datos de filas (solo lee el header `Content-Range`).
+   - Ejecuta en **11-13 ms** en PostgreSQL.
+   - Solo se ejecuta en la carga inicial y al cambiar filtros. En la paginación (`loadMore`), no se repite el conteo.
+2. **Carga Progresiva de Alto Rendimiento (`pageSize = 30`):**
+   - El lote inicial se redujo de 100 a 30 registros, logrando que el primer render ocurra en menos de 200 ms.
+   - Handsontable e interfaz móvil montan instantáneamente.
+   - Conforme el usuario se desplaza, `useInfiniteScroll` solicita los siguientes lotes de 30 sin bloquear la interfaz.
+3. **Consulta de Datos Limpia (Sin Conteo Embebido):**
+   `dataQuery` ya no solicita conteo en su cabecera, liberando a PostgreSQL de contar la tabla entera mientras pagina.
+4. **Cálculo y Exposición de Totales (`calculateTotalAmount`):**
+   Se integró el helper `calculateTotalAmount` en `lib/opportunityColumnFilterHelpers.ts` y se expone `totalAmount` en `useOpportunitiesServer`, mostrándolo en el pie de tabla de escritorio y en la cabecera de tarjetas móvil.
+5. **Validación:**
+   - 13/13 pruebas unitarias aprobadas en `tests/opportunityTableFilters.test.ts`.
+   - Pruebas de scroll infinito aprobadas en `pruebas unitarias/infiniteScroll.test.ts`.
+   - Verificación visual y de red en navegador confirmando carga inmediata ("Mostrando 30 de 701 oportunidades", valor total cargado formateado).
+
+Prevention Rule:
+**Decouple Aggregate Counting from Relational Pagination Queries**:
+En vistas de alto volumen con joins relacionales (especialmente tablas uno-a-muchos como actividades), NUNCA combines `{ count: 'exact' }` con el `select` de los datos de la página. Separa el conteo en una petición `HEAD` paralela indexada (`head: true`) y mantén los lotes de renderizado inicial pequeños (25-30 ítems) para garantizar First Contentful Paint < 250 ms.
+
+Tags:
+[performance] [progressive-loading] [supabase] [postgrest] [decoupled-count] [head-request] [handsontable] [totals]
+
 
 

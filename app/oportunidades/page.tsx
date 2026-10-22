@@ -4,7 +4,7 @@ import { useOpportunitiesServer } from "@/lib/hooks/useOpportunitiesServer";
 import { useInfiniteScroll } from "@/lib/hooks/useInfiniteScroll";
 import React, { useState, useEffect, useCallback, Suspense, useMemo, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Plus, Search, Filter, Briefcase, ArrowUpDown, ChevronUp, ChevronDown, Columns3, Check, X } from "lucide-react";
+import { Plus, Search, Filter, Briefcase, ArrowUpDown, ChevronUp, ChevronDown, Columns3, Check, X, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/components/ui/utils";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
@@ -56,6 +56,7 @@ function OpportunitiesContent() {
     const {
         data: opportunities,
         count,
+        totalAmount,
         loading,
         hasMore,
         loadMore,
@@ -1051,16 +1052,21 @@ function OpportunitiesContent() {
             {/* Listado (Tarjetas en Móvil, Tabla en Desktop) */}
             <div className="flex flex-col relative min-h-[450px] transition-all duration-300">
                 {(!loading || opportunities.length > 0) && (
-                    <div className="flex md:hidden items-center justify-end mb-3 px-1 z-10">
+                    <div className="flex flex-wrap items-center justify-between sm:justify-end mb-3 px-1 z-10 gap-2">
+                        {totalAmount > 0 && (
+                            <span className="text-sm font-medium text-slate-500 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm flex items-center gap-2">
+                                Total valor: <strong className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md font-bold">{formatCurrency(totalAmount)}</strong>
+                            </span>
+                        )}
                         <span className="text-sm font-medium text-slate-500 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm flex items-center gap-2">
-                            Total de registros: <strong className="text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md">{count !== undefined && count !== null ? count : opportunities.length}</strong>
+                            Total de registros: <strong className="text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md font-bold">{count !== undefined && count !== null ? count : opportunities.length}</strong>
                         </span>
                     </div>
                 )}
-                {loading && opportunities.length === 0 ? (
-                    <div className="space-y-4 bg-white border border-slate-200 rounded-2xl shadow-sm p-4 sm:p-6">
-                        {[1, 2, 3, 4].map((i) => (
-                            <div key={i} className="h-20 sm:h-16 bg-slate-50 rounded-xl animate-pulse border border-slate-100" />
+                {(loading && opportunities.length === 0) ? (
+                    <div data-testid="opportunities-loading" className="space-y-2">
+                        {[1, 2, 3, 4, 5, 6].map((i) => (
+                            <div key={i} className="h-20 bg-slate-100 rounded-xl animate-pulse border border-slate-200" />
                         ))}
                     </div>
                 ) : opportunities.length === 0 ? (
@@ -1629,8 +1635,18 @@ function OpportunitiesContent() {
 
                             {/* Pie de tabla unificado en desktop: contador y paginación integrados */}
                             <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-200/80 flex justify-between items-center text-xs text-slate-500">
-                                <div>
-                                    Mostrando <strong className="text-slate-800 font-bold">{opportunities.length}</strong> de <strong className="text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md font-bold">{count !== undefined && count !== null ? count : opportunities.length}</strong> oportunidades
+                                <div className="flex items-center gap-3">
+                                    <div>
+                                        Mostrando <strong className="text-slate-800 font-bold">{opportunities.length}</strong> de <strong className="text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md font-bold">{count !== undefined && count !== null ? count : opportunities.length}</strong> oportunidades
+                                    </div>
+                                    {totalAmount > 0 && (
+                                        <div className="hidden sm:flex items-center gap-1.5 pl-3 border-l border-slate-200">
+                                            <span className="text-slate-400">Total valor cargado:</span>
+                                            <strong className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md font-bold">
+                                                {formatCurrency(totalAmount)}
+                                            </strong>
+                                        </div>
+                                    )}
                                 </div>
                                 {hasMore && (
                                     <button
@@ -1639,7 +1655,7 @@ function OpportunitiesContent() {
                                         className="px-3.5 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-100 hover:text-blue-600 transition-all shadow-xs flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
                                     >
                                         {loading && <div className="w-3 h-3 rounded-full border-2 border-slate-300 border-t-blue-600 animate-spin" />}
-                                        {loading ? 'Cargando...' : 'Cargar más resultados'}
+                                        {loading ? 'Cargando...' : 'Cargar más oportunidades'}
                                     </button>
                                 )}
                             </div>
@@ -1649,14 +1665,14 @@ function OpportunitiesContent() {
                 
                 {/* Botón Cargar más exclusivo para móvil */}
                 {hasMore && opportunities.length > 0 && (
-                    <div ref={sentinelRef} className="p-4 flex justify-center mt-4 md:hidden">
+                    <div ref={sentinelRef} className="flex justify-center mt-4 mb-4 px-2 md:hidden">
                         <button
                             onClick={() => loadMore()}
                             disabled={loading}
-                            className="w-full px-6 py-3.5 bg-white border border-slate-200 text-slate-700 rounded-xl text-sm font-bold hover:bg-slate-50 active:scale-[0.98] transition-all disabled:opacity-50 flex justify-center items-center gap-2 shadow-sm"
+                            className="w-full flex items-center justify-center gap-2 px-6 py-3.5 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold hover:bg-slate-50 active:scale-[0.98] transition-all shadow-sm disabled:opacity-50"
                         >
-                            {loading && <div className="w-4 h-4 rounded-full border-2 border-slate-300 border-t-slate-600 animate-spin"></div>}
-                            {loading ? 'Cargando...' : 'Cargar más resultados'}
+                            {loading && <Loader2 size={16} className="animate-spin" />}
+                            {loading ? "Cargando..." : "Cargar más oportunidades"}
                         </button>
                     </div>
                 )}

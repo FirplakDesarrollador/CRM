@@ -3,6 +3,8 @@
  * Permiten que las opciones se consulten desde catálogos maestros de la BD sin cargar todas las filas en memoria.
  */
 
+export const DEFAULT_OPPORTUNITIES_PAGE_SIZE = 100;
+
 export interface OpportunityFilterState {
     channel?: string | null;
     phase?: number | null;
@@ -156,4 +158,52 @@ export function formatColumnHeaderTitle(title: string, sortIndicator: string, is
         parts.push('🔵');
     }
     return parts.join(' ');
+}
+
+/**
+ * Calcula la suma total de montos de oportunidades de forma segura, ignorando nulos o no numéricos.
+ */
+export function calculateTotalAmount(opportunities: Array<{ amount?: number | null | string }> | null | undefined): number {
+    if (!opportunities || !Array.isArray(opportunities)) return 0;
+    return opportunities.reduce((acc, curr) => {
+        const val = Number(curr?.amount);
+        return acc + (isNaN(val) ? 0 : val);
+    }, 0);
+}
+
+export interface ProgressiveBatchOptions {
+    page: number;
+    pageSize: number;
+    totalCount: number | null;
+    receivedCount: number;
+}
+
+export interface ProgressiveBatchResult {
+    from: number;
+    to: number;
+    hasMore: boolean;
+}
+
+/**
+ * Calcula los índices de rango y el indicador hasMore para la carga progresiva de oportunidades.
+ */
+export function computeProgressiveBatch({
+    page,
+    pageSize,
+    totalCount,
+    receivedCount
+}: ProgressiveBatchOptions): ProgressiveBatchResult {
+    const safePage = Math.max(1, page);
+    const safeSize = Math.max(1, pageSize);
+    const from = (safePage - 1) * safeSize;
+    const to = from + safeSize - 1;
+
+    let hasMore = false;
+    if (totalCount !== null && totalCount !== undefined) {
+        hasMore = from + receivedCount < totalCount;
+    } else {
+        hasMore = receivedCount >= safeSize;
+    }
+
+    return { from, to, hasMore };
 }
