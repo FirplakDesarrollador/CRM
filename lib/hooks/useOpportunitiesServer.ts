@@ -80,6 +80,11 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
     const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => (getInitialParam('status') as StatusFilter | null) || 'open');
     const [originFilter, setOriginFilter] = useState<string | null>(() => getInitialParam('origin'));
     const [accountIdFilter, setAccountIdFilter] = useState<string | null>(null);
+    const [countryFilter, setCountryFilter] = useState<number | null>(() => {
+        const val = getInitialParam('country');
+        return val ? Number(val) : null;
+    });
+    const [cityFilter, setCityFilter] = useState<string | null>(() => getInitialParam('city'));
 
     // Date Filters
     const [startDate, setStartDate] = useState<string | null>(() => getInitialParam('start'));
@@ -248,6 +253,15 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
 
             if (accountIdFilter) {
                 localOpps = localOpps.filter(o => o.account_id === accountIdFilter);
+            }
+
+            if (countryFilter) {
+                localOpps = localOpps.filter(o => accMap.get(o.account_id)?.pais_id === countryFilter);
+            }
+
+            if (cityFilter && cityFilter.trim() !== '') {
+                const lowerCity = cityFilter.trim().toLowerCase();
+                localOpps = localOpps.filter(o => accMap.get(o.account_id)?.ciudad?.toLowerCase().includes(lowerCity));
             }
 
             if (originFilter) {
@@ -432,7 +446,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                 if (usersRes.data) searchUserIds = usersRes.data.map(u => u.id);
             }
 
-            const useInnerJoin = channelFilter || subclassificationFilter;
+            const useInnerJoin = Boolean(channelFilter || subclassificationFilter || countryFilter || (cityFilter && cityFilter.trim() !== ''));
             const accountRelation = useInnerJoin ? 'account:CRM_Cuentas!inner(nombre, canal_id, subclasificacion_id, ciudad, pais_id)' : 'account:CRM_Cuentas(nombre, canal_id, subclasificacion_id, ciudad, pais_id)';
 
             let query = supabase
@@ -499,6 +513,14 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
 
             if (accountIdFilter) {
                 query = query.eq('account_id', accountIdFilter);
+            }
+
+            if (countryFilter) {
+                query = query.eq('account.pais_id', countryFilter);
+            }
+
+            if (cityFilter && cityFilter.trim() !== '') {
+                query = query.ilike('account.ciudad', `%${cityFilter.trim()}%`);
             }
 
             if (originFilter) {
@@ -693,7 +715,7 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
             setLoading(false);
             useSyncStore.getState().setIsLoadingData(false);
         }
-    }, [currentUserId, subordinateIds, pageSize, userFilter, searchTerm, accountIdFilter, accountOwnerIds, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, originFilter, phasesReady, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc]);
+    }, [currentUserId, subordinateIds, pageSize, userFilter, searchTerm, accountIdFilter, accountOwnerIds, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, originFilter, countryFilter, cityFilter, phasesReady, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc]);
 
     useEffect(() => {
         fetchOpportunities(false);
@@ -747,6 +769,10 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
         setOriginFilter,
         originFilter,
         setAccountIdFilter,
+        setCountryFilter,
+        countryFilter,
+        setCityFilter,
+        cityFilter,
         setStartDate,
         setEndDate,
         setStartClosingDate,

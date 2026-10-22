@@ -1750,4 +1750,40 @@ NUNCA utilices heurísticas difusas (como coincidencias de teléfono o email de 
 Tags:
 [vtiger] [migration] [cross-matching] [deduplication] [data-recovery] [opportunities] [pot-prefix]
 
+---
+
+## [Bug ID: 20261022-05]
+
+Context:
+Tabla interactiva de oportunidades (`app/oportunidades/page.tsx`, Handsontable `HotTable`, `useOpportunitiesServer.ts`, `components/oportunidades/FloatingColumnFilterPopover.tsx`).
+
+What I Did:
+Diagnóstico y solución del comportamiento de filtrado en cabeceras de columnas (`[▼]`) donde no aparecían todas las opciones de canales, fases, vendedores, países o ciudades debido a la carga progresiva por lotes (100 filas por página).
+
+Problem:
+1. El usuario reportó que al hacer clic en los filtros de los títulos de las columnas (ej. Canal, Ciudad, País, Fase), la lista desplegable de opciones estaba incompleta: solo aparecían los valores que por azar existían en las primeras 100 oportunidades cargadas en memoria. Si un canal (ej. `OBRAS_INT`) o una ciudad (ej. `Cartagena`) aparecía en la fila 150, no figuraba en la lista de opciones.
+2. Además, al seleccionar una de las pocas opciones visibles, el plugin nativo de Handsontable (`filter_by_value`) filtraba de forma local y ciega en JavaScript sobre esas 100 filas, en lugar de solicitar a Supabase los resultados reales en toda la base de datos.
+
+Root Cause:
+El plugin nativo `filters` / `dropdownMenu` de Handsontable es estrictamente cliente (`client-side`). Su función interna `filter_by_value` obtiene las opciones invocando `instance.getDataAtCol(col)` sobre el array cargado en el navegador (`hotData`). En arquitecturas con paginación infinita o carga progresiva (donde se cargan 100 filas a la vez para optimizar rendimiento de red y memoria), Handsontable desconoce por completo la base de datos externa.
+
+Fix Applied:
+1. **Catálogos Maestros Ligeros bajo demanda (Server-side Options):**
+   No es necesario descargar las 60.000 oportunidades para obtener los filtros. Se cargan únicamente los catálogos maestros de Supabase (`CRM_Canales`, `CRM_FasesOportunidad`, `CRM_Usuarios`, `CRM_OrigenesOportunidad`, `CRM_Paises`), cuyo peso total combinado no supera los 15 KB.
+2. **Intercepción de Clics en Cabecera (`beforeDropdownMenuShow` / `onClickCapture`):**
+   Al hacer clic en el botón `[▼]` (`.changeType`) de las columnas filtrables (`canal`, `fase`, `vendedor`, `estado`, `origen`, `pais`, `ciudad`), se cancela la apertura del menú ciego de Handsontable y se abre `FloatingColumnFilterPopover` anclado a la posición de la cabecera.
+3. **Filtros por País y Ciudad en el Servidor (`useOpportunitiesServer.ts`):**
+   Se integraron `countryFilter` y `cityFilter` en `useOpportunitiesServer`, activando `CRM_Cuentas!inner(...)` con `.eq('account.pais_id', countryFilter)` e `.ilike('account.ciudad', '%...%')`.
+4. **Indicador Visual `🔵` y Sincronización:**
+   Se aplicó el helper `formatColumnHeaderTitle` e `isColumnFilterActive` para marcar con un punto azul `🔵` cualquier columna con filtro activo.
+5. **Pruebas Automatizadas:**
+   Prueba unitaria en `tests/opportunityTableFilters.test.ts` (10/10 VERIFIED / GREEN).
+
+Prevention Rule:
+**Never Rely on In-Memory Client-Side Filters with Paginated Datasets**:
+En tablas con carga progresiva o paginada en servidor, NUNCA permitas que el usuario interactúe con plugins de filtrado cliente tipo `filter_by_value` sin interceptarlos. El filtrado debe delegarse siempre al backend mediante consultas SQL parametrizadas, y las opciones desplegables deben poblarse desde tablas maestras/catálogos o consultas agregadas (`SELECT DISTINCT`), garantizando que el usuario elija entre el 100% de las opciones reales sin colapsar el rendimiento.
+
+Tags:
+[handsontable] [server-side-filtering] [catalogs] [progressive-loading] [popover] [opportunities] [active-filters]
+
 

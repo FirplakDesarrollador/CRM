@@ -11,6 +11,8 @@ import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { UserPickerFilter } from "@/components/cuentas/UserPickerFilter";
 import { OpportunityFilters } from "@/components/oportunidades/OpportunityFilters";
 import { QuickDateFilter, FloatingDateFilterPopover } from "@/components/oportunidades/QuickDateFilter";
+import { FloatingColumnFilterPopover, FloatingColumnFilterAnchor } from "@/components/oportunidades/FloatingColumnFilterPopover";
+import { isColumnFilterActive, formatColumnHeaderTitle } from "@/lib/opportunityColumnFilterHelpers";
 import { parseHandsontableDate } from "@/lib/dateFilterHelpers";
 import { computeOpportunityActivitySummary } from "@/lib/opportunityActivities";
 import { buildOpportunityHotRow, resolveHotRowData, OPPORTUNITY_TABLE_COLUMN_KEYS } from "@/lib/opportunityTableHelpers";
@@ -67,6 +69,8 @@ function OpportunitiesContent() {
         setPhaseFilter,
         setStatusFilter,
         setOriginFilter,
+        setCountryFilter,
+        setCityFilter,
         setStartDate,
         setEndDate,
         setStartClosingDate,
@@ -110,6 +114,7 @@ function OpportunitiesContent() {
         title?: string;
         colKey: 'creada' | 'cierre';
     } | null>(null);
+    const [headerColumnFilterAnchor, setHeaderColumnFilterAnchor] = useState<FloatingColumnFilterAnchor | null>(null);
 
     const handleSort = (field: string) => {
         if (sortField === field) {
@@ -231,6 +236,29 @@ function OpportunitiesContent() {
         return null;
     });
 
+    const [selectedCountry, setSelectedCountry] = useState<number | null>(() => {
+        const fromUrl = searchParams.get('country');
+        if (fromUrl) return Number(fromUrl);
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_oportunidades_state');
+            if (saved) {
+                const val = new URLSearchParams(saved).get('country');
+                return val ? Number(val) : null;
+            }
+        }
+        return null;
+    });
+
+    const [selectedCity, setSelectedCity] = useState<string | null>(() => {
+        const fromUrl = searchParams.get('city');
+        if (fromUrl) return fromUrl;
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_oportunidades_state');
+            if (saved) return new URLSearchParams(saved).get('city') || null;
+        }
+        return null;
+    });
+
     // Synchronize initial & restored filter values from URL or sessionStorage to the server hook
     useEffect(() => {
         const savedState = typeof window !== 'undefined' ? sessionStorage.getItem('crm_oportunidades_state') : null;
@@ -252,6 +280,8 @@ function OpportunitiesContent() {
         const end = searchParams.get('end') || saved.get('end') || null;
         const startClose = searchParams.get('startClose') || saved.get('startClose') || null;
         const endClose = searchParams.get('endClose') || saved.get('endClose') || null;
+        const initialCountry = searchParams.get('country') || saved.get('country') || null;
+        const initialCity = searchParams.get('city') || saved.get('city') || null;
 
         setSearchTerm(initialSearch);
         setInputValue(initialSearch);
@@ -269,6 +299,11 @@ function OpportunitiesContent() {
         const phaseNum = initialPhase ? Number(initialPhase) : null;
         setPhaseFilter(phaseNum);
         setSelectedPhase(phaseNum);
+        const countryNum = initialCountry ? Number(initialCountry) : null;
+        setCountryFilter(countryNum);
+        setSelectedCountry(countryNum);
+        setCityFilter(initialCity);
+        setSelectedCity(initialCity);
         setStatusFilter(initialStatus as any);
         setStatusFilterState(initialStatus as any);
         setOriginFilter(initialOrigin);
@@ -370,6 +405,12 @@ function OpportunitiesContent() {
         if (endClosingDate) params.set('endClose', endClosingDate);
         else params.delete('endClose');
 
+        if (selectedCountry) params.set('country', String(selectedCountry));
+        else params.delete('country');
+
+        if (selectedCity && selectedCity.trim() !== '') params.set('city', selectedCity.trim());
+        else params.delete('city');
+
         if (sortField !== 'created_at') params.set('sort', sortField);
         else params.delete('sort');
         if (sortAsc) params.set('dir', 'asc');
@@ -394,7 +435,7 @@ function OpportunitiesContent() {
         
         const query = queryString ? `?${queryString}` : window.location.pathname;
         router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
-    }, [tab, selectedAccountOwnerIds, selectedChannel, selectedSubclass, selectedSegment, selectedPhase, selectedOrigin, statusFilter, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc, searchParams, router]); // Search is handled by the debounced effect above.
+    }, [tab, selectedAccountOwnerIds, selectedChannel, selectedSubclass, selectedSegment, selectedPhase, selectedOrigin, selectedCountry, selectedCity, statusFilter, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc, searchParams, router]); // Search is handled by the debounced effect above.
 
 
     const handleFilterChange = useCallback(({ 
@@ -799,7 +840,8 @@ function OpportunitiesContent() {
     const activeFilterCount = selectedAccountOwnerIds.length + (selectedChannel ? 1 : 0) + (selectedSubclass ? 1 : 0) +
         (selectedSegment ? 1 : 0) + (selectedPhase ? 1 : 0) + (selectedOrigin ? 1 : 0) +
         (statusFilter !== 'open' ? 1 : 0) + (startDate ? 1 : 0) + (endDate ? 1 : 0) +
-        (startClosingDate ? 1 : 0) + (endClosingDate ? 1 : 0);
+        (startClosingDate ? 1 : 0) + (endClosingDate ? 1 : 0) +
+        (selectedCountry ? 1 : 0) + (selectedCity ? 1 : 0);
 
     return (
         <div data-testid="opportunities-page" className="space-y-3.5 max-w-[1600px] mx-auto pb-8 md:pb-2 animate-in fade-in duration-300">
@@ -1331,6 +1373,25 @@ function OpportunitiesContent() {
                                                 title: colKey === 'creada' ? 'Fecha de Creación' : 'Fecha de Cierre',
                                                 colKey: colKey as 'creada' | 'cierre'
                                             });
+                                        } else if (colKey && ['canal', 'fase', 'vendedor', 'estado', 'origen', 'pais', 'ciudad'].includes(colKey)) {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            const rect = btn.getBoundingClientRect();
+                                            const titleMap: Record<string, string> = {
+                                                canal: 'Canal de Venta',
+                                                fase: 'Fase del Negocio',
+                                                vendedor: 'Asignado a',
+                                                estado: 'Estado',
+                                                origen: 'Origen Oportunidad',
+                                                pais: 'País de la Cuenta',
+                                                ciudad: 'Ciudad de la Cuenta'
+                                            };
+                                            setHeaderColumnFilterAnchor({
+                                                top: rect.bottom + 6,
+                                                left: Math.max(16, Math.min(rect.left - 100, window.innerWidth - 320)),
+                                                title: titleMap[colKey] || colKey,
+                                                colKey
+                                            });
                                         }
                                     }
                                 }}
@@ -1340,7 +1401,7 @@ function OpportunitiesContent() {
                                     if (btn) {
                                         const th = btn.closest('th');
                                         const colKey = th?.getAttribute('data-col-key');
-                                        if (colKey === 'creada' || colKey === 'cierre') {
+                                        if (colKey && ['creada', 'cierre', 'canal', 'fase', 'vendedor', 'estado', 'origen', 'pais', 'ciudad'].includes(colKey)) {
                                             e.stopPropagation();
                                         }
                                     }
@@ -1362,7 +1423,7 @@ function OpportunitiesContent() {
                                         const col = activeRange ? activeRange.highlight?.col : -1;
                                         const activeKeys = OPPORTUNITY_TABLE_COLUMN_KEYS.filter(key => visibleColumns.includes(key));
                                         const colKey = activeKeys[col];
-                                        if (colKey === 'creada' || colKey === 'cierre') {
+                                        if (colKey && ['creada', 'cierre', 'canal', 'fase', 'vendedor', 'estado', 'origen', 'pais', 'ciudad'].includes(colKey)) {
                                             setTimeout(() => {
                                                 instance.close();
                                             }, 0);
@@ -1475,13 +1536,28 @@ function OpportunitiesContent() {
                                                 'cierre': 'fecha_cierre_estimada'
                                             };
                                             const sortKey = fieldSortMap[colDef.data];
+                                            const isFiltered = isColumnFilterActive(colDef.data, {
+                                                channel: selectedChannel,
+                                                phase: selectedPhase,
+                                                ownerIds: selectedAccountOwnerIds,
+                                                status: statusFilter,
+                                                origin: selectedOrigin,
+                                                country: selectedCountry,
+                                                city: selectedCity,
+                                                startDate,
+                                                endDate,
+                                                startClose: startClosingDate,
+                                                endClose: endClosingDate
+                                            });
+
+                                            const header = TH.querySelector('.colHeader');
                                             if (sortKey) {
                                                 TH.style.cursor = 'pointer';
                                                 TH.title = 'Clic para ordenar ascendente o descendente';
-                                                const header = TH.querySelector('.colHeader');
-                                                const isFiltered = (colDef.data === 'creada' && (startDate || endDate));
-                                                const filterBadge = isFiltered ? ' 🔵' : '';
-                                                if (header) header.textContent = `${colDef.title} ${sortField === sortKey ? (sortAsc ? '↑' : '↓') : '↕'}${filterBadge}`;
+                                                const sortIndicator = sortField === sortKey ? (sortAsc ? '↑' : '↓') : '↕';
+                                                if (header) header.textContent = formatColumnHeaderTitle(colDef.title, sortIndicator, isFiltered);
+                                            } else {
+                                                if (header) header.textContent = formatColumnHeaderTitle(colDef.title, '', isFiltered);
                                             }
                                         }
                                     }}
@@ -1506,6 +1582,48 @@ function OpportunitiesContent() {
                                         }
                                     }}
                                     onClose={() => setHeaderDateFilterAnchor(null)}
+                                />
+
+                                {/* Popover flotante intuitivo anclado a las cabeceras de columnas con catálogos maestros */}
+                                <FloatingColumnFilterPopover
+                                    anchor={headerColumnFilterAnchor}
+                                    onClose={() => setHeaderColumnFilterAnchor(null)}
+                                    selectedChannel={selectedChannel}
+                                    onSelectChannel={(ch) => {
+                                        setSelectedChannel(ch);
+                                        setChannelFilter(ch);
+                                    }}
+                                    selectedPhase={selectedPhase}
+                                    onSelectPhase={(ph) => {
+                                        setSelectedPhase(ph);
+                                        setPhaseFilter(ph);
+                                    }}
+                                    selectedAccountOwnerIds={selectedAccountOwnerIds}
+                                    onSelectAccountOwners={(owners) => {
+                                        setSelectedAccountOwnerIds(owners);
+                                        setAccountOwnerIds(owners);
+                                    }}
+                                    statusFilter={statusFilter}
+                                    onSelectStatus={(st) => {
+                                        setStatusFilterState(st);
+                                        setStatusFilter(st);
+                                    }}
+                                    selectedOrigin={selectedOrigin}
+                                    onSelectOrigin={(orig) => {
+                                        setSelectedOrigin(orig);
+                                        setOriginFilter(orig);
+                                    }}
+                                    selectedCountry={selectedCountry}
+                                    onSelectCountry={(cId) => {
+                                        setSelectedCountry(cId);
+                                        setCountryFilter(cId);
+                                    }}
+                                    selectedCity={selectedCity}
+                                    onSelectCity={(city) => {
+                                        setSelectedCity(city);
+                                        setCityFilter(city);
+                                    }}
+                                    displayCountries={displayCountries}
                                 />
                             </div>
 

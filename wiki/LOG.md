@@ -3,6 +3,17 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-10-22 - Feature: Filtros Flotantes por Catálogo Maestro en Cabeceras de Oportunidades
+
+- **Módulo de Oportunidades (`app/oportunidades/page.tsx`, `components/oportunidades/FloatingColumnFilterPopover.tsx`, `lib/opportunityColumnFilterHelpers.ts`, `lib/hooks/useOpportunitiesServer.ts`, `tests/opportunityTableFilters.test.ts`):**
+  - Implementación de `FloatingColumnFilterPopover` anclado a las cabeceras de columnas (**Canal**, **Fase**, **Vendedor**, **Estado**, **Origen**, **País**, **Ciudad**).
+  - Intercepción del plugin nativo `filter_by_value` de Handsontable, el cual únicamente escaneaba las primeras 100 filas en memoria del navegador y filtraba de manera ciega sin consultar la base de datos.
+  - Carga bajo demanda de catálogos maestros ligeros (`CRM_Canales`, `CRM_FasesOportunidad`, `CRM_Usuarios`, `CRM_OrigenesOportunidad`, `CRM_Paises`) para desplegar el universo completo de opciones sin sobrecargar la red ni descargar 60.000 oportunidades completas.
+  - Sincronización del filtrado en Supabase (`useOpportunitiesServer`: `setChannelFilter`, `setPhaseFilter`, `setAccountOwnerIds`, `setStatusFilter`, `setOriginFilter`, `setCountryFilter`, `setCityFilter`).
+  - Indicadores visuales de columna filtrada `🔵` dinámicos en todas las cabeceras activas.
+  - 10 pruebas unitarias verificadas (10/10 VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+
 ## 2026-10-22 - Data Restoration: Restauración Masiva de Oportunidades Nativas 2026 Afectadas por Cruce vTiger
 
 - **Base de Datos y Módulo de Oportunidades (`CRM_Oportunidades`, `execution/execute_complete_restoration.mjs`):**

@@ -164,5 +164,57 @@ describe('Filtros internos de tabla de oportunidades', () => {
         expect(opps[1].id).toBe('mid-1');    // 2025 segundo
         expect(opps[2].id).toBe('old-1');    // 2024 al final
     });
+
+    it('isColumnFilterActive debe detectar correctamente filtros activos en cada columna', async () => {
+        const { isColumnFilterActive, formatColumnHeaderTitle } = await import('@/lib/opportunityColumnFilterHelpers');
+
+        const stateEmpty = {
+            channel: null,
+            phase: null,
+            ownerIds: [],
+            status: 'open' as const,
+            origin: null,
+            country: null,
+            city: null,
+            startDate: null,
+            endDate: null,
+            startClose: null,
+            endClose: null
+        };
+
+        expect(isColumnFilterActive('canal', stateEmpty)).toBe(false);
+        expect(isColumnFilterActive('fase', stateEmpty)).toBe(false);
+        expect(isColumnFilterActive('vendedor', stateEmpty)).toBe(false);
+        expect(isColumnFilterActive('estado', stateEmpty)).toBe(false); // 'open' is default
+        expect(isColumnFilterActive('creada', stateEmpty)).toBe(false);
+
+        const stateFiltered = {
+            channel: 'OBRAS_INT',
+            phase: 64,
+            ownerIds: ['user-1'],
+            status: 'won' as const,
+            origin: 'WhatsApp',
+            country: 1,
+            city: 'Medellín',
+            startDate: '2026-10-01',
+            endDate: null,
+            startClose: null,
+            endClose: '2026-12-31'
+        };
+
+        expect(isColumnFilterActive('canal', stateFiltered)).toBe(true);
+        expect(isColumnFilterActive('fase', stateFiltered)).toBe(true);
+        expect(isColumnFilterActive('vendedor', stateFiltered)).toBe(true);
+        expect(isColumnFilterActive('estado', stateFiltered)).toBe(true);
+        expect(isColumnFilterActive('origen', stateFiltered)).toBe(true);
+        expect(isColumnFilterActive('pais', stateFiltered)).toBe(true);
+        expect(isColumnFilterActive('ciudad', stateFiltered)).toBe(true);
+        expect(isColumnFilterActive('creada', stateFiltered)).toBe(true);
+        expect(isColumnFilterActive('cierre', stateFiltered)).toBe(true);
+
+        expect(formatColumnHeaderTitle('CANAL', '', false)).toBe('CANAL');
+        expect(formatColumnHeaderTitle('CANAL', '↑', true)).toBe('CANAL ↑ 🔵');
+        expect(formatColumnHeaderTitle('CANAL', '', true)).toBe('CANAL 🔵');
+    });
 });
 
