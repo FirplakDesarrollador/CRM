@@ -2,7 +2,8 @@
 
 import React, { useCallback, useMemo, useState } from "react";
 import ReactECharts from "echarts-for-react";
-import { CalendarCheck2, CheckCircle2, BarChart3, CalendarClock, AlertTriangle, FileWarning } from "lucide-react";
+import Link from "next/link";
+import { CalendarCheck2, CheckCircle2, BarChart3, CalendarClock, AlertTriangle, FileWarning, ExternalLink } from "lucide-react";
 import { useIndicadoresLookups } from "@/lib/hooks/useIndicadoresLookups";
 import { useCanalPropioVendedores, TipoCanalVendedor } from "@/lib/hooks/useCanalPropioVendedores";
 import { useLiveActivities } from "@/lib/hooks/useLiveActivities";
@@ -653,6 +654,7 @@ export function Page4Eventos() {
                                         <th className="px-4 py-2">Clasificación</th>
                                         <th className="px-4 py-2">Fecha</th>
                                         <th className="px-4 py-2 text-right">Días atraso</th>
+                                        <th className="px-4 py-2"></th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-50">
@@ -663,11 +665,22 @@ export function Page4Eventos() {
                                             <td className="px-4 py-2 text-slate-600">{row.clasificacion}</td>
                                             <td className="px-4 py-2 text-slate-600">{row.fechaLabel}</td>
                                             <td className="px-4 py-2 text-right text-red-600 font-semibold tabular-nums">{row.diasAtraso ?? "-"}</td>
+                                            <td className="px-4 py-2 text-right">
+                                                <Link
+                                                    href={`/actividades?id=${row.id}`}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    title="Abrir esta actividad"
+                                                    className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-slate-400 hover:text-[#254153] hover:bg-slate-100 transition-colors"
+                                                >
+                                                    <ExternalLink className="w-4 h-4" />
+                                                </Link>
+                                            </td>
                                         </tr>
                                     ))}
                                     {overdueDetailRows.length === 0 && (
                                         <tr>
-                                            <td colSpan={5} className="px-4 py-8 text-center text-slate-400">Sin actividades atrasadas.</td>
+                                            <td colSpan={6} className="px-4 py-8 text-center text-slate-400">Sin actividades atrasadas.</td>
                                         </tr>
                                     )}
                                 </tbody>

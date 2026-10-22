@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { fetchAllRowsCached, getCachedRows } from "./liveDataCache";
 
 export interface LiveActivity {
     id: string;
@@ -16,44 +16,25 @@ export interface LiveActivity {
     is_deleted: boolean | null;
 }
 
+const TABLE = "CRM_Actividades";
 const SELECT_COLUMNS = "id, asunto, user_id, account_id, opportunity_id, tipo_actividad, clasificacion_id, is_completed, fecha_inicio, is_deleted";
-const PAGE_SIZE = 1000;
-
-async function fetchAllActivities(): Promise<LiveActivity[]> {
-    const rows: LiveActivity[] = [];
-    let from = 0;
-    // Supabase caps a single response at PAGE_SIZE rows; page through until a
-    // short page tells us we've reached the end. Postgres doesn't guarantee a
-    // stable row order across requests without an explicit ORDER BY, so an
-    // unordered .range() pagination can silently skip or duplicate rows
-    // between pages — order by the primary key to keep pages consistent.
-    while (true) {
-        const { data, error } = await supabase
-            .from("CRM_Actividades")
-            .select(SELECT_COLUMNS)
-            .order("id", { ascending: true })
-            .range(from, from + PAGE_SIZE - 1);
-        if (error) throw error;
-        const page = (data as LiveActivity[]) || [];
-        rows.push(...page);
-        if (page.length < PAGE_SIZE) break;
-        from += PAGE_SIZE;
-    }
-    return rows;
-}
 
 /**
  * Live (non-offline-cached) activities. Same rationale as
  * useLiveOpportunities: the offline Dexie mirror can be stale for this data
  * even right after a manual sync, so these indicadores report pages query
- * Supabase directly.
+ * Supabase directly. Fetched in parallel pages and cached for a few minutes
+ * (see liveDataCache.ts) so switching between indicadores tabs doesn't
+ * re-download the whole table every time.
  */
 export function useLiveActivities() {
-    const [activities, setActivities] = useState<LiveActivity[]>([]);
+    const [activities, setActivities] = useState<LiveActivity[]>(
+        () => getCachedRows<LiveActivity>(TABLE) || []
+    );
 
     useEffect(() => {
         let active = true;
-        fetchAllActivities()
+        fetchAllRowsCached<LiveActivity>(TABLE, SELECT_COLUMNS)
             .then(rows => {
                 if (active) setActivities(rows);
             })
