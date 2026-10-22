@@ -682,8 +682,8 @@ export function useOpportunitiesServer({ pageSize = 20 }: UseOpportunitiesServer
                 setHasMore(from + (result?.length || 0) < totalCount);
             }
 
-        } catch (err) {
-            console.error("Error fetching opportunities, executing fallback:", err);
+        } catch (err: any) {
+            console.error("Error fetching opportunities, executing fallback:", err?.message || err, err?.details, err?.hint, err?.code, JSON.stringify(err));
             try {
                 await fetchOffline();
             } catch (fallbackErr) {

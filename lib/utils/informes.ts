@@ -34,9 +34,7 @@ export const downloadExcel = async <T extends object>(
   worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF254153' } };
 
   // Add Data
-  data.forEach((item) => {
-    worksheet.addRow(item);
-  });
+  worksheet.addRows(data);
 
   // Generate buffer and save
   const buffer = await workbook.xlsx.writeBuffer();
@@ -477,5 +475,42 @@ export function mapActivityReportRow(
   };
 }
 
+/**
+ * Ejecuta una consulta PostgREST de Supabase por bloques (chunking) consecutivos.
+ * Previene que respuestas gigantes (e.g. 75.000 actividades o 68.000 oportunidades)
+ * excedan los buffers de Cloudflare o PostgREST (50k filas), evitando el fallo
+ * 'SyntaxError: Unterminated string in JSON'.
+ */
+export async function fetchAllInChunks(
+  baseQuery: any,
+  batchSize: number = 2500,
+  onProgress?: (totalFetched: number) => void
+): Promise<any[]> {
+  const allData: any[] = [];
+  let from = 0;
+  let hasMore = true;
 
+  while (hasMore) {
+    const to = from + batchSize - 1;
+    const { data: chunk, error } = await baseQuery.range(from, to);
+    if (error) throw error;
 
+    if (!chunk || chunk.length === 0) {
+      break;
+    }
+
+    allData.push(...chunk);
+
+    if (onProgress) {
+      onProgress(allData.length);
+    }
+
+    if (chunk.length < batchSize) {
+      hasMore = false;
+    } else {
+      from += batchSize;
+    }
+  }
+
+  return allData;
+}

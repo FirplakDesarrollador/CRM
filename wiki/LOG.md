@@ -3,6 +3,28 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-10-22 - Data Restoration: Restauración Masiva de Oportunidades Nativas 2026 Afectadas por Cruce vTiger
+
+- **Base de Datos y Módulo de Oportunidades (`CRM_Oportunidades`, `execution/execute_complete_restoration.mjs`):**
+  - Creación de snapshot de seguridad previo: `CRM_Oportunidades_pre_restore_20261022`.
+  - Reactivación de **4.153 oportunidades** legítimas creadas en 2026 que fueron erróneamente soft-deleted durante la purga de duplicados (`is_deleted = false`).
+  - Reapertura de **244 oportunidades** de 2026 cambiadas indebidamente a *Cerrada Perdida* (`estado_id = 1` y motivos de pérdida reseteados a NULL).
+  - Limpieza del prefijo `POT[0-9]+ - ` en **4.904 nombres** de oportunidades nativas de 2026.
+  - Limpieza de notas `--- [HISTORIAL VTIGER] ---` en **4.224 comentarios**.
+  - Desvinculación de metadatos `vtiger_potentialid` / `vtiger_potential_no` en **4.904 oportunidades** de 2026.
+  - Verificación en CRM de la oportunidad de Edison Porras (*Hidromasaje Galapagos 250, DELTA INGENIERA GROUP* por $18.276.435,98 con cotizaciones, productos y estado abierto 100% íntegros).
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
+## 2026-10-22 - Fix: Barra de Herramientas Responsiva y Ancho Mínimo de Buscador en Oportunidades
+
+- **Módulo de Oportunidades (`app/oportunidades/page.tsx`, `tests/opportunityToolbarResponsive.test.ts`):**
+  - Corrección del fallo de diseño responsivo reportado por el equipo comercial, donde la barra de búsqueda en `/oportunidades` quedaba colapsada a un cuadro diminuto de 42px al visualizarse en pantallas de laptop y monitores entre 1280px y 1536px.
+  - Implementación de ancho mínimo garantizado en el buscador (`min-w-[200px] sm:min-w-[220px]`), impidiendo que `flex-1` comprima el input ante múltiples botones de filtrado adyacentes (`UserPickerFilter`, `QuickDateFilter`, `Filtros`, `ColumnPicker`).
+  - Ajuste de breakpoint de barra principal a `flex-col 2xl:flex-row`: en pantallas estándar de portátiles (1280px–1536px), las pestañas de módulos se posicionan en la primera fila con scroll táctil, y los controles de filtrado se ubican en la segunda fila con espacio completo (>320px para el buscador). En pantallas grandes (>= 1536px), conviven fluidamente en una sola fila.
+  - Inclusión de botón `X` de limpieza rápida dentro del input cuando hay texto escrito.
+  - Creación de prueba de regresión automatizada en `tests/opportunityToolbarResponsive.test.ts` (4/4 VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+
 ## 2026-10-21 - Feature: Vista Agenda con Filtro "Hasta la fecha" Acumulativo y Control de "Omitir terminadas"
 
 - **Módulo de Actividades (`app/actividades/page.tsx`, `lib/filterUtils.ts`, `pruebas unitarias/actividades.test.ts`):**

@@ -4,7 +4,7 @@ import { useOpportunitiesServer } from "@/lib/hooks/useOpportunitiesServer";
 import { useInfiniteScroll } from "@/lib/hooks/useInfiniteScroll";
 import React, { useState, useEffect, useCallback, Suspense, useMemo, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Plus, Search, Filter, Briefcase, ArrowUpDown, ChevronUp, ChevronDown, Columns3, Check } from "lucide-react";
+import { Plus, Search, Filter, Briefcase, ArrowUpDown, ChevronUp, ChevronDown, Columns3, Check, X } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/components/ui/utils";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
@@ -828,9 +828,9 @@ function OpportunitiesContent() {
             </div>
 
             {/* Controles Principales */}
-            <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-sm flex flex-col xl:flex-row justify-between gap-4 relative z-20">
+            <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-sm flex flex-col 2xl:flex-row justify-between gap-3 relative z-20">
                 {/* Segmented Control para Tabs */}
-                <div className="flex p-1 bg-slate-100/80 rounded-xl overflow-x-auto hide-scrollbar ring-1 ring-slate-200/50 inset-ring w-full xl:w-auto touch-pan-x">
+                <div className="flex p-1 bg-slate-100/80 rounded-xl overflow-x-auto hide-scrollbar ring-1 ring-slate-200/50 inset-ring w-full 2xl:w-auto touch-pan-x shrink-0">
                     {[
                         { id: 'all', label: 'Todas' },
                         { id: 'mine', label: 'Mis Oportunidades' },
@@ -856,15 +856,15 @@ function OpportunitiesContent() {
                     ))}
                 </div>
 
-                <div className="flex gap-2 items-center w-full xl:w-auto">
-                    <div className="hidden sm:block">
+                <div className="flex flex-wrap sm:flex-nowrap gap-2 items-center w-full 2xl:w-auto">
+                    <div className="hidden sm:block shrink-0">
                         <UserPickerFilter
                             multiple={true}
                             selectedUserIds={selectedAccountOwnerIds}
                             onUsersSelect={handleUsersSelect}
                         />
                     </div>
-                    <div>
+                    <div className="shrink-0">
                         <QuickDateFilter
                             startDate={startDate}
                             endDate={endDate}
@@ -881,44 +881,54 @@ function OpportunitiesContent() {
                             }}
                         />
                     </div>
-                    <div className="relative flex-1">
-                        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <div className="relative flex-1 min-w-[200px] sm:min-w-[220px]">
+                        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
                         <input
                             type="text"
-                            placeholder="Buscar..."
-                            className="w-full pl-10 pr-4 py-3 sm:py-2.5 bg-slate-50 hover:bg-slate-100 focus:bg-white border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400 placeholder:font-normal"
+                            placeholder="Buscar oportunidades..."
+                            className="w-full pl-10 pr-9 py-2.5 sm:py-2 bg-slate-50 hover:bg-slate-100 focus:bg-white border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400 placeholder:font-normal"
                             value={inputValue}
                             onChange={(e) => setInputValue(e.target.value)}
                         />
+                        {inputValue && (
+                            <button
+                                type="button"
+                                onClick={() => setInputValue("")}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-200 transition-colors cursor-pointer"
+                                title="Limpiar búsqueda"
+                            >
+                                <X className="w-3.5 h-3.5" />
+                            </button>
+                        )}
                     </div>
                     <button 
                         onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
                         className={cn(
-                            "p-3 sm:p-2.5 rounded-xl border transition-all duration-300 flex items-center justify-center shrink-0",
+                            "p-2.5 sm:p-2 rounded-xl border transition-all duration-300 flex items-center justify-center shrink-0 cursor-pointer",
                             showAdvancedFilters 
                                 ? "bg-blue-50 border-blue-200 text-blue-700 shadow-inner" 
                                 : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-800 hover:border-slate-300 shadow-sm"
                         )}
                         title="Filtros Avanzados"
                     >
-                        <Filter className={cn("w-5 h-5 sm:w-4 sm:h-4 transition-transform duration-300", showAdvancedFilters && "fill-blue-100")} />
-                        <span className="hidden sm:inline">Filtros</span>
+                        <Filter className={cn("w-4 h-4 transition-transform duration-300", showAdvancedFilters && "fill-blue-100")} />
+                        <span className="hidden sm:inline text-xs font-semibold">Filtros</span>
                         {activeFilterCount > 0 && <span className="-ml-1 rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">{activeFilterCount}</span>}
                     </button>
 
                     {/* Botón selector de columnas */}
-                    <div className="relative">
+                    <div className="relative shrink-0">
                         <button
                             onClick={() => setShowColumnPicker(!showColumnPicker)}
                             className={cn(
-                                "p-3 sm:p-2.5 rounded-xl border transition-all duration-300 flex items-center justify-center shrink-0",
+                                "p-2.5 sm:p-2 rounded-xl border transition-all duration-300 flex items-center justify-center shrink-0 cursor-pointer",
                                 showColumnPicker
                                     ? "bg-indigo-50 border-indigo-200 text-indigo-700 shadow-inner"
                                     : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-800 hover:border-slate-300 shadow-sm"
                             )}
                             title="Columnas visibles"
                         >
-                            <Columns3 className="w-5 h-5 sm:w-4 sm:h-4" />
+                            <Columns3 className="w-4 h-4" />
                         </button>
 
                         {/* Popup selector de columnas */}

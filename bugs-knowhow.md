@@ -1597,7 +1597,157 @@ Prevention Rule:
 Tags:
 [actividades] [vista-mes] [dexie] [useLiveQuery] [switchLocalDatabase] [AppLayout] [cold-reload] [reactivity]
 
+---
 
+## [Bug ID: 20261022-01]
 
+Context:
+Listado de Oportunidades (`/oportunidades`, `useOpportunitiesServer.ts`, Supabase PostgreSQL `CRM_Oportunidades` & `CRM_Actividades`).
+
+What I Did:
+Diagnóstico y solución del fallo donde la vista de oportunidades quedaba congelada indefinidamente mostrando 4 barras de carga (skeletons), sin cargar las oportunidades comerciales de hoy ni las anteriores.
+
+Problem:
+Al entrar a `https://crm-64yu.vercel.app/oportunidades` (o en local), la página permanecía en estado de carga con esqueletos grises. En consola se capturó el error:
+`canceling statement due to statement timeout (code: 57014)`
+Y en consecuencia el hook activaba el fallback offline a Dexie (`db.opportunities`), el cual en sesiones nuevas o incógnito está vacío, dejando `loading: true` o en reintentos infinitos sin mostrar las oportunidades recién creadas de hoy.
+
+Root Cause:
+1. **Falta de índice foráneo en `CRM_Actividades(opportunity_id)`:**
+   La consulta principal de `useOpportunitiesServer.ts` realiza un join relacional de actividades:
+   `actividades:CRM_Actividades(id, fecha_inicio, fecha_fin, tipo_actividad, is_completed, is_deleted)`
+   Al no existir índice en `opportunity_id` dentro de `CRM_Actividades` (~75,000 registros), PostgreSQL ejecutaba un Sequential Scan completo de 74,388 filas por CADA una de las 100 oportunidades del lote (`loops=100`), acumulando más de 1.3 a 2 segundos en crudo, y superando el límite de 8000 ms (timeout de PostgREST) al evaluar las políticas RLS.
+2. **Falta de índice compuesto en `CRM_Oportunidades`:**
+   El ordenamiento por defecto es `created_at DESC` con filtro `is_deleted = false`. Al no existir un índice en `(is_deleted, created_at DESC)`, la base realizaba ordenamiento por QuickSort en memoria y Parallel Seq Scan sobre 69,000 filas.
+
+Fix Applied:
+1. Se crearon los índices compuestos en PostgreSQL de Supabase:
+   - `idx_actividades_opportunity_id` en `CRM_Actividades(opportunity_id)`.
+   - `idx_oportunidades_deleted_created` en `CRM_Oportunidades(is_deleted, created_at DESC)`.
+   - `idx_oportunidades_deleted_estado_created` en `CRM_Oportunidades(is_deleted, estado_id, created_at DESC)`.
+2. **Impacto de rendimiento confirmado con `EXPLAIN ANALYZE`:**
+   El tiempo de ejecución de la consulta se redujo de **2027.5 ms (con timeouts de >8000 ms)** a **3.29 ms** (una aceleración de más de 600x).
+3. Se comprobó en navegador (local y producción) la carga instantánea de la tabla, visualizando inmediatamente las oportunidades de hoy (`Alejandro`, `Hugo`, `Diana`, `Marco`, etc.).
+4. Se mejoró el formateo del log de error en `useOpportunitiesServer.ts` para que ante cualquier fallo futuro de PostgREST se impriman `message`, `code`, `details` y `hint`.
+
+Prevention Rule:
+**Relational Joins & Foreign Key Indexing en PostgREST**:
+Toda tabla secundaria que participe en relaciones uno a muchos o joins embebidos en PostgREST (como `CRM_Actividades` asociada a `opportunity_id`) DEBE contar obligatoriamente con un índice B-tree en su clave foránea (`opportunity_id`). Sin este índice, PostgREST ejecuta sequential scans por cada fila del lote, provocando `statement timeout (57014)` en tablas medianas o grandes (>50,000 registros). Igualmente, toda columna sujeta a ordenamiento (`created_at DESC`) y filtros globales (`is_deleted = false`) debe tener un índice compuesto que permita Index Scan directo sin escaneo secuencial.
+
+Tags:
+[oportunidades] [performance] [postgrest] [statement-timeout] [57014] [indices] [crm-actividades] [crm-oportunidades]
+
+---
+
+## [Bug ID: 20261022-02]
+
+Context:
+Módulo de Informes y Exportaciones (`app/informes/page.tsx`, `lib/utils/informes.ts`, Supabase PostgREST exportación de Actividades y Oportunidades).
+
+What I Did:
+Diagnóstico y solución del fallo en la exportación de informes donde la descarga fallaba con el error emergente:
+`Ocurrió un error al exportar: SyntaxError: Unterminated string in JSON at position 16919041`
+
+Problem:
+Al intentar descargar el informe de Actividades (o cualquier informe con filtros amplios o sin filtros), PostgREST intentaba serializar y transmitir más de 74.000 filas con múltiples tablas anidadas en una sola petición HTTP. La respuesta sin comprimir superaba los 67 MB, provocando que los proxies intermedios (Cloudflare / Edge buffer) cortaran el flujo a los ~16 MB exactos (posición 16.919.041), entregando un JSON truncado que hacía fallar `response.json()` con `Unterminated string in JSON`. Además, PostgREST tiene un límite duro de 50.000 filas por petición, omitiendo silenciosamente 24.000 registros si no se paginaba.
+
+Root Cause:
+1. **Falta de paginación/chunking en exportaciones**: `app/informes/page.tsx` realizaba un único `await query` para toda la tabla sin límites ni rangos.
+2. **Proyección pesada innecesaria**: En `CRM_Actividades`, el `selectStr` incluía `*`, arrastrando columnas JSONB pesadas como `_sync_metadata`, `metadata` y campos de Microsoft Teams/Planner que no forman parte de las columnas del reporte.
+3. **Ausencia de índices temporales en actividades**: No existían índices en `CRM_Actividades(created_at DESC)` ni `CRM_Actividades(fecha_fin DESC)`.
+
+Fix Applied:
+1. Se implementó la utilidad `fetchAllInChunks(baseQuery, batchSize, onProgress)` en `lib/utils/informes.ts`:
+   - Descarga los registros en lotes de 2.500 filas mediante `.range(from, to)`.
+   - Ordena explícitamente por `created_at DESC` para paginación consistente.
+   - Cada paquete pesa solo ~1.5 MB, evitando el límite de buffer de 16 MB y garantizando la descarga de 100% de los datos (incluso >50.000 filas).
+2. Se optimizó la consulta de `actividades` para solicitar únicamente las columnas requeridas por el reporte, reduciendo el tamaño de fila en más del 70%.
+3. Se optimizó `downloadExcel` reemplazando inserciones fila por fila por `worksheet.addRows(data)`, acelerando la generación a nivel de memoria.
+4. Se agregó retroalimentación visual en vivo (`exportProgress`) en la UI que informa al usuario la cantidad de registros descargados progresivamente.
+5. Se crearon los índices `idx_actividades_created_at` e `idx_actividades_fecha_fin` en Supabase.
+6. Se crearon pruebas unitarias automatizadas en `pruebas unitarias/informes.test.ts` con cobertura de paginación por lotes, consulta vacía y propagación de errores.
+
+Prevention Rule:
+**Exportación Masiva y Streaming PostgREST**:
+NUNCA realices un `supabase.from(...).select(...)` masivo sin rango en el cliente web si la tabla puede superar los 2.000 - 5.000 registros. PostgREST tiene un límite por petición de 50.000 filas y los proxies HTTP cortan las respuestas de streaming que superen 16 MB. Toda exportación de reportes DEBE utilizar paginación por bloques (`fetchAllInChunks`) con `.range(from, to)`, proyección estricta de columnas (sin `*`), ordenamiento determinista y notificación de progreso al usuario.
+
+Tags:
+[informes] [exportacion] [excel] [csv] [postgrest] [chunking] [unterminated-string-json] [pagination]
+
+---
+
+## [Bug ID: 20261022-03]
+
+Context:
+Barra de herramientas y controles del módulo de Oportunidades (`app/oportunidades/page.tsx`, `components/oportunidades/QuickDateFilter.tsx`, `components/cuentas/UserPickerFilter.tsx`).
+
+What I Did:
+Diagnóstico y solución del fallo de diseño responsivo reportado por el equipo comercial (Juan Esteban Correa), donde el buscador de oportunidades quedaba colapsado a un cuadro diminuto de 42px al visualizarlo en computadores portátiles y pantallas estándar de 1280px a 1536px.
+
+Problem:
+Al agregar nuevos controles de filtrado a la barra superior (`QuickDateFilter`, `UserPickerFilter`, botón de Filtros y selector de Columnas), la barra de búsqueda en `/oportunidades` se comprimía en un cuadro cuadrado inutilizable de 42px x 42px. El usuario no podía ver lo que escribía ni el texto de búsqueda ni el placeholder.
+
+Root Cause:
+1. **Falta de `min-w` en el contenedor del buscador con `flex-1`:**
+   El elemento del buscador `<div className="relative flex-1">` carecía de un ancho mínimo explícito (`min-w-[...]`). En CSS Flexbox, un hijo con `flex-1` sin `min-width` puede encogerse hasta el tamaño de su contenido mínimo o hasta colapsar cuando sus hermanos (`UserPickerFilter`, `QuickDateFilter`, `Filtros`, `ColumnPicker`) ocupan la mayor parte del ancho disponible.
+2. **Breakpoint horizontal prematuro (`xl:flex-row` a 1280px):**
+   El contenedor principal forzaba `flex-row` en el breakpoint `xl` (1280px). En un portátil corporativo típico (1366x768 o 1920x1080 con escala de 125%/150%), el ancho efectivo del viewport es de ~1280px. Con el menú lateral ocupando ~250px, el ancho disponible en la tarjeta es de ~980px. Las 5 pestañas de la izquierda ocupan ~520px y los 4 botones de la derecha ocupan ~477px. La suma (997px) excedía el espacio disponible, exprimiendo el buscador a 42px.
+
+Fix Applied:
+1. **Ancho mínimo garantizado en el buscador:**
+   Se aplicó `min-w-[200px] sm:min-w-[220px]` en el contenedor del buscador:
+   `<div className="relative flex-1 min-w-[200px] sm:min-w-[220px]">`.
+2. **Reorganización responsiva a `2xl:flex-row`:**
+   En el contenedor superior se cambió el breakpoint de alineación horizontal a `flex-col 2xl:flex-row`. De este modo, en portátiles y resoluciones entre 1280px y 1536px, las pestañas ocupan la fila superior con scroll táctil suave, y la fila inferior contiene los controles con el buscador expandido cómodamente a >320px de ancho. En pantallas de escritorio grandes (>= 1536px), ambas secciones conviven perfectamente en una sola línea horizontal.
+3. **Botón de limpieza rápida:**
+   Se agregó un botón `X` dentro del input de búsqueda cuando hay texto ingresado para limpiar rápidamente la consulta con un clic.
+4. **Prueba de regresión permanente:**
+   Se creó `tests/opportunityToolbarResponsive.test.ts` que valida el contrato de estilo y el ancho mínimo del buscador.
+
+Prevention Rule:
+**Flexbox Minimum Width & Viewport Budgeting for Toolbars**:
+NUNCA utilices `flex-1` en inputs de búsqueda dentro de barras de herramientas con múltiples botones sin definir un `min-w-[...]` defensivo (mínimo `min-w-[180px]` o `min-w-[220px]`). Antes de fijar un breakpoint horizontal como `xl:flex-row`, calcula la suma de anchos mínimos de todos los elementos presentes (pestañas + filtros + botones fijos); si la suma supera los 950px considerando el sidebar del CRM, el breakpoint horizontal debe elevarse a `2xl:flex-row` o implementarse un diseño envolvente (`flex-wrap`).
+
+Tags:
+[oportunidades] [ui] [responsive] [flexbox] [search-bar] [min-width] [toolbar] [regression]
+
+---
+
+## [Bug ID: 20261022-04]
+
+Context:
+Migración, homologación y sincronización de oportunidades desde MySQL vTiger hacia Supabase CRM (`CRM_Oportunidades`, `execution/update_cross_opportunities_from_vtiger.mjs`, `execution/purge_all_pot_duplicates.mjs`).
+
+What I Did:
+Diagnóstico profundo y ejecución del plan de restauración completa de oportunidades nativas de 2026 tras el reporte de asesores que vieron oportunidades cerradas como perdidas, prefijadas con consecutivos `POT...` ajenos o desparecidas por deduplicación errónea.
+
+Problem:
+1. El equipo comercial reportó que a sus oportunidades se les agregó un prefijo `POT[número] - ` (ej. `POT49076 - Hidromasaje Galapagos 250, DELTA INGENIERA GROUP`), y que muchas oportunidades cambiaron de fase, se cerraron como perdidas (`estado_id = 3`) y desaparecieron de la vista de abiertas.
+2. En otras, parecía haberse borrado información o asignado a asesores antiguos de vTiger.
+
+Root Cause:
+1. **Cruce difuso por teléfono/email (Fuzzy Cross-Matching Fallacy):**
+   El script `update_cross_opportunities_from_vtiger.mjs` cruzó oportunidades nativas de 2026 contra vTiger buscando coincidencias en los últimos 7 dígitos del teléfono o email del cliente. Un cliente corporativo (como *DELTA INGENIERA GROUP*) tiene múltiples negocios a lo largo de los años. Al encontrar un registro antiguo de 2024/2025 que estaba en *Closed Lost* en vTiger, el script asumió erróneamente que la oportunidad nueva de 2026 era ese mismo registro antiguo:
+   - Le antepuso el consecutivo `POT...` al nombre.
+   - Cambió su estado de Abierta (1) a Cerrada Perdida (3) en 244 oportunidades de 2026.
+   - Inyectó notas de bitácora antiguas con `--- [HISTORIAL VTIGER] ---`.
+2. **Purga destructiva por código POT:**
+   Posteriormente, `purge_all_pot_duplicates.mjs` agrupó por código `POT` y marcó como `is_deleted = true` a 4.153 oportunidades de 2026 que compartieron indebidamente el mismo código POT con registros anteriores con mayor número de actividades.
+
+Fix Applied:
+1. Se creó snapshot previo de seguridad: `CRM_Oportunidades_pre_restore_20261022`.
+2. **Restauración de soft-delete:** Se reactivaron **4.153 oportunidades** de 2026 que habían sido apagadas (`is_deleted = false`).
+3. **Reapertura de estado:** Se restableció el estado `estado_id = 1` (Abierta) a las **244 oportunidades** de 2026 cerradas indebidamente, limpiando motivos de pérdida.
+4. **Limpieza de nombres:** Se eliminó el prefijo `POT[0-9]+ - ` de **4.904 oportunidades** nativas de 2026.
+5. **Limpieza de comentarios:** Se removió el bloque inyectado `--- [HISTORIAL VTIGER] ---` de **4.224 comentarios**.
+6. **Desvinculación de metadatos:** Se limpiaron los metadatos `vtiger_potentialid` y `vtiger_potential_no` de **4.904 oportunidades** de 2026.
+7. Se validó visualmente en el CRM y en la base de datos la recuperación completa de la oportunidad de Edison Porras (*Hidromasaje Galapagos 250, DELTA INGENIERA GROUP* por $18.276.435,98 con cotización e ítems 100% íntegros).
+
+Prevention Rule:
+**Strict Isolation Between Native CRM Entities and Historical Migrations**:
+NUNCA utilices heurísticas difusas (como coincidencias de teléfono o email de cuenta/contacto) para mutar el estado (`estado_id`), nombre o fase de oportunidades nativas ya creadas en el nuevo CRM. Un cliente puede tener decenas de proyectos distintos en diferentes años. Las migraciones deben ser estrictamente aditivas (`INSERT`) o guiadas por claves foráneas explícitas e inequívocas. Toda deduplicación masiva debe validar el año de creación (`created_at`) y NUNCA apagar registros recientes de vendedores activos a favor de registros históricos archivados.
+
+Tags:
+[vtiger] [migration] [cross-matching] [deduplication] [data-recovery] [opportunities] [pot-prefix]
 
 
