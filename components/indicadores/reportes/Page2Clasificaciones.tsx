@@ -11,6 +11,7 @@ import { SearchableSelect, SearchableSelectOption } from "@/components/ui/Search
 import { MultiSelect, Option } from "@/components/ui/MultiSelect";
 import { EChartsCallbackParams } from "./echartsTypes";
 import { isPlausibleYear } from "./dateUtils";
+import { getZonaByDepartamentoId, ZONA_OPTIONS } from "./zonas";
 
 const MONTH_LABELS = [
     "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -24,6 +25,7 @@ interface Filters {
     year: string;
     month: string;
     day: string;
+    zonaId: string;
 }
 
 const EMPTY_FILTERS: Filters = {
@@ -33,6 +35,7 @@ const EMPTY_FILTERS: Filters = {
     year: "",
     month: "",
     day: "",
+    zonaId: "",
 };
 
 export function Page2Clasificaciones() {
@@ -43,7 +46,12 @@ export function Page2Clasificaciones() {
     const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
 
     const setFilter = <K extends keyof Filters>(key: K, value: Filters[K]) => {
-        setFilters(prev => ({ ...prev, [key]: value }));
+        setFilters(prev => {
+            const next = { ...prev, [key]: value };
+            // Zona depende del canal elegido; se resetea si el canal cambia.
+            if (key === "canalId") next.zonaId = "";
+            return next;
+        });
     };
 
     // Activities only link to an opportunity sometimes; when account_id is empty,
@@ -123,9 +131,10 @@ export function Page2Clasificaciones() {
             if (isVendedor && user?.id && a.user_id !== user.id) return false;
             if (ownerSet && (!a.user_id || !ownerSet.has(a.user_id))) return false;
             if (clasifSet && (a.clasificacion_id == null || !clasifSet.has(a.clasificacion_id))) return false;
-            if (filters.canalId) {
+            if (filters.canalId || filters.zonaId) {
                 const acc = resolveAccount(a);
-                if (acc?.canal_id !== filters.canalId) return false;
+                if (filters.canalId && acc?.canal_id !== filters.canalId) return false;
+                if (filters.zonaId && getZonaByDepartamentoId(acc?.departamento_id) !== filters.zonaId) return false;
             }
             if (yearNum != null || monthNum != null || dayNum != null) {
                 if (!a.fecha_inicio) return false;
@@ -249,6 +258,12 @@ export function Page2Clasificaciones() {
                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Canal</label>
                         <SearchableSelect options={canalOptions} value={filters.canalId} onChange={v => setFilter("canalId", v)} placeholder="Todos" />
                     </div>
+                    {filters.canalId && (
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Zona</label>
+                            <SearchableSelect options={ZONA_OPTIONS} value={filters.zonaId} onChange={v => setFilter("zonaId", v)} placeholder="Todas" />
+                        </div>
+                    )}
                     <div>
                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Año</label>
                         <SearchableSelect options={yearOptions} value={filters.year} onChange={v => setFilter("year", v)} placeholder="Todas" />
@@ -262,7 +277,7 @@ export function Page2Clasificaciones() {
                         <SearchableSelect options={dayOptions} value={filters.day} onChange={v => setFilter("day", v)} placeholder="Todas" />
                     </div>
                 </div>
-                {(filters.ownerIds.length > 0 || filters.clasificacionIds.length > 0 || filters.canalId || filters.year || filters.month || filters.day) && (
+                {(filters.ownerIds.length > 0 || filters.clasificacionIds.length > 0 || filters.canalId || filters.year || filters.month || filters.day || filters.zonaId) && (
                     <button
                         onClick={() => setFilters(EMPTY_FILTERS)}
                         className="mt-3 text-xs font-bold text-slate-400 hover:text-[#254153] transition-colors underline"
