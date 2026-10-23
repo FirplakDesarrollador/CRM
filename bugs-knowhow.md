@@ -1934,3 +1934,37 @@ No restrinjas la búsqueda de personas de contacto (`CRM_Contactos`) por el prop
 
 Tags:
 [contactos] [vendedor] [roles-y-permisos] [account-owner] [search-filter] [directory-visibility]
+
+---
+
+## [Bug ID: 20261023-01]
+
+Context:
+Ingreso y captura de oportunidades desde la web de Firplak (WordPress) vía Edge Function (`supabase/functions/wordpress-lead-intake/index.ts`, `lib/leadDeduplication.ts`, `tests/leadDeduplication.test.ts`).
+
+Problem:
+Oportunidades entrantes de la web se duplicaban en intervalos de pocos segundos (15 a 35 s por doble clic/re-envío) o pocos minutos (1 a 4 min por combinaciones de formulario OptIn y botón de WhatsApp). Los asesores comerciales se veían forzados a cerrar manualmente la oportunidad repetida con el pareto/motivo "Duplicado" (5 oportunidades cerradas por esta razón el 22-oct y 2 el 23-oct).
+
+Root Cause:
+1. `wordpress-lead-intake` deduplicaba cuentas por teléfono/correo y contactos dentro de la cuenta, pero en el paso de oportunidad ejecutaba siempre un `.insert()` ciego e incondicional en `CRM_Oportunidades`.
+2. El trigger de Postgres `prevent_duplicate_oportunidades` solo comprobaba una ventana de 10 segundos (`NOW() - INTERVAL '10 seconds'`), por lo que cualquier re-envío tras 15 segundos o cambio de formulario evitaba la detección.
+3. Además, el trigger generaba un `RAISE EXCEPTION` que rompía la respuesta HTTP a WordPress, pudiendo generar errores visibles al usuario final en la web.
+
+Fix Applied:
+1. Se implementó deduplicación inteligente en `wordpress-lead-intake` activa para todas las oportunidades entrantes de aquí en adelante.
+2. Antes de crear una oportunidad nueva, la función consulta si la cuenta (`cuentaId`) ya tiene una oportunidad abierta (`estado_id IN (1, 8)`: Abierta o Contacto Inicial) creada en las últimas 24 horas.
+3. Si existe una oportunidad abierta reciente:
+   - No se inserta una segunda fila duplicada en `CRM_Oportunidades`.
+   - Se anexa la nueva interacción (fuente de conversión, URL de producto, asesor solicitado y comentarios adicionales) al campo `comentarios` de la oportunidad abierta existente y se actualiza `updated_at`.
+   - Se devuelve respuesta HTTP 200 con `success: true` y `duplicado_prevenido: true` a WordPress.
+4. Las oportunidades históricas previas se preservaron intactas sin alteraciones.
+5. Se creó la suite de pruebas unitarias permanente `tests/leadDeduplication.test.ts` (5/5 pruebas GREEN) y el módulo helper `lib/leadDeduplication.ts`.
+6. Se desplegó la versión 19 de la Edge Function en Supabase en producción.
+
+Prevention Rule:
+**Debounce and Consolidate Multi-Touch Inbound Web Leads**:
+Cuando recibas leads desde formularios web de marketing (OptIns, landing pages, botones WhatsApp), nunca insertes incondicionalmente una entidad comercial padre (Oportunidad) sin verificar antes si el cliente ya cuenta con una negociación en etapa inicial abierta en una ventana de 24 horas. Consolida la nueva interacción como nota o actividad en la oportunidad activa para evitar dispersión del embudo y cargas operativas innecesarias en el equipo de ventas.
+
+Tags:
+[wordpress] [lead-intake] [edge-function] [deduplication] [oportunidades] [pareto-duplicado]
+

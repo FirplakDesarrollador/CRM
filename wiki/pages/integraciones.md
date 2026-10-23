@@ -33,7 +33,8 @@ Edge Function `wordpress-lead-intake`: recibe leads del formulario web de firpla
 - Seguridad: header `x-firplak-secret` validado contra `WP_LEAD_SECRET`.
 - Asigna el lead a un asesor según el correo receptor (mapa `ASESORES_POR_CORREO`),
   con propietario fallback del canal Propio.
-- Crea la oportunidad en el canal `PROPIO` con estado inicial "Contacto Inicial" (id 8).
+- **Deduplicación Inteligente de Leads:** Si la cuenta ya cuenta con una oportunidad activa/abierta (estados `Abierta` o `Contacto Inicial`) creada en las últimas 24 horas, la Edge Function no genera una oportunidad repetida; en su lugar, anexa los nuevos datos de navegación, origen o formulario en el campo `comentarios` de la oportunidad abierta y actualiza `updated_at`.
+- Si no existe oportunidad abierta reciente, crea la oportunidad en el canal `PROPIO` con estado inicial "Contacto Inicial" (id 8).
   Ver [[canales-de-venta]] y [[oportunidades]].
 
 ## ForceManager (CRM legado)

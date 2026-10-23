@@ -3,6 +3,17 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-10-23 - Fix: Deduplicación Inteligente de Leads Entrantes en wordpress-lead-intake
+
+- **Integración Web (`supabase/functions/wordpress-lead-intake/index.ts`, `lib/leadDeduplication.ts`, `tests/leadDeduplication.test.ts`):**
+  - **Problema:** Múltiples oportunidades entraban duplicadas por re-envíos rápidos (15-35 s) o combinación de formularios OptIn y WhatsApp (1-4 min), obligando a los asesores a cerrarlas manualmente como *Perdida - Duplicado*.
+  - **Causa Raíz:** `wordpress-lead-intake` deduplicaba cuentas y contactos pero insertaba incondicionalmente una oportunidad nueva en cada webhook. El trigger de BD solo evaluaba 10 segundos.
+  - **Solución Implementada:** Se integró deduplicación inteligente en la Edge Function para oportunidades entrantes de ahora en adelante. Si la cuenta ya cuenta con una oportunidad abierta (`Abierta` o `Contacto Inicial`) en las últimas 24 horas, no genera una segunda oportunidad, sino que consolida los nuevos datos/URL/asesor en los comentarios de la oportunidad existente y actualiza `updated_at`.
+  - Las oportunidades históricas previas se preservaron intactas sin modificaciones retroactivas.
+  - Se desplegó versión 19 de la Edge Function en Supabase activa para tráfico real.
+  - 5/5 pruebas unitarias en `tests/leadDeduplication.test.ts` verificadas en GREEN.
+- **Páginas actualizadas:** `wiki/pages/integraciones.md`, `wiki/LOG.md`.
+
 ## 2026-10-22 - Feature: Visibilidad y Búsqueda Global de Contactos para Rol VENDEDOR
 
 - **Módulo de Contactos (`lib/contactVisibility.ts`, `lib/hooks/useContactsServer.ts`, `tests/contactVisibility.test.ts`):**

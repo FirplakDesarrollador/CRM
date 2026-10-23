@@ -143,8 +143,62 @@ Deno.serve(async (req: Request) => {
   }
 
   // ────────────────────────────────────────────────────────────────────────────
-  // PASO 4: OPORTUNIDAD
+  // PASO 4: OPORTUNIDAD (DEDUPLICACIÓN INTELIGENTE)
   // ────────────────────────────────────────────────────────────────────────────
+  // Si la cuenta ya tiene una oportunidad abierta reciente (últimas 24 horas),
+  // evitamos crear una duplicada y anexamos la interacción web en comentarios.
+  const window24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  let existingOp: any = null;
+
+  if (cuentaId) {
+    const { data: openOp } = await supabase.from("CRM_Oportunidades")
+      .select("id, nombre, comentarios, owner_user_id, created_at")
+      .eq("account_id", cuentaId)
+      .in("estado_id", [1, 8]) // 1: Abierta, 8: Contacto Inicial
+      .eq("is_deleted", false)
+      .gte("created_at", window24h)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    existingOp = openOp;
+  }
+
+  if (existingOp) {
+    // Lead duplicado detectado: anexar comentarios e interacción a la oportunidad abierta
+    const parts = [
+      body.oportunidad?.fuente_conversion ? `[Re-contacto web: ${body.oportunidad.fuente_conversion}]` : null,
+      body.oportunidad?.comentarios ? body.oportunidad.comentarios : null,
+      body.oportunidad?.url_origen ? `URL: ${body.oportunidad.url_origen}` : null,
+      nombreAsesor ? `Asesor solicitado: ${nombreAsesor}` : null
+    ].filter(Boolean);
+
+    if (parts.length > 0) {
+      const fechaColombia = new Date().toLocaleString("es-CO", { timeZone: "America/Bogota" });
+      const nuevoBloque = `--- [INTERACCIÓN WEB ADICIONAL ${fechaColombia}] ---\n${parts.join(" | ")}`;
+      const comentariosActualizados = existingOp.comentarios
+        ? `${existingOp.comentarios}\n\n${nuevoBloque}`
+        : nuevoBloque;
+
+      await supabase.from("CRM_Oportunidades").update({
+        comentarios: comentariosActualizados,
+        updated_at: new Date().toISOString()
+      }).eq("id", existingOp.id);
+    }
+
+    return new Response(JSON.stringify({
+      success: true,
+      cuenta_id: cuentaId,
+      oportunidad_id: existingOp.id,
+      asesor_asignado_id: existingOp.owner_user_id,
+      confirmacion_db: existingOp.owner_user_id,
+      duplicado_prevenido: true
+    }), { 
+      headers: { ...corsHeaders, "Content-Type": "application/json" } 
+    });
+  }
+
+  // Si no existe oportunidad abierta reciente, crear la oportunidad normalmente
   let oportunidadNombre = body.oportunidad?.nombre?.trim();
   if (!oportunidadNombre || oportunidadNombre === "Por definir" || oportunidadNombre === "-") {
     oportunidadNombre = nombreDeLaCuenta;
