@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useState } from "react";
-import { BarChart3, Info, PieChart, ListChecks, LineChart, CalendarCheck2, Users2, Sprout } from "lucide-react";
+import { BarChart3, Info, PieChart, ListChecks, LineChart, CalendarCheck2, Users2, Sprout, RefreshCw } from "lucide-react";
 import { cn } from "@/components/ui/utils";
+import { refreshLiveData } from "@/lib/hooks/liveDataCache";
 import { VentasGanadasTile } from "@/components/indicadores/VentasGanadasTile";
 import { Page1EstadosTiempo } from "@/components/indicadores/reportes/Page1EstadosTiempo";
 import { Page2Clasificaciones } from "@/components/indicadores/reportes/Page2Clasificaciones";
@@ -24,6 +25,13 @@ type ReportTabId = typeof REPORT_TABS[number]["id"];
 
 export default function IndicadoresPage() {
     const [activeTab, setActiveTab] = useState<ReportTabId>("estados");
+    const [isRefreshing, setIsRefreshing] = useState(false);
+
+    const handleRefresh = () => {
+        refreshLiveData();
+        setIsRefreshing(true);
+        window.setTimeout(() => setIsRefreshing(false), 1200);
+    };
 
     return (
         <div className="flex flex-col h-full bg-slate-50/50 p-6 space-y-6 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
@@ -57,6 +65,15 @@ export default function IndicadoresPage() {
                 </div>
 
         <div className="flex items-center gap-3">
+                    <button
+                        onClick={handleRefresh}
+                        disabled={isRefreshing}
+                        title="Vuelve a traer los datos de Oportunidades, Actividades y Cuentas desde el CRM (útil justo después de hacer un cambio)"
+                        className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-50 hover:text-[#254153] transition-all shadow-xs group disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                        <RefreshCw className={cn("w-4 h-4 text-slate-400 group-hover:text-[#254153]", isRefreshing && "animate-spin")} />
+                        {isRefreshing ? "Actualizando..." : "Actualizar datos"}
+                    </button>
                     <button className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-600 hover:bg-slate-50 hover:text-[#254153] transition-all shadow-xs group">
                         <Info className="w-4 h-4 text-slate-400 group-hover:text-[#254153]" />
                         Guía de Uso
