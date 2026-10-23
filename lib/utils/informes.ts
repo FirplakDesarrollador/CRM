@@ -428,7 +428,8 @@ export function mapOpportunityReportRow(
     probabilidad: item.probabilidad ?? item.probability ?? 0,
     probability: item.probabilidad ?? item.probability ?? 0,
     razon_perdida_label: item.razon_perdida_id ? (lookups.lossReasonMap.get(item.razon_perdida_id) || item.razon_perdida) : (item.razon_perdida || '-'),
-    categorias_interes: formatOpportunityCategories(item.categoria_oportunidad) || '-'
+    categorias_interes: formatOpportunityCategories(item.categoria_oportunidad) || '-',
+    setter: item.setter || '-'
   };
 }
 

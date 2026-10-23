@@ -3,6 +3,23 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-10-23 - Feature: Selector y Campo Setter en Oportunidades con Exportación en Informes
+
+- **Base de Datos y Modelo (`supabase/migrations/20261023110000_add_setter_to_oportunidades.sql`, `lib/db.ts`):**
+  - **Requerimiento:** Campo opcional "Setter" para oportunidades con opciones `CO` y `REC` (por defecto Ninguna / null).
+  - **Columna `setter`:** Agregada a `public."CRM_Oportunidades"` (`TEXT NULL`) y a la interfaz local `LocalOportunidad`.
+  - **Auditoría:** Trigger `trg_audit_opportunity_changes` actualizado para registrar cambios en `setter` dentro de `CRM_HistorialModificaciones`.
+- **UI de Oportunidades (`app/oportunidades/[id]/page.tsx`):**
+  - Ubicación: Columna derecha de la vista de detalle de la oportunidad, inmediatamente debajo de la tarjeta "Información del Cliente" (área indicada por el usuario).
+  - Botón desplegable que muestra el estado actual (`Setter: Ninguna | CO | REC`) con badge visual temático (azul para CO, esmeralda para REC, neutro para Ninguna), chevron indicador y opciones clickeables con cierre exterior automático.
+  - Guardado reactivo en Supabase y Dexie al seleccionar cualquier opción, con spinner de guardado.
+- **Informes y Exportaciones (`lib/utils/informes.ts`, `app/informes/page.tsx`):**
+  - Se agregó la columna **SETTER** al informe de oportunidades descargable en Excel y CSV (`/informes`).
+  - `mapOpportunityReportRow` mapea el valor `setter` o `-` si está vacío.
+- **Validación:**
+  - 6/6 pruebas unitarias verificadas en GREEN en `tests/opportunitySetter.test.ts`.
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/pages/modelo-de-datos.md`, `wiki/LOG.md`.
+
 ## 2026-10-23 - Feature: Log y Trazabilidad Transversal de Modificaciones en Oportunidades, Cuentas y Contactos
 
 - **Base de Datos y Triggers (`supabase/migrations/20261023100000_audit_history_log.sql`):**

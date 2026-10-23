@@ -40,6 +40,7 @@ mantiene un espejo local en IndexedDB vía Dexie (`lib/db.ts`) con interfaces `L
 - **Segmentos** (`20260121_segments`, `quote_segments`): segmentación de cotizaciones/pedidos.
 - **Subclasificaciones** (`20260119`, `20260212`): subclasificación de cuentas por canal.
 - **Auditoría**: `CRM_Audit_Cuentas` (histórico legado) y `CRM_HistorialModificaciones` (tabla transversal unificada de auditoría append-only para `CRM_Oportunidades`, `CRM_Cuentas` y `CRM_Contactos` impulsada por triggers automáticos en PostgreSQL con resolución de nombres de usuario y diff valor previo -> nuevo).
+- **Setter en Oportunidades** (`20261023110000_add_setter_to_oportunidades`): campo opcional `setter` ('CO' | 'REC' | NULL) en `CRM_Oportunidades` con auditoría automática y exportación en `/informes`.
 - **S&OP** (`20260708_add_sop_columns`): campos `planta` y `familia` en `CRM_ListaDePrecios` y `CRM_Productos` para el informe de planificación.
 - **Tiendas-Ferias e inventario** (`20260716_stores_fairs_catalog_inventory`): `CRM_OrigenesOportunidad`, `CRM_InventarioMovimientos`, `CRM_InventarioMovimientoAuditoria` y la vista calculada `CRM_InventarioDisponible`. Los movimientos (`CRM_InventarioMovimientos`) admiten vinculación directa a oportunidades vía `referencia_tipo` ('OPORTUNIDAD' / 'OPORTUNIDAD_FERIA') y `referencia_id` (`opportunity_id`), resolviéndose con enlaces interactivos en `/inventarios` tanto en el historial como en las tarjetas de productos con reservas. Las reservas reducen la disponibilidad para futuras salidas sin reducir la existencia física.
 

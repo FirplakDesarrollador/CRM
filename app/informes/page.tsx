@@ -717,6 +717,7 @@ export default function InformesPage() {
                     { header: 'PROBABILIDAD (%)', key: 'probabilidad', width: 15 },
                     { header: 'FECHA CIERRE EST.', key: 'fecha_cierre_estimada', width: 18 },
                     { header: 'FECHA ENTREGA', key: 'fecha_entrega', width: 18 },
+                    { header: 'SETTER', key: 'setter', width: 15 },
                     { header: 'ORIGEN', key: 'origen_oportunidad', width: 20 },
                     { header: 'DEPARTAMENTO', key: 'departamento_nombre', width: 20 },
                     { header: 'CIUDAD', key: 'ciudad_nombre', width: 20 },

@@ -2,9 +2,9 @@
 
 import { useOpportunities, useQuotes, useQuoteItems } from "@/lib/hooks/useOpportunities";
 import { DetailHeader } from "@/components/ui/DetailHeader";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { FileText, Plus, AlertCircle, Check, Trash2, Loader2, Truck, Package, Building, ChevronRight, TrendingUp, User, Users, Copy } from "lucide-react";
+import { FileText, Plus, AlertCircle, Check, Trash2, Loader2, Truck, Package, Building, ChevronRight, ChevronDown, TrendingUp, User, Users, Copy, Tag } from "lucide-react";
 import Link from "next/link";
 import { cn, formatNumberCO, formatOpportunityAmount } from "@/lib/utils";
 import { db, LocalCuenta } from "@/lib/db";
@@ -394,6 +394,22 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     const [localSegmentId, setLocalSegmentId] = useState<string>(opportunity.segmento_id ? String(opportunity.segmento_id) : "");
     const [isSavingSegment, setIsSavingSegment] = useState(false);
 
+    // Setter Logic
+    const [localSetter, setLocalSetter] = useState<string>((opportunity as any).setter || "");
+    const [isSavingSetter, setIsSavingSetter] = useState(false);
+    const [isSetterOpen, setIsSetterOpen] = useState(false);
+    const setterRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        function handleClickOutside(event: MouseEvent) {
+            if (setterRef.current && !setterRef.current.contains(event.target as Node)) {
+                setIsSetterOpen(false);
+            }
+        }
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
+
     // Sync local state when prop updates
     useEffect(() => {
         setLocalSegmentId(opportunity.segmento_id ? String(opportunity.segmento_id) : "");
@@ -409,7 +425,8 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
         setLocalCategoriaOportunidad(opportunity.categoria_oportunidad || "");
         setLocalContactosIds(opportunity.contactos_ids || []);
         setLocalClientesAtendidos(opportunity.clientes_atendidos || 0);
-    }, [opportunity.segmento_id, opportunity.fecha_cierre_estimada, opportunity.fecha_entrega, opportunity.origen_oportunidad, opportunity.url_origen, opportunity.fuente_conversion, opportunity.razon_perdida, opportunity.comentarios_perdida, opportunity.comentarios, opportunity.direccion_entrega, opportunity.categoria_oportunidad, opportunity.contactos_ids, opportunity.clientes_atendidos]);
+        setLocalSetter((opportunity as any).setter || "");
+    }, [opportunity.segmento_id, opportunity.fecha_cierre_estimada, opportunity.fecha_entrega, opportunity.origen_oportunidad, opportunity.url_origen, opportunity.fuente_conversion, opportunity.razon_perdida, opportunity.comentarios_perdida, opportunity.comentarios, opportunity.direccion_entrega, opportunity.categoria_oportunidad, opportunity.contactos_ids, opportunity.clientes_atendidos, (opportunity as any).setter]);
 
     useEffect(() => {
         const fetchSegments = async () => {
@@ -426,6 +443,16 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
             await updateOpportunity(opportunity.id, { segmento_id: newId ? Number(newId) : null });
         } finally {
             setIsSavingSegment(false);
+        }
+    };
+
+    const handleSetterChange = async (newVal: string) => {
+        setLocalSetter(newVal);
+        setIsSavingSetter(true);
+        try {
+            await updateOpportunity(opportunity.id, { setter: newVal ? newVal : null });
+        } finally {
+            setIsSavingSetter(false);
         }
     };
 
@@ -1208,123 +1235,237 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                     </div>
                 </div>
 
-                {/* Account Card */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-blue-300 transition-all flex flex-col justify-between h-fit">
-                    <div>
-                        <div className="flex items-center gap-3 mb-4">
-                            <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
-                                <Building className="w-6 h-6" />
+                {/* Right Column: Account Card + Setter Card */}
+                <div className="space-y-6 flex flex-col">
+                    {/* Account Card */}
+                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-blue-300 transition-all flex flex-col justify-between h-fit">
+                        <div>
+                            <div className="flex items-center gap-3 mb-4">
+                                <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
+                                    <Building className="w-6 h-6" />
+                                </div>
+                                <div>
+                                    <h3 className="font-bold text-slate-900 text-lg">Información del Cliente</h3>
+                                    <p className="text-xs text-slate-500">Datos principales de la cuenta</p>
+                                </div>
                             </div>
-                            <div>
-                                <h3 className="font-bold text-slate-900 text-lg">Información del Cliente</h3>
-                                <p className="text-xs text-slate-500">Datos principales de la cuenta</p>
+
+                            <div className="space-y-3">
+                                <div>
+                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Nombre / Razón Social</label>
+                                    <p className="text-slate-900 font-medium">{effectiveAccount.nombre}</p>
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">NIT</label>
+                                        <p className="text-slate-700">{(effectiveAccount as any).nit_base || effectiveAccount.nit || 'No registrado'}</p>
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Teléfono</label>
+                                        <p className="text-slate-700">{effectiveAccount.telefono || 'No registrado'}</p>
+                                    </div>
+                                </div>
+                                {effectiveAccount.direccion && (
+                                    <div>
+                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Dirección</label>
+                                        <p className="text-slate-700">{effectiveAccount.direccion} {effectiveAccount.ciudad && `• ${effectiveAccount.ciudad}`}</p>
+                                    </div>
+                                )}
+
+                                {/* Contactos Vinculados */}
+                                <div className="pt-3 border-t border-slate-100">
+                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                                        Contactos Vinculados ({localContactosIds.length})
+                                    </label>
+                                    {contactOptions.length > 0 ? (
+                                        <div className="relative">
+                                            <MultiSelect
+                                                options={contactOptions}
+                                                selected={localContactosIds}
+                                                onChange={async (vals) => {
+                                                    setLocalContactosIds(vals);
+                                                    setIsSavingContactos(true);
+                                                    try {
+                                                        const autoCount = vals.length;
+                                                        setLocalClientesAtendidos(autoCount);
+                                                        await updateOpportunity(opportunity.id, {
+                                                            contactos_ids: vals,
+                                                            clientes_atendidos: autoCount
+                                                        });
+                                                    } finally {
+                                                        setIsSavingContactos(false);
+                                                    }
+                                                }}
+                                                placeholder="Seleccionar contactos..."
+                                                className="bg-slate-50 border-slate-200 text-sm"
+                                            />
+                                            {isSavingContactos && (
+                                                <div className="absolute right-8 top-1/2 -translate-y-1/2">
+                                                    <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                                </div>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <p className="text-xs text-slate-500 italic">No hay contactos registrados para esta cuenta.</p>
+                                    )}
+                                </div>
+
+                                {/* Clientes Atendidos */}
+                                <div className="pt-3 border-t border-slate-100">
+                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                                        Clientes Atendidos
+                                    </label>
+                                    <div className="relative group flex items-center gap-2">
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            value={localClientesAtendidos}
+                                            onChange={(e) => setLocalClientesAtendidos(Number(e.target.value))}
+                                            onBlur={async () => {
+                                                if (Number(localClientesAtendidos) !== Number(opportunity.clientes_atendidos)) {
+                                                    setIsSavingClientesAtendidos(true);
+                                                    try {
+                                                        await updateOpportunity(opportunity.id, {
+                                                            clientes_atendidos: Number(localClientesAtendidos)
+                                                        });
+                                                    } finally {
+                                                        setIsSavingClientesAtendidos(false);
+                                                    }
+                                                }
+                                            }}
+                                            className="w-28 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-bold text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none"
+                                            placeholder="0"
+                                        />
+                                        <span className="text-xs text-slate-500">
+                                            personas atendidas
+                                        </span>
+                                        {isSavingClientesAtendidos && (
+                                            <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                        )}
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
-                        <div className="space-y-3">
-                            <div>
-                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Nombre / Razón Social</label>
-                                <p className="text-slate-900 font-medium">{effectiveAccount.nombre}</p>
-                            </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">NIT</label>
-                                    <p className="text-slate-700">{(effectiveAccount as any).nit_base || effectiveAccount.nit || 'No registrado'}</p>
+                        <button
+                            type="button"
+                            onClick={() => setIsAccountModalOpen(true)}
+                            className="mt-6 w-full py-2.5 bg-slate-50 hover:bg-blue-50 text-blue-600 hover:text-blue-700 text-sm font-bold rounded-xl border border-slate-200 hover:border-blue-200 text-center transition-all flex items-center justify-center gap-2 shadow-sm active:scale-[0.99]"
+                        >
+                            Ver detalles en Cuentas <ChevronRight className="w-4 h-4" />
+                        </button>
+                    </div>
+
+                    {/* Setter Card */}
+                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-blue-300 transition-all space-y-4">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 bg-purple-50 text-purple-600 rounded-lg">
+                                    <Tag className="w-6 h-6" />
                                 </div>
                                 <div>
-                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Teléfono</label>
-                                    <p className="text-slate-700">{effectiveAccount.telefono || 'No registrado'}</p>
+                                    <h3 className="font-bold text-slate-900 text-lg">Setter</h3>
+                                    <p className="text-xs text-slate-500">Clasificación de prospección comercial</p>
                                 </div>
                             </div>
-                            {effectiveAccount.direccion && (
-                                <div>
-                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Dirección</label>
-                                    <p className="text-slate-700">{effectiveAccount.direccion} {effectiveAccount.ciudad && `• ${effectiveAccount.ciudad}`}</p>
+                            {localSetter && (
+                                <span className={cn(
+                                    "px-2.5 py-1 text-xs font-black rounded-lg border uppercase tracking-wider",
+                                    localSetter === 'CO' ? "bg-blue-50 text-blue-700 border-blue-200" :
+                                    localSetter === 'REC' ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+                                    "bg-slate-50 text-slate-600 border-slate-200"
+                                )}>
+                                    {localSetter}
+                                </span>
+                            )}
+                        </div>
+
+                        <div className="relative" ref={setterRef}>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+                                Asignación Setter
+                            </label>
+                            <button
+                                type="button"
+                                onClick={() => setIsSetterOpen(!isSetterOpen)}
+                                className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 hover:bg-slate-100/80 border border-slate-200 rounded-xl text-sm font-bold text-slate-800 transition-all shadow-xs active:scale-[0.99]"
+                            >
+                                <div className="flex items-center gap-2.5">
+                                    <span className="text-slate-500 font-semibold text-xs uppercase tracking-wider">Setter:</span>
+                                    <span className={cn(
+                                        "px-2.5 py-0.5 rounded-lg text-xs font-black uppercase tracking-wider",
+                                        localSetter === 'CO' ? "bg-blue-100 text-blue-700 border border-blue-200" :
+                                        localSetter === 'REC' ? "bg-emerald-100 text-emerald-800 border border-emerald-200" :
+                                        "bg-slate-200/70 text-slate-600"
+                                    )}>
+                                        {localSetter || 'Ninguna'}
+                                    </span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    {isSavingSetter && <Loader2 className="w-4 h-4 text-blue-600 animate-spin" />}
+                                    <ChevronDown className={cn("w-4 h-4 text-slate-400 transition-transform", isSetterOpen && "rotate-180")} />
+                                </div>
+                            </button>
+
+                            {isSetterOpen && (
+                                <div className="absolute left-0 right-0 mt-1.5 z-20 bg-white border border-slate-200 rounded-xl shadow-lg p-1.5 space-y-1 animate-in fade-in zoom-in-95 duration-100">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            handleSetterChange("");
+                                            setIsSetterOpen(false);
+                                        }}
+                                        className={cn(
+                                            "w-full flex items-center justify-between px-3 py-2 text-xs font-semibold rounded-lg transition-colors text-left",
+                                            !localSetter ? "bg-slate-100 text-slate-900 font-bold" : "text-slate-600 hover:bg-slate-50"
+                                        )}
+                                    >
+                                        <span>Ninguna</span>
+                                        {!localSetter && <Check className="w-3.5 h-3.5 text-slate-600" />}
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            handleSetterChange("CO");
+                                            setIsSetterOpen(false);
+                                        }}
+                                        className={cn(
+                                            "w-full flex items-center justify-between px-3 py-2 text-xs font-semibold rounded-lg transition-colors text-left",
+                                            localSetter === 'CO' ? "bg-blue-50 text-blue-700 font-bold" : "text-slate-700 hover:bg-slate-50"
+                                        )}
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                                            <span>CO</span>
+                                        </div>
+                                        {localSetter === 'CO' && <Check className="w-3.5 h-3.5 text-blue-600" />}
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            handleSetterChange("REC");
+                                            setIsSetterOpen(false);
+                                        }}
+                                        className={cn(
+                                            "w-full flex items-center justify-between px-3 py-2 text-xs font-semibold rounded-lg transition-colors text-left",
+                                            localSetter === 'REC' ? "bg-emerald-50 text-emerald-800 font-bold" : "text-slate-700 hover:bg-slate-50"
+                                        )}
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                                            <span>REC</span>
+                                        </div>
+                                        {localSetter === 'REC' && <Check className="w-3.5 h-3.5 text-emerald-600" />}
+                                    </button>
                                 </div>
                             )}
 
-                            {/* Contactos Vinculados */}
-                            <div className="pt-3 border-t border-slate-100">
-                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                                    Contactos Vinculados ({localContactosIds.length})
-                                </label>
-                                {contactOptions.length > 0 ? (
-                                    <div className="relative">
-                                        <MultiSelect
-                                            options={contactOptions}
-                                            selected={localContactosIds}
-                                            onChange={async (vals) => {
-                                                setLocalContactosIds(vals);
-                                                setIsSavingContactos(true);
-                                                try {
-                                                    const autoCount = vals.length;
-                                                    setLocalClientesAtendidos(autoCount);
-                                                    await updateOpportunity(opportunity.id, {
-                                                        contactos_ids: vals,
-                                                        clientes_atendidos: autoCount
-                                                    });
-                                                } finally {
-                                                    setIsSavingContactos(false);
-                                                }
-                                            }}
-                                            placeholder="Seleccionar contactos..."
-                                            className="bg-slate-50 border-slate-200 text-sm"
-                                        />
-                                        {isSavingContactos && (
-                                            <div className="absolute right-8 top-1/2 -translate-y-1/2">
-                                                <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
-                                            </div>
-                                        )}
-                                    </div>
-                                ) : (
-                                    <p className="text-xs text-slate-500 italic">No hay contactos registrados para esta cuenta.</p>
-                                )}
-                            </div>
-
-                            {/* Clientes Atendidos */}
-                            <div className="pt-3 border-t border-slate-100">
-                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                                    Clientes Atendidos
-                                </label>
-                                <div className="relative group flex items-center gap-2">
-                                    <input
-                                        type="number"
-                                        min="0"
-                                        value={localClientesAtendidos}
-                                        onChange={(e) => setLocalClientesAtendidos(Number(e.target.value))}
-                                        onBlur={async () => {
-                                            if (Number(localClientesAtendidos) !== Number(opportunity.clientes_atendidos)) {
-                                                setIsSavingClientesAtendidos(true);
-                                                try {
-                                                    await updateOpportunity(opportunity.id, {
-                                                        clientes_atendidos: Number(localClientesAtendidos)
-                                                    });
-                                                } finally {
-                                                    setIsSavingClientesAtendidos(false);
-                                                }
-                                            }
-                                        }}
-                                        className="w-28 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-bold text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none"
-                                        placeholder="0"
-                                    />
-                                    <span className="text-xs text-slate-500">
-                                        personas atendidas
-                                    </span>
-                                    {isSavingClientesAtendidos && (
-                                        <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
-                                    )}
-                                </div>
-                            </div>
+                            <p className="text-[10px] text-slate-400 mt-2">
+                                Campo opcional. Se incluye automáticamente en el informe de oportunidades de Excel/CSV cuando está diligenciado.
+                            </p>
                         </div>
                     </div>
-
-                    <button
-                        type="button"
-                        onClick={() => setIsAccountModalOpen(true)}
-                        className="mt-6 w-full py-2.5 bg-slate-50 hover:bg-blue-50 text-blue-600 hover:text-blue-700 text-sm font-bold rounded-xl border border-slate-200 hover:border-blue-200 text-center transition-all flex items-center justify-center gap-2 shadow-sm active:scale-[0.99]"
-                    >
-                        Ver detalles en Cuentas <ChevronRight className="w-4 h-4" />
-                    </button>
                 </div>
 
                 {/* Seller Card (New) */}

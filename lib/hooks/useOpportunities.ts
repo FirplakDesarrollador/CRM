@@ -337,6 +337,7 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
             comentarios_perdida: updates.comentarios_perdida !== undefined ? (updates.comentarios_perdida || null) : undefined,
             clientes_atendidos: updates.clientes_atendidos !== undefined ? (updates.clientes_atendidos !== null && updates.clientes_atendidos !== "" ? Number(updates.clientes_atendidos) : 0) : undefined,
             contactos_ids: updates.contactos_ids !== undefined ? (Array.isArray(updates.contactos_ids) ? updates.contactos_ids : []) : undefined,
+            setter: updates.setter !== undefined ? (updates.setter || null) : undefined,
         };
 
         // Remove undefined fields to avoid overwriting with undefined
