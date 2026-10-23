@@ -14,6 +14,7 @@ export interface IndicadoresChannel {
 export interface IndicadoresAccountInfo {
     canal_id?: string | null;
     subclasificacion_id?: number | null;
+    departamento_id?: number | null;
     nombre?: string | null;
 }
 
@@ -51,6 +52,7 @@ export function useIndicadoresLookups() {
             map.set(a.id, {
                 canal_id: a.canal_id,
                 subclasificacion_id: a.subclasificacion_id,
+                departamento_id: a.departamento_id,
                 nombre: a.nombre,
             });
         });

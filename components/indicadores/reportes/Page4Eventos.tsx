@@ -13,6 +13,7 @@ import { MultiSelect, Option } from "@/components/ui/MultiSelect";
 import { currentWeekMarkLine, getISOWeek, getWeekKey, withCurrentWeekMarker } from "./weekUtils";
 import { EChartsCallbackParams } from "./echartsTypes";
 import { isPlausibleYear } from "./dateUtils";
+import { getZonaByDepartamentoId, ZONA_OPTIONS } from "./zonas";
 
 const MONTH_LABELS = [
     "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -34,6 +35,7 @@ interface Filters {
     asesorIds: string[]; // also set via chart/table click cross-filter
     clasificacionIds: string[];
     subclasificacionId: string;
+    zonaId: string;
 }
 
 const EMPTY_FILTERS: Filters = {
@@ -46,6 +48,7 @@ const EMPTY_FILTERS: Filters = {
     asesorIds: [],
     clasificacionIds: [],
     subclasificacionId: "",
+    zonaId: "",
 };
 const CANAL_PROPIO_ID = "PROPIO";
 const WEEK_OPTIONS = Array.from({ length: 53 }, (_, i) => ({ value: String(i + 1), label: String(i + 1) }));
@@ -82,6 +85,7 @@ export function Page4Eventos() {
             canalId,
             tiposCanal: canalId === CANAL_PROPIO_ID ? prev.tiposCanal : [],
             subclasificacionId: "",
+            zonaId: "",
         }));
     };
 
@@ -167,9 +171,10 @@ export function Page4Eventos() {
             if (a.is_deleted) return false;
             if (asesorSet && (!a.user_id || !asesorSet.has(a.user_id))) return false;
             if (clasifSet && (a.clasificacion_id == null || !clasifSet.has(a.clasificacion_id))) return false;
-            const acc = filters.canalId || subclasId ? resolveAccount(a) : undefined;
+            const acc = filters.canalId || subclasId || filters.zonaId ? resolveAccount(a) : undefined;
             if (filters.canalId && acc?.canal_id !== filters.canalId) return false;
             if (subclasId && acc?.subclasificacion_id !== subclasId) return false;
+            if (filters.zonaId && getZonaByDepartamentoId(acc?.departamento_id) !== filters.zonaId) return false;
             if (tipoSet) {
                 const tipo = a.user_id ? tipoByVendedor.get(a.user_id) : undefined;
                 if (!tipo || !tipoSet.has(tipo)) return false;
@@ -238,13 +243,14 @@ export function Page4Eventos() {
             const acc = o.account_id ? accountsMap.get(o.account_id) : undefined;
             if (filters.canalId && acc?.canal_id !== filters.canalId) return false;
             if (subclasId && acc?.subclasificacion_id !== subclasId) return false;
+            if (filters.zonaId && getZonaByDepartamentoId(acc?.departamento_id) !== filters.zonaId) return false;
             if (tipoSet) {
                 const tipo = o.owner_user_id ? tipoByVendedor.get(o.owner_user_id) : undefined;
                 if (!tipo || !tipoSet.has(tipo)) return false;
             }
             return true;
         });
-    }, [opportunities, filters.canalId, filters.subclasificacionId, filters.asesorIds, filters.tiposCanal, isCanalPropio, accountsMap, tipoByVendedor]);
+    }, [opportunities, filters.canalId, filters.subclasificacionId, filters.zonaId, filters.asesorIds, filters.tiposCanal, isCanalPropio, accountsMap, tipoByVendedor]);
 
     // Mismo criterio que computeOpportunityActivitySummary (lib/opportunityActivities.ts):
     // una oportunidad "tiene actividad" si existe al menos una actividad no
@@ -412,7 +418,7 @@ export function Page4Eventos() {
 
     const hasActiveFilters =
         filters.canalId || filters.tiposCanal.length > 0 || filters.year || filters.month || filters.day || filters.week ||
-        filters.asesorIds.length > 0 || filters.clasificacionIds.length > 0 || filters.subclasificacionId;
+        filters.asesorIds.length > 0 || filters.clasificacionIds.length > 0 || filters.subclasificacionId || filters.zonaId;
 
     return (
         <div className="flex flex-col gap-6">
@@ -452,6 +458,12 @@ export function Page4Eventos() {
                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">SubClasificación</label>
                         <SearchableSelect options={subclasOptions} value={filters.subclasificacionId} onChange={v => setFilter("subclasificacionId", v)} placeholder="Todas" />
                     </div>
+                    {filters.canalId && (
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Zona</label>
+                            <SearchableSelect options={ZONA_OPTIONS} value={filters.zonaId} onChange={v => setFilter("zonaId", v)} placeholder="Todas" />
+                        </div>
+                    )}
                     <div>
                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Clasificación</label>
                         <MultiSelect options={clasificacionOptions} selected={filters.clasificacionIds} onChange={v => setFilter("clasificacionIds", v)} placeholder="Todas" />

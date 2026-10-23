@@ -13,6 +13,7 @@ import { currentWeekMarkLine, getISOWeek, getWeekKey, withCurrentWeekMarker } fr
 import { getEstadoBucket } from "./estadoUtils";
 import { EChartsCallbackParams } from "./echartsTypes";
 import { isPlausibleYear } from "./dateUtils";
+import { getZonaByDepartamentoId, ZONA_OPTIONS } from "./zonas";
 
 const MONTH_LABELS = [
     "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -35,6 +36,7 @@ interface Filters {
     asesorIds: string[]; // also set via chart/table click cross-filter
     subclasificacionId: string;
     segmentoId: string;
+    zonaId: string;
 }
 
 const EMPTY_FILTERS: Filters = {
@@ -46,6 +48,7 @@ const EMPTY_FILTERS: Filters = {
     asesorIds: [],
     subclasificacionId: "",
     segmentoId: "",
+    zonaId: "",
 };
 const CANAL_PROPIO_ID = "PROPIO";
 const WEEK_OPTIONS = Array.from({ length: 53 }, (_, i) => ({ value: String(i + 1), label: String(i + 1) }));
@@ -83,6 +86,7 @@ export function Page3MontoAsesor() {
             canalId,
             tiposCanal: canalId === CANAL_PROPIO_ID ? prev.tiposCanal : [],
             subclasificacionId: "",
+            zonaId: "",
         }));
     };
 
@@ -138,6 +142,7 @@ export function Page3MontoAsesor() {
             const acc = o.account_id ? accountsMap.get(o.account_id) : undefined;
             if (filters.canalId && acc?.canal_id !== filters.canalId) return false;
             if (subclasId && acc?.subclasificacion_id !== subclasId) return false;
+            if (filters.zonaId && getZonaByDepartamentoId(acc?.departamento_id) !== filters.zonaId) return false;
             if (tipoSet) {
                 const tipo = o.owner_user_id ? tipoByVendedor.get(o.owner_user_id) : undefined;
                 if (!tipo || !tipoSet.has(tipo)) return false;
@@ -312,7 +317,7 @@ export function Page3MontoAsesor() {
 
     const hasActiveFilters =
         filters.canalId || filters.tiposCanal.length > 0 || filters.year || filters.month || filters.week ||
-        filters.asesorIds.length > 0 || filters.subclasificacionId || filters.segmentoId;
+        filters.asesorIds.length > 0 || filters.subclasificacionId || filters.segmentoId || filters.zonaId;
 
     return (
         <div className="flex flex-col gap-6">
@@ -356,6 +361,12 @@ export function Page3MontoAsesor() {
                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Segmentos</label>
                         <SearchableSelect options={segmentoOptions} value={filters.segmentoId} onChange={v => setFilter("segmentoId", v)} placeholder="Todos" />
                     </div>
+                    {filters.canalId && (
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Zona</label>
+                            <SearchableSelect options={ZONA_OPTIONS} value={filters.zonaId} onChange={v => setFilter("zonaId", v)} placeholder="Todas" />
+                        </div>
+                    )}
                     <div>
                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Asesor</label>
                         <MultiSelect options={asesorOptions} selected={filters.asesorIds} onChange={v => setFilter("asesorIds", v)} placeholder="Todos" />

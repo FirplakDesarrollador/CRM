@@ -13,6 +13,7 @@ import { currentWeekMarkLine, getWeekKey, withCurrentWeekMarker } from "./weekUt
 import { EstadoBucket, getEstadoBucket } from "./estadoUtils";
 import { EChartsCallbackParams } from "./echartsTypes";
 import { isPlausibleYear } from "./dateUtils";
+import { getZonaByDepartamentoId, ZONA_OPTIONS } from "./zonas";
 
 const MONTH_LABELS = [
     "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -45,6 +46,7 @@ interface Filters {
     month: string;
     asesorIds: string[];
     estados: EstadoBucket[]; // also set via chart click cross-filter
+    zonaId: string;
 }
 
 const EMPTY_FILTERS: Filters = {
@@ -55,6 +57,7 @@ const EMPTY_FILTERS: Filters = {
     month: "",
     asesorIds: [],
     estados: [],
+    zonaId: "",
 };
 const CANAL_PROPIO_ID = "PROPIO";
 
@@ -83,6 +86,7 @@ export function Page5Cuentas() {
             canalId,
             tiposCanal: canalId === CANAL_PROPIO_ID ? prev.tiposCanal : [],
             subclasificacionId: "",
+            zonaId: "",
         }));
     };
 
@@ -153,6 +157,7 @@ export function Page5Cuentas() {
             if (asesorSet && (!a.owner_user_id || !asesorSet.has(a.owner_user_id))) return false;
             if (filters.canalId && a.canal_id !== filters.canalId) return false;
             if (subclasId && a.subclasificacion_id !== subclasId) return false;
+            if (filters.zonaId && getZonaByDepartamentoId(a.departamento_id) !== filters.zonaId) return false;
             if (tipoSet) {
                 const tipo = a.owner_user_id ? tipoByVendedor.get(a.owner_user_id) : undefined;
                 if (!tipo || !tipoSet.has(tipo)) return false;
@@ -282,7 +287,7 @@ export function Page5Cuentas() {
 
     const hasActiveFilters =
         filters.canalId || filters.tiposCanal.length > 0 || filters.subclasificacionId || filters.year ||
-        filters.month || filters.asesorIds.length > 0 || filters.estados.length > 0;
+        filters.month || filters.asesorIds.length > 0 || filters.estados.length > 0 || filters.zonaId;
 
     return (
         <div className="flex flex-col gap-6">
@@ -322,6 +327,12 @@ export function Page5Cuentas() {
                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">SubClasificación</label>
                         <SearchableSelect options={subclasOptions} value={filters.subclasificacionId} onChange={v => setFilter("subclasificacionId", v)} placeholder="Todas" />
                     </div>
+                    {filters.canalId && (
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Zona</label>
+                            <SearchableSelect options={ZONA_OPTIONS} value={filters.zonaId} onChange={v => setFilter("zonaId", v)} placeholder="Todas" />
+                        </div>
+                    )}
                     <div>
                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Estado</label>
                         <MultiSelect options={ESTADO_OPTIONS} selected={filters.estados} onChange={v => setFilter("estados", v as EstadoBucket[])} placeholder="Todos" />

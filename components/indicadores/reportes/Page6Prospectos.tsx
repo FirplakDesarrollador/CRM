@@ -13,6 +13,7 @@ import { currentWeekMarkLine, getISOWeek, getWeekKey, withCurrentWeekMarker } fr
 import { getEstadoBucket } from "./estadoUtils";
 import { EChartsCallbackParams } from "./echartsTypes";
 import { isPlausibleYear } from "./dateUtils";
+import { getZonaByDepartamentoId, ZONA_OPTIONS } from "./zonas";
 
 const MONTH_LABELS = [
     "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -54,6 +55,7 @@ interface Filters {
     month: string;
     week: string;
     day: string;
+    zonaId: string;
 }
 
 const EMPTY_FILTERS: Filters = {
@@ -66,6 +68,7 @@ const EMPTY_FILTERS: Filters = {
     month: "",
     week: "",
     day: "",
+    zonaId: "",
 };
 
 /**
@@ -111,6 +114,7 @@ export function Page6Prospectos() {
             canalId,
             tiposCanal: canalId === CANAL_PROPIO_ID ? prev.tiposCanal : [],
             subclasificacionId: "",
+            zonaId: "",
         }));
     };
 
@@ -169,6 +173,7 @@ export function Page6Prospectos() {
             const acc = o.account_id ? accountsMap.get(o.account_id) : undefined;
             if (filters.canalId && acc?.canal_id !== filters.canalId) return false;
             if (subclasId && acc?.subclasificacion_id !== subclasId) return false;
+            if (filters.zonaId && getZonaByDepartamentoId(acc?.departamento_id) !== filters.zonaId) return false;
             if (tipoSet) {
                 const tipo = o.owner_user_id ? tipoByVendedor.get(o.owner_user_id) : undefined;
                 if (!tipo || !tipoSet.has(tipo)) return false;
@@ -358,7 +363,7 @@ export function Page6Prospectos() {
 
     const hasActiveFilters =
         filters.canalId || filters.tiposCanal.length > 0 || filters.subclasificacionId || filters.segmentoId ||
-        filters.asesorIds.length > 0 || filters.year || filters.month || filters.week || filters.day;
+        filters.asesorIds.length > 0 || filters.year || filters.month || filters.week || filters.day || filters.zonaId;
 
     return (
         <div className="flex flex-col gap-6">
@@ -398,6 +403,12 @@ export function Page6Prospectos() {
                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">SubClasificación</label>
                         <SearchableSelect options={subclasOptions} value={filters.subclasificacionId} onChange={v => setFilter("subclasificacionId", v)} placeholder="Todas" />
                     </div>
+                    {filters.canalId && (
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Zona</label>
+                            <SearchableSelect options={ZONA_OPTIONS} value={filters.zonaId} onChange={v => setFilter("zonaId", v)} placeholder="Todas" />
+                        </div>
+                    )}
                     <div>
                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Segmentos</label>
                         <SearchableSelect options={segmentoOptions} value={filters.segmentoId} onChange={v => setFilter("segmentoId", v)} placeholder="Todos" />

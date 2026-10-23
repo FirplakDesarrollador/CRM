@@ -19,6 +19,7 @@ import {
 } from "./estadoUtils";
 import { EChartsCallbackParams } from "./echartsTypes";
 import { isPlausibleYear } from "./dateUtils";
+import { getZonaByDepartamentoId, ZONA_OPTIONS } from "./zonas";
 
 const MONTH_LABELS = [
     "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -66,6 +67,7 @@ interface Filters {
     subclasificacionId: string;
     segmentoId: string;
     faseIds: string[];
+    zonaId: string;
 }
 
 const EMPTY_FILTERS: Filters = {
@@ -77,6 +79,7 @@ const EMPTY_FILTERS: Filters = {
     subclasificacionId: "",
     segmentoId: "",
     faseIds: [],
+    zonaId: "",
 };
 
 function KpiCard({
@@ -116,8 +119,11 @@ export function Page1EstadosTiempo() {
     const setFilter = <K extends keyof Filters>(key: K, value: Filters[K]) => {
         setFilters(prev => {
             const next = { ...prev, [key]: value };
-            // Etapas depend on the selected channel; reset them if the channel changes.
-            if (key === "canalId") next.faseIds = [];
+            // Etapas and Zona depend on the selected channel; reset them if the channel changes.
+            if (key === "canalId") {
+                next.faseIds = [];
+                next.zonaId = "";
+            }
             return next;
         });
     };
@@ -194,6 +200,10 @@ export function Page1EstadosTiempo() {
         return base.filter(o => {
             if (o.is_deleted) return false;
             if (faseIdSet && !faseIdSet.has(Number(o.fase_id))) return false;
+            if (filters.zonaId) {
+                const acc = o.account_id ? accountsMap.get(o.account_id) : undefined;
+                if (getZonaByDepartamentoId(acc?.departamento_id) !== filters.zonaId) return false;
+            }
             if (yearNum != null || monthNum != null) {
                 if (!o.fecha_cierre_estimada) return false;
                 const d = new Date(o.fecha_cierre_estimada);
@@ -376,8 +386,14 @@ export function Page1EstadosTiempo() {
                             <MultiSelect options={faseOptions} selected={filters.faseIds} onChange={v => setFilter("faseIds", v)} placeholder="Todas" />
                         </div>
                     )}
+                    {filters.canalId && (
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Zona</label>
+                            <SearchableSelect options={ZONA_OPTIONS} value={filters.zonaId} onChange={v => setFilter("zonaId", v)} placeholder="Todas" />
+                        </div>
+                    )}
                 </div>
-                {(filters.year || filters.month || filters.ownerIds.length > 0 || filters.estados.length > 0 || filters.canalId || filters.subclasificacionId || filters.segmentoId || filters.faseIds.length > 0) && (
+                {(filters.year || filters.month || filters.ownerIds.length > 0 || filters.estados.length > 0 || filters.canalId || filters.subclasificacionId || filters.segmentoId || filters.faseIds.length > 0 || filters.zonaId) && (
                     <button
                         onClick={() => setFilters(EMPTY_FILTERS)}
                         className="mt-3 text-xs font-bold text-slate-400 hover:text-[#254153] transition-colors underline"
