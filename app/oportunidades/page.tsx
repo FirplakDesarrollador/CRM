@@ -534,6 +534,7 @@ function OpportunitiesContent() {
         { key: 'fase',        label: 'Fase' },
         { key: 'estado',      label: 'Estado' },
         { key: 'creada',      label: 'Creada' },
+        { key: 'categoria',   label: 'Categoría de Interés' },
         { key: 'valor',       label: 'Valor' },
         { key: 'cierre',      label: 'Cierre' },
         { key: 'vendedor',    label: 'Vendedor' },
@@ -542,7 +543,7 @@ function OpportunitiesContent() {
     const [visibleColumns, setVisibleColumns] = useState<string[]>(() => {
         const defaultKeys = ALL_COLUMNS.map(c => c.key);
         if (typeof window !== 'undefined') {
-            const saved = localStorage.getItem('crm_opp_visible_cols_v3') || localStorage.getItem('crm_opp_visible_cols_v2') || localStorage.getItem('crm_opp_visible_cols');
+            const saved = localStorage.getItem('crm_opp_visible_cols_v4') || localStorage.getItem('crm_opp_visible_cols_v3') || localStorage.getItem('crm_opp_visible_cols_v2') || localStorage.getItem('crm_opp_visible_cols');
             if (saved) {
                 try {
                     const parsed: string[] = JSON.parse(saved);
@@ -550,7 +551,7 @@ function OpportunitiesContent() {
                         const savedSet = new Set(parsed);
                         const missingKeys = defaultKeys.filter(k => !savedSet.has(k));
                         const reordered = defaultKeys.filter(k => savedSet.has(k) || missingKeys.includes(k));
-                        localStorage.setItem('crm_opp_visible_cols_v3', JSON.stringify(reordered));
+                        localStorage.setItem('crm_opp_visible_cols_v4', JSON.stringify(reordered));
                         return reordered;
                     }
                 } catch (e) {}
@@ -562,7 +563,7 @@ function OpportunitiesContent() {
     const toggleColumn = (key: string) => {
         setVisibleColumns(prev => {
             const next = prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key];
-            localStorage.setItem('crm_opp_visible_cols_v3', JSON.stringify(next));
+            localStorage.setItem('crm_opp_visible_cols_v4', JSON.stringify(next));
             return next;
         });
     };
@@ -755,6 +756,20 @@ function OpportunitiesContent() {
             wordWrap: false,
             renderer(_: unknown, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 td.innerHTML = `<span style="font-size:12.5px;color:#64748b;font-weight:500;font-variant-numeric:tabular-nums;">${value || '-'}</span>`;
+                return td;
+            }
+        },
+        categoria: {
+            data: 'categoria', title: 'Categoría de Interés', readOnly: true, width: colWidths['categoria'] || 165, wordWrap: false,
+            renderer(_: unknown, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+                const v = value || '-';
+                const safe = String(v).replace(/"/g, '&quot;');
+                if (v === '-') {
+                    td.innerHTML = `<div style="display:flex;align-items:center;height:100%;"><span style="font-size:12.5px;color:#94a3b8;font-weight:500;">-</span></div>`;
+                } else {
+                    td.innerHTML = `<div style="display:flex;align-items:center;height:100%;overflow:hidden;"><span style="display:inline-block;padding:2px 8px;border-radius:6px;font-size:11.5px;font-weight:600;white-space:nowrap;background:#f8fafc;color:#334155;border:1px solid #e2e8f0;overflow:hidden;text-overflow:ellipsis;max-width:100%;line-height:1.4;" title="${safe}">${v}</span></div>`;
+                }
+                td.style.overflow = 'hidden';
                 return td;
             }
         },
@@ -986,9 +1001,9 @@ function OpportunitiesContent() {
                                         <p className="text-xs font-bold text-slate-700 uppercase tracking-wide">Columnas visibles</p>
                                         <button
                                             onClick={() => {
-                                                const allKeys = ['nombre','cuenta','actividades','pais','ciudad','canal','origen','fase','estado','creada','valor','cierre','vendedor'];
+                                                const allKeys = ALL_COLUMNS.map(c => c.key);
                                                 setVisibleColumns(allKeys);
-                                                localStorage.setItem('crm_opp_visible_cols_v3', JSON.stringify(allKeys));
+                                                localStorage.setItem('crm_opp_visible_cols_v4', JSON.stringify(allKeys));
                                             }}
                                             className="text-[10px] text-indigo-600 hover:text-indigo-800 font-semibold transition-colors"
                                         >

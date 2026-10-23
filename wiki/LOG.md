@@ -3,6 +3,22 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-10-23 - Feature: Columna Categoría de Interés en Lista Principal de Oportunidades
+
+- **Requerimiento:** Agregar la columna **Categoría de Interés** a la tabla interactiva de oportunidades (`/oportunidades`).
+- **Mapeo de Datos (`lib/opportunityTableHelpers.ts`, `lib/hooks/useOpportunitiesServer.ts`):**
+  - Añadido `categoria_oportunidad` a la consulta de `CRM_Oportunidades` en Supabase.
+  - Añadida la clave `categoria` a `OPPORTUNITY_TABLE_COLUMN_KEYS`, `OpportunityHotRow` y `OpportunityInput`.
+  - En `buildOpportunityHotRow`, normalización y formateo con `formatOpportunityCategories(opp.categoria_oportunidad) || '-'` para garantizar tipos primitivos string y compatibilidad con búsquedas y filtros internos de Handsontable.
+- **Frontend y UI (`app/oportunidades/page.tsx`):**
+  - Añadido `{ key: 'categoria', label: 'Categoría de Interés' }` en `ALL_COLUMNS` ubicado estratégicamente antes de Valor (`creada` $\rightarrow$ `categoria` $\rightarrow$ `valor`).
+  - Añadida la definición en `ALL_COLUMN_DEFS` con badge visual suave (`#f8fafc`, borde `#e2e8f0`), elipsis y tooltip seguro.
+  - Clave de localStorage actualizada a `crm_opp_visible_cols_v4` asegurando que todos los usuarios vean la nueva columna activa por defecto.
+- **Validación:**
+  - 16/16 pruebas unitarias verificadas en GREEN en `tests/opportunityTableFilters.test.ts`.
+  - Pruebas relacionadas verificadas: `tests/opportunityCategories.test.ts` (7/7) y `tests/opportunitySetter.test.ts` (6/6).
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+
 ## 2026-10-23 - Feature: Selector y Campo Setter en Oportunidades con Exportación en Informes
 
 - **Base de Datos y Modelo (`supabase/migrations/20261023110000_add_setter_to_oportunidades.sql`, `lib/db.ts`):**

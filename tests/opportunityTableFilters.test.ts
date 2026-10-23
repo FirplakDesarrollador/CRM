@@ -108,10 +108,34 @@ describe('Filtros internos de tabla de oportunidades', () => {
             'fase',
             'estado',
             'creada',
+            'categoria',
             'valor',
             'cierre',
             'vendedor'
         ]);
+    });
+
+    it('debe mapear "categoria_oportunidad" a "categoria" como string formateado o "-"', () => {
+        const mockOppWithCats: OpportunityInput = {
+            id: 'opp-cats-1',
+            categoria_oportunidad: ['Hidromasajes', 'Baños']
+        };
+        const rowWithCats = buildOpportunityHotRow(mockOppWithCats, {});
+        expect(rowWithCats.categoria).toBe('Hidromasajes, Baños');
+
+        const mockOppWithStringCats: OpportunityInput = {
+            id: 'opp-cats-2',
+            categoria_oportunidad: 'Cocinas, Institucional'
+        };
+        const rowWithStringCats = buildOpportunityHotRow(mockOppWithStringCats, {});
+        expect(rowWithStringCats.categoria).toBe('Cocinas, Institucional');
+
+        const mockOppEmptyCats: OpportunityInput = {
+            id: 'opp-cats-3',
+            categoria_oportunidad: null
+        };
+        const rowEmptyCats = buildOpportunityHotRow(mockOppEmptyCats, {});
+        expect(rowEmptyCats.categoria).toBe('-');
     });
 
     it('debe formatear "cierre" con DD/MM/AAAA para permitir filtrado por condición de fecha en Handsontable', () => {

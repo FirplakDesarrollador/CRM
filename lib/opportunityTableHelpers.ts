@@ -1,4 +1,5 @@
 import { computeOpportunityActivitySummary } from './opportunityActivities';
+import { formatOpportunityCategories } from './opportunityCategories';
 
 export const OPPORTUNITY_TABLE_COLUMN_KEYS = [
     'nombre',
@@ -11,6 +12,7 @@ export const OPPORTUNITY_TABLE_COLUMN_KEYS = [
     'fase',
     'estado',
     'creada',
+    'categoria',
     'valor',
     'cierre',
     'vendedor'
@@ -30,6 +32,7 @@ export interface OpportunityHotRow {
     fase: string;
     estado: string;
     creada: string;
+    categoria: string;
     valor: number;
     cierre: string;
     cierre_overdue: boolean;
@@ -41,6 +44,7 @@ export interface OpportunityInput {
     account_id?: string | null;
     nombre?: string | null;
     amount?: number | null;
+    categoria_oportunidad?: string | string[] | null;
     account?: {
         id?: string;
         nombre?: string | null;
@@ -95,6 +99,7 @@ export function buildOpportunityHotRow(
         creada: opp.created_at
             ? new Date(opp.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })
             : '-',
+        categoria: formatOpportunityCategories(opp.categoria_oportunidad) || '-',
         valor: opp.amount || 0,
         cierre: opp.fecha_cierre_estimada
             ? new Date(opp.fecha_cierre_estimada).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })
