@@ -8,13 +8,14 @@ export interface LiveAccount {
     nombre: string | null;
     canal_id: string | null;
     subclasificacion_id: number | null;
+    departamento_id: number | null;
     owner_user_id: string | null;
     created_at: string | null;
     is_deleted: boolean | null;
 }
 
 const TABLE = "CRM_Cuentas";
-const SELECT_COLUMNS = "id, nombre, canal_id, subclasificacion_id, owner_user_id, created_at, is_deleted";
+const SELECT_COLUMNS = "id, nombre, canal_id, subclasificacion_id, departamento_id, owner_user_id, created_at, is_deleted";
 
 /**
  * Live (non-offline-cached) accounts. Same rationale as useLiveOpportunities:
