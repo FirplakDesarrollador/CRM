@@ -3,6 +3,26 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-10-23 - Feature: Log y Trazabilidad Transversal de Modificaciones en Oportunidades, Cuentas y Contactos
+
+- **Base de Datos y Triggers (`supabase/migrations/20261023100000_audit_history_log.sql`):**
+  - **Requerimiento:** Auditoría y trazabilidad en la nube de quién realizó modificaciones en oportunidades, contactos y cuentas, qué campos cambiaron, valores previos y nuevos, y fecha/hora exacta.
+  - **Tabla `CRM_HistorialModificaciones`:** Append-only con RLS, índices compuestos (`idx_historial_mod_entity`, `idx_historial_mod_changed_by`) y función `public.get_audit_user_name(UUID)` para resolución de nombre y correo.
+  - **Triggers en PostgreSQL:**
+    - `trg_audit_opportunity_changes`: Audita cambios en `fase_id`, `estado_id`, `owner_user_id`, `amount`, `razon_perdida`, `nombre`, `fecha_cierre_estimada`, `probabilidad`, `comentarios_perdida`, `is_deleted`.
+    - `trg_audit_account_changes_full`: Audita cambios en `nombre`, `owner_user_id`, `canal_id`, `telefono`, `email`, `nit`, `direccion`, `ciudad`, `is_deleted`.
+    - `trg_audit_contact_changes_full`: Audita cambios en `nombre`, `cargo`, `telefono`, `email`, `account_id`, `es_principal`, `is_deleted`.
+- **Frontend y UI Reutilizable (`lib/hooks/useEntityAuditHistory.ts`, `components/shared/EntityAuditHistoryTab.tsx`):**
+  - Hook reactivo `useEntityAuditHistory` con orden descendente, paginación configurable y fallback de error.
+  - Componente `EntityAuditHistoryTab` con buscador en tiempo real, filtro selector por campo (`fieldsList`), resolución de tiempos relativos y formateo regional colombiano (`es-CO`), y visualizador diff (rojo tachado valor anterior $\rightarrow$ verde negrita valor nuevo).
+  - Integrado en:
+    - **Oportunidades:** `app/oportunidades/[id]/page.tsx` (pestaña *Historial*).
+    - **Cuentas:** `components/cuentas/AccountForm.tsx` (pestaña *Historial*).
+    - **Contactos:** `components/contactos/ContactForm.tsx` (pestañas *Información* e *Historial de Cambios*).
+- **Validación:**
+  - 3/3 pruebas unitarias en `tests/auditHistory.test.ts` ejecutadas con `npm run qa:focused` y verificadas en GREEN.
+- **Páginas actualizadas:** `wiki/pages/modelo-de-datos.md`, `wiki/pages/oportunidades.md`, `wiki/pages/cuentas.md`, `wiki/pages/contactos.md`, `wiki/pages/auditoria-local.md`, `wiki/INDEX.md`, `wiki/LOG.md`.
+
 ## 2026-10-23 - Fix: Deduplicación Inteligente de Leads Entrantes en wordpress-lead-intake
 
 - **Integración Web (`supabase/functions/wordpress-lead-intake/index.ts`, `lib/leadDeduplication.ts`, `tests/leadDeduplication.test.ts`):**

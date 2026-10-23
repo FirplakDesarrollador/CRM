@@ -9,7 +9,7 @@
 - [modelo-de-datos](pages/modelo-de-datos.md) — Todas las tablas `CRM_*`, tablas de referencia, convenciones (soft-delete, `_sync_metadata`, RLS).
 - [sincronizacion-offline](pages/sincronizacion-offline.md) — SyncEngine local-first: push/pull desacoplados, Outbox recuperable, cursores durables, paginación, catálogos con TTL, LWW y telemetría.
 - [roles-y-permisos](pages/roles-y-permisos.md) — Roles ADMIN/COORDINADOR/VENDEDOR, matriz de permisos, `allowed_modules`, coordinadores, RLS y auth.
-- [auditoria-local](pages/auditoria-local.md) — Registro local de modificaciones y creaciones de datos por usuario, persistido en localStorage con Zustand.
+- [auditoria-local](pages/auditoria-local.md) — Trazabilidad y auditoría de cambios: local en localStorage y persistente en Supabase (`CRM_HistorialModificaciones` con triggers y visualizador en Oportunidades, Cuentas y Contactos).
 
 ## Módulos de negocio
 

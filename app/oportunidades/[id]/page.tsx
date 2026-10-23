@@ -35,6 +35,8 @@ import { useOpportunityOrigins } from "@/lib/hooks/useOpportunityOrigins";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { OPPORTUNITY_CATEGORIES, parseOpportunityCategories, formatOpportunityCategories } from "@/lib/opportunityCategories";
 import { AccountModal } from "@/components/cuentas/AccountModal";
+import { EntityAuditHistoryTab } from "@/components/shared/EntityAuditHistoryTab";
+import { History } from "lucide-react";
 
 export default function OpportunityDetailPage() {
     const params = useParams();
@@ -119,13 +121,13 @@ export default function OpportunityDetailPage() {
 
     const searchParams = useSearchParams();
     const initialTab = searchParams.get('tab') as any;
-    const [activeTab, setActiveTab] = useState<'resumen' | 'colaboradores' | 'cotizaciones' | 'productos' | 'actividades' | 'asignado'>(initialTab || 'resumen');
+    const [activeTab, setActiveTab] = useState<'resumen' | 'colaboradores' | 'cotizaciones' | 'productos' | 'actividades' | 'asignado' | 'historial'>(initialTab || 'resumen');
     const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
 
     // Sincronizar pestaña con parámetro de URL si cambia
     useEffect(() => {
         const tab = searchParams.get('tab');
-        if (tab && ['resumen', 'colaboradores', 'cotizaciones', 'productos', 'actividades', 'asignado'].includes(tab)) {
+        if (tab && ['resumen', 'colaboradores', 'cotizaciones', 'productos', 'actividades', 'asignado', 'historial'].includes(tab)) {
             setActiveTab(tab as any);
         }
     }, [searchParams]);
@@ -228,7 +230,8 @@ export default function OpportunityDetailPage() {
                         { id: 'cotizaciones', label: 'Cotizaciones', icon: FileText },
                         { id: 'productos', label: 'Productos', icon: Package },
                         { id: 'actividades', label: 'Actividades', icon: ListTodo },
-                        ...(userRole === 'ADMIN' || userRole === 'COORDINADOR' ? [{ id: 'asignado', label: 'Asignado', icon: User }] : [])
+                        ...(userRole === 'ADMIN' || userRole === 'COORDINADOR' ? [{ id: 'asignado', label: 'Asignado', icon: User }] : []),
+                        { id: 'historial', label: 'Historial', icon: History }
                     ].map((tab, idx) => (
                         <button
                             key={tab.id}
@@ -269,6 +272,14 @@ export default function OpportunityDetailPage() {
 
                 {(userRole === 'ADMIN' || userRole === 'COORDINADOR') && activeTab === 'asignado' && (
                     <AssignedTab opportunityId={id} currentOwnerId={opportunity.owner_user_id || null} />
+                )}
+
+                {activeTab === 'historial' && (
+                    <EntityAuditHistoryTab 
+                        entityType="OPORTUNIDAD" 
+                        entityId={id} 
+                        entityName={opportunity.nombre} 
+                    />
                 )}
             </div>
 
