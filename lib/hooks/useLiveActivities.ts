@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { fetchAllRowsCached, getCachedRows } from "./liveDataCache";
+import { fetchAllRowsCached, getCachedRows, onLiveDataRefresh } from "./liveDataCache";
 
 export interface LiveActivity {
     id: string;
@@ -31,6 +31,9 @@ export function useLiveActivities() {
     const [activities, setActivities] = useState<LiveActivity[]>(
         () => getCachedRows<LiveActivity>(TABLE) || []
     );
+    const [refreshToken, setRefreshToken] = useState(0);
+
+    useEffect(() => onLiveDataRefresh(() => setRefreshToken(t => t + 1)), []);
 
     useEffect(() => {
         let active = true;
@@ -42,7 +45,7 @@ export function useLiveActivities() {
         return () => {
             active = false;
         };
-    }, []);
+    }, [refreshToken]);
 
     return { activities };
 }

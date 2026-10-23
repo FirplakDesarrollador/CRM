@@ -8,8 +8,11 @@ const PAGE_SIZE = 1000;
 // useLive* hook instance and unmount it when the user switches tabs, so
 // without this every tab switch re-downloaded the whole table from
 // scratch. A short TTL keeps tab-switching instant while still picking up
-// changes made elsewhere in the CRM within a few minutes.
-const CACHE_TTL_MS = 3 * 60 * 1000;
+// changes made elsewhere in the CRM within a minute or so; the "Actualizar
+// datos" button (app/indicadores/page.tsx) bypasses this entirely via
+// refreshLiveData() for someone who just made an edit and wants to see it
+// right away instead of waiting out the TTL.
+const CACHE_TTL_MS = 60 * 1000;
 
 interface CacheEntry<T> {
     rows: T[];
@@ -18,6 +21,7 @@ interface CacheEntry<T> {
 
 const cache = new Map<string, CacheEntry<unknown>>();
 const inFlight = new Map<string, Promise<unknown[]>>();
+const refreshListeners = new Set<() => void>();
 
 /**
  * Fetches every row of a table in pages of PAGE_SIZE, ordered by `id` for
@@ -94,4 +98,21 @@ export function fetchAllRowsCached<T>(table: string, columns: string): Promise<T
 /** Last cached rows for a table, if any, for synchronous initial render. */
 export function getCachedRows<T>(table: string): T[] | undefined {
     return (cache.get(table) as CacheEntry<T> | undefined)?.rows;
+}
+
+/** A useLive* hook calls this on mount; it re-fetches whenever refreshLiveData() runs. */
+export function onLiveDataRefresh(listener: () => void): () => void {
+    refreshListeners.add(listener);
+    return () => refreshListeners.delete(listener);
+}
+
+/**
+ * Drops every cached table so the next render of each mounted useLive* hook
+ * re-fetches immediately, instead of waiting out CACHE_TTL_MS. Wired to the
+ * "Actualizar datos" button in Indicadores for right after someone edits an
+ * opportunity/actividad/cuenta and wants the report to pick it up now.
+ */
+export function refreshLiveData(): void {
+    cache.clear();
+    refreshListeners.forEach(listener => listener());
 }
