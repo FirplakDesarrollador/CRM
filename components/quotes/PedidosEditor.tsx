@@ -19,6 +19,7 @@ import {
     PedidoWithItems,
 } from "@/lib/pedidoFormalization";
 import { isValidRealNit, isProvisionalNit } from "@/lib/nitUtils";
+import { normalizeDateToInput } from "@/lib/pedidoHelpers";
 
 const PEDIDO_WIZARD_LAST_STEP = 2;
 
@@ -152,14 +153,14 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
 
     return (
         <div className="space-y-4">
-            <div className="flex justify-between items-center bg-white p-4 rounded-xl border shadow-sm">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white p-4 rounded-xl border shadow-sm">
                 <div>
                     <h3 className="font-bold text-lg text-slate-800">Pedidos Vinculados</h3>
                     <p className="text-sm text-slate-500">Maneja múltiples pedidos facturables para esta cotización.</p>
                 </div>
                 <button
                     onClick={() => setIsCreating(true)}
-                    className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition"
+                    className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition w-full sm:w-auto justify-center"
                 >
                     <Plus className="w-4 h-4" /> Nuevo Pedido Parcial
                 </button>
@@ -210,7 +211,7 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
                             </div>
 
                             {/* Detalle solicitado por el usuario */}
-                            <div className="flex-1 grid grid-cols-2 gap-x-6 gap-y-2 border-l pl-6 ml-2">
+                            <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 border-t pt-3 md:border-t-0 md:pt-0 md:border-l md:pl-6 md:ml-2">
                                 <div className="col-span-2 space-y-1">
                                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Productos y Cantidades</p>
                                     <div className="flex flex-wrap gap-2">
@@ -239,6 +240,13 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
                                     <p className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
                                         <Receipt className="w-3.5 h-3.5 text-slate-400" />
                                         {ped.tipo_facturacion || 'No definido'}
+                                    </p>
+                                </div>
+                                <div className="space-y-0.5">
+                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Tipo POD</p>
+                                    <p className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                                        <Truck className="w-3.5 h-3.5 text-slate-400" />
+                                        {ped.tipo_pod || 'POD Total'}
                                     </p>
                                 </div>
                             </div>
@@ -374,9 +382,11 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
     const [canSubmitFinalStep, setCanSubmitFinalStep] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const form = useForm({
+        shouldUnregister: false,
         defaultValues: {
-            fecha_facturacion: ped?.fecha_facturacion || "",
+            fecha_facturacion: normalizeDateToInput(ped?.fecha_facturacion),
             tipo_facturacion: ped?.tipo_facturacion || "",
+            tipo_pod: ped?.tipo_pod || "POD Total",
             cierre_facturacion: ped?.cierre_facturacion ?? false,
             es_muestra: ped?.es_muestra ?? false,
             orden_compra: ped?.orden_compra || "",
@@ -395,7 +405,7 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
             tiene_escaleras: ped?.tiene_escaleras ?? false,
             verificacion_previa_firplak: ped?.verificacion_previa_firplak ?? false,
             planos_hidromasaje: ped?.planos_hidromasaje || "",
-            fecha_entrega: ped?.fecha_entrega || "",
+            fecha_entrega: normalizeDateToInput(ped?.fecha_entrega || ped?.fecha_minima_requerida),
             nit_cliente_final: ped?.nit_cliente_final || "",
             entrega_en_obra: ped?.entrega_en_obra || false,
             bodega_externa: ped?.bodega_externa || false,
@@ -425,8 +435,10 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
             }
         }
         const pedData = {
-            fecha_facturacion: data.fecha_facturacion,
+            fecha_facturacion: data.fecha_facturacion || null,
             tipo_facturacion: data.tipo_facturacion,
+            tipo_pod: data.tipo_pod || "POD Total",
+            pod: data.tipo_pod || "POD Total",
             cierre_facturacion: Boolean(data.cierre_facturacion),
             es_muestra: Boolean(data.es_muestra),
             orden_compra: data.orden_compra,
@@ -445,6 +457,7 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
             verificacion_previa_firplak: Boolean(data.verificacion_previa_firplak),
             planos_hidromasaje: data.planos_hidromasaje,
             fecha_entrega: data.fecha_entrega || null,
+            fecha_minima_requerida: data.fecha_entrega || null,
             nit_cliente_final: data.nit_cliente_final,
             entrega_en_obra: data.entrega_en_obra,
             bodega_externa: data.bodega_externa,
@@ -453,6 +466,8 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
         await updatePedido(pedidoUuid, pedData);
         await updatePedidoItems(pedidoUuid, itemsToSave);
         await persistQuotePedidoFields(quote.id, {
+            tipo_pod: pedData.tipo_pod,
+            pod: pedData.pod,
             cierre_facturacion: pedData.cierre_facturacion,
             es_muestra: pedData.es_muestra,
             cliente_final: pedData.cliente_final,
@@ -498,8 +513,9 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
     // Populate logistic fields when 'ped' is loaded from local DB
     useEffect(() => {
         if (ped) {
-            setValue('fecha_facturacion', ped.fecha_facturacion || "");
+            setValue('fecha_facturacion', normalizeDateToInput(ped.fecha_facturacion));
             setValue('tipo_facturacion', ped.tipo_facturacion || "");
+            setValue('tipo_pod', ped.tipo_pod || "POD Total");
             setValue('cierre_facturacion', ped.cierre_facturacion ?? false);
             setValue('es_muestra', ped.es_muestra ?? false);
             setValue('orden_compra', ped.orden_compra || "");
@@ -518,7 +534,7 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
             setValue('tiene_escaleras', ped.tiene_escaleras ?? false);
             setValue('verificacion_previa_firplak', ped.verificacion_previa_firplak ?? false);
             setValue('planos_hidromasaje', ped.planos_hidromasaje || "");
-            setValue('fecha_entrega', ped.fecha_entrega || "");
+            setValue('fecha_entrega', normalizeDateToInput(ped.fecha_entrega || ped.fecha_minima_requerida));
             setValue('nit_cliente_final', ped.nit_cliente_final || "");
             setValue('entrega_en_obra', ped.entrega_en_obra || false);
             setValue('bodega_externa', ped.bodega_externa || false);
@@ -606,6 +622,8 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
         const pedData = {
             fecha_facturacion: data.fecha_facturacion,
             tipo_facturacion: data.tipo_facturacion,
+            tipo_pod: data.tipo_pod || "POD Total",
+            pod: data.tipo_pod || "POD Total",
             cierre_facturacion: Boolean(data.cierre_facturacion),
             es_muestra: Boolean(data.es_muestra),
             orden_compra: data.orden_compra,
@@ -624,6 +642,7 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
             verificacion_previa_firplak: Boolean(data.verificacion_previa_firplak),
             planos_hidromasaje: data.planos_hidromasaje,
             fecha_entrega: data.fecha_entrega || null,
+            fecha_minima_requerida: data.fecha_entrega || null,
             nit_cliente_final: data.nit_cliente_final,
             entrega_en_obra: data.entrega_en_obra,
             bodega_externa: data.bodega_externa,
@@ -641,6 +660,8 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
 
         // Sincronizar estos mismos campos en la Cotización principal para el PDF F-V-29
         await persistQuotePedidoFields(quote.id, {
+            tipo_pod: pedData.tipo_pod,
+            pod: pedData.pod,
             cierre_facturacion: pedData.cierre_facturacion,
             es_muestra: pedData.es_muestra,
             cliente_final: pedData.cliente_final,
@@ -767,6 +788,17 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
                             <option value="">Seleccione...</option>
                             <option value="Standard">Estándar</option>
                             <option value="Anticipo">Anticipo</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label className="text-sm font-medium flex items-center gap-2 mb-1">
+                            <Truck className="w-4 h-4 text-slate-400" /> Tipo POD
+                        </label>
+                        <select {...register("tipo_pod")} className="w-full p-2 border rounded-lg">
+                            <option value="POD Total">POD Total</option>
+                            <option value="POD Parcial">POD Parcial</option>
+                            <option value="Sin POD">Sin POD</option>
                         </select>
                     </div>
 

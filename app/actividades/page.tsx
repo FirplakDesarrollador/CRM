@@ -6,11 +6,10 @@ import { useActivities, LocalActivity } from '@/lib/hooks/useActivities';
 import { useInfiniteScroll } from '@/lib/hooks/useInfiniteScroll';
 import { useDebounce } from '@/lib/hooks/useDebounce';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '@/lib/db';
+import { db, getActiveLocalUserId, useActiveDatabaseVersion } from '@/lib/db';
 import { syncEngine } from '@/lib/sync';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { hasPermission } from '@/lib/permissions';
-import { useUsers } from '@/lib/hooks/useUsers';
 import {
     Calendar as CalendarIcon,
     ChevronLeft,
@@ -32,6 +31,7 @@ import {
     CheckCircle,
     AlertTriangle
 } from 'lucide-react';
+import { handleEntityLinkClick } from '@/lib/utils/navigation';
 
 import { cn } from '@/components/ui/utils';
 import { CreateActivityModal } from '@/components/activities/CreateActivityModal';
@@ -48,10 +48,14 @@ function ActivitiesContent() {
     const { user, role } = useCurrentUser();
     const canViewAll = hasPermission(role, 'view_all_activities');
 
+    // Keep active user id and db version across quick session/token revalidations to prevent calendar flickers
+    const activeUserId = user?.id || getActiveLocalUserId();
+    const dbVersion = useActiveDatabaseVersion();
+
     // Load collaborators to know which opportunities the user collaborates in
     const userCollaborations = useLiveQuery(
-        () => user ? db.opportunityCollaborators.where('usuario_id').equals(user.id).toArray() : [],
-        [user]
+        () => activeUserId ? db.opportunityCollaborators.where('usuario_id').equals(activeUserId).toArray() : [],
+        [activeUserId, dbVersion]
     ) || [];
 
     const collaborativeOppIds = useMemo(() => {
@@ -61,16 +65,10 @@ function ActivitiesContent() {
 
 
     // Catalogs
-    const classifications = useLiveQuery(() => db.activityClassifications.toArray().then(arr => arr.filter(c => !c.is_deleted)), []) || [];
-    const subclassifications = useLiveQuery(() => db.activitySubclassifications.toArray().then(arr => arr.filter(s => !s.is_deleted)), []) || [];
+    const classifications = useLiveQuery(() => db.activityClassifications.toArray().then(arr => arr.filter(c => !c.is_deleted)), [activeUserId, dbVersion]) || [];
+    const subclassifications = useLiveQuery(() => db.activitySubclassifications.toArray().then(arr => arr.filter(s => !s.is_deleted)), [activeUserId, dbVersion]) || [];
 
-    // PROACTIVE SYNC: If catalogs are empty, trigger a pull
-    useEffect(() => {
-        if (classifications.length === 0 && navigator.onLine) {
-            console.log("[ActivitiesPage] Catalogs empty, triggering sync...");
-            syncEngine.triggerSync();
-        }
-    }, [classifications.length]);
+// Catalogs are managed by global sync
 
     const [selectedDate, setSelectedDate] = useState(new Date());
     const [view, setView] = useState<ActivityView>(() => {
@@ -81,6 +79,30 @@ function ActivitiesContent() {
             if (saved) return (new URLSearchParams(saved).get('view') as ActivityView | null) || 'agenda';
         }
         return 'agenda';
+    });
+    const [agendaDateMode, setAgendaDateMode] = useState<'up_to' | 'exact'>(() => {
+        const fromUrl = searchParams.get('dateMode');
+        if (fromUrl === 'exact' || fromUrl === 'up_to') return fromUrl;
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_actividades_state');
+            if (saved) {
+                const val = new URLSearchParams(saved).get('dateMode');
+                if (val === 'exact' || val === 'up_to') return val;
+            }
+        }
+        return 'up_to';
+    });
+    const [omitCompleted, setOmitCompleted] = useState<boolean>(() => {
+        const fromUrl = searchParams.get('omitCompleted');
+        if (fromUrl !== null) return fromUrl === 'true';
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_actividades_state');
+            if (saved) {
+                const val = new URLSearchParams(saved).get('omitCompleted');
+                if (val !== null) return val === 'true';
+            }
+        }
+        return true;
     });
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [selectedActivity, setSelectedActivity] = useState<LocalActivity | null>(null);
@@ -217,6 +239,8 @@ function ActivitiesContent() {
         const dateFrom = searchParams.get('dateFrom') || saved.get('dateFrom') || '';
         const dateTo = searchParams.get('dateTo') || saved.get('dateTo') || '';
         const viewUrl = (searchParams.get('view') || saved.get('view') || 'agenda') as ActivityView;
+        const dateMode = (searchParams.get('dateMode') || saved.get('dateMode') || 'up_to') as 'up_to' | 'exact';
+        const omit = searchParams.get('omitCompleted') ?? saved.get('omitCompleted');
 
         setFilterUser(user);
         setSearchQuery(search);
@@ -228,6 +252,10 @@ function ActivitiesContent() {
         setFilterDateFrom(dateFrom);
         setFilterDateTo(dateTo);
         setView(viewUrl);
+        setAgendaDateMode(dateMode);
+        if (omit !== null) {
+            setOmitCompleted(omit === 'true');
+        }
     }, [searchParams]);
 
     // Sync all filters to URL to persist across "back" navigations
@@ -268,6 +296,12 @@ function ActivitiesContent() {
             if (sortOrder !== 'soonest') params.set('order', sortOrder);
             else params.delete('order');
 
+            if (agendaDateMode !== 'up_to') params.set('dateMode', agendaDateMode);
+            else params.delete('dateMode');
+
+            if (!omitCompleted) params.set('omitCompleted', 'false');
+            else params.delete('omitCompleted');
+
             const queryString = params.toString();
             
             // Save to sessionStorage without ID for cross-module persistence
@@ -292,15 +326,14 @@ function ActivitiesContent() {
             }
         }, 500);
         return () => clearTimeout(timer);
-    }, [view, searchQuery, filterType, filterClassification, filterSubclassification, filterUser, filterStatus, filterChannel, filterDateFrom, filterDateTo, sortOrder, searchParams, router]);
+    }, [view, agendaDateMode, omitCompleted, searchQuery, filterType, filterClassification, filterSubclassification, filterUser, filterStatus, filterChannel, filterDateFrom, filterDateTo, sortOrder, searchParams, router]);
 
     // Performance: Display limit for pagination
     const [displayLimit, setDisplayLimit] = useState(20);
 
     // Hook data for filters
-    const { users } = useUsers();
-    const accounts = useLiveQuery(() => db.accounts.toArray()) || [];
-    const opportunities = useLiveQuery(() => db.opportunities.toArray()) || [];
+    const accounts = useLiveQuery(() => db.accounts.toArray(), [activeUserId, dbVersion]) || [];
+    const opportunities = useLiveQuery(() => db.opportunities.toArray(), [activeUserId, dbVersion]) || [];
 
 
 
@@ -343,15 +376,24 @@ function ActivitiesContent() {
             return;
         }
 
-        if (id && activities) {
-            const act = activities.find(a => a.id === id);
+        const findAndOpen = async () => {
+            let act = activities?.find(a => a.id === id);
+            if (!act) {
+                try {
+                    act = await db.activities.get(id);
+                } catch (e) {
+                    console.warn("[ActivitiesPage] local DB fetch failed", e);
+                }
+            }
             if (act) {
                 lastProcessedUrlIdRef.current = id;
-                setSelectedDate(new Date(act.fecha_inicio));
+                if (act.fecha_inicio) setSelectedDate(new Date(act.fecha_inicio));
                 setSelectedActivity(act);
                 setIsModalOpen(true);
             }
-        }
+        };
+
+        findAndOpen();
     }, [searchParams, activities, isModalOpen]);
 
 
@@ -397,19 +439,24 @@ function ActivitiesContent() {
 
     // PERF FIX: Apply global filters once, then derive views from the result
     const globallyFilteredActivities = useMemo(() => {
-        if (!activities) return [];
+        const sourceActivities = activities || [];
+        if (sourceActivities.length === 0) return [];
         const lowerQuery = debouncedSearchQuery.toLowerCase();
 
         // Optimize lookup for search matches (O(1) instead of O(N))
         const oppMap = new Map(opportunities.map(o => [o.id, o]));
         const accMap = new Map(accounts.map(a => [a.id, a]));
 
-        return activities.filter(act => {
+        const effectiveUserId = user?.id || activeUserId;
+
+        const filtered = sourceActivities.filter(act => {
+            if (act.is_deleted) return false;
+
             // Apply role-based filtering: VENDEDOR and similar roles only see their own activities or those of opportunities they collaborate on
             if (!canViewAll) {
-                if (!user) return false; // Prevent leak while loading
+                if (!effectiveUserId) return false; // Prevent leak if identity is genuinely unknown
                 
-                const isOwner = act.user_id === user.id;
+                const isOwner = act.user_id === effectiveUserId;
                 const isCollaborator = act.opportunity_id ? collaborativeOppIds.has(act.opportunity_id) : false;
                 if (!isOwner && !isCollaborator) {
                     return false;
@@ -439,6 +486,7 @@ function ActivitiesContent() {
             if (filterUser && act.user_id !== filterUser) return false;
 
             // 4. NEW: Estado
+            if (omitCompleted && filterStatus !== "completed" && act.is_completed) return false;
             if (filterStatus === "completed" && !act.is_completed) return false;
             if (filterStatus === "pending" && act.is_completed) return false;
             if (filterStatus === "overdue") {
@@ -469,16 +517,20 @@ function ActivitiesContent() {
 
             return true;
         });
-    }, [activities, filterType, filterClassification, filterSubclassification, debouncedSearchQuery, canViewAll, user, collaborativeOppIds, filterUser, filterStatus, filterChannel, filterDateFrom, filterDateTo, opportunities, accounts]);
+
+        return filtered;
+    }, [activities, filterType, filterClassification, filterSubclassification, debouncedSearchQuery, canViewAll, user, activeUserId, collaborativeOppIds, filterUser, filterStatus, omitCompleted, filterChannel, filterDateFrom, filterDateTo, opportunities, accounts]);
 
     // Count overdue activities for badge (computed from role-filtered but ignoring current status filter)
     const overdueCount = useMemo(() => {
-        if (!activities) return 0;
+        const sourceActivities = activities || [];
+        if (sourceActivities.length === 0) return 0;
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        return activities.filter(act => {
-            if (!canViewAll && user) {
-                const isOwner = act.user_id === user.id;
+        const effectiveUserId = user?.id || activeUserId;
+        return sourceActivities.filter(act => {
+            if (!canViewAll && effectiveUserId) {
+                const isOwner = act.user_id === effectiveUserId;
                 const isCollaborator = act.opportunity_id ? collaborativeOppIds.has(act.opportunity_id) : false;
                 if (!isOwner && !isCollaborator) return false;
             }
@@ -488,18 +540,25 @@ function ActivitiesContent() {
             actDate.setHours(0, 0, 0, 0);
             return actDate < today;
         }).length;
-    }, [activities, canViewAll, user, collaborativeOppIds]);
+    }, [activities, canViewAll, user, activeUserId, collaborativeOppIds]);
 
     // For agenda/all views: filter by selected date + sort
     const filteredActivities = useMemo(() => {
         let result = globallyFilteredActivities;
-        if (view !== 'all') {
+        if (view === 'agenda') {
             const sd = selectedDate.getDate();
             const sm = selectedDate.getMonth();
             const sy = selectedDate.getFullYear();
+            const endOfSelectedDay = new Date(sy, sm, sd, 23, 59, 59, 999);
+
             result = result.filter(act => {
+                if (!act.fecha_inicio) return false;
                 const actDate = new Date(act.fecha_inicio);
-                return actDate.getDate() === sd && actDate.getMonth() === sm && actDate.getFullYear() === sy;
+                if (agendaDateMode === 'exact') {
+                    return actDate.getDate() === sd && actDate.getMonth() === sm && actDate.getFullYear() === sy;
+                }
+                // 'up_to': all activities scheduled up to the selected date (including overdue/prior ones)
+                return actDate <= endOfSelectedDay;
             });
         }
         return [...result].sort((a, b) => {
@@ -510,7 +569,7 @@ function ActivitiesContent() {
             const difference = new Date(a.fecha_inicio).getTime() - new Date(b.fecha_inicio).getTime();
             return sortOrder === 'latest' ? -difference : difference;
         });
-    }, [globallyFilteredActivities, view, selectedDate, sortOrder]);
+    }, [globallyFilteredActivities, view, selectedDate, agendaDateMode, sortOrder]);
 
     const { sentinelRef: activitiesSentinelRef } = useInfiniteScroll({
         loading: false,
@@ -571,7 +630,13 @@ function ActivitiesContent() {
                         {/* Overdue Quick Filter */}
                         <button
                             data-testid="activities-overdue-filter"
-                            onClick={() => setFilterStatus(filterStatus === 'overdue' ? 'all' : 'overdue')}
+                            onClick={() => {
+                                const nextStatus = filterStatus === 'overdue' ? 'all' : 'overdue';
+                                setFilterStatus(nextStatus);
+                                if (nextStatus === 'overdue' && agendaDateMode === 'exact') {
+                                    setAgendaDateMode('up_to');
+                                }
+                            }}
                             className={cn(
                                 "flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-bold border transition-all",
                                 filterStatus === 'overdue'
@@ -691,7 +756,10 @@ function ActivitiesContent() {
                                     Vencidas
                                 </button>
                                 <button
-                                    onClick={() => setFilterStatus("completed")}
+                                    onClick={() => {
+                                        setFilterStatus("completed");
+                                        setOmitCompleted(false);
+                                    }}
                                     className={cn(
                                         "px-3 py-1.5 rounded-lg text-[10px] uppercase font-black transition-all",
                                         filterStatus === "completed" ? "bg-white text-emerald-600 shadow-sm" : "text-slate-400 hover:text-slate-600"
@@ -813,56 +881,118 @@ function ActivitiesContent() {
                             </button>
 
                             {view !== 'all' && (
-                                <div className="flex items-center gap-4 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-100">
-                                    <button
-                                        data-testid="activities-page-prev"
-                                        onClick={handlePrev}
-                                        className="p-1 hover:bg-white hover:shadow-sm rounded-lg text-slate-400 hover:text-blue-600 transition-all"
-                                    >
-                                        <ChevronLeft className="w-5 h-5" />
-                                    </button>
-                                    <div className="relative group flex items-center justify-center min-w-[140px] px-2 py-1 rounded hover:bg-white transition-colors cursor-pointer">
-                                        <span className="text-base font-bold text-slate-900 capitalize text-center group-hover:text-blue-600 transition-colors mr-2">
-                                            {view === 'agenda'
-                                                ? selectedDate.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })
-                                                : selectedDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })
-                                            }
-                                        </span>
-                                        <CalendarIcon className="w-4 h-4 text-slate-400 group-hover:text-blue-500 transition-colors" />
-                                        <input
-                                            type={view === 'agenda' ? 'date' : 'month'}
-                                            className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-                                            onClick={(e) => {
-                                                try {
-                                                    if ('showPicker' in e.target) {
-                                                        (e.target as HTMLInputElement).showPicker();
-                                                    }
-                                                } catch (err) {}
-                                            }}
-                                            value={
-                                                view === 'agenda'
-                                                    ? `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`
-                                                    : `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}`
-                                            }
-                                            onChange={(e) => {
-                                                if (e.target.value) {
-                                                    const parts = e.target.value.split('-');
-                                                    if (parts.length === 3) {
-                                                        setSelectedDate(new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2])));
-                                                    } else if (parts.length === 2) {
-                                                        setSelectedDate(new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, 1));
-                                                    }
+                                <div className="flex flex-wrap items-center gap-3">
+                                    <div className="flex items-center gap-4 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-100 shadow-sm">
+                                        <button
+                                            data-testid="activities-page-prev"
+                                            onClick={handlePrev}
+                                            className="p-1 hover:bg-white hover:shadow-sm rounded-lg text-slate-400 hover:text-blue-600 transition-all"
+                                            title="Día anterior"
+                                        >
+                                            <ChevronLeft className="w-5 h-5" />
+                                        </button>
+                                        <div className="relative group flex items-center justify-center min-w-[140px] px-2 py-1 rounded hover:bg-white transition-colors cursor-pointer">
+                                            <span className="text-base font-bold text-slate-900 capitalize text-center group-hover:text-blue-600 transition-colors mr-2">
+                                                {view === 'agenda'
+                                                    ? (agendaDateMode === 'up_to'
+                                                        ? `Hasta: ${selectedDate.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })}`
+                                                        : selectedDate.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' }))
+                                                    : selectedDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })
                                                 }
-                                            }}
-                                        />
+                                            </span>
+                                            <CalendarIcon className="w-4 h-4 text-slate-400 group-hover:text-blue-500 transition-colors" />
+                                            <input
+                                                type={view === 'agenda' ? 'date' : 'month'}
+                                                className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                                                onClick={(e) => {
+                                                    try {
+                                                        if ('showPicker' in e.target) {
+                                                            (e.target as HTMLInputElement).showPicker();
+                                                        }
+                                                    } catch {}
+                                                }}
+                                                value={
+                                                    view === 'agenda'
+                                                        ? `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`
+                                                        : `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}`
+                                                }
+                                                onChange={(e) => {
+                                                    if (e.target.value) {
+                                                        const parts = e.target.value.split('-');
+                                                        if (parts.length === 3) {
+                                                            setSelectedDate(new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2])));
+                                                        } else if (parts.length === 2) {
+                                                            setSelectedDate(new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, 1));
+                                                        }
+                                                    }
+                                                }}
+                                            />
+                                        </div>
+                                        <button
+                                            data-testid="activities-page-next"
+                                            onClick={handleNext}
+                                            className="p-1 hover:bg-white hover:shadow-sm rounded-lg text-slate-400 hover:text-blue-600 transition-all"
+                                            title="Día siguiente"
+                                        >
+                                            <ChevronRight className="w-5 h-5" />
+                                        </button>
                                     </div>
-                                    <button
-                                        data-testid="activities-page-next"
-                                        onClick={handleNext}
-                                        className="p-1 hover:bg-white hover:shadow-sm rounded-lg text-slate-400 hover:text-blue-600 transition-all"
+
+                                    {view === 'agenda' && (
+                                        <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200 shadow-sm text-xs font-semibold">
+                                            <button
+                                                type="button"
+                                                data-testid="agenda-mode-upto"
+                                                onClick={() => setAgendaDateMode('up_to')}
+                                                className={cn(
+                                                    "px-3 py-1 rounded-lg transition-all",
+                                                    agendaDateMode === 'up_to'
+                                                        ? "bg-white text-blue-600 shadow-sm font-bold"
+                                                        : "text-slate-500 hover:text-slate-800"
+                                                )}
+                                                title="Muestra todas las actividades agendadas hasta esta fecha (incluye pendientes y atrasadas anteriores)"
+                                            >
+                                                Hasta la fecha
+                                            </button>
+                                            <button
+                                                type="button"
+                                                data-testid="agenda-mode-exact"
+                                                onClick={() => setAgendaDateMode('exact')}
+                                                className={cn(
+                                                    "px-3 py-1 rounded-lg transition-all",
+                                                    agendaDateMode === 'exact'
+                                                        ? "bg-white text-blue-600 shadow-sm font-bold"
+                                                        : "text-slate-500 hover:text-slate-800"
+                                                )}
+                                                title="Muestra únicamente las actividades de este día específico"
+                                            >
+                                                Solo este día
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    {/* Checkbox para omitir terminadas */}
+                                    <label
+                                        data-testid="omit-completed-toggle"
+                                        className={cn(
+                                            "flex items-center gap-2 cursor-pointer px-3 py-1.5 rounded-xl border text-xs font-bold transition-all shadow-sm select-none",
+                                            omitCompleted
+                                                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                                : "bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100"
+                                        )}
+                                        title="Oculta las actividades que ya han sido marcadas como terminadas"
                                     >
-                                        <ChevronRight className="w-5 h-5" />
-                                    </button>
+                                        <input
+                                            type="checkbox"
+                                            checked={omitCompleted}
+                                            onChange={(e) => setOmitCompleted(e.target.checked)}
+                                            className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-slate-300 cursor-pointer accent-emerald-600"
+                                        />
+                                        <span className="flex items-center gap-1.5 whitespace-nowrap">
+                                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                                            Omitir terminadas
+                                        </span>
+                                    </label>
                                 </div>
                             )}
                         </div>
@@ -937,10 +1067,12 @@ function ActivitiesContent() {
                                         const subName = subclassificationNode?.nombre;
 
                                         return (
-                                            <div
+                                            <a
                                                 key={act.id}
+                                                href={`/actividades?id=${act.id}`}
+                                                onClick={(e) => handleEntityLinkClick(e, `/actividades?id=${act.id}`, () => openActivityModal(act))}
                                                 className={cn(
-                                                    "group p-4 bg-white rounded-2xl border transition-all hover:shadow-md cursor-pointer",
+                                                    "group p-4 bg-white rounded-2xl border transition-all hover:shadow-md cursor-pointer block no-underline text-inherit",
                                                     act.is_completed
                                                         ? "border-slate-100 opacity-75"
                                                         : isOverdue
@@ -949,7 +1081,6 @@ function ActivitiesContent() {
                                                                 ? "border-emerald-200 hover:border-emerald-300 hover:shadow-emerald-100"
                                                                 : "border-blue-200 hover:border-blue-300 hover:shadow-blue-100"
                                                 )}
-                                                onClick={() => openActivityModal(act)}
                                             >
                                                 <div className="flex items-start gap-4">
                                                     <button
@@ -992,10 +1123,6 @@ function ActivitiesContent() {
                                                                             </span>
                                                                         )}
                                                                     </div>
-                                                                {/* DEBUG INDICATOR */}
-                                                                {act.clasificacion_id && !clsName && (
-                                                                    <div className="text-[10px] text-red-500 font-bold mt-1">Error L: {act.clasificacion_id}</div>
-                                                                )}
                                                             </div>
 
                                                             {act.tipo_actividad === 'EVENTO' ? (
@@ -1037,7 +1164,7 @@ function ActivitiesContent() {
                                                         </div>
                                                     </div>
                                                 </div>
-                                            </div>
+                                            </a>
                                         );
                                     })}
 
@@ -1103,7 +1230,7 @@ function ActivitiesContent() {
                                                     key={`day-${i}`}
                                                     onClick={() => { setSelectedDate(currentDate); setView('agenda'); }}
                                                     className={cn(
-                                                        "group relative bg-white p-1.5 min-h-[90px] transition-all cursor-pointer flex flex-col",
+                                                        "group/day relative bg-white p-1.5 min-h-[90px] transition-all cursor-pointer flex flex-col",
                                                         isSelected ? "bg-blue-50 ring-2 ring-inset ring-blue-500" : "hover:bg-slate-50",
                                                         isToday && !isSelected && "bg-amber-50/50"
                                                     )}
@@ -1135,10 +1262,14 @@ function ActivitiesContent() {
                                                             const isOverdueAct = !act.is_completed && new Date(act.fecha_inicio).setHours(0, 0, 0, 0) < new Date().setHours(0, 0, 0, 0);
                                                             return (
                                                                 <div key={act.id} className="flex gap-1 group/act">
-                                                                    <div
-                                                                        onClick={() => openActivityModal(act)}
+                                                                    <a
+                                                                        href={`/actividades?id=${act.id}`}
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation();
+                                                                            handleEntityLinkClick(e, `/actividades?id=${act.id}`, () => openActivityModal(act));
+                                                                        }}
                                                                         className={cn(
-                                                                            "text-[9px] px-1 py-0.5 rounded truncate font-medium border-l-2 flex-1 cursor-pointer",
+                                                                            "text-[9px] px-1 py-0.5 rounded truncate font-medium border-l-2 flex-1 cursor-pointer no-underline block",
                                                                             act.is_completed
                                                                                 ? "bg-slate-50 text-slate-400 border-slate-300 line-through"
                                                                                 : isOverdueAct
@@ -1150,7 +1281,7 @@ function ActivitiesContent() {
                                                                         title={act.asunto}
                                                                     >
                                                                         {act.asunto}
-                                                                    </div>
+                                                                    </a>
                                                                     <button
                                                                         onClick={(e) => {
                                                                             e.stopPropagation();
@@ -1191,11 +1322,15 @@ function ActivitiesContent() {
                                                                     const cName = classifications.find(c => String(c.id) === String(act.clasificacion_id))?.nombre;
 
                                                                     return (
-                                                                        <div 
+                                                                        <a 
                                                                             key={act.id} 
-                                                                            onClick={() => openActivityModal(act)}
+                                                                            href={`/actividades?id=${act.id}`}
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation();
+                                                                                handleEntityLinkClick(e, `/actividades?id=${act.id}`, () => openActivityModal(act));
+                                                                            }}
                                                                             className={cn(
-                                                                                "relative group/tip flex items-center gap-2 p-1.5 rounded border-l-2 transition-all hover:bg-slate-50 cursor-pointer",
+                                                                                "relative group/tip flex items-center gap-2 p-1.5 rounded border-l-2 transition-all hover:bg-slate-50 cursor-pointer no-underline text-inherit block",
                                                                                 act.is_completed
                                                                                     ? "bg-slate-50/50 text-slate-400 border-slate-300"
                                                                                     : isOverdueAct
@@ -1236,7 +1371,7 @@ function ActivitiesContent() {
                                                                             >
                                                                                 <CheckCircle2 className="w-4 h-4" />
                                                                             </button>
-                                                                        </div>
+                                                                        </a>
                                                                     );
                                                                 })}
                                                             </div>

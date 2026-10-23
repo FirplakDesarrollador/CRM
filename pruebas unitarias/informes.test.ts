@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mapOpportunityReportRow, OpportunityFlattenLookups, mapActivityReportRow, ActivityFlattenLookups } from '@/lib/utils/informes';
+import { mapOpportunityReportRow, OpportunityFlattenLookups, mapActivityReportRow, ActivityFlattenLookups, fetchAllInChunks } from '@/lib/utils/informes';
 
 describe('Exportación de Oportunidades a Excel', () => {
     const mockLookups: OpportunityFlattenLookups = {
@@ -137,5 +137,50 @@ describe('Exportación de Actividades a Excel', () => {
         const result = mapActivityReportRow(item, mockActivityLookups);
         expect(result.cuenta_nombre).toBe('Inversiones ABC');
         expect(result.oportunidad_nombre).toBe('Torre 2');
+    });
+});
+
+describe('Descarga por lotes con fetchAllInChunks', () => {
+    it('concatena múltiples lotes y reporta progreso acumulado', async () => {
+        const fakeDb = Array.from({ length: 6500 }, (_, i) => ({ id: `row-${i + 1}` }));
+        const rangesCalled: [number, number][] = [];
+        const progressValues: number[] = [];
+
+        const mockQuery = {
+            range: async (from: number, to: number) => {
+                rangesCalled.push([from, to]);
+                const slice = fakeDb.slice(from, to + 1);
+                return { data: slice, error: null };
+            }
+        };
+
+        const result = await fetchAllInChunks(mockQuery, 2500, (total) => {
+            progressValues.push(total);
+        });
+
+        expect(result.length).toBe(6500);
+        expect(result[0].id).toBe('row-1');
+        expect(result[6499].id).toBe('row-6500');
+        expect(rangesCalled).toEqual([
+            [0, 2499],
+            [2500, 4999],
+            [5000, 7499]
+        ]);
+        expect(progressValues).toEqual([2500, 5000, 6500]);
+    });
+
+    it('maneja consultas sin datos retornando arreglo vacío sin error', async () => {
+        const mockQuery = {
+            range: async () => ({ data: [], error: null })
+        };
+        const result = await fetchAllInChunks(mockQuery, 2500);
+        expect(result).toEqual([]);
+    });
+
+    it('propaga errores de Supabase si falla un lote', async () => {
+        const mockQuery = {
+            range: async () => ({ data: null, error: new Error('PostgREST error 57014') })
+        };
+        await expect(fetchAllInChunks(mockQuery, 2500)).rejects.toThrow('PostgREST error 57014');
     });
 });

@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { useRouter } from "next/navigation";
-import { Lock, Loader2, AlertCircle, CheckCircle } from "lucide-react";
+import { Lock, Loader2, AlertCircle, CheckCircle, ArrowLeft } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import Link from "next/link";
 
 const updatePasswordSchema = z.object({
     password: z.string().min(6, "Mínimo 6 caracteres"),
@@ -21,6 +22,15 @@ export default function UpdatePasswordPage() {
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState(false);
+
+    useEffect(() => {
+        // Listen to auth state changes (for PASSWORD_RECOVERY event)
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(() => {});
+
+        return () => {
+            subscription.unsubscribe();
+        };
+    }, []);
 
     const {
         register,
@@ -42,10 +52,10 @@ export default function UpdatePasswordPage() {
 
             setSuccess(true);
             setTimeout(() => {
-                router.push("/");
+                router.push("/login");
             }, 2000);
         } catch (err: any) {
-            setError(err.message || "Error al actualizar contraseña");
+            setError(err.message || "Error al actualizar contraseña. El enlace puede haber expirado.");
         } finally {
             setIsLoading(false);
         }
@@ -56,7 +66,7 @@ export default function UpdatePasswordPage() {
             <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
                 <div className="bg-slate-800 p-8 text-center text-white">
                     <h1 className="text-2xl font-bold mb-2">Restablecer Contraseña</h1>
-                    <p className="opacity-90 text-sm">Ingresa tu nueva contraseña</p>
+                    <p className="opacity-90 text-sm">Ingresa tu nueva contraseña para el CRM</p>
                 </div>
 
                 <div className="p-8">
@@ -122,6 +132,16 @@ export default function UpdatePasswordPage() {
                                     "Actualizar Contraseña"
                                 )}
                             </button>
+
+                            <div className="text-center pt-2">
+                                <Link
+                                    href="/login"
+                                    className="inline-flex items-center text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors"
+                                >
+                                    <ArrowLeft className="w-3.5 h-3.5 mr-1" />
+                                    Volver al inicio de sesión
+                                </Link>
+                            </div>
                         </form>
                     )}
                 </div>

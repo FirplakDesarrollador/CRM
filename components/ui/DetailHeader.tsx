@@ -40,24 +40,25 @@ export function DetailHeader({ title, subtitle, status, backHref, onBack, action
     return (
         <div className="bg-white border-b border-slate-200 sticky top-0 z-20">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div className="py-4 flex items-center justify-between">
-                    <div className="flex items-center gap-4">
+                <div className="py-3 sm:py-4 flex items-center justify-between gap-2 sm:gap-4">
+                    <div className="flex items-center gap-2 sm:gap-4 min-w-0 flex-1">
                         <button 
                             onClick={() => {
                                 if (onBack) onBack();
                                 else if (backHref) router.push(backHref);
                             }}
-                            className="p-2 hover:bg-slate-100 rounded-full text-slate-500 transition-colors"
+                            className="p-1.5 sm:p-2 hover:bg-slate-100 rounded-full text-slate-500 transition-colors shrink-0"
+                            aria-label="Volver"
                         >
                             <ChevronLeft className="w-5 h-5" />
                         </button>
-                        <div>
-                            <h1 className="text-xl font-bold text-slate-900">{title}</h1>
-                            <div className="flex items-center text-sm text-slate-500 gap-2">
-                                <span>{subtitle}</span>
-                                <span className="w-1 h-1 bg-slate-300 rounded-full" />
+                        <div className="min-w-0 flex-1">
+                            <h1 className="text-base sm:text-xl font-bold text-slate-900 truncate" title={title}>{title}</h1>
+                            <div className="flex items-center text-xs sm:text-sm text-slate-500 gap-1.5 sm:gap-2 truncate">
+                                <span className="truncate">{subtitle}</span>
+                                <span className="w-1 h-1 bg-slate-300 rounded-full shrink-0" />
                                 <span className={cn(
-                                    "font-medium px-2 py-0.5 rounded-full text-xs",
+                                    "font-medium px-2 py-0.5 rounded-full text-[10px] sm:text-xs shrink-0",
                                     status === 'Ganada' ? "bg-green-100 text-green-700" : "bg-blue-100 text-blue-700"
                                 )}>
                                     {status}

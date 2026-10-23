@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { v4 as uuidv4 } from 'uuid';
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { sendOpportunityDeletionEmail } from "@/lib/services/notifications";
+import { sanitizeQuoteItemUpdates } from "@/lib/quotePricing";
 
 // Helper to fetch pricing from server
 async function fetchPricing(productId: string, channelId: string, qty: number) {
@@ -692,10 +693,11 @@ export function useQuoteItems(quoteId?: string) {
         const current = await db.quoteItems.get(itemId);
         if (!current) return;
 
-        const updated = { ...current, ...updates };
+        const safeUpdates = sanitizeQuoteItemUpdates(current, updates);
+        const updated = { ...current, ...safeUpdates };
 
         // If quantity changed, re-calculate pricing ONLY for linked products
-        if (updates.cantidad !== undefined && updates.cantidad !== current.cantidad && current.producto_id) {
+        if (safeUpdates.cantidad !== undefined && safeUpdates.cantidad !== current.cantidad && current.producto_id) {
             let pricing = null;
             try {
                 const parentQuote = await db.quotes.get(current.cotizacion_id);

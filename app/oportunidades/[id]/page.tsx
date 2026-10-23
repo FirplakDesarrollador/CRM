@@ -2,9 +2,9 @@
 
 import { useOpportunities, useQuotes, useQuoteItems } from "@/lib/hooks/useOpportunities";
 import { DetailHeader } from "@/components/ui/DetailHeader";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { FileText, Plus, AlertCircle, Check, Trash2, Loader2, Truck, Package, Building, ChevronRight, TrendingUp, User, Users, Copy } from "lucide-react";
+import { FileText, Plus, AlertCircle, Check, Trash2, Loader2, Truck, Package, Building, ChevronRight, ChevronDown, TrendingUp, User, Users, Copy, Tag } from "lucide-react";
 import Link from "next/link";
 import { cn, formatNumberCO, formatOpportunityAmount } from "@/lib/utils";
 import { db, LocalCuenta } from "@/lib/db";
@@ -23,6 +23,8 @@ import { useActivities, LocalActivity } from "@/lib/hooks/useActivities";
 import { CreateActivityModal } from "@/components/activities/CreateActivityModal";
 import { supabase } from "@/lib/supabase";
 import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
+import { resolveActiveQuote } from "@/lib/opportunityQuoteSync";
+import { handleEntityLinkClick } from "@/lib/utils/navigation";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { LossReasonModal } from "@/components/oportunidades/LossReasonModal";
 import { CollaboratorsTab } from "@/components/oportunidades/CollaboratorsTab";
@@ -33,6 +35,8 @@ import { useOpportunityOrigins } from "@/lib/hooks/useOpportunityOrigins";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { OPPORTUNITY_CATEGORIES, parseOpportunityCategories, formatOpportunityCategories } from "@/lib/opportunityCategories";
 import { AccountModal } from "@/components/cuentas/AccountModal";
+import { EntityAuditHistoryTab } from "@/components/shared/EntityAuditHistoryTab";
+import { History } from "lucide-react";
 
 export default function OpportunityDetailPage() {
     const params = useParams();
@@ -117,13 +121,13 @@ export default function OpportunityDetailPage() {
 
     const searchParams = useSearchParams();
     const initialTab = searchParams.get('tab') as any;
-    const [activeTab, setActiveTab] = useState<'resumen' | 'colaboradores' | 'cotizaciones' | 'productos' | 'actividades' | 'asignado'>(initialTab || 'resumen');
+    const [activeTab, setActiveTab] = useState<'resumen' | 'colaboradores' | 'cotizaciones' | 'productos' | 'actividades' | 'asignado' | 'historial'>(initialTab || 'resumen');
     const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
 
     // Sincronizar pestaña con parámetro de URL si cambia
     useEffect(() => {
         const tab = searchParams.get('tab');
-        if (tab && ['resumen', 'colaboradores', 'cotizaciones', 'productos', 'actividades', 'asignado'].includes(tab)) {
+        if (tab && ['resumen', 'colaboradores', 'cotizaciones', 'productos', 'actividades', 'asignado', 'historial'].includes(tab)) {
             setActiveTab(tab as any);
         }
     }, [searchParams]);
@@ -226,7 +230,8 @@ export default function OpportunityDetailPage() {
                         { id: 'cotizaciones', label: 'Cotizaciones', icon: FileText },
                         { id: 'productos', label: 'Productos', icon: Package },
                         { id: 'actividades', label: 'Actividades', icon: ListTodo },
-                        ...(userRole === 'ADMIN' || userRole === 'COORDINADOR' ? [{ id: 'asignado', label: 'Asignado', icon: User }] : [])
+                        ...(userRole === 'ADMIN' || userRole === 'COORDINADOR' ? [{ id: 'asignado', label: 'Asignado', icon: User }] : []),
+                        { id: 'historial', label: 'Historial', icon: History }
                     ].map((tab, idx) => (
                         <button
                             key={tab.id}
@@ -268,6 +273,14 @@ export default function OpportunityDetailPage() {
                 {(userRole === 'ADMIN' || userRole === 'COORDINADOR') && activeTab === 'asignado' && (
                     <AssignedTab opportunityId={id} currentOwnerId={opportunity.owner_user_id || null} />
                 )}
+
+                {activeTab === 'historial' && (
+                    <EntityAuditHistoryTab 
+                        entityType="OPORTUNIDAD" 
+                        entityId={id} 
+                        entityName={opportunity.nombre} 
+                    />
+                )}
             </div>
 
             <ConfirmationModal
@@ -290,11 +303,11 @@ const LOSS_REASONS = [
     "N- Sin información de contacto",
     "N- Inadecuada Segmentación",
     "N- No va a comprar",
+    "RED- MAC",
     "RED- Firplak Home",
     "RED- Ser. Tecnico",
     "RED- Distribución",
     "RED- Obras",
-    "RED- MAC",
     "INT - Abandona Conversación",
     "INT - Precio Elevado",
     "INT - Sin cobertura",
@@ -305,7 +318,8 @@ const LOSS_REASONS = [
     "INT- Compro FIRPLAK",
     "INT- Pago contraentrega",
     "INT - Lo pospone",
-    "INT - Compra en Homcenter"
+    "INT - Compra en Homcenter",
+    "Duplicado"
 ];
 
 function SummaryTab({ opportunity }: { opportunity: any }) {
@@ -313,7 +327,12 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     const { origins: opportunityOrigins } = useOpportunityOrigins();
     const { quotes } = useQuotes(opportunity.id);
     const [localAmount, setLocalAmount] = useState(opportunity.amount || 0);
+
+    useEffect(() => {
+        setLocalAmount(opportunity?.amount || 0);
+    }, [opportunity?.amount]);
     const [localClosingDate, setLocalClosingDate] = useState(toInputDate(opportunity.fecha_cierre_estimada));
+    const [localDeliveryDate, setLocalDeliveryDate] = useState(toInputDate(opportunity.fecha_entrega));
     const [localOrigen, setLocalOrigen] = useState(opportunity.origen_oportunidad || "");
     const [localUrlOrigen, setLocalUrlOrigen] = useState(opportunity.url_origen || "");
     const [localFuente, setLocalFuente] = useState(opportunity.fuente_conversion || "");
@@ -323,6 +342,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     const [isSaving, setIsSaving] = useState(false);
     const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
     const [isSavingDate, setIsSavingDate] = useState(false);
+    const [isSavingDeliveryDate, setIsSavingDeliveryDate] = useState(false);
     const [isSavingOrigen, setIsSavingOrigen] = useState(false);
     const [isSavingUrl, setIsSavingUrl] = useState(false);
     const [isSavingFuente, setIsSavingFuente] = useState(false);
@@ -374,10 +394,27 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     const [localSegmentId, setLocalSegmentId] = useState<string>(opportunity.segmento_id ? String(opportunity.segmento_id) : "");
     const [isSavingSegment, setIsSavingSegment] = useState(false);
 
+    // Setter Logic
+    const [localSetter, setLocalSetter] = useState<string>((opportunity as any).setter || "");
+    const [isSavingSetter, setIsSavingSetter] = useState(false);
+    const [isSetterOpen, setIsSetterOpen] = useState(false);
+    const setterRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        function handleClickOutside(event: MouseEvent) {
+            if (setterRef.current && !setterRef.current.contains(event.target as Node)) {
+                setIsSetterOpen(false);
+            }
+        }
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
+
     // Sync local state when prop updates
     useEffect(() => {
         setLocalSegmentId(opportunity.segmento_id ? String(opportunity.segmento_id) : "");
         setLocalClosingDate(toInputDate(opportunity.fecha_cierre_estimada));
+        setLocalDeliveryDate(toInputDate(opportunity.fecha_entrega));
         setLocalOrigen(opportunity.origen_oportunidad || "");
         setLocalUrlOrigen(opportunity.url_origen || "");
         setLocalFuente(opportunity.fuente_conversion || "");
@@ -388,7 +425,8 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
         setLocalCategoriaOportunidad(opportunity.categoria_oportunidad || "");
         setLocalContactosIds(opportunity.contactos_ids || []);
         setLocalClientesAtendidos(opportunity.clientes_atendidos || 0);
-    }, [opportunity.segmento_id, opportunity.fecha_cierre_estimada, opportunity.origen_oportunidad, opportunity.url_origen, opportunity.fuente_conversion, opportunity.razon_perdida, opportunity.comentarios_perdida, opportunity.comentarios, opportunity.direccion_entrega, opportunity.categoria_oportunidad, opportunity.contactos_ids, opportunity.clientes_atendidos]);
+        setLocalSetter((opportunity as any).setter || "");
+    }, [opportunity.segmento_id, opportunity.fecha_cierre_estimada, opportunity.fecha_entrega, opportunity.origen_oportunidad, opportunity.url_origen, opportunity.fuente_conversion, opportunity.razon_perdida, opportunity.comentarios_perdida, opportunity.comentarios, opportunity.direccion_entrega, opportunity.categoria_oportunidad, opportunity.contactos_ids, opportunity.clientes_atendidos, (opportunity as any).setter]);
 
     useEffect(() => {
         const fetchSegments = async () => {
@@ -405,6 +443,16 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
             await updateOpportunity(opportunity.id, { segmento_id: newId ? Number(newId) : null });
         } finally {
             setIsSavingSegment(false);
+        }
+    };
+
+    const handleSetterChange = async (newVal: string) => {
+        setLocalSetter(newVal);
+        setIsSavingSetter(true);
+        try {
+            await updateOpportunity(opportunity.id, { setter: newVal ? newVal : null });
+        } finally {
+            setIsSavingSetter(false);
         }
     };
 
@@ -750,6 +798,35 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                             />
                         </div>
 
+                        {/* Categorías de Interés */}
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                                Categorías de Interés
+                            </label>
+                            <div className="relative group">
+                                <MultiSelect
+                                    options={OPPORTUNITY_CATEGORIES}
+                                    selected={parseOpportunityCategories(localCategoriaOportunidad)}
+                                    onChange={async (selected) => {
+                                        const formatted = formatOpportunityCategories(selected);
+                                        setLocalCategoriaOportunidad(formatted);
+                                        if (formatted !== (opportunity.categoria_oportunidad || "")) {
+                                            setIsSavingCategoria(true);
+                                            await updateOpportunity(opportunity.id, { categoria_oportunidad: formatted });
+                                            setIsSavingCategoria(false);
+                                        }
+                                    }}
+                                    placeholder="Seleccionar categorías..."
+                                    className="bg-slate-50 border-slate-200 text-sm"
+                                />
+                                {isSavingCategoria && (
+                                    <div className="absolute right-8 top-1/2 -translate-y-1/2">
+                                        <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
                         <div>
                             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
                                 Valor de la Oportunidad (Importe)
@@ -805,7 +882,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                             )}
                         </div>
 
-                        <div className="pt-4 border-t border-slate-100 grid grid-cols-2 gap-4">
+                        <div className="pt-4 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-3 gap-4">
                             <div>
                                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Fecha Cierre Estimada</label>
                                 <div className="relative group">
@@ -823,6 +900,29 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                         className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-bold text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none"
                                     />
                                     {isSavingDate && (
+                                        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                                            <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Fecha de Entrega</label>
+                                <div className="relative group">
+                                    <input
+                                        type="date"
+                                        value={localDeliveryDate}
+                                        onChange={(e) => setLocalDeliveryDate(e.target.value)}
+                                        onBlur={async () => {
+                                            if (localDeliveryDate !== opportunity.fecha_entrega) {
+                                                setIsSavingDeliveryDate(true);
+                                                await updateOpportunity(opportunity.id, { fecha_entrega: localDeliveryDate ? localDeliveryDate : null });
+                                                setIsSavingDeliveryDate(false);
+                                            }
+                                        }}
+                                        className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-bold text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none"
+                                    />
+                                    {isSavingDeliveryDate && (
                                         <div className="absolute right-3 top-1/2 -translate-y-1/2">
                                             <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
                                         </div>
@@ -998,34 +1098,6 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                     )}
                                 </div>
                             </div>
-
-                            <div>
-                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                                    Categorías de Interés (Categoría Oportunidad)
-                                </label>
-                                <div className="relative group">
-                                    <MultiSelect
-                                        options={OPPORTUNITY_CATEGORIES}
-                                        selected={parseOpportunityCategories(localCategoriaOportunidad)}
-                                        onChange={async (selected) => {
-                                            const formatted = formatOpportunityCategories(selected);
-                                            setLocalCategoriaOportunidad(formatted);
-                                            if (formatted !== (opportunity.categoria_oportunidad || "")) {
-                                                setIsSavingCategoria(true);
-                                                await updateOpportunity(opportunity.id, { categoria_oportunidad: formatted });
-                                                setIsSavingCategoria(false);
-                                            }
-                                        }}
-                                        placeholder="Seleccionar categorías..."
-                                        className="bg-slate-50 border-slate-200 text-sm"
-                                    />
-                                    {isSavingCategoria && (
-                                        <div className="absolute right-8 top-1/2 -translate-y-1/2">
-                                            <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
                         </div>
 
                         {/* Comentarios Section */}
@@ -1096,6 +1168,9 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                         )}
                                     >
                                         <option value="">Seleccione una razón...</option>
+                                        {localRazonPerdida && !LOSS_REASONS.includes(localRazonPerdida) && (
+                                            <option value={localRazonPerdida}>{localRazonPerdida}</option>
+                                        )}
                                         {LOSS_REASONS.map(r => (
                                             <option key={r} value={r}>{r}</option>
                                         ))}
@@ -1160,123 +1235,237 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                     </div>
                 </div>
 
-                {/* Account Card */}
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-blue-300 transition-all flex flex-col justify-between h-fit">
-                    <div>
-                        <div className="flex items-center gap-3 mb-4">
-                            <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
-                                <Building className="w-6 h-6" />
+                {/* Right Column: Account Card + Setter Card */}
+                <div className="space-y-6 flex flex-col">
+                    {/* Account Card */}
+                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-blue-300 transition-all flex flex-col justify-between h-fit">
+                        <div>
+                            <div className="flex items-center gap-3 mb-4">
+                                <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
+                                    <Building className="w-6 h-6" />
+                                </div>
+                                <div>
+                                    <h3 className="font-bold text-slate-900 text-lg">Información del Cliente</h3>
+                                    <p className="text-xs text-slate-500">Datos principales de la cuenta</p>
+                                </div>
                             </div>
-                            <div>
-                                <h3 className="font-bold text-slate-900 text-lg">Información del Cliente</h3>
-                                <p className="text-xs text-slate-500">Datos principales de la cuenta</p>
+
+                            <div className="space-y-3">
+                                <div>
+                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Nombre / Razón Social</label>
+                                    <p className="text-slate-900 font-medium">{effectiveAccount.nombre}</p>
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">NIT</label>
+                                        <p className="text-slate-700">{(effectiveAccount as any).nit_base || effectiveAccount.nit || 'No registrado'}</p>
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Teléfono</label>
+                                        <p className="text-slate-700">{effectiveAccount.telefono || 'No registrado'}</p>
+                                    </div>
+                                </div>
+                                {effectiveAccount.direccion && (
+                                    <div>
+                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Dirección</label>
+                                        <p className="text-slate-700">{effectiveAccount.direccion} {effectiveAccount.ciudad && `• ${effectiveAccount.ciudad}`}</p>
+                                    </div>
+                                )}
+
+                                {/* Contactos Vinculados */}
+                                <div className="pt-3 border-t border-slate-100">
+                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                                        Contactos Vinculados ({localContactosIds.length})
+                                    </label>
+                                    {contactOptions.length > 0 ? (
+                                        <div className="relative">
+                                            <MultiSelect
+                                                options={contactOptions}
+                                                selected={localContactosIds}
+                                                onChange={async (vals) => {
+                                                    setLocalContactosIds(vals);
+                                                    setIsSavingContactos(true);
+                                                    try {
+                                                        const autoCount = vals.length;
+                                                        setLocalClientesAtendidos(autoCount);
+                                                        await updateOpportunity(opportunity.id, {
+                                                            contactos_ids: vals,
+                                                            clientes_atendidos: autoCount
+                                                        });
+                                                    } finally {
+                                                        setIsSavingContactos(false);
+                                                    }
+                                                }}
+                                                placeholder="Seleccionar contactos..."
+                                                className="bg-slate-50 border-slate-200 text-sm"
+                                            />
+                                            {isSavingContactos && (
+                                                <div className="absolute right-8 top-1/2 -translate-y-1/2">
+                                                    <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                                </div>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <p className="text-xs text-slate-500 italic">No hay contactos registrados para esta cuenta.</p>
+                                    )}
+                                </div>
+
+                                {/* Clientes Atendidos */}
+                                <div className="pt-3 border-t border-slate-100">
+                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                                        Clientes Atendidos
+                                    </label>
+                                    <div className="relative group flex items-center gap-2">
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            value={localClientesAtendidos}
+                                            onChange={(e) => setLocalClientesAtendidos(Number(e.target.value))}
+                                            onBlur={async () => {
+                                                if (Number(localClientesAtendidos) !== Number(opportunity.clientes_atendidos)) {
+                                                    setIsSavingClientesAtendidos(true);
+                                                    try {
+                                                        await updateOpportunity(opportunity.id, {
+                                                            clientes_atendidos: Number(localClientesAtendidos)
+                                                        });
+                                                    } finally {
+                                                        setIsSavingClientesAtendidos(false);
+                                                    }
+                                                }
+                                            }}
+                                            className="w-28 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-bold text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none"
+                                            placeholder="0"
+                                        />
+                                        <span className="text-xs text-slate-500">
+                                            personas atendidas
+                                        </span>
+                                        {isSavingClientesAtendidos && (
+                                            <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                        )}
+                                    </div>
+                                </div>
                             </div>
                         </div>
 
-                        <div className="space-y-3">
-                            <div>
-                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Nombre / Razón Social</label>
-                                <p className="text-slate-900 font-medium">{effectiveAccount.nombre}</p>
-                            </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">NIT</label>
-                                    <p className="text-slate-700">{(effectiveAccount as any).nit_base || effectiveAccount.nit || 'No registrado'}</p>
+                        <button
+                            type="button"
+                            onClick={() => setIsAccountModalOpen(true)}
+                            className="mt-6 w-full py-2.5 bg-slate-50 hover:bg-blue-50 text-blue-600 hover:text-blue-700 text-sm font-bold rounded-xl border border-slate-200 hover:border-blue-200 text-center transition-all flex items-center justify-center gap-2 shadow-sm active:scale-[0.99]"
+                        >
+                            Ver detalles en Cuentas <ChevronRight className="w-4 h-4" />
+                        </button>
+                    </div>
+
+                    {/* Setter Card */}
+                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-blue-300 transition-all space-y-4">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 bg-purple-50 text-purple-600 rounded-lg">
+                                    <Tag className="w-6 h-6" />
                                 </div>
                                 <div>
-                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Teléfono</label>
-                                    <p className="text-slate-700">{effectiveAccount.telefono || 'No registrado'}</p>
+                                    <h3 className="font-bold text-slate-900 text-lg">Setter</h3>
+                                    <p className="text-xs text-slate-500">Clasificación de prospección comercial</p>
                                 </div>
                             </div>
-                            {effectiveAccount.direccion && (
-                                <div>
-                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Dirección</label>
-                                    <p className="text-slate-700">{effectiveAccount.direccion} {effectiveAccount.ciudad && `• ${effectiveAccount.ciudad}`}</p>
+                            {localSetter && (
+                                <span className={cn(
+                                    "px-2.5 py-1 text-xs font-black rounded-lg border uppercase tracking-wider",
+                                    localSetter === 'CO' ? "bg-blue-50 text-blue-700 border-blue-200" :
+                                    localSetter === 'REC' ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+                                    "bg-slate-50 text-slate-600 border-slate-200"
+                                )}>
+                                    {localSetter}
+                                </span>
+                            )}
+                        </div>
+
+                        <div className="relative" ref={setterRef}>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+                                Asignación Setter
+                            </label>
+                            <button
+                                type="button"
+                                onClick={() => setIsSetterOpen(!isSetterOpen)}
+                                className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 hover:bg-slate-100/80 border border-slate-200 rounded-xl text-sm font-bold text-slate-800 transition-all shadow-xs active:scale-[0.99]"
+                            >
+                                <div className="flex items-center gap-2.5">
+                                    <span className="text-slate-500 font-semibold text-xs uppercase tracking-wider">Setter:</span>
+                                    <span className={cn(
+                                        "px-2.5 py-0.5 rounded-lg text-xs font-black uppercase tracking-wider",
+                                        localSetter === 'CO' ? "bg-blue-100 text-blue-700 border border-blue-200" :
+                                        localSetter === 'REC' ? "bg-emerald-100 text-emerald-800 border border-emerald-200" :
+                                        "bg-slate-200/70 text-slate-600"
+                                    )}>
+                                        {localSetter || 'Ninguna'}
+                                    </span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    {isSavingSetter && <Loader2 className="w-4 h-4 text-blue-600 animate-spin" />}
+                                    <ChevronDown className={cn("w-4 h-4 text-slate-400 transition-transform", isSetterOpen && "rotate-180")} />
+                                </div>
+                            </button>
+
+                            {isSetterOpen && (
+                                <div className="absolute left-0 right-0 mt-1.5 z-20 bg-white border border-slate-200 rounded-xl shadow-lg p-1.5 space-y-1 animate-in fade-in zoom-in-95 duration-100">
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            handleSetterChange("");
+                                            setIsSetterOpen(false);
+                                        }}
+                                        className={cn(
+                                            "w-full flex items-center justify-between px-3 py-2 text-xs font-semibold rounded-lg transition-colors text-left",
+                                            !localSetter ? "bg-slate-100 text-slate-900 font-bold" : "text-slate-600 hover:bg-slate-50"
+                                        )}
+                                    >
+                                        <span>Ninguna</span>
+                                        {!localSetter && <Check className="w-3.5 h-3.5 text-slate-600" />}
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            handleSetterChange("CO");
+                                            setIsSetterOpen(false);
+                                        }}
+                                        className={cn(
+                                            "w-full flex items-center justify-between px-3 py-2 text-xs font-semibold rounded-lg transition-colors text-left",
+                                            localSetter === 'CO' ? "bg-blue-50 text-blue-700 font-bold" : "text-slate-700 hover:bg-slate-50"
+                                        )}
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                                            <span>CO</span>
+                                        </div>
+                                        {localSetter === 'CO' && <Check className="w-3.5 h-3.5 text-blue-600" />}
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            handleSetterChange("REC");
+                                            setIsSetterOpen(false);
+                                        }}
+                                        className={cn(
+                                            "w-full flex items-center justify-between px-3 py-2 text-xs font-semibold rounded-lg transition-colors text-left",
+                                            localSetter === 'REC' ? "bg-emerald-50 text-emerald-800 font-bold" : "text-slate-700 hover:bg-slate-50"
+                                        )}
+                                    >
+                                        <div className="flex items-center gap-2">
+                                            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                                            <span>REC</span>
+                                        </div>
+                                        {localSetter === 'REC' && <Check className="w-3.5 h-3.5 text-emerald-600" />}
+                                    </button>
                                 </div>
                             )}
 
-                            {/* Contactos Vinculados */}
-                            <div className="pt-3 border-t border-slate-100">
-                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                                    Contactos Vinculados ({localContactosIds.length})
-                                </label>
-                                {contactOptions.length > 0 ? (
-                                    <div className="relative">
-                                        <MultiSelect
-                                            options={contactOptions}
-                                            selected={localContactosIds}
-                                            onChange={async (vals) => {
-                                                setLocalContactosIds(vals);
-                                                setIsSavingContactos(true);
-                                                try {
-                                                    const autoCount = vals.length;
-                                                    setLocalClientesAtendidos(autoCount);
-                                                    await updateOpportunity(opportunity.id, {
-                                                        contactos_ids: vals,
-                                                        clientes_atendidos: autoCount
-                                                    });
-                                                } finally {
-                                                    setIsSavingContactos(false);
-                                                }
-                                            }}
-                                            placeholder="Seleccionar contactos..."
-                                            className="bg-slate-50 border-slate-200 text-sm"
-                                        />
-                                        {isSavingContactos && (
-                                            <div className="absolute right-8 top-1/2 -translate-y-1/2">
-                                                <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
-                                            </div>
-                                        )}
-                                    </div>
-                                ) : (
-                                    <p className="text-xs text-slate-500 italic">No hay contactos registrados para esta cuenta.</p>
-                                )}
-                            </div>
-
-                            {/* Clientes Atendidos */}
-                            <div className="pt-3 border-t border-slate-100">
-                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                                    Clientes Atendidos
-                                </label>
-                                <div className="relative group flex items-center gap-2">
-                                    <input
-                                        type="number"
-                                        min="0"
-                                        value={localClientesAtendidos}
-                                        onChange={(e) => setLocalClientesAtendidos(Number(e.target.value))}
-                                        onBlur={async () => {
-                                            if (Number(localClientesAtendidos) !== Number(opportunity.clientes_atendidos)) {
-                                                setIsSavingClientesAtendidos(true);
-                                                try {
-                                                    await updateOpportunity(opportunity.id, {
-                                                        clientes_atendidos: Number(localClientesAtendidos)
-                                                    });
-                                                } finally {
-                                                    setIsSavingClientesAtendidos(false);
-                                                }
-                                            }
-                                        }}
-                                        className="w-28 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-bold text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none"
-                                        placeholder="0"
-                                    />
-                                    <span className="text-xs text-slate-500">
-                                        personas atendidas
-                                    </span>
-                                    {isSavingClientesAtendidos && (
-                                        <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
-                                    )}
-                                </div>
-                            </div>
+                            <p className="text-[10px] text-slate-400 mt-2">
+                                Campo opcional. Se incluye automáticamente en el informe de oportunidades de Excel/CSV cuando está diligenciado.
+                            </p>
                         </div>
                     </div>
-
-                    <button
-                        type="button"
-                        onClick={() => setIsAccountModalOpen(true)}
-                        className="mt-6 w-full py-2.5 bg-slate-50 hover:bg-blue-50 text-blue-600 hover:text-blue-700 text-sm font-bold rounded-xl border border-slate-200 hover:border-blue-200 text-center transition-all flex items-center justify-center gap-2 shadow-sm active:scale-[0.99]"
-                    >
-                        Ver detalles en Cuentas <ChevronRight className="w-4 h-4" />
-                    </button>
                 </div>
 
                 {/* Seller Card (New) */}
@@ -1327,26 +1516,23 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
 }
 
 function ProductsTab({ opportunityId }: { opportunityId: string }) {
-    const { opportunities } = useOpportunities();
+    const { opportunities, updateOpportunity } = useOpportunities();
     const opportunity = opportunities?.find(o => o.id === opportunityId);
-    const { quotes } = useQuotes(opportunityId);
+    const { quotes, updateQuote } = useQuotes(opportunityId);
 
-    // 1. Determine "Active" quote (Winner or Latest)
-    const sortedQuotes = [...(quotes || [])].sort((a, b) =>
-        new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime()
-    );
-    const defaultQuote = sortedQuotes.find(q => q.status === 'WINNER') || sortedQuotes[0];
-
-    // 2. State for User Selection
+    // 1. State for User Selection
     const [selectedQuoteId, setSelectedQuoteId] = useState<string | null>(null);
 
-    // Sync state with default if not yet selected
-    const effectiveQuote = selectedQuoteId
-        ? quotes?.find(q => q.id === selectedQuoteId)
-        : defaultQuote;
+    // 2. Determine "Active" quote (Winner, Selected, Amount match, or Latest)
+    const sortedQuotes = useMemo(() => {
+        return [...(quotes || [])].sort((a, b) =>
+            new Date(b.updated_at || 0).getTime() - new Date(a.updated_at || 0).getTime()
+        );
+    }, [quotes]);
+
+    const effectiveQuote = resolveActiveQuote(quotes, opportunity?.amount, selectedQuoteId);
 
     const { items: quoteItems } = useQuoteItems(effectiveQuote?.id);
-    const { updateOpportunity } = useOpportunities();
 
     const itemsToShow = (quoteItems && quoteItems.length > 0)
         ? quoteItems
@@ -1354,10 +1540,10 @@ function ProductsTab({ opportunityId }: { opportunityId: string }) {
 
     // Effect: Synchronize opportunity amount with effective quote whenever quote changes
     useEffect(() => {
-        if (effectiveQuote && opportunity && effectiveQuote.total_amount !== opportunity.amount) {
+        if (effectiveQuote && opportunity && Math.abs((effectiveQuote.total_amount || 0) - (opportunity.amount || 0)) > 0.01) {
             updateOpportunity(opportunityId, { amount: effectiveQuote.total_amount });
         }
-    }, [effectiveQuote?.id, effectiveQuote?.total_amount, opportunity?.id, opportunity?.amount]);
+    }, [effectiveQuote?.id, effectiveQuote?.total_amount, opportunity?.id, opportunity?.amount, opportunityId, updateOpportunity]);
 
     if (!effectiveQuote && itemsToShow.length === 0) {
         return (
@@ -1385,12 +1571,13 @@ function ProductsTab({ opportunityId }: { opportunityId: string }) {
                                 <select
                                     className="text-xs font-bold text-blue-600 bg-blue-50 border-none rounded-md py-1 pl-2 pr-8 cursor-pointer focus:ring-2 focus:ring-blue-500"
                                     value={effectiveQuote?.id || ''}
-                                    onChange={(e) => {
+                                    onChange={async (e) => {
                                         const qId = e.target.value;
                                         setSelectedQuoteId(qId);
                                         const selected = quotes?.find(q => q.id === qId);
                                         if (selected && opportunity) {
-                                            updateOpportunity(opportunityId, { amount: selected.total_amount });
+                                            await updateOpportunity(opportunityId, { amount: selected.total_amount });
+                                            await updateQuote(selected.id, { updated_at: new Date().toISOString() });
                                         }
                                     }}
                                 >
@@ -1692,10 +1879,15 @@ function ActivitiesTab({ opportunityId, accountId }: { opportunityId: string, ac
                         const subName = subclassifications.find(s => String(s.id) === String(act.subclasificacion_id))?.nombre;
 
                         return (
-                            <div
+                            <a
                                 key={act.id}
+                                href={`/actividades?id=${act.id}`}
+                                onClick={(e) => handleEntityLinkClick(e, `/actividades?id=${act.id}`, () => {
+                                    setSelectedActivity(act);
+                                    setIsModalOpen(true);
+                                })}
                                 className={cn(
-                                    "group p-4 bg-white rounded-2xl border transition-all hover:shadow-md cursor-pointer",
+                                    "group p-4 bg-white rounded-2xl border transition-all hover:shadow-md cursor-pointer block no-underline text-inherit",
                                     act.is_completed
                                         ? "border-slate-100 opacity-75"
                                         : isOverdue
@@ -1704,10 +1896,6 @@ function ActivitiesTab({ opportunityId, accountId }: { opportunityId: string, ac
                                                 ? "border-emerald-200 hover:border-emerald-300 hover:shadow-emerald-100"
                                                 : "border-blue-200 hover:border-blue-300 hover:shadow-blue-100"
                                 )}
-                                onClick={() => {
-                                    setSelectedActivity(act);
-                                    setIsModalOpen(true);
-                                }}
                             >
                                 <div className="flex items-start gap-4">
                                     <button
@@ -1777,7 +1965,7 @@ function ActivitiesTab({ opportunityId, accountId }: { opportunityId: string, ac
                                         )}
                                     </div>
                                 </div>
-                            </div>
+                            </a>
                         );
                     })}
                 </div>

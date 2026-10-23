@@ -369,6 +369,10 @@ export interface FilterActivitiesParams {
     filterChannel?: string;
     filterDateFrom?: string;
     filterDateTo?: string;
+    selectedDate?: Date | string;
+    agendaDateMode?: "up_to" | "exact";
+    view?: "agenda" | "month" | "all";
+    omitCompleted?: boolean;
 }
 
 export interface FilterActivitiesOptions {
@@ -407,7 +411,11 @@ export function filterActivities<T extends {
         filterStatus = "all",
         filterChannel = "",
         filterDateFrom = "",
-        filterDateTo = ""
+        filterDateTo = "",
+        selectedDate,
+        agendaDateMode = "up_to",
+        view,
+        omitCompleted = false
     } = filters;
 
     const {
@@ -455,6 +463,11 @@ export function filterActivities<T extends {
         // User
         if (filterUser && act.user_id !== filterUser) return false;
 
+        // Omitir terminadas
+        if (omitCompleted && filterStatus !== "completed" && act.is_completed) {
+            return false;
+        }
+
         // Status (completed, pending, overdue)
         if (filterStatus === "completed" && !act.is_completed) return false;
         if (filterStatus === "pending" && act.is_completed) return false;
@@ -480,6 +493,23 @@ export function filterActivities<T extends {
         }
         if (filterDateTo) {
             if (new Date(act.fecha_inicio) > new Date(`${filterDateTo}T23:59:59`)) return false;
+        }
+
+        // Agenda View Date Filter: 'up_to' (hasta la fecha seleccionada) o 'exact' (solo este día)
+        if (view === "agenda" && selectedDate) {
+            const dateObj = typeof selectedDate === "string" ? new Date(selectedDate) : selectedDate;
+            const endOfDay = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate(), 23, 59, 59, 999);
+            const actDate = new Date(act.fecha_inicio);
+
+            if (agendaDateMode === "exact") {
+                const sameDay = actDate.getDate() === dateObj.getDate() &&
+                                actDate.getMonth() === dateObj.getMonth() &&
+                                actDate.getFullYear() === dateObj.getFullYear();
+                if (!sameDay) return false;
+            } else {
+                // Default 'up_to': all activities scheduled up to the selected date
+                if (actDate > endOfDay) return false;
+            }
         }
 
         return true;

@@ -10,6 +10,7 @@ export interface DashboardFilterState {
     advisor_id: string | null;
     subclasificacion_id: number | null;
     nivel_premium: 'PREMIUM' | 'DESTACADO' | 'ACTIVO' | null;
+    origen_oportunidad: string | null;
     search_query: string | null;
     date_from: string | null;
     date_to: string | null;
@@ -36,13 +37,14 @@ export function DashboardFilters({ filters, onFilterChange }: DashboardFiltersPr
             advisor_id: null,
             subclasificacion_id: null,
             nivel_premium: null,
+            origen_oportunidad: null,
             search_query: null,
             date_from: null,
             date_to: null
         });
     };
 
-    const hasFilters = filters.canal_id || filters.advisor_id || filters.subclasificacion_id || filters.nivel_premium || filters.search_query || filters.date_from || filters.date_to;
+    const hasFilters = filters.canal_id || filters.advisor_id || filters.subclasificacion_id || filters.nivel_premium || filters.origen_oportunidad || filters.search_query || filters.date_from || filters.date_to;
 
     return (
         <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 mb-6 flex flex-wrap items-center gap-6 transition-all duration-300">
@@ -111,6 +113,16 @@ export function DashboardFilters({ filters, onFilterChange }: DashboardFiltersPr
                         value={filters.nivel_premium}
                         onChange={(value) => handleChange("nivel_premium", value as 'ORO' | 'PLATA' | 'BRONCE' | null)}
                         placeholder="Nivel Premium ✨"
+                    />
+                </div>
+
+                {/* Origen de Oportunidad */}
+                <div className="relative group w-[200px] shrink-0" data-testid="dashboard-filter-origin">
+                    <FilterCombobox
+                        options={options.origins.map(o => ({ value: o.codigo, label: o.nombre }))}
+                        value={filters.origen_oportunidad}
+                        onChange={(value) => handleChange("origen_oportunidad", value as string | null)}
+                        placeholder="Origen de Oportunidad"
                     />
                 </div>
 
