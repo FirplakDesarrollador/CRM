@@ -650,13 +650,14 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
 
                 countQuery = applyCommonFilters(countQuery);
 
-                countPromise = countQuery.then(({ count: queryCount, error: countErr }) => {
+                countPromise = (async () => {
+                    const { count: queryCount, error: countErr } = await countQuery;
                     if (countErr) {
                         console.warn("Error en conteo de totales de oportunidades:", countErr);
                         return null;
                     }
                     return queryCount ?? null;
-                });
+                })();
             } else {
                 countPromise = Promise.resolve(null);
             }

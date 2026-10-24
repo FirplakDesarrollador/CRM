@@ -200,7 +200,7 @@ export function useCloudDraft<T extends FieldValues, E = Record<string, unknown>
     useEffect(() => {
         if (!enabled) return;
 
-        const subscription = form.watch((values) => {
+        const subscription = form.watch(() => {
             // Solo guardar si ya pasó la etapa de verificación de borrador existente
             if (!isHydratedRef.current || showPrompt) return;
 
