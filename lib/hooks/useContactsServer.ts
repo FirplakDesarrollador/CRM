@@ -3,7 +3,7 @@ import { supabase } from '@/lib/supabase';
 import { db } from '@/lib/db';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useSyncStore } from '@/lib/stores/useSyncStore';
-import { matchesSearchTokens, getSearchTokens } from '@/lib/utils';
+import { matchesSearchTokens, getSearchTokens, getPhoneIlikePatterns } from '@/lib/utils';
 import { shouldRestrictContactsByAccountOwner, filterContactsForUser } from '@/lib/contactVisibility';
 
 export type ContactServer = {
@@ -223,7 +223,8 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
             if (searchTerm && searchTerm.trim()) {
                 const tokens = getSearchTokens(searchTerm);
                 for (const token of tokens) {
-                    query = query.or(`nombre.ilike.%${token}%,email.ilike.%${token}%,telefono.ilike.%${token}%,cargo.ilike.%${token}%`);
+                    const phoneParts = getPhoneIlikePatterns(token).map(pattern => `,telefono.ilike.${pattern}`).join('');
+                    query = query.or(`nombre.ilike.%${token}%,email.ilike.%${token}%,telefono.ilike.%${token}%,cargo.ilike.%${token}%${phoneParts}`);
                 }
             }
 
