@@ -21,8 +21,7 @@ type CompletedActivity = {
 
 interface UseActivityFollowUpOptions {
     /** Persists the new activity (`useActivities().createActivity`). */
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    createActivity: (data: any) => Promise<unknown> | unknown;
+    createActivity: (data: Parameters<React.ComponentProps<typeof CreateActivityModal>['onSubmit']>[0]) => Promise<unknown> | unknown;
     /**
      * When provided, the completion dialog also shows a "Ver actividad" button
      * (used inside an opportunity, to open the activity that was just completed).
@@ -146,8 +145,7 @@ export function useActivityFollowUp({ createActivity, onViewActivity }: UseActiv
         followUpElement = (
             <CreateActivityModal
                 onClose={close}
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                onSubmit={async (data: any) => {
+                onSubmit={async (data) => {
                     await createActivity(data);
                     close();
                 }}

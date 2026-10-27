@@ -209,14 +209,55 @@ export function McpIntegrationCard({ user, role }: McpIntegrationCardProps) {
         </div>
       </div>
 
-      {/* Button to open Modal */}
-      <button
-        onClick={() => setModalOpen(true)}
-        className="w-full flex items-center justify-center gap-2 px-3.5 py-2.5 bg-linear-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-purple-500/20 active:scale-[0.98]"
-      >
-        <Sparkles className="w-3.5 h-3.5" />
-        Ver Credenciales y Conexión IA
-      </button>
+      {/* Action Buttons */}
+      <div className="space-y-2">
+        {/* Button to open Modal */}
+        <button
+          onClick={() => setModalOpen(true)}
+          className="w-full flex items-center justify-center gap-2 px-3.5 py-2.5 bg-linear-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-purple-500/20 active:scale-[0.98] cursor-pointer"
+        >
+          <Sparkles className="w-3.5 h-3.5" />
+          Ver Credenciales y Conexión IA
+        </button>
+
+        {/* Direct Token Generation Button on Main Card */}
+        <button
+          type="button"
+          onClick={handleGenerateToken}
+          disabled={tokenLoading}
+          className={cn(
+            "w-full flex items-center justify-center gap-2 px-3.5 py-2.5 bg-white hover:bg-purple-50 text-purple-700 border border-purple-200 hover:border-purple-300 rounded-xl text-xs font-bold transition-all shadow-2xs active:scale-[0.98] disabled:opacity-60 cursor-pointer",
+            copied === "token" && "bg-emerald-50 text-emerald-700 border-emerald-300"
+          )}
+        >
+          {tokenLoading ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-600" />
+          ) : copied === "token" ? (
+            <Check className="w-3.5 h-3.5 text-emerald-600" />
+          ) : (
+            <Key className="w-3.5 h-3.5 text-purple-600" />
+          )}
+          <span>
+            {copied === "token"
+              ? "¡Token Copiado al Portapapeles!"
+              : token
+              ? "Copiar Token Nuevamente"
+              : "Generar y Copiar Token de Autenticación"}
+          </span>
+        </button>
+
+        {tokenError && (
+          <p className="text-[11px] text-rose-600 bg-rose-50 p-2 rounded-lg border border-rose-200 text-center font-medium">
+            {tokenError}
+          </p>
+        )}
+
+        {tokenExpiresAt && !tokenError && (
+          <p className="text-[10px] text-slate-500 text-center font-medium">
+            Token activo • Válido hasta: {tokenExpiresAt}
+          </p>
+        )}
+      </div>
 
       {/* Modal con instrucciones y configuraciones */}
       {modalOpen && (
@@ -248,7 +289,7 @@ export function McpIntegrationCard({ user, role }: McpIntegrationCardProps) {
                   { id: "claude", label: "Claude Desktop" },
                   { id: "antigravity", label: "Antigravity IDE" },
                   { id: "cursor", label: "Cursor / Windsurf" },
-                  { id: "chatgpt", label: "ChatGPT / HTTP" },
+                  { id: "chatgpt", label: "Token / ChatGPT" },
                   { id: "tools", label: "Herramientas" },
                 ] as const
               ).map((tab) => (

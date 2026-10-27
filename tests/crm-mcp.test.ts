@@ -318,4 +318,32 @@ describe('Servidor MCP CRM FIRPLAK', () => {
       expect(getMcpPublicUrl('https://crm.firplak.com')).toBe('https://crm.firplak.com/api/mcp');
     });
   });
+
+  describe('14. Garantía de Acceso ADMIN para usuarios administradores (ismael.correa@firplak.com)', () => {
+    it('debe otorgar catálogo completo y herramientas administrativas a ismael.correa@firplak.com como ADMIN', async () => {
+      const ismaelContext: McpSessionContext = {
+        userId: 'b703cd3e-11f6-402e-81da-1db49f052b33',
+        email: 'ismael.correa@firplak.com',
+        role: 'ADMIN',
+        transport: 'sse',
+      };
+
+      const server = createCrmMcpServer(ismaelContext);
+      const tools = await server.listTools();
+      const names = tools.map((t) => t.name);
+
+      expect(names).toContain('crm_gestionar_configuracion');
+      expect(names).toContain('crm_reasignar_oportunidad');
+      expect(names).toContain('crm_reasignar_cuenta_cascada');
+      expect(names).toContain('crm_gestionar_clasificacion');
+      expect(names).toContain('crm_gestionar_origen');
+
+      // Puede ejecutar herramientas de configuración de sistema
+      const res = await server.callTool('crm_gestionar_configuracion', {
+        key: 'ai_assistant_enabled',
+        value: true,
+      });
+      expect(res.isError).toBe(false);
+    });
+  });
 });

@@ -21,14 +21,24 @@ async function resolveSessionFromRequest(req: NextRequest): Promise<McpSessionCo
       const { data: { user }, error } = await client.auth.getUser(token);
 
       if (user && !error) {
-        // Consultar rol en CRM_Usuarios
+        // Consultar rol en CRM_Usuarios (la columna en BD es role)
         const { data: crmUser } = await client
           .from('CRM_Usuarios')
-          .select('id, email, rol')
+          .select('id, email, role')
           .eq('id', user.id)
           .single();
 
-        const role: McpUserRole = (crmUser?.rol || user.app_metadata?.role || 'VENDEDOR').toUpperCase();
+        let resolvedRole = crmUser?.role;
+        if (!resolvedRole && user.email) {
+          const { data: crmUserByEmail } = await client
+            .from('CRM_Usuarios')
+            .select('id, email, role')
+            .ilike('email', user.email)
+            .single();
+          resolvedRole = crmUserByEmail?.role;
+        }
+
+        const role: McpUserRole = (resolvedRole || user.app_metadata?.role || 'VENDEDOR').toUpperCase() as McpUserRole;
 
         return {
           userId: user.id,
@@ -42,10 +52,29 @@ async function resolveSessionFromRequest(req: NextRequest): Promise<McpSessionCo
     }
   }
 
-  // Fallback para pruebas o llamadas con clave de servicio
+  // Fallback para pruebas o llamadas con clave de servicio / headers
   const defaultEmail = req.headers.get('x-user-email') || process.env.CRM_USER_EMAIL || 'vendedor@firplak.com';
-  const defaultRole = (req.headers.get('x-user-role') || process.env.CRM_USER_ROLE || 'VENDEDOR').toUpperCase() as McpUserRole;
-  const defaultId = req.headers.get('x-user-id') || '11111111-1111-1111-1111-111111111111';
+  let defaultRole = (req.headers.get('x-user-role') || process.env.CRM_USER_ROLE || 'VENDEDOR').toUpperCase() as McpUserRole;
+  let defaultId = req.headers.get('x-user-id') || '11111111-1111-1111-1111-111111111111';
+
+  if (supabaseUrl && (serviceKey || anonKey)) {
+    try {
+      const client = createClient(supabaseUrl, serviceKey || anonKey!);
+      const { data: crmUser } = await client
+        .from('CRM_Usuarios')
+        .select('id, email, role')
+        .ilike('email', defaultEmail)
+        .single();
+      if (crmUser?.role) {
+        defaultRole = crmUser.role.toUpperCase() as McpUserRole;
+      }
+      if (crmUser?.id) {
+        defaultId = crmUser.id;
+      }
+    } catch (e) {
+      console.warn('[MCP-API] Error al resolver usuario fallback:', e);
+    }
+  }
 
   return {
     userId: defaultId,

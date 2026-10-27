@@ -3,6 +3,19 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-10-27 - UI & Seguridad: Botón de Token Directo en MCP y Garantía de Rol ADMIN en CRM_Usuarios
+
+- **Requerimiento:** Mover la generación de token a la UI principal (botón debajo de "Ver Credenciales y Conexión IA" en la tarjeta MCP) y garantizar que administradores como `ismael.correa@firplak.com` y `alejandro.isaza@firplak.com` tengan acceso MCP con rol `ADMIN`.
+- **Cambios Realizados:**
+  - `components/config/McpIntegrationCard.tsx`: Se añadió el botón directo "Generar y Copiar Token de Autenticación" en la tarjeta principal, con estado de carga, verificación de expiración y feedback de copiado. Se renombró la pestaña en el modal a "Token / ChatGPT".
+  - `app/configuracion/page.tsx`: Se envía `realRole || role` al componente para asegurar que si un administrador simula vista de vendedor en la UI, sus credenciales MCP preserven el rol `ADMIN`.
+  - `app/api/mcp/route.ts`: Se corrigió el bug en la consulta a `CRM_Usuarios` (se consultaba `rol` en vez de `role`, lo que provocaba que la consulta fallara y cayera en `VENDEDOR`). Se implementó resolución resiliente por `id` y por `email`.
+  - `bin/crm-mcp.ts`: El entrypoint CLI ahora consulta dinámicamente `CRM_Usuarios` por email en la base de datos para auto-asignar `ADMIN` cuando no se especifique `CRM_USER_ROLE`.
+- **Validación:**
+  - 24/24 pruebas unitarias verificadas en GREEN (`tests/crm-mcp.test.ts` y `tests/mcp-token.test.ts`).
+  - `npx tsc --noEmit` verificado con 0 errores de compilación.
+- **Páginas actualizadas:** `wiki/pages/servidor-mcp.md`, `wiki/LOG.md`.
+
 ## 2026-10-27 - Feature: Generación y Copiado de Token Bearer en Conexión MCP
 
 - **Requerimiento:** Incluir botón para generar y copiar el token de autenticación Bearer de la sesión de Supabase en la tarjeta de integración MCP (`/configuracion`).

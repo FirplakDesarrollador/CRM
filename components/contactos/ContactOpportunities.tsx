@@ -51,12 +51,19 @@ export function ContactOpportunities({ contactId, accountId }: ContactOpportunit
                         .order('updated_at', { ascending: false })
                         .limit(50);
                     if (!error && data) {
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        result = (data as any[]).map(o => ({
+                        type SupabaseOppRecord = {
+                            id: string;
+                            nombre?: string | null;
+                            amount?: number | null;
+                            currency_id?: string | null;
+                            fase_data?: { nombre?: string | null } | null;
+                            contactos_ids?: string[] | null;
+                        };
+                        result = (data as unknown as SupabaseOppRecord[]).map(o => ({
                             id: o.id,
-                            nombre: o.nombre,
-                            amount: o.amount,
-                            currency_id: o.currency_id,
+                            nombre: o.nombre || null,
+                            amount: o.amount ?? null,
+                            currency_id: o.currency_id || null,
                             fase: o.fase_data?.nombre || null,
                             linked: Array.isArray(o.contactos_ids) && o.contactos_ids.includes(contactId)
                         }));

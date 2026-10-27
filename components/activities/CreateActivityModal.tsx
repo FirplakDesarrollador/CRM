@@ -42,8 +42,7 @@ interface CreateActivityModalProps {
         prioridad: 'Alta' | 'Media' | 'Baja';
     }>;
     /** Called once when the activity being edited is marked as completed from inside the modal. */
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    onActivityCompleted?: (activity: any) => void;
+    onActivityCompleted?: (activity: { id: string; [key: string]: unknown }) => void;
 }
 
 const ACTIVITY_WIZARD_LAST_STEP = 2;

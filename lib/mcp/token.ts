@@ -50,19 +50,20 @@ export async function getMcpSessionToken(supabaseClient: {
     }
 
     return {
-      token: session.access_token,
+      token: session.access_token || null,
       expiresAt,
       formattedExpiresAt,
       isExpired: isTokenExpired(expiresAt),
       error: null,
     };
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : 'Error al obtener sesión de Supabase';
     return {
       token: null,
       expiresAt: null,
       formattedExpiresAt: null,
       isExpired: true,
-      error: err?.message || 'Error al obtener sesión de Supabase',
+      error: errorMsg,
     };
   }
 }

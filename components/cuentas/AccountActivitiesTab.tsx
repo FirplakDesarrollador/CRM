@@ -1,6 +1,6 @@
 "use client";
 
-import { useActivitiesServer } from "@/lib/hooks/useActivitiesServer";
+import { useActivitiesServer, ActivityServer } from "@/lib/hooks/useActivitiesServer";
 import { useActivities } from "@/lib/hooks/useActivities";
 import { useState } from "react";
 import { CreateActivityModal } from "@/components/activities/CreateActivityModal";
@@ -29,19 +29,18 @@ export default function AccountActivitiesTab({ accountId }: { accountId: string 
 
     const { toggleComplete, createActivity, updateActivity } = useActivities();
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-    const [selectedActivity, setSelectedActivity] = useState<any>(null);
+    const [selectedActivity, setSelectedActivity] = useState<ActivityServer | null>(null);
     const { requestFollowUp, resetFollowUp, followUpElement } = useActivityFollowUp({
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        createActivity: async (data: any) => {
+        createActivity: async (data) => {
             await createActivity(data);
             refresh();
         }
     });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const handleToggleComplete = async (act: any) => {
+
+    const handleToggleComplete = async (act: ActivityServer) => {
         const willComplete = !act.is_completed;
         await toggleComplete(act.id, willComplete);
-        if (willComplete) requestFollowUp({ ...act, opportunity_id: act.opportunity_id, account_id: act.account_id || accountId });
+        if (willComplete) requestFollowUp({ ...act, opportunity_id: act.opportunity_id, account_id: accountId });
         else resetFollowUp(act.id);
         refresh();
     };
@@ -198,7 +197,7 @@ export default function AccountActivitiesTab({ accountId }: { accountId: string 
                         setSelectedActivity(null);
                         refresh();
                     }}
-                    onActivityCompleted={(act) => requestFollowUp({ ...act, account_id: act.account_id || accountId })}
+                    onActivityCompleted={(act) => requestFollowUp({ ...act, account_id: (act.account_id as string | undefined) || accountId })}
                 />
             )}
 
