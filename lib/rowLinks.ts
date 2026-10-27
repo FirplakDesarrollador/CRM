@@ -12,8 +12,8 @@ export function isNewTabClick(event: { button?: number; ctrlKey?: boolean; metaK
 
 /**
  * Envuelve el contenido ya renderizado de una celda en un <a href> real.
- * El clic izquierdo normal se cancela (la navegación la sigue haciendo la tabla),
- * así el navegador solo actúa en clic central, Ctrl/Cmd+clic y clic derecho.
+ * El clic primario se cancela (la navegación la hace la tabla); el navegador solo actúa
+ * en clic central y clic derecho -> "Abrir en pestaña nueva".
  */
 export function wrapCellInRowLink(td: HTMLTableCellElement, href: string): void {
     if (typeof document === 'undefined' || !href) return;
@@ -22,9 +22,9 @@ export function wrapCellInRowLink(td: HTMLTableCellElement, href: string): void 
     anchor.className = 'opp-row-link';
     anchor.draggable = false;
     anchor.style.cssText = 'display:block;width:100%;height:100%;color:inherit;text-decoration:none;';
-    anchor.addEventListener('click', (e) => {
-        if (!isNewTabClick(e)) e.preventDefault();
-    });
+    // El clic primario (izquierdo, Ctrl, Cmd, Shift) lo gestiona la tabla en mousedown; el navegador
+    // solo debe actuar de forma nativa en clic central ("auxclick") y en el menú contextual.
+    anchor.addEventListener('click', (e) => e.preventDefault());
     while (td.firstChild) anchor.appendChild(td.firstChild);
     td.appendChild(anchor);
 }
