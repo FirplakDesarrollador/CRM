@@ -1,6 +1,41 @@
 import React, { useState } from 'react';
-import { useEntityAuditHistory, AuditLogEntry } from '@/lib/hooks/useEntityAuditHistory';
+import { useEntityAuditHistory } from '@/lib/hooks/useEntityAuditHistory';
 import { History, ArrowRight, User, Calendar, RefreshCw, Filter, Search } from 'lucide-react';
+
+function formatTimestamp(isoString: string): string {
+    try {
+        const date = new Date(isoString);
+        return date.toLocaleString('es-CO', {
+            year: 'numeric',
+            month: 'short',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: true
+        });
+    } catch {
+        return isoString;
+    }
+}
+
+function getRelativeTime(isoString: string, now: number): string {
+    try {
+        const past = new Date(isoString).getTime();
+        const diffSeconds = Math.floor((now - past) / 1000);
+
+        if (diffSeconds < 60) return 'Hace unos segundos';
+        const diffMinutes = Math.floor(diffSeconds / 60);
+        if (diffMinutes < 60) return `Hace ${diffMinutes} min`;
+        const diffHours = Math.floor(diffMinutes / 60);
+        if (diffHours < 24) return `Hace ${diffHours} h`;
+        const diffDays = Math.floor(diffHours / 24);
+        if (diffDays < 30) return `Hace ${diffDays} día${diffDays > 1 ? 's' : ''}`;
+        return formatTimestamp(isoString);
+    } catch {
+        return isoString;
+    }
+}
 
 interface EntityAuditHistoryTabProps {
     entityType: 'OPORTUNIDAD' | 'CUENTA' | 'CONTACTO';
@@ -13,6 +48,7 @@ export function EntityAuditHistoryTab({
     entityId,
     entityName
 }: EntityAuditHistoryTabProps) {
+    const [now] = useState(() => Date.now());
     const { entries, isLoading, error, refetch } = useEntityAuditHistory({
         entityType,
         entityId,
@@ -33,43 +69,6 @@ export function EntityAuditHistoryTab({
             (e.new_value || '').toLowerCase().includes(searchTerm.toLowerCase());
         return matchesField && matchesSearch;
     });
-
-    const formatTimestamp = (isoString: string) => {
-        try {
-            const date = new Date(isoString);
-            return date.toLocaleString('es-CO', {
-                year: 'numeric',
-                month: 'short',
-                day: '2-digit',
-                hour: '2-digit',
-                minute: '2-digit',
-                second: '2-digit',
-                hour12: true
-            });
-        } catch {
-            return isoString;
-        }
-    };
-
-    const getRelativeTime = (isoString: string) => {
-        try {
-            const now = Date.now();
-            const past = new Date(isoString).getTime();
-            const diffSeconds = Math.floor((now - past) / 1000);
-
-            if (diffSeconds < 60) return 'Hace unos segundos';
-            const diffMinutes = Math.floor(diffSeconds / 60);
-            if (diffMinutes < 60) return `Hace ${diffMinutes} min`;
-            const diffHours = Math.floor(diffMinutes / 60);
-            if (diffHours < 24) return `Hace ${diffHours} h`;
-            const diffDays = Math.floor(diffHours / 24);
-            if (diffDays === 1) return 'Ayer';
-            if (diffDays < 7) return `Hace ${diffDays} días`;
-            return '';
-        } catch {
-            return '';
-        }
-    };
 
     return (
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-6">
@@ -167,7 +166,7 @@ export function EntityAuditHistoryTab({
             ) : (
                 <div className="space-y-3">
                     {filteredEntries.map((entry) => {
-                        const relativeTime = getRelativeTime(entry.changed_at);
+                        const relativeTime = getRelativeTime(entry.changed_at, now);
                         return (
                             <div 
                                 key={entry.id}

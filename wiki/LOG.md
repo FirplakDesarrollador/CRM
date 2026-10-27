@@ -3,6 +3,17 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-10-27 - Feature: Generación y Copiado de Token Bearer en Conexión MCP
+
+- **Requerimiento:** Incluir botón para generar y copiar el token de autenticación Bearer de la sesión de Supabase en la tarjeta de integración MCP (`/configuracion`).
+- **Lógica e Integración (`lib/mcp/token.ts`, `components/config/McpIntegrationCard.tsx`):**
+  - Creado helper `lib/mcp/token.ts` con funciones `getMcpSessionToken`, `formatBearerAuthHeader` e `isTokenExpired`.
+  - En `McpIntegrationCard.tsx`, añadido bloque interactivo en la pestaña "ChatGPT / HTTP" con botón "Generar y Copiar Token de Autenticación", visualizador del token de acceso, indicador de hora de expiración y feedback de copiado al portapapeles.
+- **Validación:**
+  - 4/4 pruebas unitarias verificadas en GREEN en `tests/mcp-token.test.ts`.
+  - 19/19 pruebas verificadas en GREEN en `tests/crm-mcp.test.ts`.
+- **Páginas actualizadas:** `wiki/pages/servidor-mcp.md`, `wiki/LOG.md`.
+
 ## 2026-10-27 - Ajuste: controles de vista de Actividades movidos al encabezado
 
 - **Pedido de Esteban:** ubicar arriba también los controles de la tarjeta "Vista Agenda".

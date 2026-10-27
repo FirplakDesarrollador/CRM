@@ -9,9 +9,13 @@ import {
   Sparkles,
   Bot,
   X,
+  Key,
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/components/ui/utils";
 import { getMcpPublicUrl } from "@/lib/mcp/types";
+import { supabase } from "@/lib/supabase";
+import { getMcpSessionToken } from "@/lib/mcp/token";
 
 interface McpIntegrationCardProps {
   user: { email?: string | null; id?: string } | null;
@@ -24,6 +28,10 @@ export function McpIntegrationCard({ user, role }: McpIntegrationCardProps) {
   const [activeTab, setActiveTab] = useState<"claude" | "chatgpt" | "antigravity" | "cursor" | "tools">("claude");
   const [serverStatus, setServerStatus] = useState<"checking" | "online" | "offline">("checking");
   const [toolsCount, setToolsCount] = useState<number>(17);
+  const [token, setToken] = useState<string | null>(null);
+  const [tokenLoading, setTokenLoading] = useState(false);
+  const [tokenExpiresAt, setTokenExpiresAt] = useState<string | null>(null);
+  const [tokenError, setTokenError] = useState<string | null>(null);
 
   // Asegura que aun en localhost:3000 la URL que se muestre y copie sea la desplegada en Vercel
   const mcpUrl = getMcpPublicUrl(typeof window !== "undefined" ? window.location.origin : undefined);
@@ -61,6 +69,28 @@ export function McpIntegrationCard({ user, role }: McpIntegrationCardProps) {
     navigator.clipboard.writeText(text);
     setCopied(key);
     setTimeout(() => setCopied(null), 2000);
+  };
+
+  const handleGenerateToken = async () => {
+    setTokenLoading(true);
+    setTokenError(null);
+    try {
+      const result = await getMcpSessionToken(supabase);
+      if (result.token) {
+        setToken(result.token);
+        setTokenExpiresAt(result.formattedExpiresAt);
+        await navigator.clipboard.writeText(result.token);
+        setCopied("token");
+        setTimeout(() => setCopied(null), 2500);
+      } else {
+        setTokenError(result.error || "No se pudo obtener el token.");
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Error al obtener el token de autenticación";
+      setTokenError(msg);
+    } finally {
+      setTokenLoading(false);
+    }
   };
 
   const claudeConfig = JSON.stringify(
@@ -218,7 +248,7 @@ export function McpIntegrationCard({ user, role }: McpIntegrationCardProps) {
                   { id: "claude", label: "Claude Desktop" },
                   { id: "antigravity", label: "Antigravity IDE" },
                   { id: "cursor", label: "Cursor / Windsurf" },
-                  { id: "chatgpt", label: "ChatGPT Actions" },
+                  { id: "chatgpt", label: "ChatGPT / HTTP" },
                   { id: "tools", label: "Herramientas" },
                 ] as const
               ).map((tab) => (
@@ -301,8 +331,9 @@ export function McpIntegrationCard({ user, role }: McpIntegrationCardProps) {
 
               {activeTab === "chatgpt" && (
                 <div className="space-y-4">
+                  {/* Endpoint URL Box */}
                   <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Endpoint para ChatGPT Actions</span>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Endpoint para ChatGPT Actions / HTTP SSE</span>
                     <p className="text-xs font-mono font-bold text-slate-800 break-all">{mcpUrl}</p>
                     <button
                       onClick={() => handleCopy(mcpUrl, "gpt-url")}
@@ -313,12 +344,76 @@ export function McpIntegrationCard({ user, role }: McpIntegrationCardProps) {
                     </button>
                   </div>
 
+                  {/* Token Generator Card */}
+                  <div className="p-4 bg-purple-50/70 rounded-2xl border border-purple-100 space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-lg bg-purple-600/10 text-purple-700 flex items-center justify-center font-bold">
+                          <Key className="w-3.5 h-3.5" />
+                        </div>
+                        <span className="text-xs font-bold text-slate-900">Token de Autenticación Bearer</span>
+                      </div>
+                      {tokenExpiresAt && (
+                        <span className="text-[10px] font-medium text-purple-700 bg-white px-2 py-0.5 rounded-md border border-purple-200">
+                          Válido hasta: {tokenExpiresAt}
+                        </span>
+                      )}
+                    </div>
+
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      Genera y copia el token JWT de tu sesión activa en Supabase para autorizar peticiones HTTP remotas en el endpoint MCP:
+                    </p>
+
+                    {token && (
+                      <div className="space-y-1">
+                        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 block">Token de Acceso Activo:</span>
+                        <div className="p-2.5 bg-white rounded-xl border border-purple-200 font-mono text-[11px] text-slate-700 break-all select-all max-h-24 overflow-y-auto">
+                          {token}
+                        </div>
+                      </div>
+                    )}
+
+                    {tokenError && (
+                      <p className="text-xs text-rose-600 bg-rose-50 p-2.5 rounded-xl border border-rose-200">
+                        {tokenError}
+                      </p>
+                    )}
+
+                    <div className="flex items-center gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={handleGenerateToken}
+                        disabled={tokenLoading}
+                        className="flex items-center gap-1.5 px-3.5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs active:scale-95 disabled:opacity-60 cursor-pointer"
+                      >
+                        {tokenLoading ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : copied === "token" ? (
+                          <Check className="w-3.5 h-3.5 text-emerald-300" />
+                        ) : (
+                          <Key className="w-3.5 h-3.5" />
+                        )}
+                        <span>
+                          {copied === "token"
+                            ? "¡Token Copiado al Portapapeles!"
+                            : token
+                            ? "Copiar Token Nuevamente"
+                            : "Generar y Copiar Token de Autenticación"}
+                        </span>
+                      </button>
+                    </div>
+
+                    <p className="text-[10px] text-slate-400">
+                      * Este token se deriva de tu sesión activa en el CRM y valida tus permisos según tu rol ({userRole}).
+                    </p>
+                  </div>
+
                   <div className="text-xs text-slate-600 space-y-2">
                     <p className="font-bold text-slate-800">Instrucciones de configuración:</p>
                     <ol className="list-decimal pl-4 space-y-1.5">
                       <li>En ChatGPT, crea un Custom GPT y ve a <strong>Actions</strong> &gt; <strong>Create new action</strong>.</li>
                       <li>Introduce la URL del endpoint <code className="bg-slate-100 px-1 py-0.5 rounded text-purple-700">{mcpUrl}</code>.</li>
-                      <li>Configura autenticación tipo <strong>Bearer</strong> usando tu token de sesión de Supabase Auth.</li>
+                      <li>Configura autenticación tipo <strong>Bearer</strong> e ingresa el token generado con el botón superior.</li>
                     </ol>
                   </div>
                 </div>

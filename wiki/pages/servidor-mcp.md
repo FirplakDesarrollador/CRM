@@ -6,7 +6,7 @@ El servidor MCP oficial de Firplak expone las operaciones del CRM a modelos de i
 
 - **Transporte Dual:**
   - **`stdio` (Local):** Ejecutable CLI en `bin/crm-mcp.ts` (con wrapper `bin/crm-mcp.mjs`), usado por clientes de escritorio (Claude Desktop, Cursor, Antigravity IDE).
-  - **`HTTP/SSE` (Remoto):** Endpoint en `/api/mcp` (`https://crm-64yu.vercel.app/api/mcp`, implementado en `app/api/mcp/route.ts`) para integraciones remotas y ChatGPT Custom Actions, autenticando el usuario y rol vía token JWT de Supabase.
+  - **`HTTP/SSE` (Remoto):** Endpoint en `/api/mcp` (`https://crm-64yu.vercel.app/api/mcp`, implementado en `app/api/mcp/route.ts`) para integraciones remotas y ChatGPT Custom Actions, autenticando el usuario y rol vía token JWT de Supabase. La UI de configuración (`components/config/McpIntegrationCard.tsx`) provee un botón directo para extraer y copiar el token de sesión activo usando `lib/mcp/token.ts`.
 - **SDK Oficial:** Construido sobre `@modelcontextprotocol/sdk`.
 
 ## Política Estricta de Cero Borrado
@@ -38,8 +38,11 @@ El servidor publica catálogos estáticos como recursos URI para que el LLM los 
 - `lib/mcp/permissions.ts` (control de acceso y bloqueo de borrado)
 - `lib/mcp/database.ts` (catálogos y adaptador Supabase)
 - `lib/mcp/resources.ts` (recursos nativos MCP)
+- `lib/mcp/token.ts` (extracción y formateo de tokens de sesión para autenticación remota)
 - `lib/mcp/tools/` (controladores de oportunidades, cuentas, contactos, actividades y parámetros)
 - `bin/crm-mcp.ts` y `bin/crm-mcp.mjs` (entrypoints CLI stdio)
 - `app/api/mcp/route.ts` (endpoint HTTP/SSE para ChatGPT y web)
+- `components/config/McpIntegrationCard.tsx` (tarjeta y modal de configuración con generador/copiado de token)
 - `docs/mcp/INSTALACION_Y_USO.md` (manual de configuración)
 - `tests/crm-mcp.test.ts` (suite de pruebas QA)
+- `tests/mcp-token.test.ts` (pruebas unitarias de tokens y autorización Bearer)
