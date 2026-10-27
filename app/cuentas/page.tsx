@@ -522,7 +522,7 @@ function AccountsContent() {
             <DataListToolbar
                 searchValue={inputValue}
                 onSearchChange={setInputValue}
-                searchPlaceholder="Buscar por nombre o NIT…"
+                searchPlaceholder="Buscar por nombre, NIT o celular…"
                 searchTestId="accounts-search"
                 filtersOpen={showFilters}
                 onFiltersOpenChange={setShowFilters}
