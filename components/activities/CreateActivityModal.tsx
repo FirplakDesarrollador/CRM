@@ -18,6 +18,7 @@ import { AccountCombobox } from "@/components/accounts/AccountCombobox";
 import { useFormAutoSave } from "@/lib/hooks/useFormAutoSave";
 import { AutoSaveIndicator } from "@/components/ui/AutoSaveIndicator";
 import { SearchableSelect } from "@/components/ui/SearchableSelect";
+import { isB2COnlyActivityClassification, userHasB2CAccess } from "@/lib/b2c";
 
 interface CreateActivityModalProps {
     onClose: () => void;
@@ -26,6 +27,23 @@ interface CreateActivityModalProps {
     initialOpportunityId?: string;
     initialAccountId?: string;
     initialData?: any;
+    /**
+     * Pre-filled values for a NEW activity (e.g. a follow-up of a completed one).
+     * Ignored when `initialData` is present (edit mode).
+     */
+    initialValues?: Partial<{
+        asunto: string;
+        descripcion: string;
+        tipo_actividad: 'TAREA' | 'EVENTO';
+        clasificacion_id: number | string | null;
+        subclasificacion_id: number | string | null;
+        fecha_inicio: string | Date;
+        fecha_fin: string | Date;
+        prioridad: 'Alta' | 'Media' | 'Baja';
+    }>;
+    /** Called once when the activity being edited is marked as completed from inside the modal. */
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    onActivityCompleted?: (activity: any) => void;
 }
 
 const ACTIVITY_WIZARD_LAST_STEP = 2;
@@ -46,27 +64,31 @@ const normalizePlannerChecklist = (items: PlannerChecklistItem[]) => {
         .filter((item) => item.title.length > 0);
 };
 
-export function CreateActivityModal({ onClose, onSubmit, opportunities, initialOpportunityId, initialAccountId, initialData }: CreateActivityModalProps) {
+export function CreateActivityModal({ onClose, onSubmit, opportunities, initialOpportunityId, initialAccountId, initialData, initialValues, onActivityCompleted }: CreateActivityModalProps) {
     const isEditing = !!initialData;
     const [wizardStep, setWizardStep] = useState(0);
     const [canSubmitFinalStep, setCanSubmitFinalStep] = useState(false);
     const form = useForm({
         defaultValues: {
-            asunto: initialData?.asunto || '',
-            descripcion: initialData?.descripcion || '',
-            tipo_actividad: (initialData?.tipo_actividad || 'EVENTO') as 'TAREA' | 'EVENTO',
-            clasificacion_id: initialData?.clasificacion_id ? String(initialData.clasificacion_id) : "",
-            subclasificacion_id: initialData?.subclasificacion_id ? String(initialData.subclasificacion_id) : "",
+            asunto: initialData?.asunto || initialValues?.asunto || '',
+            descripcion: initialData?.descripcion || initialValues?.descripcion || '',
+            tipo_actividad: (initialData?.tipo_actividad || initialValues?.tipo_actividad || 'EVENTO') as 'TAREA' | 'EVENTO',
+            clasificacion_id: initialData?.clasificacion_id ? String(initialData.clasificacion_id) : (!initialData && initialValues?.clasificacion_id ? String(initialValues.clasificacion_id) : ""),
+            subclasificacion_id: initialData?.subclasificacion_id ? String(initialData.subclasificacion_id) : (!initialData && initialValues?.subclasificacion_id ? String(initialValues.subclasificacion_id) : ""),
             fecha_inicio: initialData?.fecha_inicio
                 ? (initialData.tipo_actividad === 'TAREA' ? toInputDate(initialData.fecha_inicio) : toInputDateTime(initialData.fecha_inicio))
-                : (initialData?.tipo_actividad === 'TAREA' ? toInputDate(new Date()) : toInputDateTime(new Date())),
+                : initialValues?.fecha_inicio
+                    ? (initialValues.tipo_actividad === 'TAREA' ? toInputDate(initialValues.fecha_inicio) : toInputDateTime(initialValues.fecha_inicio))
+                    : (initialData?.tipo_actividad === 'TAREA' ? toInputDate(new Date()) : toInputDateTime(new Date())),
             fecha_fin: initialData?.fecha_fin
                 ? toInputDateTime(initialData.fecha_fin)
-                : toInputDateTime(new Date(Date.now() + 3600000)),
+                : initialValues?.fecha_fin
+                    ? toInputDateTime(initialValues.fecha_fin)
+                    : toInputDateTime(new Date(Date.now() + 3600000)),
             opportunity_id: initialData?.opportunity_id || initialOpportunityId || '',
             account_id: initialData?.account_id || initialAccountId || '',
             is_completed: !!initialData?.is_completed,
-            prioridad: initialData?.prioridad || 'Media'
+            prioridad: initialData?.prioridad || initialValues?.prioridad || 'Media'
         }
     });
 
@@ -138,6 +160,8 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         return parsed ? parsed.toISOString() : null;
     };
 
+    const completedNotifiedRef = useRef(false);
+
     const onAutoSave = async (data: any) => {
         if (!isEditing || !initialData?.id) return;
         const autoAsunto = data.asunto?.trim() || getAutoAsunto(data.clasificacion_id, data.opportunity_id, data.account_id);
@@ -161,6 +185,14 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
             payload.user_id = reassignUserId;
         }
         await updateActivity(initialData.id, payload);
+
+        // Notify the parent once when the activity transitions to completed from inside the modal
+        if (payload.is_completed && !completedNotifiedRef.current && !initialData.is_completed) {
+            completedNotifiedRef.current = true;
+            onActivityCompleted?.({ ...initialData, ...payload });
+        } else if (!payload.is_completed) {
+            completedNotifiedRef.current = false;
+        }
     };
 
     const { status: autoSaveStatus, errorMessage: autoSaveErrorMessage } = useFormAutoSave({
@@ -1380,9 +1412,15 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
     const selectedClasificacionId = watch('clasificacion_id');
 
     // Filtered Lists
+    // 'SETTER' / 'Cliente frecuente' are B2C-only: hide them from other channels
+    // (an already-assigned one stays visible so existing activities keep rendering).
+    const canUseB2CClassifications = userHasB2CAccess(currentUser);
     const filteredClassifications = useMemo(() => {
-        return classifications.filter(c => c.tipo_actividad === tipo);
-    }, [classifications, tipo]);
+        return classifications.filter(c =>
+            c.tipo_actividad === tipo &&
+            (canUseB2CClassifications || !isB2COnlyActivityClassification(c.nombre) || String(c.id) === String(selectedClasificacionId))
+        );
+    }, [classifications, tipo, canUseB2CClassifications, selectedClasificacionId]);
 
     const filteredSubclassifications = useMemo(() => {
         if (!selectedClasificacionId) return [];

@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { useActivities, LocalActivity } from "@/lib/hooks/useActivities";
 import { CreateActivityModal } from "@/components/activities/CreateActivityModal";
+import { useActivityFollowUp } from "@/components/activities/ActivityFollowUp";
 import { supabase } from "@/lib/supabase";
 import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
 import { resolveActiveQuote } from "@/lib/opportunityQuoteSync";
@@ -1831,6 +1832,22 @@ function ActivitiesTab({ opportunityId, accountId }: { opportunityId: string, ac
     const [selectedActivity, setSelectedActivity] = useState<LocalActivity | null>(null);
     const { opportunities } = useOpportunities();
 
+    // After completing an activity: open it in place ("Ver actividad") and/or schedule the next follow-up (B2C)
+    const { requestFollowUp, resetFollowUp, followUpElement } = useActivityFollowUp({
+        createActivity,
+        onViewActivity: (act) => {
+            const full = activities?.find(a => a.id === act.id) || (act as LocalActivity);
+            setSelectedActivity(full);
+            setIsModalOpen(true);
+        }
+    });
+    const handleToggleComplete = async (act: LocalActivity) => {
+        const willComplete = !act.is_completed;
+        await toggleComplete(act.id, willComplete);
+        if (willComplete) requestFollowUp(act);
+        else resetFollowUp(act.id);
+    };
+
     const sortedActivities = activities?.sort((a, b) => new Date(b.fecha_inicio).getTime() - new Date(a.fecha_inicio).getTime());
 
     // Catalogs
@@ -1901,7 +1918,7 @@ function ActivitiesTab({ opportunityId, accountId }: { opportunityId: string, ac
                                     <button
                                         onClick={(e) => {
                                             e.stopPropagation();
-                                            toggleComplete(act.id, !act.is_completed);
+                                            handleToggleComplete(act);
                                         }}
                                         className="mt-1 transition-colors"
                                     >
@@ -1981,6 +1998,9 @@ function ActivitiesTab({ opportunityId, accountId }: { opportunityId: string, ac
                         console.log("[ActivitiesTab] Modal Submitted Data:", data);
                         if (selectedActivity) {
                             await updateActivity(selectedActivity.id, data);
+                            if (data?.is_completed === true && !selectedActivity.is_completed) {
+                                requestFollowUp(selectedActivity);
+                            }
                         } else {
                             await createActivity(data);
                         }
@@ -1991,9 +2011,11 @@ function ActivitiesTab({ opportunityId, accountId }: { opportunityId: string, ac
                     initialOpportunityId={opportunityId}
                     initialAccountId={accountId}
                     initialData={selectedActivity}
+                    onActivityCompleted={(act) => requestFollowUp(act)}
                 />
             )}
 
+            {followUpElement}
         </div>
     );
 }

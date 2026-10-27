@@ -6,6 +6,7 @@ import * as z from "zod";
 import { useOpportunities } from "@/lib/hooks/useOpportunities";
 import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useState, useEffect, useMemo } from "react";
+import { OPPORTUNITY_SETTER_OPTIONS } from "@/lib/opportunitySetter";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronRight, Check } from "lucide-react";
 import { cn } from "@/components/ui/utils";
@@ -54,7 +55,8 @@ const schema = z.object({
         nombre: z.string(),
         descuento_porcentaje: z.union([z.number(), z.string()]).optional().nullable()
     })).default([]),
-    owner_user_id: z.string().optional()
+    owner_user_id: z.string().optional(),
+    setter: z.string().optional().nullable()
 });
 
 export default function CreateOpportunityWizard() {
@@ -200,7 +202,8 @@ export default function CreateOpportunityWizard() {
             contactos_ids: [],
             clientes_atendidos: 1,
             items: [],
-            owner_user_id: ''
+            owner_user_id: '',
+            setter: ''
         },
         shouldUnregister: false
     });
@@ -322,6 +325,16 @@ export default function CreateOpportunityWizard() {
 
         resolveAccount();
     }, [searchParams, accounts, setValue, step]);
+
+    // Pre-select the contact when coming from a contact (?contact_id=...), once the account's contacts are loaded
+    useEffect(() => {
+        const contactId = searchParams.get('contact_id');
+        if (!contactId || !selectedAccount) return;
+        if (!localAccountContacts.some(c => c.id === contactId)) return;
+        if ((form.getValues("contactos_ids") || []).length > 0) return;
+        setValue("contactos_ids", [contactId]);
+        setValue("clientes_atendidos", 1);
+    }, [searchParams, selectedAccount, localAccountContacts, form, setValue]);
 
     const { products: searchResults, isLoading: isSearching } = useProductSearch(searchTerm);
 
@@ -536,6 +549,7 @@ export default function CreateOpportunityWizard() {
                 clientes_atendidos: data.clientes_atendidos !== undefined && data.clientes_atendidos !== null && data.clientes_atendidos !== "" ? Number(data.clientes_atendidos) : 0,
                 fecha_entrega: data.fecha_entrega || null,
                 fecha_cierre_estimada: data.fecha_cierre_estimada || null,
+                setter: data.setter || null,
                 collaborators: collaborators
             };
 
@@ -903,6 +917,22 @@ export default function CreateOpportunityWizard() {
                             />
                         </div>
                         
+                        <div>
+                            <label className="text-sm font-medium">Setter (Opcional)</label>
+                            <select
+                                {...register("setter")}
+                                className="w-full p-2 border rounded-lg bg-white"
+                            >
+                                <option value="">Ninguna</option>
+                                {OPPORTUNITY_SETTER_OPTIONS.map(opt => (
+                                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                ))}
+                            </select>
+                            <p className="text-[10px] text-slate-500 mt-0.5">
+                                Clasificación de prospección comercial. Se puede cambiar luego desde el detalle de la oportunidad.
+                            </p>
+                        </div>
+
                         <div>
                             <label className="text-sm font-medium">Comentarios / Observaciones</label>
                             <textarea 
