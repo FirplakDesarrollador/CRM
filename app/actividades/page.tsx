@@ -35,6 +35,9 @@ import { handleEntityLinkClick } from '@/lib/utils/navigation';
 
 import { cn } from '@/components/ui/utils';
 import { CreateActivityModal } from '@/components/activities/CreateActivityModal';
+import { useActivityFollowUp } from '@/components/activities/ActivityFollowUp';
+import { isB2COnlyActivityClassification, userHasB2CAccess } from '@/lib/b2c';
+import { digitsOnly, isPhoneLikeQuery } from '@/lib/utils';
 import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { UserPickerFilter } from '@/components/cuentas/UserPickerFilter';
 
@@ -47,6 +50,15 @@ function ActivitiesContent() {
     const { activities, createActivity, updateActivity, toggleComplete } = useActivities();
     const { user, role } = useCurrentUser();
     const canViewAll = hasPermission(role, 'view_all_activities');
+    const { requestFollowUp, resetFollowUp, followUpElement } = useActivityFollowUp({ createActivity });
+
+    // Completing an activity: offer to schedule the next follow-up (B2C) right away
+    const handleToggleComplete = async (act: LocalActivity) => {
+        const willComplete = !act.is_completed;
+        await toggleComplete(act.id, willComplete);
+        if (willComplete) requestFollowUp(act);
+        else resetFollowUp(act.id);
+    };
 
     // Keep active user id and db version across quick session/token revalidations to prevent calendar flickers
     const activeUserId = user?.id || getActiveLocalUserId();
@@ -334,6 +346,19 @@ function ActivitiesContent() {
     // Hook data for filters
     const accounts = useLiveQuery(() => db.accounts.toArray(), [activeUserId, dbVersion]) || [];
     const opportunities = useLiveQuery(() => db.opportunities.toArray(), [activeUserId, dbVersion]) || [];
+    const contacts = useLiveQuery(() => db.contacts.toArray(), [activeUserId, dbVersion]) || [];
+
+    // Phones of each account's contacts, so activities can be found by the customer's mobile number
+    const contactPhonesByAccount = useMemo(() => {
+        const map = new Map<string, string[]>();
+        for (const c of contacts) {
+            if (c.is_deleted || !c.telefono) continue;
+            const list = map.get(c.account_id) || [];
+            list.push(c.telefono);
+            map.set(c.account_id, list);
+        }
+        return map;
+    }, [contacts]);
 
 
 
@@ -402,7 +427,7 @@ function ActivitiesContent() {
     // Reset display limit when search or filters change to improve perceived performance
     useEffect(() => {
         setDisplayLimit(20);
-    }, [debouncedSearchQuery, filterType, filterClassification, filterSubclassification, filterUser, filterStatus, filterChannel]);
+    }, [debouncedSearchQuery, filterType, filterClassification, filterSubclassification, filterUser, filterStatus, filterChannel, filterDateFrom, filterDateTo]);
 
     const handlePrev = () => {
         const newDate = new Date(selectedDate);
@@ -427,10 +452,15 @@ function ActivitiesContent() {
     };
 
     // Filter Options Logic
+    const canSeeB2CClassifications = userHasB2CAccess(user);
     const availableClassifications = useMemo(() => {
-        if (!filterType) return classifications;
-        return classifications.filter(c => c.tipo_actividad === filterType);
-    }, [classifications, filterType]);
+        // 'SETTER' / 'Cliente frecuente' are B2C-only classifications
+        const visible = canSeeB2CClassifications
+            ? classifications
+            : classifications.filter(c => !isB2COnlyActivityClassification(c.nombre) || String(c.id) === String(filterClassification));
+        if (!filterType) return visible;
+        return visible.filter(c => c.tipo_actividad === filterType);
+    }, [classifications, filterType, canSeeB2CClassifications, filterClassification]);
 
     const availableSubclassifications = useMemo(() => {
         if (!filterClassification) return [];
@@ -442,6 +472,8 @@ function ActivitiesContent() {
         const sourceActivities = activities || [];
         if (sourceActivities.length === 0) return [];
         const lowerQuery = debouncedSearchQuery.toLowerCase();
+        const queryIsPhone = isPhoneLikeQuery(debouncedSearchQuery);
+        const queryDigits = digitsOnly(debouncedSearchQuery);
 
         // Optimize lookup for search matches (O(1) instead of O(N))
         const oppMap = new Map(opportunities.map(o => [o.id, o]));
@@ -468,11 +500,19 @@ function ActivitiesContent() {
                 const opp = act.opportunity_id ? oppMap.get(act.opportunity_id) : null;
                 const acc = act.account_id ? accMap.get(act.account_id) : (opp?.account_id ? accMap.get(opp.account_id) : null);
 
+                // Phone/mobile search: account phone or any of the account's contacts (digits only, format-agnostic)
+                let phoneMatch = false;
+                if (queryIsPhone && acc) {
+                    const phones = [acc.telefono, ...(contactPhonesByAccount.get(acc.id) || [])];
+                    phoneMatch = phones.some(p => digitsOnly(p).includes(queryDigits));
+                }
+
                 const searchMatch =
                     act.asunto?.toLowerCase().includes(lowerQuery) ||
                     act.descripcion?.toLowerCase().includes(lowerQuery) ||
                     acc?.nombre?.toLowerCase().includes(lowerQuery) ||
-                    opp?.nombre?.toLowerCase().includes(lowerQuery);
+                    opp?.nombre?.toLowerCase().includes(lowerQuery) ||
+                    phoneMatch;
 
                 if (!searchMatch) return false;
             }
@@ -519,7 +559,7 @@ function ActivitiesContent() {
         });
 
         return filtered;
-    }, [activities, filterType, filterClassification, filterSubclassification, debouncedSearchQuery, canViewAll, user, activeUserId, collaborativeOppIds, filterUser, filterStatus, omitCompleted, filterChannel, filterDateFrom, filterDateTo, opportunities, accounts]);
+    }, [activities, filterType, filterClassification, filterSubclassification, debouncedSearchQuery, canViewAll, user, activeUserId, collaborativeOppIds, filterUser, filterStatus, omitCompleted, filterChannel, filterDateFrom, filterDateTo, opportunities, accounts, contactPhonesByAccount]);
 
     // Count overdue activities for badge (computed from role-filtered but ignoring current status filter)
     const overdueCount = useMemo(() => {
@@ -545,7 +585,8 @@ function ActivitiesContent() {
     // For agenda/all views: filter by selected date + sort
     const filteredActivities = useMemo(() => {
         let result = globallyFilteredActivities;
-        if (view === 'agenda') {
+        // With an explicit "Desde/Hasta" range the range itself defines what is listed: do not also cap it to the selected agenda day
+        if (view === 'agenda' && !filterDateFrom && !filterDateTo) {
             const sd = selectedDate.getDate();
             const sm = selectedDate.getMonth();
             const sy = selectedDate.getFullYear();
@@ -569,7 +610,7 @@ function ActivitiesContent() {
             const difference = new Date(a.fecha_inicio).getTime() - new Date(b.fecha_inicio).getTime();
             return sortOrder === 'latest' ? -difference : difference;
         });
-    }, [globallyFilteredActivities, view, selectedDate, agendaDateMode, sortOrder]);
+    }, [globallyFilteredActivities, view, selectedDate, agendaDateMode, sortOrder, filterDateFrom, filterDateTo]);
 
     const { sentinelRef: activitiesSentinelRef } = useInfiniteScroll({
         loading: false,
@@ -613,7 +654,7 @@ function ActivitiesContent() {
                             <input
                                 type="text"
                                 data-testid="activities-search"
-                                placeholder="Buscar por cliente..."
+                                placeholder="Buscar por cliente, asunto o celular..."
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
                                 className="bg-white border text-slate-600 border-slate-200 font-semibold text-sm rounded-xl pl-9 pr-4 py-2.5 w-full sm:w-64 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
@@ -830,21 +871,38 @@ function ActivitiesContent() {
                                 <div className="px-2 text-slate-400">
                                     <CalendarIcon className="w-4 h-4" />
                                 </div>
+                                <label className="text-[10px] font-bold uppercase text-slate-400 mr-1" htmlFor="activities-date-from">Desde</label>
                                 <input
+                                    id="activities-date-from"
                                     type="date"
                                     value={filterDateFrom}
+                                    max={filterDateTo || undefined}
                                     onChange={(e) => setFilterDateFrom(e.target.value)}
                                     className="bg-transparent text-slate-600 font-semibold focus:outline-none p-1 w-[115px]"
                                     title="Fecha Desde"
                                 />
                                 <span className="text-slate-300 mx-1">-</span>
+                                <label className="text-[10px] font-bold uppercase text-slate-400 mr-1" htmlFor="activities-date-to">Hasta</label>
                                 <input
+                                    id="activities-date-to"
                                     type="date"
                                     value={filterDateTo}
+                                    min={filterDateFrom || undefined}
                                     onChange={(e) => setFilterDateTo(e.target.value)}
                                     className="bg-transparent text-slate-600 font-semibold focus:outline-none p-1 w-[115px]"
                                     title="Fecha Hasta"
                                 />
+                                {(filterDateFrom || filterDateTo) && (
+                                    <button
+                                        type="button"
+                                        onClick={() => { setFilterDateFrom(''); setFilterDateTo(''); }}
+                                        className="p-1 text-slate-400 hover:text-red-500"
+                                        title="Quitar rango de fechas"
+                                        aria-label="Quitar rango de fechas"
+                                    >
+                                        <X className="w-3.5 h-3.5" />
+                                    </button>
+                                )}
                             </div>
 
                             <div className="flex bg-slate-50 p-1 rounded-xl border border-slate-100 items-center shadow-sm">
@@ -1086,7 +1144,7 @@ function ActivitiesContent() {
                                                     <button
                                                         onClick={(e) => {
                                                             e.stopPropagation();
-                                                            toggleComplete(act.id, !act.is_completed);
+                                                            handleToggleComplete(act);
                                                         }}
                                                         className="mt-1 transition-colors"
                                                     >
@@ -1285,7 +1343,7 @@ function ActivitiesContent() {
                                                                     <button
                                                                         onClick={(e) => {
                                                                             e.stopPropagation();
-                                                                            toggleComplete(act.id, !act.is_completed);
+                                                                            handleToggleComplete(act);
                                                                         }}
                                                                         className={cn(
                                                                             "p-0.5 rounded-md transition-all sm:opacity-0 sm:group-hover/act:opacity-100",
@@ -1361,7 +1419,7 @@ function ActivitiesContent() {
                                                                             <button
                                                                                 onClick={(e) => {
                                                                                     e.stopPropagation();
-                                                                                    toggleComplete(act.id, !act.is_completed);
+                                                                                    handleToggleComplete(act);
                                                                                 }}
                                                                                 className={cn(
                                                                                     "p-1 rounded-md transition-all sm:opacity-0 sm:group-hover/tip:opacity-100 shrink-0",
@@ -1399,6 +1457,9 @@ function ActivitiesContent() {
                         if (selectedActivity) {
                             console.log("[ActivitiesPage] Calling updateActivity for:", selectedActivity.id);
                             await updateActivity(selectedActivity.id, data);
+                            if (data?.is_completed === true && !selectedActivity.is_completed) {
+                                requestFollowUp(selectedActivity);
+                            }
                         } else {
                             console.log("[ActivitiesPage] Calling createActivity");
                             await createActivity(data);
@@ -1406,8 +1467,12 @@ function ActivitiesContent() {
                         closeActivityModal();
                     }}
                     initialData={selectedActivity}
+                    onActivityCompleted={(act) => requestFollowUp(act)}
                 />
             )}
+
+            {/* B2C: offer to schedule the next follow-up after completing an activity */}
+            {followUpElement}
         </div>
     );
 }
