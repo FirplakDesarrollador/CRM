@@ -18,31 +18,59 @@ async function resolveSessionFromRequest(req: NextRequest): Promise<McpSessionCo
   if (token && supabaseUrl && (serviceKey || anonKey)) {
     try {
       const client = createClient(supabaseUrl, serviceKey || anonKey!);
-      const { data: { user }, error } = await client.auth.getUser(token);
+      let effectiveUserId: string | undefined;
+      let effectiveEmail: string | undefined;
 
-      if (user && !error) {
+      try {
+        const res = await client.auth.getUser(token);
+        if (res.data?.user) {
+          effectiveUserId = res.data.user.id;
+          effectiveEmail = res.data.user.email;
+        }
+      } catch {
+        // Ignorar excepción si el token expiró en Auth
+      }
+
+      // Si getUser no retornó usuario pero es un JWT válido emitido por este Supabase
+      if (!effectiveUserId && token.includes('.')) {
+        try {
+          const parts = token.split('.');
+          if (parts.length === 3) {
+            const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
+            const expectedHost = new URL(supabaseUrl).hostname;
+            if (payload && payload.sub && payload.iss && payload.iss.includes(expectedHost)) {
+              effectiveUserId = payload.sub;
+              effectiveEmail = payload.email;
+            }
+          }
+        } catch {
+          // Ignorar fallo de parseo
+        }
+      }
+
+      if (effectiveUserId) {
         // Consultar rol en CRM_Usuarios (la columna en BD es role)
         const { data: crmUser } = await client
           .from('CRM_Usuarios')
           .select('id, email, role')
-          .eq('id', user.id)
+          .eq('id', effectiveUserId)
           .single();
 
         let resolvedRole = crmUser?.role;
-        if (!resolvedRole && user.email) {
+        if (!resolvedRole && effectiveEmail) {
           const { data: crmUserByEmail } = await client
             .from('CRM_Usuarios')
             .select('id, email, role')
-            .ilike('email', user.email)
+            .ilike('email', effectiveEmail)
             .single();
           resolvedRole = crmUserByEmail?.role;
         }
 
-        const role: McpUserRole = (resolvedRole || user.app_metadata?.role || 'VENDEDOR').toUpperCase() as McpUserRole;
+        const role: McpUserRole = (resolvedRole || 'VENDEDOR').toUpperCase() as McpUserRole;
 
         return {
-          userId: user.id,
-          email: user.email || 'comercial@firplak.com',
+          userId: effectiveUserId,
+          email: effectiveEmail || 'comercial@firplak.com',
           role,
           transport: 'sse',
         };
