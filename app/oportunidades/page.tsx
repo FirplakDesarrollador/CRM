@@ -619,7 +619,7 @@ function OpportunitiesContent() {
                 const physicalRow = inst && typeof inst.toPhysicalRow === 'function' ? inst.toPhysicalRow(row) : row;
                 const rowData = inst && typeof inst.getSourceDataAtRow === 'function' ? inst.getSourceDataAtRow(physicalRow) : undefined;
                 const url = rowData?.id ? `/oportunidades/${rowData.id}` : '#';
-                td.innerHTML = `<a href="${url}" onclick="if (!event.ctrlKey && !event.metaKey && event.button === 0) { event.preventDefault(); }" style="font-weight:600;color:#0f172a;text-decoration:none;display:block;width:100%;height:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</a>`;
+                td.innerHTML = `<a href="${url}" onclick="event.preventDefault();" style="font-weight:600;color:#0f172a;text-decoration:none;display:block;width:100%;height:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</a>`;
                 td.style.overflow = 'hidden';
                 return td;
             }
@@ -664,7 +664,7 @@ function OpportunitiesContent() {
                 const rowData = inst && typeof inst.getSourceDataAtRow === 'function' ? inst.getSourceDataAtRow(physicalRow) : undefined;
                 const oppId = rowData?.id;
                 const url = oppId ? `/oportunidades/${oppId}` : '#';
-                td.innerHTML = `<a href="${url}" onclick="if (!event.ctrlKey && !event.metaKey && event.button === 0) { event.preventDefault(); }" style="font-weight:600;color:#0f172a;text-decoration:none;display:block;width:100%;height:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</a>`;
+                td.innerHTML = `<a href="${url}" onclick="event.preventDefault();" style="font-weight:600;color:#0f172a;text-decoration:none;display:block;width:100%;height:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</a>`;
                 td.style.overflow = 'hidden';
                 return td;
             }
@@ -1554,8 +1554,11 @@ function OpportunitiesContent() {
                                             }
                                             if (isNewTabClick(mouseEvent)) {
                                                 // Clic central / Ctrl / Cmd / Shift: abrir en pestaña nueva sin mover la actual.
+                                                // Clic central sobre un <a>: lo abre el navegador de forma nativa (en segundo plano).
+                                                // Ctrl/Cmd/Shift + clic: la tabla vuelve a renderizar la celda entre mousedown y
+                                                // mouseup y el <a> se reemplaza, así que el navegador pierde el clic; por eso se abre aquí.
                                                 const onLink = (mouseEvent?.target as HTMLElement | null)?.closest?.('a[href]');
-                                                if (onLink) return; // el navegador abre el enlace nativo (en segundo plano)
+                                                if (onLink && mouseEvent.button === 1) return;
                                                 if (opp && opp.id) {
                                                     mouseEvent.preventDefault(); // evita el autoscroll del clic central
                                                     openLinkInBackgroundTab(`/oportunidades/${opp.id}`);
