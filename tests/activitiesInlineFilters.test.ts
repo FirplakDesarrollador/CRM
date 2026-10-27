@@ -29,4 +29,25 @@ describe('Activities page: inline filter bar and Desde/Hasta range', () => {
     it('keeps the clear-all button', () => {
         expect(page).toMatch(/title="Limpiar filtros"/);
     });
+
+    it('moves the view controls (tabs, navigator, agenda mode, omit completed) into the header', () => {
+        const header = page.slice(page.indexOf('<header'), page.indexOf('</header>'));
+        expect(header).toMatch(/data-testid="activities-view-controls"/);
+        expect(header).toMatch(/data-testid="activities-view-tabs"/);
+        expect(header).toMatch(/data-testid="activities-page-prev"/);
+        expect(header).toMatch(/data-testid="agenda-mode-upto"/);
+        expect(header).toMatch(/data-testid="agenda-mode-exact"/);
+        expect(header).toMatch(/data-testid="omit-completed-toggle"/);
+        expect(header).toMatch(/data-testid="agenda-range-active"/);
+        // the old "Vista Agenda" card header row is gone, the total counter stays next to the list
+        expect(page).not.toMatch(/Vista Agenda/);
+        const body = page.slice(page.indexOf('</header>'));
+        expect(body).toMatch(/Total de registros/);
+        expect(body).not.toMatch(/data-testid="agenda-mode-upto"/);
+    });
+
+    it('navigator is hidden outside agenda/month and replaced by the range badge in agenda', () => {
+        expect(page).toMatch(/view !== 'all' && \(/);
+        expect(page).toMatch(/\{!\(view === 'agenda' && dateRangeActive\) && \(/);
+    });
 });
