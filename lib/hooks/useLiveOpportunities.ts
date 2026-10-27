@@ -5,6 +5,7 @@ import { fetchAllRowsCached, getCachedRows, onLiveDataRefresh } from "./liveData
 
 export interface LiveOpportunity {
     id: string;
+    nombre: string | null;
     account_id: string | null;
     owner_user_id: string | null;
     estado_id: number | null;
@@ -17,7 +18,7 @@ export interface LiveOpportunity {
 }
 
 const TABLE = "CRM_Oportunidades";
-const SELECT_COLUMNS = "id, account_id, owner_user_id, estado_id, fase_id, segmento_id, amount, fecha_cierre_estimada, created_at, is_deleted";
+const SELECT_COLUMNS = "id, nombre, account_id, owner_user_id, estado_id, fase_id, segmento_id, amount, fecha_cierre_estimada, created_at, is_deleted";
 
 /**
  * Live (non-offline-cached) opportunities. Some indicadores report pages

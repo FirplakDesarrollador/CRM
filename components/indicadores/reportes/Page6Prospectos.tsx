@@ -2,7 +2,8 @@
 
 import React, { useMemo, useState } from "react";
 import ReactECharts from "echarts-for-react";
-import { UserPlus, Wallet, Clock, AlertTriangle, PieChart, BarChart3 } from "lucide-react";
+import Link from "next/link";
+import { UserPlus, Wallet, Clock, AlertTriangle, PieChart, BarChart3, ExternalLink } from "lucide-react";
 import { useIndicadoresLookups } from "@/lib/hooks/useIndicadoresLookups";
 import { useCanalPropioVendedores, TipoCanalVendedor } from "@/lib/hooks/useCanalPropioVendedores";
 import { useLiveOpportunities } from "@/lib/hooks/useLiveOpportunities";
@@ -240,6 +241,27 @@ export function Page6Prospectos() {
             return { ...prev, asesorIds: isOnlySelected ? [] : [asesorId] };
         });
     };
+
+    // --- Detail: listado de prospectos individuales -------------------------
+    // Refleja scopedOpportunities tal cual, así que ya respeta el cross-filter
+    // de asesor (clic en la tabla "Prospectos por asesor") y de canal (clic en
+    // el donut) sin lógica adicional. Ordenado por antigüedad descendente para
+    // resaltar primero los más estancados.
+    const prospectDetailRows = useMemo(() => {
+        return scopedOpportunities
+            .map(o => {
+                const acc = o.account_id ? accountsMap.get(o.account_id) : undefined;
+                return {
+                    id: o.id,
+                    nombre: o.nombre?.trim() || "Sin nombre",
+                    cuenta: acc?.nombre || "Sin cuenta",
+                    asesor: o.owner_user_id ? userNameMap.get(o.owner_user_id) || "Sin asesor" : "Sin asesor",
+                    amount: Number(o.amount ?? 0),
+                    dias: ageInDays(o.created_at),
+                };
+            })
+            .sort((a, b) => (b.dias ?? 0) - (a.dias ?? 0));
+    }, [scopedOpportunities, accountsMap, userNameMap]);
 
     // --- Donut: prospectos por canal ----------------------------------------
     const canalDonutOption = useMemo(() => {
@@ -532,7 +554,7 @@ export function Page6Prospectos() {
                 </div>
 
                 {/* Donut: por canal */}
-                <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200/60 shadow-sm p-5 flex flex-col">
+                <div className="lg:col-span-1 bg-white rounded-2xl border border-slate-200/60 shadow-sm p-5 flex flex-col">
                     <div className="flex items-center gap-2 mb-1">
                         <PieChart className="w-4 h-4 text-[#254153]" />
                         <h3 className="font-bold text-slate-800 text-sm">Prospectos por canal</h3>
@@ -550,6 +572,54 @@ export function Page6Prospectos() {
                                 onEvents={{ click: handleDonutClick }}
                             />
                         )}
+                    </div>
+                </div>
+
+                {/* Listado de prospectos individuales */}
+                <div className="lg:col-span-1 bg-white rounded-2xl border border-slate-200/60 shadow-sm p-5 flex flex-col">
+                    <h3 className="font-bold text-slate-800 text-sm mb-1">Listado de prospectos</h3>
+                    <p className="text-[11px] text-slate-400 mb-2">Clic en un asesor o canal para filtrar esta lista.</p>
+                    <div className="max-h-[340px] overflow-y-auto border border-slate-100 rounded-xl">
+                        <table className="w-full text-sm">
+                            <thead className="sticky top-0 bg-slate-50 z-10">
+                                <tr className="text-left text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                                    <th className="px-3 py-2">Oportunidad</th>
+                                    <th className="px-3 py-2">Asesor</th>
+                                    <th className="px-3 py-2 text-right">Días</th>
+                                    <th className="px-3 py-2"></th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-50">
+                                {prospectDetailRows.map(row => (
+                                    <tr key={row.id} className="hover:bg-slate-50/60 transition-colors">
+                                        <td className="px-3 py-2">
+                                            <p className="text-slate-800 font-medium truncate max-w-[160px]">{row.nombre}</p>
+                                            <p className="text-slate-400 text-xs truncate max-w-[160px]">{row.cuenta}</p>
+                                        </td>
+                                        <td className="px-3 py-2 text-slate-600">{row.asesor}</td>
+                                        <td className={`px-3 py-2 text-right tabular-nums ${(row.dias ?? 0) > STALE_THRESHOLD_DAYS ? "text-red-600 font-semibold" : "text-slate-700"}`}>
+                                            {row.dias ?? "-"}
+                                        </td>
+                                        <td className="px-3 py-2 text-right">
+                                            <Link
+                                                href={`/oportunidades/${row.id}`}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                title="Abrir esta oportunidad"
+                                                className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-slate-400 hover:text-[#254153] hover:bg-slate-100 transition-colors"
+                                            >
+                                                <ExternalLink className="w-4 h-4" />
+                                            </Link>
+                                        </td>
+                                    </tr>
+                                ))}
+                                {prospectDetailRows.length === 0 && (
+                                    <tr>
+                                        <td colSpan={4} className="px-3 py-8 text-center text-slate-400">Sin datos para estos filtros.</td>
+                                    </tr>
+                                )}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
