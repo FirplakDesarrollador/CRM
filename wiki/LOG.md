@@ -14,6 +14,29 @@
   - 19/19 pruebas verificadas en GREEN en `tests/crm-mcp.test.ts`.
 - **Páginas actualizadas:** `wiki/pages/servidor-mcp.md`, `wiki/LOG.md`.
 
+## 2026-10-27 - Ajuste: controles de vista de Actividades movidos al encabezado
+
+- **Pedido de Esteban:** ubicar arriba también los controles de la tarjeta "Vista Agenda".
+- **`app/actividades/page.tsx`:** pestañas Todo/Agenda/Mes, navegador de fecha (solo Agenda y Mes), toggle "Hasta la fecha / Solo este día" (solo Agenda), insignia "Rango activo" y "Omitir terminadas" pasan a una fila `activities-view-controls` en el encabezado, encima de la barra de filtros. Se eliminó la fila de título "Vista Agenda"; "Total de registros" queda junto a la lista. Comportamiento sin cambios.
+- **Pruebas:** `tests/activitiesInlineFilters.test.ts`.
+
+## 2026-10-27 - Ajuste: filtros de Actividades siempre visibles + rango Desde/Hasta (rama `cambio-que-pidio-daniela`)
+
+- **Pedido de Esteban:** todos los filtros arriba, visibles; el filtro Desde–Hasta no se veía.
+- **`app/actividades/page.tsx`:** se eliminó el botón/panel "Filtros"; canal, estado, tipo/clasificación/subclasificación, orden y el rango **Desde / Hasta** quedan en una barra inline (con wrap en pantallas pequeñas) bajo el título, junto a búsqueda, usuario y Atrasadas. Se mantiene el botón limpiar filtros.
+- **Rango Desde/Hasta (sin gate B2C, visible para todos):** funciona en Todo, Agenda y Mes. En Agenda reemplaza el navegador de fecha única y el toggle "Hasta la fecha / Solo este día" (se muestra "Rango activo: … – …" con botón para quitarlo); al limpiarlo vuelve el comportamiento anterior. En Mes, al elegir fecha se salta al mes del rango.
+- **Pruebas:** `tests/activitiesInlineFilters.test.ts`.
+
+## 2026-10-27 - Feature: Funcionalidades CRM B2C (rama `cambio-que-pidio-daniela`)
+
+- **Seguimiento tras completar actividad** (`components/activities/ActivityFollowUp.tsx`): al completar una actividad se ofrece programar un seguimiento con cuenta/oportunidad prellenadas (solo usuarios con canal `PROPIO`/ADMIN o actividades de cuentas `PROPIO`). En el detalle de la oportunidad también ofrece "Ver actividad".
+- **Búsqueda por celular** (`lib/utils.ts`: `isPhoneLikeQuery`, `getPhoneIlikePatterns`, `matchesSearchTokens`): cuentas, contactos, oportunidades (teléfono de cuenta y contactos) y actividades.
+- **Contacto → oportunidades** (`components/contactos/ContactOpportunities.tsx`, lista y detalle de contactos): ver oportunidades de la cuenta del contacto o crear una con `?account_id=&contact_id=` prellenados (`CreateOpportunityWizard`).
+- **Actividades:** filtro de fecha Desde–Hasta efectivo también en la vista agenda, con etiquetas y botón limpiar.
+- **Setter:** opciones compartidas en `lib/opportunitySetter.ts`; selector también en el asistente de creación de oportunidades.
+- **Clasificaciones SETTER / Cliente frecuente** (`lib/b2c.ts`): visibles solo para usuarios B2C. Requiere migración `20261027100000_add_setter_cliente_frecuente_activity_classifications.sql` (NO aplicada).
+- **Pruebas:** `tests/b2cCrmFeatures.test.ts`.
+
 ## 2026-10-23 - Feature: Columna Categoría de Interés en Lista Principal de Oportunidades
 
 - **Requerimiento:** Agregar la columna **Categoría de Interés** a la tabla interactiva de oportunidades (`/oportunidades`).

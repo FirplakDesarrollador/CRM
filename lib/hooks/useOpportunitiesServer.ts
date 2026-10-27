@@ -4,7 +4,7 @@ import { syncEngine } from '@/lib/sync';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { db } from '@/lib/db';
 import { useSyncStore } from '@/lib/stores/useSyncStore';
-import { matchesSearchTokens, getSearchTokens } from '@/lib/utils';
+import { matchesSearchTokens, getSearchTokens, getPhoneIlikePatterns, isPhoneLikeQuery } from '@/lib/utils';
 import { computeOpportunityActivitySummary, OpportunityActivitySummary } from '@/lib/opportunityActivities';
 import { PROSPECTO_PHASE_ID, getEquivalentPhaseIds, PhaseCatalogItem, calculateTotalAmount, computeProgressiveBatch, DEFAULT_OPPORTUNITIES_PAGE_SIZE } from '@/lib/opportunityColumnFilterHelpers';
 import { toStartOfDayISO, toEndOfDayISO } from '@/lib/dateFilterHelpers';
@@ -219,12 +219,25 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
             }
 
             if (searchTerm && searchTerm.trim()) {
+                // Búsqueda por celular/teléfono: el de la cuenta o el de cualquiera de sus contactos
+                const contactPhonesByAccount = new Map<string, string[]>();
+                if (isPhoneLikeQuery(searchTerm)) {
+                    const allContacts = await db.contacts.toArray();
+                    for (const c of allContacts) {
+                        if (c.is_deleted || !c.telefono) continue;
+                        const list = contactPhonesByAccount.get(c.account_id) || [];
+                        list.push(c.telefono);
+                        contactPhonesByAccount.set(c.account_id, list);
+                    }
+                }
                 localOpps = localOpps.filter(o =>
                     matchesSearchTokens([
                         o.nombre,
                         accMap.get(o.account_id)?.nombre,
                         userMap.get(o.owner_user_id || '')?.full_name,
-                        o.origen_oportunidad
+                        o.origen_oportunidad,
+                        accMap.get(o.account_id)?.telefono,
+                        ...(contactPhonesByAccount.get(o.account_id) || [])
                     ], searchTerm)
                 );
             }
@@ -438,8 +451,23 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
 
             let searchAccountIds: string[] = [];
             let searchUserIds: string[] = [];
+            // Cuando la búsqueda completa es un celular/teléfono: cuentas cuyo teléfono (o el de alguno de sus contactos) coincide
+            const searchIsPhone = isPhoneLikeQuery(searchTerm);
+            const phoneAccountIds = new Set<string>();
 
-            if (searchTerm && searchTerm.trim()) {
+            if (searchIsPhone) {
+                const phoneOr = getPhoneIlikePatterns(searchTerm).map(pattern => `telefono.ilike.${pattern}`).join(',');
+                const [phoneAccRes, phoneContactRes] = await Promise.all([
+                    supabase.from('CRM_Cuentas').select('id').eq('is_deleted', false).or(phoneOr).limit(100),
+                    supabase.from('CRM_Contactos').select('account_id').eq('is_deleted', false).or(phoneOr).limit(100)
+                ]);
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                (phoneAccRes.data || []).forEach((a: any) => a.id && phoneAccountIds.add(a.id));
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                (phoneContactRes.data || []).forEach((c: any) => c.account_id && phoneAccountIds.add(c.account_id));
+            }
+
+            if (searchTerm && searchTerm.trim() && !searchIsPhone) {
                 const tokens = getSearchTokens(searchTerm);
                 let accQuery = supabase.from('CRM_Cuentas').select('id').eq('is_deleted', false);
                 let userQuery = supabase.from('CRM_Usuarios').select('id');
@@ -472,7 +500,13 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
             const applyCommonFilters = (targetQuery: any) => {
                 let q = targetQuery.eq('is_deleted', false);
 
-                if (searchTerm && searchTerm.trim()) {
+                if (searchTerm && searchTerm.trim() && searchIsPhone) {
+                    const phoneConditions = [`nombre.ilike.${getPhoneIlikePatterns(searchTerm)[0]}`];
+                    if (phoneAccountIds.size > 0) {
+                        phoneConditions.push(`account_id.in.(${Array.from(phoneAccountIds).join(',')})`);
+                    }
+                    q = q.or(phoneConditions.join(','));
+                } else if (searchTerm && searchTerm.trim()) {
                     const tokens = getSearchTokens(searchTerm);
                     for (const token of tokens) {
                         const orConditions = [`nombre.ilike.%${token}%`];
@@ -708,6 +742,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
             }));
             if (searchTerm && searchTerm.trim()) {
                 combinedResults = combinedResults.filter(o =>
+                    (searchIsPhone && phoneAccountIds.has(o.account_id)) ||
                     matchesSearchTokens([
                         o.nombre,
                         o.account?.nombre,

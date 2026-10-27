@@ -943,7 +943,7 @@ function OpportunitiesContent() {
                         <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
                         <input
                             type="text"
-                            placeholder="Buscar oportunidades..."
+                            placeholder="Buscar oportunidades, cliente o celular..."
                             className="w-full pl-10 pr-9 py-2.5 sm:py-2 bg-slate-50 hover:bg-slate-100 focus:bg-white border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400 placeholder:font-normal"
                             value={inputValue}
                             onChange={(e) => setInputValue(e.target.value)}

@@ -4,7 +4,7 @@ import { syncEngine } from '@/lib/sync';
 import { db } from '@/lib/db';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useSyncStore } from '@/lib/stores/useSyncStore';
-import { matchesSearchTokens, getSearchTokens } from '@/lib/utils';
+import { matchesSearchTokens, getSearchTokens, getPhoneIlikePatterns } from '@/lib/utils';
 
 export type AccountServer = {
     id: string;
@@ -318,7 +318,9 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                 const tokens = getSearchTokens(searchTerm);
                 const orParts = tokens.flatMap(token => [
                     `nombre.ilike.%${token}%`,
-                    `nit_base.ilike.%${token}%`
+                    `nit_base.ilike.%${token}%`,
+                    `telefono.ilike.%${token}%`,
+                    ...getPhoneIlikePatterns(token).map(pattern => `telefono.ilike.${pattern}`)
                 ]);
                 query = query.or(orParts.join(','));
             }

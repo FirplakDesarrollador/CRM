@@ -62,8 +62,42 @@ export function includesNormalized(text: string | null | undefined, searchQuery:
 }
 
 /**
+ * Deja solo los dígitos de un texto (útil para comparar teléfonos con distintos formatos:
+ * "+57 300 123 4567", "(300) 123-4567", "3001234567").
+ */
+export function digitsOnly(text: string | null | undefined): string {
+    if (!text) return "";
+    return String(text).replace(/\D/g, "");
+}
+
+/**
+ * Indica si un término de búsqueda parece un número de teléfono/celular:
+ * solo dígitos y separadores comunes (+ - ( ) . espacio) con al menos `minDigits` dígitos.
+ */
+export function isPhoneLikeQuery(query: string | null | undefined, minDigits: number = 4): boolean {
+    if (!query) return false;
+    const trimmed = query.trim();
+    if (!trimmed || !/^[+(\d][\d\s().+-]*$/.test(trimmed)) return false;
+    return digitsOnly(trimmed).length >= minDigits;
+}
+
+/**
+ * Patrones `ilike` (PostgREST/Postgres) para buscar un teléfono en una columna de texto sin importar
+ * el formato guardado. Para números largos permite separadores intermedios ("300 123 4567").
+ */
+export function getPhoneIlikePatterns(query: string | null | undefined): string[] {
+    if (!isPhoneLikeQuery(query)) return [];
+    const digits = digitsOnly(query);
+    const patterns = new Set<string>([`%${digits}%`]);
+    if (digits.length >= 7) patterns.add(`%${digits.split("").join("%")}%`);
+    return Array.from(patterns);
+}
+
+/**
  * Verifica si `text` o una lista de `texts` contiene todas las palabras de `searchQuery` en cualquier orden, ignorando tildes y mayúsculas.
  * Si no hay término de búsqueda o está vacío, retorna true.
+ * Las palabras numéricas (ej. un celular) también se comparan contra los dígitos del texto, de modo que
+ * "3001234567" encuentra "+57 300 123 4567".
  */
 export function matchesSearchTokens(
     textOrTexts: string | null | undefined | (string | null | undefined)[],
@@ -81,8 +115,16 @@ export function matchesSearchTokens(
 
     if (!combinedText) return false;
     const normalizedText = removeAccents(combinedText);
+    // Lazily computed: only needed when a token is a number such as a phone.
+    let textDigits: string | null = null;
 
-    return tokens.every(token => normalizedText.includes(token));
+    return tokens.every(token => {
+        if (normalizedText.includes(token)) return true;
+        const tokenDigits = digitsOnly(token);
+        if (tokenDigits.length >= 4 && isPhoneLikeQuery(token)) {
+            if (textDigits === null) textDigits = digitsOnly(combinedText);
+            return textDigits.includes(tokenDigits);
+        }
+        return false;
+    });
 }
-
-

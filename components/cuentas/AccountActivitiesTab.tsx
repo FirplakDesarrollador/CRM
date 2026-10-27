@@ -4,6 +4,7 @@ import { useActivitiesServer } from "@/lib/hooks/useActivitiesServer";
 import { useActivities } from "@/lib/hooks/useActivities";
 import { useState } from "react";
 import { CreateActivityModal } from "@/components/activities/CreateActivityModal";
+import { useActivityFollowUp } from "@/components/activities/ActivityFollowUp";
 import { 
     Calendar as CalendarIcon, 
     ListTodo, 
@@ -29,6 +30,21 @@ export default function AccountActivitiesTab({ accountId }: { accountId: string 
     const { toggleComplete, createActivity, updateActivity } = useActivities();
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [selectedActivity, setSelectedActivity] = useState<any>(null);
+    const { requestFollowUp, resetFollowUp, followUpElement } = useActivityFollowUp({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        createActivity: async (data: any) => {
+            await createActivity(data);
+            refresh();
+        }
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handleToggleComplete = async (act: any) => {
+        const willComplete = !act.is_completed;
+        await toggleComplete(act.id, willComplete);
+        if (willComplete) requestFollowUp({ ...act, opportunity_id: act.opportunity_id, account_id: act.account_id || accountId });
+        else resetFollowUp(act.id);
+        refresh();
+    };
 
     if (loading && activities.length === 0) {
         return <div className="p-4 text-center text-slate-400 font-medium">Cargando actividades...</div>;
@@ -81,7 +97,7 @@ export default function AccountActivitiesTab({ accountId }: { accountId: string 
                                     onClick={(e) => {
                                         e.preventDefault();
                                         e.stopPropagation();
-                                        toggleComplete(act.id, !act.is_completed);
+                                        handleToggleComplete(act);
                                     }}
                                     className="mt-0.5 transition-colors shrink-0"
                                 >
@@ -172,6 +188,9 @@ export default function AccountActivitiesTab({ accountId }: { accountId: string 
                     onSubmit={async (data: any) => {
                         if (selectedActivity) {
                             await updateActivity(selectedActivity.id, data);
+                            if (data?.is_completed === true && !selectedActivity.is_completed) {
+                                requestFollowUp({ ...selectedActivity, account_id: selectedActivity.account_id || accountId });
+                            }
                         } else {
                             await createActivity(data);
                         }
@@ -179,8 +198,11 @@ export default function AccountActivitiesTab({ accountId }: { accountId: string 
                         setSelectedActivity(null);
                         refresh();
                     }}
+                    onActivityCompleted={(act) => requestFollowUp({ ...act, account_id: act.account_id || accountId })}
                 />
             )}
+
+            {followUpElement}
         </div>
     );
 }
