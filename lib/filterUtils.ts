@@ -29,7 +29,7 @@ export interface FilterOpportunitiesOptions {
     wonPhaseIds?: number[];
     lostPhaseIds?: number[];
     closedPhaseIds?: number[];
-    accountsMap?: Map<string, { canal_id?: string | null; subclasificacion_id?: number | null; nombre?: string | null }>;
+    accountsMap?: Map<string, { canal_id?: string | null; subclasificacion_id?: number | null; nombre?: string | null; telefono?: string | null }>;
 }
 
 export function filterOpportunities<T extends {
@@ -47,7 +47,7 @@ export function filterOpportunities<T extends {
     origen_oportunidad?: string | null;
     url_origen?: string | null;
     vendedor?: { full_name?: string | null } | null;
-    account?: { nombre?: string | null; canal_id?: string | null; subclasificacion_id?: number | null } | null;
+    account?: { nombre?: string | null; canal_id?: string | null; subclasificacion_id?: number | null; telefono?: string | null } | null;
 }>(
     opportunities: T[],
     filters: FilterOpportunitiesParams,
@@ -101,7 +101,8 @@ export function filterOpportunities<T extends {
                 o.nombre,
                 acc?.nombre,
                 o.vendedor?.full_name,
-                o.origen_oportunidad
+                o.origen_oportunidad,
+                acc?.telefono
             ], searchTerm);
             if (!match) return false;
         }
