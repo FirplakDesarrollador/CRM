@@ -1341,15 +1341,9 @@ function OpportunitiesContent() {
                                     box-shadow: inset 3px 0 0 0 #3b82f6 !important;
                                 }
 
-                                /* ── Selection ── */
-                                .opp-hot-wrap .handsontable .wtBorder.current {
-                                    background: #3b82f6 !important;
-                                }
-                                .opp-hot-wrap .handsontable td.area {
-                                    background: #eff6ff !important;
-                                }
-                                .opp-hot-wrap .handsontable td.current {
-                                    background: #e0edff !important;
+                                /* ── Selection: sin selector tipo Excel (rango azul, borde y fill handle) ── */
+                                .opp-hot-wrap .handsontable .wtBorder {
+                                    display: none !important;
                                 }
 
                                 /* ── Dropdown Filter Popover ── */
@@ -1459,6 +1453,8 @@ function OpportunitiesContent() {
                                     filters={true}
                                     dropdownMenu={true}
                                     manualColumnResize={true}
+                                    disableVisualSelection={true}
+                                    fillHandle={false}
                                     afterColumnResize={(width: number, col: number) => handleColumnResize(width, col)}
                                     afterScrollVertically={triggerLoadMore}
                                     beforeDropdownMenuShow={(instance: any) => {
