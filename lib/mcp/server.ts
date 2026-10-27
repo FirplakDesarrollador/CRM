@@ -90,6 +90,8 @@ export function createCrmMcpServer(context: McpSessionContext): CrmMcpInstance {
         query: z.string().optional().describe('Texto de búsqueda en nombre de la oportunidad'),
         canal_id: z.string().optional().describe('Filtro por canal comercial (OBRAS_NAC, DIST_NAC, PROPIO, etc.)'),
         fase_id: z.number().optional().describe('Filtro por ID de fase comercial'),
+        estado_id: z.number().optional().describe('Filtro por ID de estado (1=Abierta, 2=Ganada, 3=Perdida, etc.)'),
+        ordenar_por: z.enum(['valor_desc', 'valor_asc', 'recientes', 'antiguos']).optional().describe('Criterio de ordenamiento (ej. valor_desc para mayores oportunidades)'),
         limit: z.number().min(1).max(30).optional().describe('Límite de registros (máx 30, default 10)'),
         offset: z.number().min(0).optional().describe('Desplazamiento para paginación'),
         incluir_archivadas: z.boolean().optional().describe('Incluir oportunidades en papelera o soft-deleted'),
