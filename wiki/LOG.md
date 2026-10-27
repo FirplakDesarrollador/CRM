@@ -3,6 +3,13 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-10-27 - Ajuste: filtros de Actividades siempre visibles + rango Desde/Hasta (rama `cambio-que-pidio-daniela`)
+
+- **Pedido de Esteban:** todos los filtros arriba, visibles; el filtro Desde–Hasta no se veía.
+- **`app/actividades/page.tsx`:** se eliminó el botón/panel "Filtros"; canal, estado, tipo/clasificación/subclasificación, orden y el rango **Desde / Hasta** quedan en una barra inline (con wrap en pantallas pequeñas) bajo el título, junto a búsqueda, usuario y Atrasadas. Se mantiene el botón limpiar filtros.
+- **Rango Desde/Hasta (sin gate B2C, visible para todos):** funciona en Todo, Agenda y Mes. En Agenda reemplaza el navegador de fecha única y el toggle "Hasta la fecha / Solo este día" (se muestra "Rango activo: … – …" con botón para quitarlo); al limpiarlo vuelve el comportamiento anterior. En Mes, al elegir fecha se salta al mes del rango.
+- **Pruebas:** `tests/activitiesInlineFilters.test.ts`.
+
 ## 2026-10-27 - Feature: Funcionalidades CRM B2C (rama `cambio-que-pidio-daniela`)
 
 - **Seguimiento tras completar actividad** (`components/activities/ActivityFollowUp.tsx`): al completar una actividad se ofrece programar un seguimiento con cuenta/oportunidad prellenadas (solo usuarios con canal `PROPIO`/ADMIN o actividades de cuentas `PROPIO`). En el detalle de la oportunidad también ofrece "Ver actividad".
