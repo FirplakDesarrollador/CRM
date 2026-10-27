@@ -4,7 +4,7 @@ import { useOpportunities, useQuotes, useQuoteItems } from "@/lib/hooks/useOppor
 import { DetailHeader } from "@/components/ui/DetailHeader";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { FileText, Plus, AlertCircle, Check, Trash2, Loader2, Truck, Package, Building, ChevronRight, ChevronDown, TrendingUp, User, Users, Copy, Tag } from "lucide-react";
+import { FileText, Plus, AlertCircle, Check, Trash2, Loader2, Truck, Package, Building, ChevronRight, ChevronDown, TrendingUp, User, Users, Copy, Tag, MessageSquare } from "lucide-react";
 import Link from "next/link";
 import { cn, formatNumberCO, formatOpportunityAmount } from "@/lib/utils";
 import { db, LocalCuenta } from "@/lib/db";
@@ -1100,9 +1100,144 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                 </div>
                             </div>
                         </div>
+                    </div>
+                </div>
+
+                {/* Right Column: Account Card + Comentarios/Pérdida Card + Setter Card */}
+                <div className="space-y-6 flex flex-col">
+                    {/* Account Card */}
+                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-blue-300 transition-all flex flex-col justify-between h-fit">
+                        <div>
+                            <div className="flex items-center gap-3 mb-4">
+                                <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
+                                    <Building className="w-6 h-6" />
+                                </div>
+                                <div>
+                                    <h3 className="font-bold text-slate-900 text-lg">Información del Cliente</h3>
+                                    <p className="text-xs text-slate-500">Datos principales de la cuenta</p>
+                                </div>
+                            </div>
+
+                            <div className="space-y-3">
+                                <div>
+                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Nombre / Razón Social</label>
+                                    <p className="text-slate-900 font-medium">{effectiveAccount.nombre}</p>
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">NIT</label>
+                                        <p className="text-slate-700">{(effectiveAccount as any).nit_base || effectiveAccount.nit || 'No registrado'}</p>
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Teléfono</label>
+                                        <p className="text-slate-700">{effectiveAccount.telefono || 'No registrado'}</p>
+                                    </div>
+                                </div>
+                                {effectiveAccount.direccion && (
+                                    <div>
+                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Dirección</label>
+                                        <p className="text-slate-700">{effectiveAccount.direccion} {effectiveAccount.ciudad && `• ${effectiveAccount.ciudad}`}</p>
+                                    </div>
+                                )}
+
+                                {/* Contactos Vinculados */}
+                                <div className="pt-3 border-t border-slate-100">
+                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                                        Contactos Vinculados ({localContactosIds.length})
+                                    </label>
+                                    {contactOptions.length > 0 ? (
+                                        <div className="relative">
+                                            <MultiSelect
+                                                options={contactOptions}
+                                                selected={localContactosIds}
+                                                onChange={async (vals) => {
+                                                    setLocalContactosIds(vals);
+                                                    setIsSavingContactos(true);
+                                                    try {
+                                                        const autoCount = vals.length;
+                                                        setLocalClientesAtendidos(autoCount);
+                                                        await updateOpportunity(opportunity.id, {
+                                                            contactos_ids: vals,
+                                                            clientes_atendidos: autoCount
+                                                        });
+                                                    } finally {
+                                                        setIsSavingContactos(false);
+                                                    }
+                                                }}
+                                                placeholder="Seleccionar contactos..."
+                                                className="bg-slate-50 border-slate-200 text-sm"
+                                            />
+                                            {isSavingContactos && (
+                                                <div className="absolute right-8 top-1/2 -translate-y-1/2">
+                                                    <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                                </div>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <p className="text-xs text-slate-500 italic">No hay contactos registrados para esta cuenta.</p>
+                                    )}
+                                </div>
+
+                                {/* Clientes Atendidos */}
+                                <div className="pt-3 border-t border-slate-100">
+                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                                        Clientes Atendidos
+                                    </label>
+                                    <div className="relative group flex items-center gap-2">
+                                        <input
+                                            type="number"
+                                            min="0"
+                                            value={localClientesAtendidos}
+                                            onChange={(e) => setLocalClientesAtendidos(Number(e.target.value))}
+                                            onBlur={async () => {
+                                                if (Number(localClientesAtendidos) !== Number(opportunity.clientes_atendidos)) {
+                                                    setIsSavingClientesAtendidos(true);
+                                                    try {
+                                                        await updateOpportunity(opportunity.id, {
+                                                            clientes_atendidos: Number(localClientesAtendidos)
+                                                        });
+                                                    } finally {
+                                                        setIsSavingClientesAtendidos(false);
+                                                    }
+                                                }
+                                            }}
+                                            className="w-28 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-bold text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none"
+                                            placeholder="0"
+                                        />
+                                        <span className="text-xs text-slate-500">
+                                            personas atendidas
+                                        </span>
+                                        {isSavingClientesAtendidos && (
+                                            <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <button
+                            type="button"
+                            onClick={() => setIsAccountModalOpen(true)}
+                            className="mt-6 w-full py-2.5 bg-slate-50 hover:bg-blue-50 text-blue-600 hover:text-blue-700 text-sm font-bold rounded-xl border border-slate-200 hover:border-blue-200 text-center transition-all flex items-center justify-center gap-2 shadow-sm active:scale-[0.99]"
+                        >
+                            Ver detalles en Cuentas <ChevronRight className="w-4 h-4" />
+                        </button>
+                    </div>
+
+                    {/* Comentarios y Pérdida Card */}
+                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-blue-300 transition-all space-y-4" data-testid="comentarios-card">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 bg-amber-50 text-amber-600 rounded-lg">
+                                <MessageSquare className="w-6 h-6" />
+                            </div>
+                            <div>
+                                <h3 className="font-bold text-slate-900 text-lg">Comentarios</h3>
+                                <p className="text-xs text-slate-500">Notas generales y razón de pérdida</p>
+                            </div>
+                        </div>
 
                         {/* Comentarios Section */}
-                        <div className="pt-4 border-t border-slate-100">
+                        <div>
                             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Comentarios</label>
                             <div className="relative group">
                                 <textarea
@@ -1233,128 +1368,6 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                 </p>
                             )}
                         </div>
-                    </div>
-                </div>
-
-                {/* Right Column: Account Card + Setter Card */}
-                <div className="space-y-6 flex flex-col">
-                    {/* Account Card */}
-                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-blue-300 transition-all flex flex-col justify-between h-fit">
-                        <div>
-                            <div className="flex items-center gap-3 mb-4">
-                                <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
-                                    <Building className="w-6 h-6" />
-                                </div>
-                                <div>
-                                    <h3 className="font-bold text-slate-900 text-lg">Información del Cliente</h3>
-                                    <p className="text-xs text-slate-500">Datos principales de la cuenta</p>
-                                </div>
-                            </div>
-
-                            <div className="space-y-3">
-                                <div>
-                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Nombre / Razón Social</label>
-                                    <p className="text-slate-900 font-medium">{effectiveAccount.nombre}</p>
-                                </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">NIT</label>
-                                        <p className="text-slate-700">{(effectiveAccount as any).nit_base || effectiveAccount.nit || 'No registrado'}</p>
-                                    </div>
-                                    <div>
-                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Teléfono</label>
-                                        <p className="text-slate-700">{effectiveAccount.telefono || 'No registrado'}</p>
-                                    </div>
-                                </div>
-                                {effectiveAccount.direccion && (
-                                    <div>
-                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Dirección</label>
-                                        <p className="text-slate-700">{effectiveAccount.direccion} {effectiveAccount.ciudad && `• ${effectiveAccount.ciudad}`}</p>
-                                    </div>
-                                )}
-
-                                {/* Contactos Vinculados */}
-                                <div className="pt-3 border-t border-slate-100">
-                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                                        Contactos Vinculados ({localContactosIds.length})
-                                    </label>
-                                    {contactOptions.length > 0 ? (
-                                        <div className="relative">
-                                            <MultiSelect
-                                                options={contactOptions}
-                                                selected={localContactosIds}
-                                                onChange={async (vals) => {
-                                                    setLocalContactosIds(vals);
-                                                    setIsSavingContactos(true);
-                                                    try {
-                                                        const autoCount = vals.length;
-                                                        setLocalClientesAtendidos(autoCount);
-                                                        await updateOpportunity(opportunity.id, {
-                                                            contactos_ids: vals,
-                                                            clientes_atendidos: autoCount
-                                                        });
-                                                    } finally {
-                                                        setIsSavingContactos(false);
-                                                    }
-                                                }}
-                                                placeholder="Seleccionar contactos..."
-                                                className="bg-slate-50 border-slate-200 text-sm"
-                                            />
-                                            {isSavingContactos && (
-                                                <div className="absolute right-8 top-1/2 -translate-y-1/2">
-                                                    <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
-                                                </div>
-                                            )}
-                                        </div>
-                                    ) : (
-                                        <p className="text-xs text-slate-500 italic">No hay contactos registrados para esta cuenta.</p>
-                                    )}
-                                </div>
-
-                                {/* Clientes Atendidos */}
-                                <div className="pt-3 border-t border-slate-100">
-                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                                        Clientes Atendidos
-                                    </label>
-                                    <div className="relative group flex items-center gap-2">
-                                        <input
-                                            type="number"
-                                            min="0"
-                                            value={localClientesAtendidos}
-                                            onChange={(e) => setLocalClientesAtendidos(Number(e.target.value))}
-                                            onBlur={async () => {
-                                                if (Number(localClientesAtendidos) !== Number(opportunity.clientes_atendidos)) {
-                                                    setIsSavingClientesAtendidos(true);
-                                                    try {
-                                                        await updateOpportunity(opportunity.id, {
-                                                            clientes_atendidos: Number(localClientesAtendidos)
-                                                        });
-                                                    } finally {
-                                                        setIsSavingClientesAtendidos(false);
-                                                    }
-                                                }
-                                            }}
-                                            className="w-28 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-bold text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none"
-                                            placeholder="0"
-                                        />
-                                        <span className="text-xs text-slate-500">
-                                            personas atendidas
-                                        </span>
-                                        {isSavingClientesAtendidos && (
-                                            <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <button
-                            type="button"
-                            onClick={() => setIsAccountModalOpen(true)}
-                            className="mt-6 w-full py-2.5 bg-slate-50 hover:bg-blue-50 text-blue-600 hover:text-blue-700 text-sm font-bold rounded-xl border border-slate-200 hover:border-blue-200 text-center transition-all flex items-center justify-center gap-2 shadow-sm active:scale-[0.99]"
-                        >
-                            Ver detalles en Cuentas <ChevronRight className="w-4 h-4" />
-                        </button>
                     </div>
 
                     {/* Setter Card */}

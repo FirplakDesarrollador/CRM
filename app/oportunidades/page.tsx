@@ -15,7 +15,8 @@ import { FloatingColumnFilterPopover, FloatingColumnFilterAnchor } from "@/compo
 import { isColumnFilterActive, formatColumnHeaderTitle } from "@/lib/opportunityColumnFilterHelpers";
 import { parseHandsontableDate } from "@/lib/dateFilterHelpers";
 import { computeOpportunityActivitySummary } from "@/lib/opportunityActivities";
-import { buildOpportunityHotRow, resolveHotRowData, OPPORTUNITY_TABLE_COLUMN_KEYS } from "@/lib/opportunityTableHelpers";
+import { isNewTabClick, openLinkInBackgroundTab, wrapCellInRowLink } from "@/lib/rowLinks";
+import { buildOpportunityHotRow, resolveHotRowData, type HotInstanceLike, OPPORTUNITY_TABLE_COLUMN_KEYS } from "@/lib/opportunityTableHelpers";
 import { supabase } from "@/lib/supabase";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/db";
@@ -617,8 +618,8 @@ function OpportunitiesContent() {
                 const inst = instance as { toPhysicalRow?: (r: number) => number; getSourceDataAtRow?: (r: number) => { id?: string; account_id?: string } } | null | undefined;
                 const physicalRow = inst && typeof inst.toPhysicalRow === 'function' ? inst.toPhysicalRow(row) : row;
                 const rowData = inst && typeof inst.getSourceDataAtRow === 'function' ? inst.getSourceDataAtRow(physicalRow) : undefined;
-                const url = rowData?.account_id ? `/cuentas?id=${rowData.account_id}` : (rowData?.id ? `/oportunidades/${rowData.id}` : '#');
-                td.innerHTML = `<a href="${url}" onclick="if (!event.ctrlKey && !event.metaKey && event.button === 0) { event.preventDefault(); }" style="font-weight:600;color:#0f172a;text-decoration:none;display:block;width:100%;height:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</a>`;
+                const url = rowData?.id ? `/oportunidades/${rowData.id}` : '#';
+                td.innerHTML = `<a href="${url}" onclick="event.preventDefault();" style="font-weight:600;color:#0f172a;text-decoration:none;display:block;width:100%;height:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</a>`;
                 td.style.overflow = 'hidden';
                 return td;
             }
@@ -663,7 +664,7 @@ function OpportunitiesContent() {
                 const rowData = inst && typeof inst.getSourceDataAtRow === 'function' ? inst.getSourceDataAtRow(physicalRow) : undefined;
                 const oppId = rowData?.id;
                 const url = oppId ? `/oportunidades/${oppId}` : '#';
-                td.innerHTML = `<a href="${url}" onclick="if (!event.ctrlKey && !event.metaKey && event.button === 0) { event.preventDefault(); }" style="font-weight:600;color:#0f172a;text-decoration:none;display:block;width:100%;height:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</a>`;
+                td.innerHTML = `<a href="${url}" onclick="event.preventDefault();" style="font-weight:600;color:#0f172a;text-decoration:none;display:block;width:100%;height:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</a>`;
                 td.style.overflow = 'hidden';
                 return td;
             }
@@ -821,12 +822,33 @@ function OpportunitiesContent() {
         },
     };
 
+    // Convierte cada celda en un enlace real a la oportunidad (las columnas "nombre" y
+    // "cuenta" ya lo son), para que clic central / Ctrl+clic / clic derecho abran
+    // una pestaña nueva de forma nativa.
+    const withOpportunityRowLink = <T extends { data: string; renderer?: unknown }>(def: T): T => {
+        if (def.data === 'nombre' || def.data === 'cuenta' || typeof def.renderer !== 'function') return def;
+        const baseRenderer = def.renderer as (...args: unknown[]) => unknown;
+        return {
+            ...def,
+            renderer(instance: HotInstanceLike | null | undefined, td: HTMLTableCellElement, row: number, ...rest: unknown[]) {
+                const result = baseRenderer(instance, td, row, ...rest);
+                const physicalRow = instance && typeof instance.toPhysicalRow === 'function' ? instance.toPhysicalRow(row) : row;
+                const rowData = instance && typeof instance.getSourceDataAtRow === 'function'
+                    ? (instance.getSourceDataAtRow(physicalRow) as { id?: string } | undefined)
+                    : undefined;
+                if (rowData?.id) wrapCellInRowLink(td, `/oportunidades/${rowData.id}`);
+                return result ?? td;
+            }
+        } as T;
+    };
+
     const hotColumns = [
         // Solo incluir las columnas marcadas como visibles, manteniendo el orden original
         ...OPPORTUNITY_TABLE_COLUMN_KEYS
             .filter(key => visibleColumns.includes(key))
             .map(key => ALL_COLUMN_DEFS[key])
             .filter(Boolean)
+            .map(withOpportunityRowLink)
     ];
 
     const getPhaseBadge = (fase: string) => {
@@ -1319,15 +1341,9 @@ function OpportunitiesContent() {
                                     box-shadow: inset 3px 0 0 0 #3b82f6 !important;
                                 }
 
-                                /* ── Selection ── */
-                                .opp-hot-wrap .handsontable .wtBorder.current {
-                                    background: #3b82f6 !important;
-                                }
-                                .opp-hot-wrap .handsontable td.area {
-                                    background: #eff6ff !important;
-                                }
-                                .opp-hot-wrap .handsontable td.current {
-                                    background: #e0edff !important;
+                                /* ── Selection: sin selector tipo Excel (rango azul, borde y fill handle) ── */
+                                .opp-hot-wrap .handsontable .wtBorder {
+                                    display: none !important;
                                 }
 
                                 /* ── Dropdown Filter Popover ── */
@@ -1437,6 +1453,8 @@ function OpportunitiesContent() {
                                     filters={true}
                                     dropdownMenu={true}
                                     manualColumnResize={true}
+                                    disableVisualSelection={true}
+                                    fillHandle={false}
                                     afterColumnResize={(width: number, col: number) => handleColumnResize(width, col)}
                                     afterScrollVertically={triggerLoadMore}
                                     beforeDropdownMenuShow={(instance: any) => {
@@ -1530,9 +1548,16 @@ function OpportunitiesContent() {
                                                 // Clic derecho: permitir menú contextual nativo
                                                 return;
                                             }
-                                            if (mouseEvent?.button === 1 || mouseEvent?.ctrlKey || mouseEvent?.metaKey) {
+                                            if (isNewTabClick(mouseEvent)) {
+                                                // Clic central / Ctrl / Cmd / Shift: abrir en pestaña nueva sin mover la actual.
+                                                // Clic central sobre un <a>: lo abre el navegador de forma nativa (en segundo plano).
+                                                // Ctrl/Cmd/Shift + clic: la tabla vuelve a renderizar la celda entre mousedown y
+                                                // mouseup y el <a> se reemplaza, así que el navegador pierde el clic; por eso se abre aquí.
+                                                const onLink = (mouseEvent?.target as HTMLElement | null)?.closest?.('a[href]');
+                                                if (onLink && mouseEvent.button === 1) return;
                                                 if (opp && opp.id) {
-                                                    window.open(`/oportunidades/${opp.id}`, '_blank');
+                                                    mouseEvent.preventDefault(); // evita el autoscroll del clic central
+                                                    openLinkInBackgroundTab(`/oportunidades/${opp.id}`);
                                                 }
                                                 return;
                                             }
