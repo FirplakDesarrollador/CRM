@@ -19,7 +19,6 @@ import {
     CheckCircle2,
     Circle,
     Building2,
-    CalendarDays,
     ListTodo,
     Filter,
     Loader2,
@@ -742,7 +741,179 @@ function ActivitiesContent() {
                 </div>
                 </div>
 
-                <div data-testid="activities-filter-bar" className="flex flex-wrap items-center gap-2 pt-4 border-t border-slate-100">
+                <div className="flex flex-col gap-3 pt-4 border-t border-slate-100">
+                    {/* View controls: tabs, date navigator / active range badge, agenda mode, omit completed */}
+                    <div data-testid="activities-view-controls" className="flex flex-wrap items-center gap-3">
+                        <div data-testid="activities-view-tabs" className="flex gap-2 p-1 bg-slate-50 rounded-xl border border-slate-100 shrink-0">
+                            <button
+                                onClick={() => setView('all')}
+                                className={cn(
+                                    "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                                    view === 'all' ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                                )}
+                            >
+                                Todo
+                            </button>
+                            <button
+                                onClick={() => setView('agenda')}
+                                className={cn(
+                                    "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                                    view === 'agenda' ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                                )}
+                            >
+                                Agenda
+                            </button>
+                            <button
+                                onClick={() => setView('month')}
+                                className={cn(
+                                    "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                                    view === 'month' ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                                )}
+                            >
+                                Mes
+                            </button>
+                        </div>
+                            {view !== 'all' && (
+                                <div className="flex flex-wrap items-center gap-3">
+                                    {view === 'agenda' && dateRangeActive && (
+                                        <div
+                                            data-testid="agenda-range-active"
+                                            className="flex items-center gap-2 bg-blue-50 text-blue-700 px-3 py-1.5 rounded-xl border border-blue-200 shadow-sm text-sm font-bold"
+                                            title="El rango Desde/Hasta reemplaza la fecha única y el modo 'Hasta la fecha / Solo este día'"
+                                        >
+                                            <CalendarIcon className="w-4 h-4" />
+                                            <span>
+                                                Rango activo: {filterDateFrom ? formatRangeDate(filterDateFrom) : 'inicio'} – {filterDateTo ? formatRangeDate(filterDateTo) : 'sin límite'}
+                                            </span>
+                                            <button
+                                                type="button"
+                                                onClick={() => { setFilterDateFrom(''); setFilterDateTo(''); }}
+                                                className="p-0.5 rounded hover:bg-blue-100 text-blue-500 hover:text-red-500"
+                                                title="Quitar rango y volver a la fecha única"
+                                                aria-label="Quitar rango de fechas"
+                                            >
+                                                <X className="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
+                                    )}
+                                    {!(view === 'agenda' && dateRangeActive) && (
+                                    <div className="flex items-center gap-4 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-100 shadow-sm">
+                                        <button
+                                            data-testid="activities-page-prev"
+                                            onClick={handlePrev}
+                                            className="p-1 hover:bg-white hover:shadow-sm rounded-lg text-slate-400 hover:text-blue-600 transition-all"
+                                            title="Día anterior"
+                                        >
+                                            <ChevronLeft className="w-5 h-5" />
+                                        </button>
+                                        <div className="relative group flex items-center justify-center min-w-[140px] px-2 py-1 rounded hover:bg-white transition-colors cursor-pointer">
+                                            <span className="text-base font-bold text-slate-900 capitalize text-center group-hover:text-blue-600 transition-colors mr-2">
+                                                {view === 'agenda'
+                                                    ? (agendaDateMode === 'up_to'
+                                                        ? `Hasta: ${selectedDate.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })}`
+                                                        : selectedDate.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' }))
+                                                    : selectedDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })
+                                                }
+                                            </span>
+                                            <CalendarIcon className="w-4 h-4 text-slate-400 group-hover:text-blue-500 transition-colors" />
+                                            <input
+                                                type={view === 'agenda' ? 'date' : 'month'}
+                                                className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                                                onClick={(e) => {
+                                                    try {
+                                                        if ('showPicker' in e.target) {
+                                                            (e.target as HTMLInputElement).showPicker();
+                                                        }
+                                                    } catch {}
+                                                }}
+                                                value={
+                                                    view === 'agenda'
+                                                        ? `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`
+                                                        : `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}`
+                                                }
+                                                onChange={(e) => {
+                                                    if (e.target.value) {
+                                                        const parts = e.target.value.split('-');
+                                                        if (parts.length === 3) {
+                                                            setSelectedDate(new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2])));
+                                                        } else if (parts.length === 2) {
+                                                            setSelectedDate(new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, 1));
+                                                        }
+                                                    }
+                                                }}
+                                            />
+                                        </div>
+                                        <button
+                                            data-testid="activities-page-next"
+                                            onClick={handleNext}
+                                            className="p-1 hover:bg-white hover:shadow-sm rounded-lg text-slate-400 hover:text-blue-600 transition-all"
+                                            title="Día siguiente"
+                                        >
+                                            <ChevronRight className="w-5 h-5" />
+                                        </button>
+                                    </div>
+                                    )}
+
+                                    {view === 'agenda' && !dateRangeActive && (
+                                        <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200 shadow-sm text-xs font-semibold">
+                                            <button
+                                                type="button"
+                                                data-testid="agenda-mode-upto"
+                                                onClick={() => setAgendaDateMode('up_to')}
+                                                className={cn(
+                                                    "px-3 py-1 rounded-lg transition-all",
+                                                    agendaDateMode === 'up_to'
+                                                        ? "bg-white text-blue-600 shadow-sm font-bold"
+                                                        : "text-slate-500 hover:text-slate-800"
+                                                )}
+                                                title="Muestra todas las actividades agendadas hasta esta fecha (incluye pendientes y atrasadas anteriores)"
+                                            >
+                                                Hasta la fecha
+                                            </button>
+                                            <button
+                                                type="button"
+                                                data-testid="agenda-mode-exact"
+                                                onClick={() => setAgendaDateMode('exact')}
+                                                className={cn(
+                                                    "px-3 py-1 rounded-lg transition-all",
+                                                    agendaDateMode === 'exact'
+                                                        ? "bg-white text-blue-600 shadow-sm font-bold"
+                                                        : "text-slate-500 hover:text-slate-800"
+                                                )}
+                                                title="Muestra únicamente las actividades de este día específico"
+                                            >
+                                                Solo este día
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    {/* Checkbox para omitir terminadas */}
+                                    <label
+                                        data-testid="omit-completed-toggle"
+                                        className={cn(
+                                            "flex items-center gap-2 cursor-pointer px-3 py-1.5 rounded-xl border text-xs font-bold transition-all shadow-sm select-none",
+                                            omitCompleted
+                                                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                                : "bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100"
+                                        )}
+                                        title="Oculta las actividades que ya han sido marcadas como terminadas"
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            checked={omitCompleted}
+                                            onChange={(e) => setOmitCompleted(e.target.checked)}
+                                            className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-slate-300 cursor-pointer accent-emerald-600"
+                                        />
+                                        <span className="flex items-center gap-1.5 whitespace-nowrap">
+                                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                                            Omitir terminadas
+                                        </span>
+                                    </label>
+                                </div>
+                            )}
+                    </div>
+
+                    <div data-testid="activities-filter-bar" className="flex flex-wrap items-center gap-2">
                     {/* Date range (Desde / Hasta): always visible, works in every view */}
                     <div
                         data-testid="activities-date-range"
@@ -921,194 +1092,13 @@ function ActivitiesContent() {
                                     <option value="title_desc">Asunto: Z–A</option>
                                 </select>
                             </div>
+                    </div>
                 </div>
             </header>
 
             <div className="flex flex-1 gap-6">
                 {/* Agenda / Month View */}
                 <div className="flex-1 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col">
-                    <div className="p-6 border-b border-slate-100 flex items-center justify-between gap-4">
-                        <div className="flex items-center gap-6">
-                            <button
-                                onClick={() => setView(view === 'agenda' ? 'month' : 'agenda')}
-                                className="flex items-center gap-2 text-slate-600 hover:text-blue-600 transition-colors whitespace-nowrap"
-                            >
-                                {view === 'agenda' ? <CalendarDays className="w-5 h-5 text-blue-500" /> : view === 'month' ? <CalendarIcon className="w-5 h-5 text-blue-500" /> : <ListTodo className="w-5 h-5 text-blue-500" />}
-                                <span className="font-bold hidden sm:inline">
-                                    {view === 'agenda' ? 'Vista Agenda' : view === 'month' ? 'Vista Mensual' : 'Todas las Actividades'}
-                                </span>
-                            </button>
-
-                            {view !== 'all' && (
-                                <div className="flex flex-wrap items-center gap-3">
-                                    {view === 'agenda' && dateRangeActive && (
-                                        <div
-                                            data-testid="agenda-range-active"
-                                            className="flex items-center gap-2 bg-blue-50 text-blue-700 px-3 py-1.5 rounded-xl border border-blue-200 shadow-sm text-sm font-bold"
-                                            title="El rango Desde/Hasta reemplaza la fecha única y el modo 'Hasta la fecha / Solo este día'"
-                                        >
-                                            <CalendarIcon className="w-4 h-4" />
-                                            <span>
-                                                Rango activo: {filterDateFrom ? formatRangeDate(filterDateFrom) : 'inicio'} – {filterDateTo ? formatRangeDate(filterDateTo) : 'sin límite'}
-                                            </span>
-                                            <button
-                                                type="button"
-                                                onClick={() => { setFilterDateFrom(''); setFilterDateTo(''); }}
-                                                className="p-0.5 rounded hover:bg-blue-100 text-blue-500 hover:text-red-500"
-                                                title="Quitar rango y volver a la fecha única"
-                                                aria-label="Quitar rango de fechas"
-                                            >
-                                                <X className="w-3.5 h-3.5" />
-                                            </button>
-                                        </div>
-                                    )}
-                                    {!(view === 'agenda' && dateRangeActive) && (
-                                    <div className="flex items-center gap-4 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-100 shadow-sm">
-                                        <button
-                                            data-testid="activities-page-prev"
-                                            onClick={handlePrev}
-                                            className="p-1 hover:bg-white hover:shadow-sm rounded-lg text-slate-400 hover:text-blue-600 transition-all"
-                                            title="Día anterior"
-                                        >
-                                            <ChevronLeft className="w-5 h-5" />
-                                        </button>
-                                        <div className="relative group flex items-center justify-center min-w-[140px] px-2 py-1 rounded hover:bg-white transition-colors cursor-pointer">
-                                            <span className="text-base font-bold text-slate-900 capitalize text-center group-hover:text-blue-600 transition-colors mr-2">
-                                                {view === 'agenda'
-                                                    ? (agendaDateMode === 'up_to'
-                                                        ? `Hasta: ${selectedDate.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' })}`
-                                                        : selectedDate.toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short' }))
-                                                    : selectedDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' })
-                                                }
-                                            </span>
-                                            <CalendarIcon className="w-4 h-4 text-slate-400 group-hover:text-blue-500 transition-colors" />
-                                            <input
-                                                type={view === 'agenda' ? 'date' : 'month'}
-                                                className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-                                                onClick={(e) => {
-                                                    try {
-                                                        if ('showPicker' in e.target) {
-                                                            (e.target as HTMLInputElement).showPicker();
-                                                        }
-                                                    } catch {}
-                                                }}
-                                                value={
-                                                    view === 'agenda'
-                                                        ? `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`
-                                                        : `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}`
-                                                }
-                                                onChange={(e) => {
-                                                    if (e.target.value) {
-                                                        const parts = e.target.value.split('-');
-                                                        if (parts.length === 3) {
-                                                            setSelectedDate(new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2])));
-                                                        } else if (parts.length === 2) {
-                                                            setSelectedDate(new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, 1));
-                                                        }
-                                                    }
-                                                }}
-                                            />
-                                        </div>
-                                        <button
-                                            data-testid="activities-page-next"
-                                            onClick={handleNext}
-                                            className="p-1 hover:bg-white hover:shadow-sm rounded-lg text-slate-400 hover:text-blue-600 transition-all"
-                                            title="Día siguiente"
-                                        >
-                                            <ChevronRight className="w-5 h-5" />
-                                        </button>
-                                    </div>
-                                    )}
-
-                                    {view === 'agenda' && !dateRangeActive && (
-                                        <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200 shadow-sm text-xs font-semibold">
-                                            <button
-                                                type="button"
-                                                data-testid="agenda-mode-upto"
-                                                onClick={() => setAgendaDateMode('up_to')}
-                                                className={cn(
-                                                    "px-3 py-1 rounded-lg transition-all",
-                                                    agendaDateMode === 'up_to'
-                                                        ? "bg-white text-blue-600 shadow-sm font-bold"
-                                                        : "text-slate-500 hover:text-slate-800"
-                                                )}
-                                                title="Muestra todas las actividades agendadas hasta esta fecha (incluye pendientes y atrasadas anteriores)"
-                                            >
-                                                Hasta la fecha
-                                            </button>
-                                            <button
-                                                type="button"
-                                                data-testid="agenda-mode-exact"
-                                                onClick={() => setAgendaDateMode('exact')}
-                                                className={cn(
-                                                    "px-3 py-1 rounded-lg transition-all",
-                                                    agendaDateMode === 'exact'
-                                                        ? "bg-white text-blue-600 shadow-sm font-bold"
-                                                        : "text-slate-500 hover:text-slate-800"
-                                                )}
-                                                title="Muestra únicamente las actividades de este día específico"
-                                            >
-                                                Solo este día
-                                            </button>
-                                        </div>
-                                    )}
-
-                                    {/* Checkbox para omitir terminadas */}
-                                    <label
-                                        data-testid="omit-completed-toggle"
-                                        className={cn(
-                                            "flex items-center gap-2 cursor-pointer px-3 py-1.5 rounded-xl border text-xs font-bold transition-all shadow-sm select-none",
-                                            omitCompleted
-                                                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                                                : "bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100"
-                                        )}
-                                        title="Oculta las actividades que ya han sido marcadas como terminadas"
-                                    >
-                                        <input
-                                            type="checkbox"
-                                            checked={omitCompleted}
-                                            onChange={(e) => setOmitCompleted(e.target.checked)}
-                                            className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-slate-300 cursor-pointer accent-emerald-600"
-                                        />
-                                        <span className="flex items-center gap-1.5 whitespace-nowrap">
-                                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                                            Omitir terminadas
-                                        </span>
-                                    </label>
-                                </div>
-                            )}
-                        </div>
-                        <div className="flex gap-2 p-1 bg-slate-50 rounded-xl border border-slate-100 shrink-0">
-                            <button
-                                onClick={() => setView('all')}
-                                className={cn(
-                                    "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
-                                    view === 'all' ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
-                                )}
-                            >
-                                Todo
-                            </button>
-                            <button
-                                onClick={() => setView('agenda')}
-                                className={cn(
-                                    "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
-                                    view === 'agenda' ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
-                                )}
-                            >
-                                Agenda
-                            </button>
-                            <button
-                                onClick={() => setView('month')}
-                                className={cn(
-                                    "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
-                                    view === 'month' ? "bg-white text-blue-600 shadow-sm" : "text-slate-500 hover:text-slate-700"
-                                )}
-                            >
-                                Mes
-                            </button>
-                        </div>
-                    </div>
-
                     <div className="flex-1 p-6 bg-slate-50/50">
                         {(view === 'agenda' || view === 'all') && (
                             <div className="flex items-center justify-end mb-3 px-1 z-10">
