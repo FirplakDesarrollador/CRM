@@ -5,6 +5,18 @@
 import { McpSessionContext, McpToolResult, CompactContact } from '../types';
 import { CrmDatabaseAdapter } from '../database';
 
+interface ContactRow {
+  id: string;
+  account_id?: string | null;
+  nombre?: string | null;
+  cargo?: string | null;
+  email?: string | null;
+  telefono?: string | null;
+  es_principal?: boolean | null;
+  is_deleted?: boolean | null;
+  cuenta?: { nombre?: string | null } | null;
+}
+
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function isUuid(val?: string | null): boolean {
   return typeof val === 'string' && UUID_REGEX.test(val);
@@ -52,7 +64,7 @@ export async function crmListarContactos(
       const { data, count, error } = await q;
 
       if (!error && data) {
-        const items: CompactContact[] = data.map((con: any) => ({
+        const items: CompactContact[] = (data as unknown as ContactRow[]).map((con) => ({
           id: String(con.id),
           account_id: String(con.account_id || ''),
           cuenta_nombre: con.cuenta?.nombre || undefined,
@@ -60,7 +72,7 @@ export async function crmListarContactos(
           cargo: con.cargo || undefined,
           email: con.email || undefined,
           telefono: con.telefono || undefined,
-          es_principal: con.es_principal,
+          es_principal: Boolean(con.es_principal),
         }));
 
         const totalCount = count !== null ? count : items.length;

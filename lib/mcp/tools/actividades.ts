@@ -6,6 +6,23 @@ import { McpSessionContext, McpToolResult, CompactActivity } from '../types';
 import { CrmDatabaseAdapter, CLASIFICACIONES_ACTIVIDAD } from '../database';
 import { canAccessActivity, normalizeRole } from '../permissions';
 
+interface ActivityRow {
+  id: string;
+  user_id?: string | null;
+  opportunity_id?: string | null;
+  account_id?: string | null;
+  tipo_actividad?: 'TAREA' | 'EVENTO' | string | null;
+  asunto?: string | null;
+  descripcion?: string | null;
+  fecha_inicio?: string | null;
+  fecha_fin?: string | null;
+  is_completed?: boolean | null;
+  is_deleted?: boolean | null;
+  prioridad?: 'Alta' | 'Media' | 'Baja' | string | null;
+  clasificacion_id?: number | null;
+  updated_at?: string | null;
+}
+
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function isUuid(val?: string | null): boolean {
   return typeof val === 'string' && UUID_REGEX.test(val);
@@ -34,13 +51,13 @@ export async function crmAgendaDiaria(
       const { data, error } = await q;
 
       if (!error && data) {
-        const pendientesHoy = data.filter((a: any) => {
+        const pendientesHoy = (data as unknown as ActivityRow[]).filter((a) => {
           if (a.is_completed) return false;
           const fecha = String(a.fecha_inicio || '').split('T')[0];
           return fecha <= todayStr;
         });
 
-        const completadasHoy = data.filter((a: any) => {
+        const completadasHoy = (data as unknown as ActivityRow[]).filter((a) => {
           if (!a.is_completed) return false;
           const fecha = String(a.updated_at || a.fecha_inicio || '').split('T')[0];
           return fecha === todayStr;
@@ -60,7 +77,7 @@ export async function crmAgendaDiaria(
                     total_pendientes_o_vencidas: pendientesHoy.length,
                     total_completadas_hoy: completadasHoy.length,
                   },
-                  pendientes: pendientesHoy.map((a: any) => ({
+                  pendientes: pendientesHoy.map((a: ActivityRow) => ({
                     id: a.id,
                     asunto: a.asunto,
                     tipo: a.tipo_actividad,
@@ -185,15 +202,15 @@ export async function crmListarActividades(
       const { data, count, error } = await q;
 
       if (!error && data) {
-        const items: CompactActivity[] = data.map((act: any) => ({
+        const items: CompactActivity[] = (data as unknown as ActivityRow[]).map((act) => ({
           id: String(act.id),
           asunto: String(act.asunto || 'Sin asunto'),
-          tipo_actividad: act.tipo_actividad || 'TAREA',
-          is_completed: !!act.is_completed,
-          fecha_inicio: act.fecha_inicio || undefined,
-          fecha_fin: act.fecha_fin || undefined,
-          prioridad: act.prioridad || 'Media',
-          user_id: act.user_id,
+          tipo_actividad: (act.tipo_actividad === 'EVENTO' ? 'EVENTO' : 'TAREA'),
+          is_completed: Boolean(act.is_completed),
+          fecha_inicio: String(act.fecha_inicio || ''),
+          fecha_fin: act.fecha_fin ? String(act.fecha_fin) : undefined,
+          prioridad: (act.prioridad as 'Alta' | 'Media' | 'Baja') || 'Media',
+          user_id: act.user_id ? String(act.user_id) : undefined,
           opportunity_id: act.opportunity_id || undefined,
           account_id: act.account_id || undefined,
         }));
@@ -238,9 +255,9 @@ export async function crmListarActividades(
     id: act.id,
     asunto: act.asunto,
     tipo_actividad: act.tipo_actividad || 'TAREA',
-    is_completed: act.is_completed,
-    fecha_inicio: act.fecha_inicio,
-    fecha_fin: act.fecha_fin,
+    is_completed: Boolean(act.is_completed),
+    fecha_inicio: String(act.fecha_inicio || ''),
+    fecha_fin: act.fecha_fin ? String(act.fecha_fin) : undefined,
     prioridad: act.prioridad,
     user_id: act.user_id,
     opportunity_id: act.opportunity_id,
@@ -361,7 +378,7 @@ export async function crmCrearActividad(
     try {
       const newRecord = {
         asunto: asuntoFinal,
-        tipo_actividad: tipo,
+        tipo_actividad: (tipo === 'EVENTO' ? 'EVENTO' : 'TAREA') as 'TAREA' | 'EVENTO',
         clasificacion_id: clasificacion ? clasificacion.id : null,
         user_id: isUuid(ctx.userId) ? ctx.userId : undefined,
         opportunity_id: isUuid(args.opportunity_id) ? args.opportunity_id : null,
@@ -405,7 +422,7 @@ export async function crmCrearActividad(
   const newActivity = {
     id: newId,
     asunto: asuntoFinal,
-    tipo_actividad: tipo,
+    tipo_actividad: (tipo === 'EVENTO' ? 'EVENTO' : 'TAREA') as 'TAREA' | 'EVENTO',
     clasificacion_id: clasificacion ? clasificacion.id : undefined,
     user_id: ctx.userId,
     opportunity_id: args.opportunity_id,

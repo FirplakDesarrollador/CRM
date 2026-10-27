@@ -69,9 +69,9 @@ export function buildFollowUpSubject(previousSubject?: string | null): string | 
 }
 
 /** Une listas sin duplicados (sin distinguir mayúsculas), respetando el orden. */
-export function uniqueSubjects(lists: string[][], exclude?: string, limit = 6): string[] {
+export function uniqueSubjects(lists: string[][], skipSubject?: string, limit = 6): string[] {
     const seen = new Set<string>();
-    const ex = cleanSubject(exclude).toLowerCase();
+    const ex = cleanSubject(skipSubject).toLowerCase();
     const out: string[] = [];
     for (const list of lists) {
         for (const s of list) {

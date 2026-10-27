@@ -6,6 +6,26 @@ import { McpSessionContext, McpToolResult, CompactOpportunity } from '../types';
 import { CrmDatabaseAdapter, FASES_POR_CANAL } from '../database';
 import { canAccessOpportunity, normalizeRole } from '../permissions';
 
+interface OpportunityRow {
+  id: string;
+  nombre?: string | null;
+  amount?: number | string | null;
+  currency_id?: string | null;
+  fase_id?: number | null;
+  estado_id?: number | null;
+  fecha_cierre_estimada?: string | null;
+  probability?: number | null;
+  owner_user_id?: string | null;
+  origen_oportunidad?: string | null;
+  account_id?: string | null;
+  is_deleted?: boolean | null;
+  created_at?: string | null;
+  cuenta?: { id?: string; nombre?: string; nit?: string; canal_id?: string } | null;
+  fase?: { id?: number; nombre?: string; canal_id?: string } | null;
+  estado?: { id?: number; nombre?: string } | null;
+  vendedor?: { id?: string; full_name?: string; email?: string } | null;
+}
+
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function isUuid(val?: string | null): boolean {
   return typeof val === 'string' && UUID_REGEX.test(val);
@@ -101,7 +121,7 @@ export async function crmBuscarOportunidades(
       const { data, count, error } = await q;
 
       if (!error && data) {
-        let rows = data as any[];
+        let rows = data as unknown as OpportunityRow[];
         if (canalFilter) {
           rows = rows.filter((r) => {
             const rowCanal = r.cuenta?.canal_id || r.fase?.canal_id;

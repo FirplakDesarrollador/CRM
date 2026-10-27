@@ -5,6 +5,36 @@
 import { McpSessionContext, McpToolResult, CompactAccount } from '../types';
 import { CrmDatabaseAdapter, CANALES_REFERENCIA } from '../database';
 
+interface AccountRow {
+  id: string;
+  nombre?: string | null;
+  nit?: number | string | null;
+  nit_base?: string | null;
+  canal_id?: string | null;
+  ciudad?: string | null;
+  direccion?: string | null;
+  telefono?: string | null;
+  email?: string | null;
+  nivel_premium?: string | null;
+  owner_user_id?: string | null;
+  is_deleted?: boolean | null;
+}
+interface ContactRelationRow {
+  id: string;
+  nombre?: string | null;
+  cargo?: string | null;
+  telefono?: string | null;
+  email?: string | null;
+  es_principal?: boolean | null;
+}
+interface OpportunityRelationRow {
+  id: string;
+  nombre?: string | null;
+  fase_id?: number | null;
+  amount?: number | string | null;
+  probability?: number | null;
+}
+
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function isUuid(val?: string | null): boolean {
   return typeof val === 'string' && UUID_REGEX.test(val);
@@ -60,13 +90,13 @@ export async function crmBuscarCuentas(
       const { data, count, error } = await q;
 
       if (!error && data) {
-        const items: CompactAccount[] = data.map((acc: any) => ({
+        const items: CompactAccount[] = (data as unknown as AccountRow[]).map((acc) => ({
           id: String(acc.id),
           nombre: String(acc.nombre || 'Sin nombre'),
           nit: acc.nit_base || (acc.nit !== null && acc.nit !== undefined ? String(acc.nit) : ''),
           canal_id: acc.canal_id || '',
           ciudad: acc.ciudad || undefined,
-          nivel_premium: acc.nivel_premium || undefined,
+          nivel_premium: (acc.nivel_premium as 'PREMIUM' | 'DESTACADO' | 'ACTIVO' | null) || undefined,
           owner_user_id: acc.owner_user_id ? String(acc.owner_user_id) : undefined,
           telefono: acc.telefono || undefined,
           email: acc.email || undefined,
@@ -197,7 +227,7 @@ export async function crmConsultarCuenta(
                   comentarios: account.comentarios,
                   is_deleted: account.is_deleted || false,
                   created_at: account.created_at,
-                  contactos_asociados: (contacts || []).map((c: any) => ({
+                  contactos_asociados: ((contacts || []) as unknown as ContactRelationRow[]).map((c) => ({
                     id: c.id,
                     nombre: c.nombre,
                     cargo: c.cargo,
@@ -205,7 +235,7 @@ export async function crmConsultarCuenta(
                     email: c.email,
                     es_principal: c.es_principal,
                   })),
-                  oportunidades_activas: (opportunities || []).map((o: any) => ({
+                  oportunidades_activas: ((opportunities || []) as unknown as OpportunityRelationRow[]).map((o) => ({
                     id: o.id,
                     nombre: o.nombre,
                     fase_id: o.fase_id,
