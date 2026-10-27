@@ -1967,4 +1967,26 @@ Cuando recibas leads desde formularios web de marketing (OptIns, landing pages, 
 
 Tags:
 [wordpress] [lead-intake] [edge-function] [deduplication] [oportunidades] [pareto-duplicado]
+## [Bug ID: 20261027-01]
 
+Context:
+Resolución de identidad y roles de usuario para el Servidor MCP de CRM Firplak (`app/api/mcp/route.ts`, `bin/crm-mcp.ts`, `components/config/McpIntegrationCard.tsx`).
+
+Problem:
+Usuarios con rol administrativo en el CRM (como `ismael.correa@firplak.com` y `alejandro.isaza@firplak.com`) se resolvían erróneamente con permisos de `VENDEDOR` en el endpoint `/api/mcp` al autenticarse con token Bearer, impidiendo el uso de herramientas de reasignación y configuración.
+
+Root Cause:
+1. `app/api/mcp/route.ts` ejecutaba `select('id, email, rol')` contra la tabla `CRM_Usuarios`. En la base de datos Postgres de Supabase, la columna se llama `role` (en inglés), no `rol`. La consulta fallaba silenciosamente y caía en el fallback por defecto (`VENDEDOR`).
+2. En `bin/crm-mcp.ts`, si no se pasaba `CRM_USER_ROLE` explícito en las variables de entorno, no se consultaba la base de datos para resolver el rol real del usuario autenticado.
+
+Fix Applied:
+1. Se corrigió la consulta en `app/api/mcp/route.ts` para seleccionar `role` y resolver tanto por `user.id` como por `user.email`.
+2. Se actualizó `bin/crm-mcp.ts` para que consulte `CRM_Usuarios` por email y garantice el rol `ADMIN` a usuarios como `ismael.correa@firplak.com`.
+3. Se añadió prueba unitaria permanente en `tests/crm-mcp.test.ts`.
+
+Prevention Rule:
+**Verify Postgres Database Column Names in Supabase Queries**:
+Al consultar esquemas de usuario (`CRM_Usuarios`), no asumas nombres en español (`rol`) cuando la definición de la tabla use inglés (`role`). Verifica siempre el catálogo de columnas con `information_schema.columns` antes de escribir selectores SQL / PostgREST.
+
+Tags:
+[mcp] [roles] [permissions] [crm-usuarios] [admin-access]

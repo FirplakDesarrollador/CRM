@@ -461,10 +461,8 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                     supabase.from('CRM_Cuentas').select('id').eq('is_deleted', false).or(phoneOr).limit(100),
                     supabase.from('CRM_Contactos').select('account_id').eq('is_deleted', false).or(phoneOr).limit(100)
                 ]);
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                (phoneAccRes.data || []).forEach((a: any) => a.id && phoneAccountIds.add(a.id));
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                (phoneContactRes.data || []).forEach((c: any) => c.account_id && phoneAccountIds.add(c.account_id));
+                ((phoneAccRes.data || []) as Array<{ id: string }>).forEach((a) => a.id && phoneAccountIds.add(a.id));
+                ((phoneContactRes.data || []) as Array<{ account_id: string | null }>).forEach((c) => c.account_id && phoneAccountIds.add(c.account_id));
             }
 
             if (searchTerm && searchTerm.trim() && !searchIsPhone) {

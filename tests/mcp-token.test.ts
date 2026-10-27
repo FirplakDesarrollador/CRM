@@ -30,7 +30,7 @@ describe('MCP Authentication Token Helper', () => {
       },
     };
 
-    const res = await getMcpSessionToken(mockSupabase as any);
+    const res = await getMcpSessionToken(mockSupabase as unknown as Parameters<typeof getMcpSessionToken>[0]);
     expect(res.token).toBe('mock-access-token-123');
     expect(res.isExpired).toBe(false);
     expect(res.error).toBeNull();
@@ -46,7 +46,7 @@ describe('MCP Authentication Token Helper', () => {
       },
     };
 
-    const res = await getMcpSessionToken(mockSupabase as any);
+    const res = await getMcpSessionToken(mockSupabase as unknown as Parameters<typeof getMcpSessionToken>[0]);
     expect(res.token).toBeNull();
     expect(res.isExpired).toBe(true);
     expect(res.error).toBe('No hay sesión activa de Supabase');

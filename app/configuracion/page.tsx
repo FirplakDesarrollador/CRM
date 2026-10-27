@@ -668,7 +668,7 @@ function ConfigPageContent() {
                             </div>
                         </div>
 
-                        <McpIntegrationCard user={user} role={role} />
+                        <McpIntegrationCard user={user} role={realRole || role} />
                     </div>
                 </div>
 

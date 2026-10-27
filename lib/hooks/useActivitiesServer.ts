@@ -15,6 +15,7 @@ export type ActivityServer = {
     tipo_actividad: 'TAREA' | 'EVENTO';
     is_completed: boolean;
     opportunity_id?: string;
+    account_id?: string;
     user_id?: string;
     created_at?: string;
     updated_at?: string;
