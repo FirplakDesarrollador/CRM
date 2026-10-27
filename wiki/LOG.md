@@ -3,6 +3,12 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-10-27 - Ajuste: controles de vista de Actividades movidos al encabezado
+
+- **Pedido de Esteban:** ubicar arriba también los controles de la tarjeta "Vista Agenda".
+- **`app/actividades/page.tsx`:** pestañas Todo/Agenda/Mes, navegador de fecha (solo Agenda y Mes), toggle "Hasta la fecha / Solo este día" (solo Agenda), insignia "Rango activo" y "Omitir terminadas" pasan a una fila `activities-view-controls` en el encabezado, encima de la barra de filtros. Se eliminó la fila de título "Vista Agenda"; "Total de registros" queda junto a la lista. Comportamiento sin cambios.
+- **Pruebas:** `tests/activitiesInlineFilters.test.ts`.
+
 ## 2026-10-27 - Ajuste: filtros de Actividades siempre visibles + rango Desde/Hasta (rama `cambio-que-pidio-daniela`)
 
 - **Pedido de Esteban:** todos los filtros arriba, visibles; el filtro Desde–Hasta no se veía.
