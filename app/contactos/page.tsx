@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useState, useMemo, useEffect, useCallback, Suspense } from "react";
 import { ContactForm } from "@/components/contactos/ContactForm";
+import { ContactOpportunities, newOpportunityUrlForContact } from "@/components/contactos/ContactOpportunities";
 import Link from "next/link";
 import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
 import { Edit2, Trash2, Phone, Mail, User, Building, Search, Plus, CloudUpload, Loader2 } from "lucide-react";
@@ -410,6 +411,9 @@ function ContactsContent() {
                     onSuccess={resetView}
                     onCancel={resetView}
                 />
+                {editingContact && (
+                    <ContactOpportunities contactId={editingContact.id} accountId={editingContact.account_id} />
+                )}
             </div>
         );
     }
@@ -485,6 +489,15 @@ function ContactsContent() {
         { data: 'telefono', title: 'Teléfono', readOnly: true, width: colWidths['telefono'] || 130, wordWrap: false,
             renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 td.innerHTML = `<span style="font-size:12.5px;color:#64748b;font-weight:500;font-variant-numeric:tabular-nums;">${value || '-'}</span>`;
+                return td;
+            }
+        },
+        { data: 'oportunidades', title: 'Oportunidades', readOnly: true, width: colWidths['oportunidades'] || 150, wordWrap: false,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            renderer(_: any, td: HTMLTableCellElement) {
+                // Quick actions: "Ver" opens the contact (with its opportunities), "+ Nueva" opens the prefilled wizard
+                td.innerHTML = `<div style="display:flex;align-items:center;gap:6px;height:100%;"><span data-action="view" style="cursor:pointer;font-size:11px;font-weight:700;color:#475569;background:#f1f5f9;padding:2px 8px;border-radius:6px;">Ver</span><span data-action="new" style="cursor:pointer;font-size:11px;font-weight:700;color:#2563eb;background:#eff6ff;padding:2px 8px;border-radius:6px;white-space:nowrap;">+ Nueva</span></div>`;
+                td.style.overflow = 'visible';
                 return td;
             }
         }
@@ -807,6 +820,15 @@ function ContactsContent() {
                                         if (mouseEvent?.button === 2) {
                                             // Clic derecho: permitir menú contextual nativo del enlace
                                             return;
+                                        }
+                                        if (coords.col === 6 && contact?.account_id) {
+                                            const action = (mouseEvent?.target as HTMLElement | null)?.closest?.('[data-action]')?.getAttribute('data-action');
+                                            if (action === 'new') {
+                                                const url = newOpportunityUrlForContact(contact.account_id, contact.id);
+                                                if (mouseEvent?.button === 1 || mouseEvent?.ctrlKey || mouseEvent?.metaKey) window.open(url, '_blank');
+                                                else router.push(url);
+                                                return;
+                                            }
                                         }
                                         if (mouseEvent?.button === 1 || mouseEvent?.ctrlKey || mouseEvent?.metaKey) {
                                             if (coords.col === 3 && contact?.account_id) {
