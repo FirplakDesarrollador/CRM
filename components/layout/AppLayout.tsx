@@ -6,7 +6,7 @@ import { TopBar } from "./TopBar";
 import { NetworkStatusLine } from "./NetworkStatusLine";
 import { OfflineBanner } from "./OfflineBanner";
 import { useSyncStore } from "@/lib/stores/useSyncStore";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { Loader2 } from "lucide-react";
 import { syncEngine } from "@/lib/sync";
 import { deactivateLocalDatabase } from "@/lib/db";
@@ -22,17 +22,34 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     const isOtherPublic = pathname === '/auth/callback' || pathname === '/update-password' || pathname === '/offline';
     const isPublicPage = isLoginPage || isE2EPage || isOtherPublic;
     const [isLocalDataReady, setIsLocalDataReady] = useState(isPublicPage);
+    // Usuario cuya base local ya está lista. Evita desmontar la página cuando
+    // supabase-js re-emite SIGNED_IN al volver a la pestaña (visibilitychange).
+    const preparedUserIdRef = useRef<string | null>(null);
 
     // Auth state listener - Redirect to login when signed out (critical for mobile)
     useEffect(() => {
-        if (isPublicPage) return;
+        if (isPublicPage) {
+            // En páginas públicas (login, etc.) se descarta el estado: al volver a
+            // entrar se prepara la base local de nuevo.
+            preparedUserIdRef.current = null;
+            return;
+        }
 
         let cancelled = false;
 
         const prepareLocalData = async (userId: string) => {
+            // Mismo usuario ya preparado (p. ej. SIGNED_IN re-emitido al volver a la
+            // pestaña): no se desmonta la página ni se muestra el loader.
+            if (preparedUserIdRef.current === userId) {
+                if (!cancelled) setIsLocalDataReady(true);
+                return;
+            }
             setIsLocalDataReady(false);
             await syncEngine.initializeForUser(userId);
-            if (!cancelled) setIsLocalDataReady(true);
+            if (!cancelled) {
+                preparedUserIdRef.current = userId;
+                setIsLocalDataReady(true);
+            }
         };
 
         // Check initial session
@@ -55,6 +72,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
 
             if (event === 'SIGNED_OUT') {
+                preparedUserIdRef.current = null;
                 setIsLocalDataReady(false);
                 void deactivateLocalDatabase();
                 // Clear any cached data
