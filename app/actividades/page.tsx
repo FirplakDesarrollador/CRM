@@ -214,15 +214,6 @@ function ActivitiesContent() {
         }
         return 'soonest';
     });
-    const [showFilters, setShowFilters] = useState(() => Boolean(
-        searchParams.get('type') || searchParams.get('classification') || searchParams.get('subclassification') ||
-        searchParams.get('user') || searchParams.get('status') || searchParams.get('channel') ||
-        searchParams.get('dateFrom') || searchParams.get('dateTo') || searchParams.get('order')
-    ));
-    const activeFilterCount = (filterType ? 1 : 0) + (filterClassification ? 1 : 0) +
-        (filterSubclassification ? 1 : 0) + (filterUser ? 1 : 0) + (filterStatus !== 'all' ? 1 : 0) +
-        (filterChannel ? 1 : 0) + (filterDateFrom ? 1 : 0) + (filterDateTo ? 1 : 0) + (sortOrder !== 'soonest' ? 1 : 0);
-
     // Restore state from sessionStorage if navigating from sidebar (empty query)
     useEffect(() => {
         if (typeof window !== 'undefined' && searchParams.toString() === '') {
@@ -631,10 +622,27 @@ function ActivitiesContent() {
         return map;
     }, [globallyFilteredActivities]);
 
+    const dateRangeActive = Boolean(filterDateFrom || filterDateTo);
+    const formatRangeDate = (iso: string) => {
+        const [y, m, d] = iso.split('-').map(Number);
+        return new Date(y, (m || 1) - 1, d || 1).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
+    };
+
+    // In the month view the grid shows one month: jump to the month of the range so the range is not shown empty.
+    const handleDateRangeChange = (edge: 'from' | 'to', value: string) => {
+        if (edge === 'from') setFilterDateFrom(value);
+        else setFilterDateTo(value);
+        if (view === 'month' && value) {
+            const [y, m] = value.split('-').map(Number);
+            if (y && m) setSelectedDate(new Date(y, m - 1, 1));
+        }
+    };
+
     return (
         <div data-testid="activities-page" className="flex flex-col space-y-4 pb-20">
             {/* Header */}
-            <header className="flex flex-col md:flex-row md:items-center justify-between p-6 bg-white rounded-2xl border border-slate-200 shadow-sm gap-4">
+            <header className="flex flex-col p-6 bg-white rounded-2xl border border-slate-200 shadow-sm gap-4">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="flex items-center gap-4">
                     <div className="bg-blue-100 p-3 rounded-xl text-blue-600">
                         <CalendarIcon className="w-6 h-6" />
@@ -700,20 +708,6 @@ function ActivitiesContent() {
                             )}
                         </button>
 
-                        <button
-                            type="button"
-                            onClick={() => setShowFilters(!showFilters)}
-                            className={cn(
-                                "flex items-center gap-1.5 rounded-xl border px-3 py-2.5 text-sm font-bold transition-all",
-                                showFilters || activeFilterCount > 0 ? "border-blue-200 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-500 hover:border-slate-300"
-                            )}
-                            aria-expanded={showFilters}
-                        >
-                            <Filter className="h-4 w-4" />
-                            <span>Filtros</span>
-                            {activeFilterCount > 0 && <span className="rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] leading-none text-white">{activeFilterCount}</span>}
-                        </button>
-
                         {/* Clear Filters Button */}
                         {(searchQuery || filterType || filterClassification || filterSubclassification || filterUser || filterStatus !== "all" || filterChannel || filterDateFrom || filterDateTo) && (
                             <button
@@ -745,9 +739,57 @@ function ActivitiesContent() {
                         </button>
                     </div>
 
-                    {/* Keep active filters reachable in every view; hidden filters are a frequent source of confusion. */}
-                    {showFilters && (
-                        <div className="flex flex-wrap items-center gap-2 w-full justify-end">
+                </div>
+                </div>
+
+                <div data-testid="activities-filter-bar" className="flex flex-wrap items-center gap-2 pt-4 border-t border-slate-100">
+                    {/* Date range (Desde / Hasta): always visible, works in every view */}
+                    <div
+                        data-testid="activities-date-range"
+                        className={cn(
+                            "flex flex-wrap items-center gap-1 p-1 rounded-xl border shadow-sm text-sm",
+                            dateRangeActive ? "bg-blue-50 border-blue-200" : "bg-slate-50 border-slate-100"
+                        )}
+                    >
+                        <div className={cn("px-2", dateRangeActive ? "text-blue-500" : "text-slate-400")}>
+                            <CalendarIcon className="w-4 h-4" />
+                        </div>
+                        <label className="text-[10px] font-bold uppercase text-slate-500" htmlFor="activities-date-from">Desde</label>
+                        <input
+                            id="activities-date-from"
+                            data-testid="activities-date-from"
+                            type="date"
+                            value={filterDateFrom}
+                            max={filterDateTo || undefined}
+                            onChange={(e) => handleDateRangeChange('from', e.target.value)}
+                            className="bg-transparent text-slate-600 font-semibold focus:outline-none p-1 w-[125px]"
+                            title="Fecha Desde"
+                        />
+                        <span className="text-slate-300">-</span>
+                        <label className="text-[10px] font-bold uppercase text-slate-500" htmlFor="activities-date-to">Hasta</label>
+                        <input
+                            id="activities-date-to"
+                            data-testid="activities-date-to"
+                            type="date"
+                            value={filterDateTo}
+                            min={filterDateFrom || undefined}
+                            onChange={(e) => handleDateRangeChange('to', e.target.value)}
+                            className="bg-transparent text-slate-600 font-semibold focus:outline-none p-1 w-[125px]"
+                            title="Fecha Hasta"
+                        />
+                        {dateRangeActive && (
+                            <button
+                                type="button"
+                                onClick={() => { setFilterDateFrom(''); setFilterDateTo(''); }}
+                                className="p-1 text-slate-400 hover:text-red-500"
+                                title="Quitar rango de fechas"
+                                aria-label="Quitar rango de fechas"
+                            >
+                                <X className="w-3.5 h-3.5" />
+                            </button>
+                        )}
+                    </div>
+
                             {/* Channel Selector */}
                             <div className="flex bg-slate-50 p-1 rounded-xl border border-slate-100 items-center shadow-sm">
                                 <div className="px-2 text-slate-400">
@@ -866,45 +908,6 @@ function ActivitiesContent() {
                                 )}
                             </div>
 
-                            {/* Date Range Selectors */}
-                            <div className="flex bg-slate-50 p-1 rounded-xl border border-slate-100 items-center shadow-sm text-sm">
-                                <div className="px-2 text-slate-400">
-                                    <CalendarIcon className="w-4 h-4" />
-                                </div>
-                                <label className="text-[10px] font-bold uppercase text-slate-400 mr-1" htmlFor="activities-date-from">Desde</label>
-                                <input
-                                    id="activities-date-from"
-                                    type="date"
-                                    value={filterDateFrom}
-                                    max={filterDateTo || undefined}
-                                    onChange={(e) => setFilterDateFrom(e.target.value)}
-                                    className="bg-transparent text-slate-600 font-semibold focus:outline-none p-1 w-[115px]"
-                                    title="Fecha Desde"
-                                />
-                                <span className="text-slate-300 mx-1">-</span>
-                                <label className="text-[10px] font-bold uppercase text-slate-400 mr-1" htmlFor="activities-date-to">Hasta</label>
-                                <input
-                                    id="activities-date-to"
-                                    type="date"
-                                    value={filterDateTo}
-                                    min={filterDateFrom || undefined}
-                                    onChange={(e) => setFilterDateTo(e.target.value)}
-                                    className="bg-transparent text-slate-600 font-semibold focus:outline-none p-1 w-[115px]"
-                                    title="Fecha Hasta"
-                                />
-                                {(filterDateFrom || filterDateTo) && (
-                                    <button
-                                        type="button"
-                                        onClick={() => { setFilterDateFrom(''); setFilterDateTo(''); }}
-                                        className="p-1 text-slate-400 hover:text-red-500"
-                                        title="Quitar rango de fechas"
-                                        aria-label="Quitar rango de fechas"
-                                    >
-                                        <X className="w-3.5 h-3.5" />
-                                    </button>
-                                )}
-                            </div>
-
                             <div className="flex bg-slate-50 p-1 rounded-xl border border-slate-100 items-center shadow-sm">
                                 <select
                                     value={sortOrder}
@@ -918,8 +921,6 @@ function ActivitiesContent() {
                                     <option value="title_desc">Asunto: Z–A</option>
                                 </select>
                             </div>
-                        </div>
-                    )}
                 </div>
             </header>
 
@@ -940,6 +941,28 @@ function ActivitiesContent() {
 
                             {view !== 'all' && (
                                 <div className="flex flex-wrap items-center gap-3">
+                                    {view === 'agenda' && dateRangeActive && (
+                                        <div
+                                            data-testid="agenda-range-active"
+                                            className="flex items-center gap-2 bg-blue-50 text-blue-700 px-3 py-1.5 rounded-xl border border-blue-200 shadow-sm text-sm font-bold"
+                                            title="El rango Desde/Hasta reemplaza la fecha única y el modo 'Hasta la fecha / Solo este día'"
+                                        >
+                                            <CalendarIcon className="w-4 h-4" />
+                                            <span>
+                                                Rango activo: {filterDateFrom ? formatRangeDate(filterDateFrom) : 'inicio'} – {filterDateTo ? formatRangeDate(filterDateTo) : 'sin límite'}
+                                            </span>
+                                            <button
+                                                type="button"
+                                                onClick={() => { setFilterDateFrom(''); setFilterDateTo(''); }}
+                                                className="p-0.5 rounded hover:bg-blue-100 text-blue-500 hover:text-red-500"
+                                                title="Quitar rango y volver a la fecha única"
+                                                aria-label="Quitar rango de fechas"
+                                            >
+                                                <X className="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
+                                    )}
+                                    {!(view === 'agenda' && dateRangeActive) && (
                                     <div className="flex items-center gap-4 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-100 shadow-sm">
                                         <button
                                             data-testid="activities-page-prev"
@@ -995,8 +1018,9 @@ function ActivitiesContent() {
                                             <ChevronRight className="w-5 h-5" />
                                         </button>
                                     </div>
+                                    )}
 
-                                    {view === 'agenda' && (
+                                    {view === 'agenda' && !dateRangeActive && (
                                         <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200 shadow-sm text-xs font-semibold">
                                             <button
                                                 type="button"
