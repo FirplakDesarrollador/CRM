@@ -3,6 +3,16 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-10-27 - Feature: Funcionalidades CRM B2C (rama `cambio-que-pidio-daniela`)
+
+- **Seguimiento tras completar actividad** (`components/activities/ActivityFollowUp.tsx`): al completar una actividad se ofrece programar un seguimiento con cuenta/oportunidad prellenadas (solo usuarios con canal `PROPIO`/ADMIN o actividades de cuentas `PROPIO`). En el detalle de la oportunidad también ofrece "Ver actividad".
+- **Búsqueda por celular** (`lib/utils.ts`: `isPhoneLikeQuery`, `getPhoneIlikePatterns`, `matchesSearchTokens`): cuentas, contactos, oportunidades (teléfono de cuenta y contactos) y actividades.
+- **Contacto → oportunidades** (`components/contactos/ContactOpportunities.tsx`, lista y detalle de contactos): ver oportunidades de la cuenta del contacto o crear una con `?account_id=&contact_id=` prellenados (`CreateOpportunityWizard`).
+- **Actividades:** filtro de fecha Desde–Hasta efectivo también en la vista agenda, con etiquetas y botón limpiar.
+- **Setter:** opciones compartidas en `lib/opportunitySetter.ts`; selector también en el asistente de creación de oportunidades.
+- **Clasificaciones SETTER / Cliente frecuente** (`lib/b2c.ts`): visibles solo para usuarios B2C. Requiere migración `20261027100000_add_setter_cliente_frecuente_activity_classifications.sql` (NO aplicada).
+- **Pruebas:** `tests/b2cCrmFeatures.test.ts`.
+
 ## 2026-10-23 - Feature: Columna Categoría de Interés en Lista Principal de Oportunidades
 
 - **Requerimiento:** Agregar la columna **Categoría de Interés** a la tabla interactiva de oportunidades (`/oportunidades`).
