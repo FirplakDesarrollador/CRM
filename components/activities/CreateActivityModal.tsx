@@ -7,7 +7,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { cn } from "@/components/ui/utils";
 import { toInputDate, toInputDateTime, parseColombiaDate } from "@/lib/date-utils";
-import { db, LocalActivity, LocalActivityClassification, LocalActivitySubclassification } from "@/lib/db";
+import { db, LocalActivity, LocalActivityClassification, LocalActivitySubclassification, useActiveLocalUserId, useActiveDatabaseVersion } from "@/lib/db";
 import { syncEngine } from "@/lib/sync";
 import { supabase } from "@/lib/supabase";
 import { DateTimePicker } from "@/components/ui/DateTimePicker";
@@ -19,6 +19,7 @@ import { useFormAutoSave } from "@/lib/hooks/useFormAutoSave";
 import { AutoSaveIndicator } from "@/components/ui/AutoSaveIndicator";
 import { SearchableSelect } from "@/components/ui/SearchableSelect";
 import { isB2COnlyActivityClassification, userHasB2CAccess } from "@/lib/b2c";
+import { getRecentSubjects, rememberSubject, nextNumberedSubjects, uniqueSubjects } from "@/lib/activitySubjects";
 
 interface CreateActivityModalProps {
     onClose: () => void;
@@ -1061,6 +1062,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
             const currentAsunto = data.asunto?.trim() || getAutoAsunto(data.clasificacion_id, data.opportunity_id, data.account_id);
             data.asunto = currentAsunto;
             setValue('asunto', currentAsunto);
+            if (!isEditing) rememberSubject(currentAsunto, currentUser?.id);
 
             console.log("[CreateActivityModal] Raw Submit Data:", data);
 
@@ -1407,6 +1409,32 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
     };
 
     const tipo = watch('tipo_actividad');
+    const watchedAsunto = watch('asunto');
+
+    // Asuntos previos de la misma oportunidad (más recientes primero) para sugerirlos
+    const activeLocalUserId = useActiveLocalUserId();
+    const activeDbVersion = useActiveDatabaseVersion();
+    const opportunitySubjects = useLiveQuery(async () => {
+        if (isEditing || !watchedOpportunityId) return [] as string[];
+        const acts = await db.activities.where('opportunity_id').equals(watchedOpportunityId).toArray();
+        return acts
+            .filter(a => !a.is_deleted && a.asunto && a.id !== initialData?.id)
+            .sort((a, b) => String(b.created_at || b.fecha_inicio || '').localeCompare(String(a.created_at || a.fecha_inicio || '')))
+            .map(a => a.asunto);
+    }, [isEditing, watchedOpportunityId, initialData?.id, activeLocalUserId, activeDbVersion]);
+
+    const [recentSubjects, setRecentSubjects] = useState<string[]>([]);
+    useEffect(() => {
+        if (!isEditing) setRecentSubjects(getRecentSubjects(currentUser?.id));
+    }, [isEditing, currentUser?.id]);
+
+    const subjectSuggestions = useMemo(() => {
+        if (isEditing) return [] as string[];
+        return uniqueSubjects(
+            [nextNumberedSubjects(opportunitySubjects ?? []), opportunitySubjects ?? [], recentSubjects],
+            watchedAsunto
+        );
+    }, [isEditing, opportunitySubjects, recentSubjects, watchedAsunto]);
     const fechaInicio = watch('fecha_inicio');
     const selectedClasificacionId = watch('clasificacion_id');
 
@@ -1755,6 +1783,22 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                                 placeholder={tipo === 'TAREA' ? "Ej. Llamar a seguimiento (o autogenerar)" : "Ej. Reunión de presentación (o autogenerar)"}
                             />
+                            {!isEditing && subjectSuggestions.length > 0 && (
+                                <div className="flex flex-wrap items-center gap-1.5 pt-1" data-testid="asunto-sugerencias">
+                                    <span className="text-[10px] text-slate-400 font-semibold uppercase">Usar:</span>
+                                    {subjectSuggestions.map(s => (
+                                        <button
+                                            key={s}
+                                            type="button"
+                                            title={s}
+                                            onClick={() => setValue('asunto', s, { shouldDirty: true, shouldValidate: true })}
+                                            className="max-w-full truncate px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 transition"
+                                        >
+                                            {s}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     )}
 

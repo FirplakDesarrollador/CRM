@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState, type ReactNode } from "react";
+import { buildFollowUpSubject } from "@/lib/activitySubjects";
 import { CalendarPlus, CheckCircle2, Eye, X } from "lucide-react";
 import { db } from "@/lib/db";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
@@ -152,7 +153,7 @@ export function useActivityFollowUp({ createActivity, onViewActivity }: UseActiv
                 initialOpportunityId={pending.opportunity_id || undefined}
                 initialAccountId={pending.account_id || undefined}
                 initialValues={{
-                    asunto: pending.asunto ? `Seguimiento: ${pending.asunto}` : undefined,
+                    asunto: buildFollowUpSubject(pending.asunto),
                     tipo_actividad: pending.tipo_actividad || 'EVENTO',
                     clasificacion_id: pending.clasificacion_id ?? null,
                     subclasificacion_id: pending.subclasificacion_id ?? null,
