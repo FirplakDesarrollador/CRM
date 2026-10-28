@@ -210,8 +210,18 @@ export function useActivities(filters?: { opportunity_id?: string, account_id?: 
         await syncEngine.commitLocalChanges([db.activities], async () => {
             const current = await db.activities.get(id);
             if (!current) return [];
-            const fullActivity = { ...current, is_completed: isCompleted, updated_at };
-            await db.activities.put(fullActivity);
+            // Marca de tiempo por campo: evita que un pull posterior (LWW por campo)
+            // revierta el check con el valor anterior del servidor.
+            const syncMetadata = {
+                ...((current as { _sync_metadata?: Record<string, unknown> })._sync_metadata || {}),
+                is_completed: Date.now()
+            };
+            const merged: Record<string, unknown> = { ...current, is_completed: isCompleted, updated_at, _sync_metadata: syncMetadata };
+            // Igual que updateActivity: solo columnas reales de CRM_Actividades.
+            const fullActivity = Object.fromEntries(
+                Object.entries(merged).filter(([key]) => DB_COLUMNS.has(key))
+            ) as unknown as LocalActivity;
+            await db.activities.put({ ...current, ...fullActivity });
             return [{
                 entityTable: 'CRM_Actividades', entityId: id, changes: fullActivity,
                 options: { isSnapshot: true }
