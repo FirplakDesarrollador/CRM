@@ -55,7 +55,13 @@ function ActivitiesContent() {
     // Completing an activity: offer to schedule the next follow-up (B2C) right away
     const handleToggleComplete = async (act: LocalActivity) => {
         const willComplete = !act.is_completed;
-        await toggleComplete(act.id, willComplete);
+        try {
+            await toggleComplete(act.id, willComplete);
+        } catch (error) {
+            console.error('[Actividades] No se pudo cambiar el estado de la actividad:', error);
+            alert(`No se pudo ${willComplete ? 'completar' : 'reabrir'} la actividad: ${error instanceof Error ? error.message : String(error)}`);
+            return;
+        }
         if (willComplete) requestFollowUp(act);
         else resetFollowUp(act.id);
     };
@@ -1171,6 +1177,9 @@ function ActivitiesContent() {
                                                 <div className="flex items-start gap-4">
                                                     <button
                                                         onClick={(e) => {
+                                                            // El botón está dentro de un <a href>: sin preventDefault el navegador
+                                                            // sigue el enlace (recarga /actividades?id=...) y la actividad no queda completada.
+                                                            e.preventDefault();
                                                             e.stopPropagation();
                                                             handleToggleComplete(act);
                                                         }}
@@ -1370,6 +1379,9 @@ function ActivitiesContent() {
                                                                     </a>
                                                                     <button
                                                                         onClick={(e) => {
+                                                                            // El botón está dentro de un <a href>: sin preventDefault el navegador
+                                                                            // sigue el enlace (recarga /actividades?id=...) y la actividad no queda completada.
+                                                                            e.preventDefault();
                                                                             e.stopPropagation();
                                                                             handleToggleComplete(act);
                                                                         }}
@@ -1446,6 +1458,9 @@ function ActivitiesContent() {
                                                                             </div>
                                                                             <button
                                                                                 onClick={(e) => {
+                                                                                    // El botón está dentro de un <a href>: sin preventDefault el navegador
+                                                                                    // sigue el enlace (recarga /actividades?id=...) y la actividad no queda completada.
+                                                                                    e.preventDefault();
                                                                                     e.stopPropagation();
                                                                                     handleToggleComplete(act);
                                                                                 }}
