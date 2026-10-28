@@ -39,12 +39,42 @@ export function isSyncLeaseExpired(item: Pick<OutboxItem, 'last_attempt_at'>, no
     return !item.last_attempt_at || item.last_attempt_at < now - SYNCING_LEASE_TIMEOUT_MS;
 }
 
+/**
+ * Errores de red/infraestructura que no dependen del dato (señal móvil intermitente,
+ * llamada entrante, app en segundo plano, token por refrescar, 5xx del gateway).
+ * Estos NO deben agotar los reintentos: antes, 5 fallos seguidos (~30 s de backoff)
+ * mandaban el cambio a DEAD_LETTER y dejaba de subirse hasta un reintento manual.
+ */
+const TRANSIENT_SYNC_ERROR_PATTERNS = [
+    /failed to fetch/i,
+    /fetch failed/i,
+    /load failed/i,
+    /networkerror/i,
+    /network request failed/i,
+    /network error/i,
+    /timed? ?out/i,
+    /aborterror/i,
+    /the user aborted a request/i,
+    /econnreset|econnrefused|enotfound|etimedout/i,
+    /jwt expired/i,
+    /\b(502|503|504)\b/,
+    /bad gateway|service unavailable|gateway time-?out/i
+];
+
+export function isTransientSyncError(error: string | null | undefined): boolean {
+    if (!error) return false;
+    return TRANSIENT_SYNC_ERROR_PATTERNS.some(pattern => pattern.test(error));
+}
+
 export function buildFailureUpdate(
     item: Pick<OutboxItem, 'retry_count'>,
     error: string,
     now = Date.now()
 ): Pick<OutboxItem, 'status' | 'retry_count' | 'error' | 'last_attempt_at' | 'next_attempt_at'> {
-    const retryCount = (item.retry_count || 0) + 1;
+    const attempt = (item.retry_count || 0) + 1;
+    // Un error transitorio nunca convierte el cambio en DEAD_LETTER: se sigue
+    // reintentando con el backoff máximo hasta que vuelva la conexión.
+    const retryCount = isTransientSyncError(error) ? Math.min(attempt, MAX_SYNC_RETRIES - 1) : attempt;
     const isDeadLetter = retryCount >= MAX_SYNC_RETRIES;
 
     return {

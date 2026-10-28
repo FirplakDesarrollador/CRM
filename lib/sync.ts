@@ -55,6 +55,26 @@ export interface LocalMutationRequest {
     options?: { isSnapshot?: boolean };
 }
 
+/**
+ * Combina en orden cronológico (field_timestamp) los valores pendientes de un mismo
+ * registro en el outbox: snapshots completos/parciales y mutaciones de un solo campo.
+ * El valor más reciente de cada campo gana.
+ */
+export function mergePendingOutboxValues(items: OutboxItem[]): Record<string, unknown> {
+    const merged: Record<string, unknown> = {};
+    const ordered = [...items].sort((a, b) => (a.field_timestamp || 0) - (b.field_timestamp || 0));
+    for (const item of ordered) {
+        if (item.field_name === '_complete_snapshot_') {
+            if (item.new_value && typeof item.new_value === 'object') {
+                Object.assign(merged, item.new_value as Record<string, unknown>);
+            }
+        } else if (item.field_name && item.field_name !== '_sync_metadata' && item.field_name !== 'id') {
+            merged[item.field_name] = item.new_value;
+        }
+    }
+    return merged;
+}
+
 export class SyncEngine {
     private isSyncing = false;
     private retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -326,8 +346,10 @@ export class SyncEngine {
         // Universal Outbox Deduplication & Compaction:
         // Consolidates redundant snapshots and duplicate field mutations across all entities
         try {
+            // SYNCING no entra: tras liberar los leases vencidos, lo que sigue en SYNCING
+            // está en vuelo (p. ej. en otra pestaña) y borrarlo perdía ese cambio.
             const activeItems = await db.outbox
-                .where('status').anyOf(['PENDING', 'SYNCING', 'FAILED'])
+                .where('status').anyOf(['PENDING', 'FAILED'])
                 .toArray();
 
             if (activeItems.length > 1) {
@@ -349,6 +371,16 @@ export class SyncEngine {
                     if (snapshots.length > 0) {
                         snapshots.sort((a, b) => (b.field_timestamp || 0) - (a.field_timestamp || 0));
                         const keepSnapshot = snapshots[0];
+
+                        // Antes se borraban los demás items sin más: un cambio de campo
+                        // posterior al snapshot (o un snapshot parcial) se perdía. Ahora se
+                        // fusionan en orden cronológico dentro del snapshot que se conserva.
+                        const mergedValue = mergePendingOutboxValues(items);
+                        const latestTimestamp = Math.max(...items.map(i => i.field_timestamp || 0));
+                        await db.outbox.update(keepSnapshot.id, {
+                            new_value: mergedValue,
+                            field_timestamp: latestTimestamp
+                        });
 
                         for (const item of items) {
                             if (item.id !== keepSnapshot.id) {
@@ -2557,10 +2589,14 @@ export class SyncEngine {
         if (options.isSnapshot) {
             const [primary, ...duplicates] = activeItems;
             if (primary) {
+                // Fusionar (no reemplazar): si había cambios pendientes de campos que no
+                // vienen en este snapshot (snapshot parcial, p. ej. solo is_deleted), se
+                // perdían al sobrescribir el item del outbox.
+                const pendingValues = mergePendingOutboxValues(activeItems);
                 await db.outbox.update(primary.id, {
                     ...resetForNewEdit,
                     field_name: '_complete_snapshot_',
-                    new_value: changes
+                    new_value: { ...pendingValues, ...changes }
                 });
                 if (duplicates.length > 0) await db.outbox.bulkDelete(duplicates.map(item => item.id));
             } else {
