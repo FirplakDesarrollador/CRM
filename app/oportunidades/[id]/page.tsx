@@ -43,7 +43,7 @@ export default function OpportunityDetailPage() {
     const params = useParams();
     const router = useRouter();
     const id = params.id as string;
-    const { opportunities, deleteOpportunity } = useOpportunities();
+    const { opportunities, deleteOpportunity, updateOpportunity } = useOpportunities();
     const { user: currentUser, role: userRole, isAdmin } = useCurrentUser();
     const setIsLoadingData = useSyncStore(state => state.setIsLoadingData);
     const phases = useLiveQuery(() => db.phases.toArray());
@@ -159,11 +159,18 @@ export default function OpportunityDetailPage() {
             console.error("Error deleting opportunity:", error);
             setIsDeleting(false);
             setIsDeleteModalOpen(false);
+            alert(error instanceof Error ? error.message : "No se pudo eliminar la oportunidad");
         }
     };
 
     // Note: Splash screen removed to allow non-blocking navigation.
     // Progress is now shown via the global LoadingOverlay.
+
+    // Eliminar (borrado lógico): administradores y coordinadores cualquier oportunidad;
+    // el asesor solo las suyas (dueño o creador). El hook valida lo mismo antes de borrar.
+    const isOpportunityOwner = !!currentUser?.id && !!opportunity &&
+        (opportunity.owner_user_id === currentUser.id || opportunity.created_by === currentUser.id);
+    const canDeleteOpportunity = userRole === 'ADMIN' || isAdmin || userRole === 'COORDINADOR' || isOpportunityOwner;
 
     if (!opportunity) {
         if (serverOpportunity === 'NOT_FOUND') {
@@ -211,8 +218,12 @@ export default function OpportunityDetailPage() {
                                 (phaseMap.get(opportunity.fase_id) || opportunity.fase || 'Prospecto')
                 }
                 backHref="/oportunidades?view=list"
+                onTitleSave={async (nombre) => {
+                    await updateOpportunity(opportunity.id, { nombre });
+                }}
+                titleEditLabel="Editar nombre de la oportunidad"
                 actions={[
-                    ...(userRole === 'ADMIN' || isAdmin ? [{
+                    ...(canDeleteOpportunity ? [{
                         label: "Eliminar Oportunidad",
                         icon: Trash2,
                         variant: 'danger' as const,
@@ -289,7 +300,7 @@ export default function OpportunityDetailPage() {
                 onClose={() => setIsDeleteModalOpen(false)}
                 onConfirm={handleDelete}
                 title="Eliminar Oportunidad"
-                message="¿Estás seguro de que deseas eliminar esta oportunidad? Esta acción no se puede deshacer."
+                message={`¿Eliminar la oportunidad "${opportunity.nombre}"? Dejará de verse en el CRM junto con sus cotizaciones y actividades. El registro no se borra físicamente (queda marcado como eliminado), así que se puede recuperar si fue un error.`}
                 confirmLabel="Eliminar Oportunidad"
                 variant="danger"
                 isLoading={isDeleting}
@@ -1638,7 +1649,7 @@ function ProductsTab({ opportunityId }: { opportunityId: string }) {
                             return (
                                 <tr key={item.id || item.product_id}>
                                     <td className="px-4 py-3 font-medium text-slate-900 min-w-[300px] max-w-sm">
-                                        <div className="line-clamp-2 leading-tight">
+                                        <div className="leading-snug break-words sm:line-clamp-2" title={item.descripcion_linea || item.nombre}>
                                             {item.descripcion_linea || item.nombre}
                                         </div>
                                     </td>
@@ -1856,7 +1867,13 @@ function ActivitiesTab({ opportunityId, accountId }: { opportunityId: string, ac
     });
     const handleToggleComplete = async (act: LocalActivity) => {
         const willComplete = !act.is_completed;
-        await toggleComplete(act.id, willComplete);
+        try {
+            await toggleComplete(act.id, willComplete);
+        } catch (error) {
+            console.error('[Actividades] No se pudo cambiar el estado de la actividad:', error);
+            alert(`No se pudo ${willComplete ? 'completar' : 'reabrir'} la actividad: ${error instanceof Error ? error.message : String(error)}`);
+            return;
+        }
         if (willComplete) requestFollowUp(act);
         else resetFollowUp(act.id);
     };
@@ -1930,6 +1947,9 @@ function ActivitiesTab({ opportunityId, accountId }: { opportunityId: string, ac
                                 <div className="flex items-start gap-4">
                                     <button
                                         onClick={(e) => {
+                                            // El botón está dentro de un <a href>: sin preventDefault el navegador
+                                            // sigue el enlace (recarga /actividades?id=...) y la actividad no queda completada.
+                                            e.preventDefault();
                                             e.stopPropagation();
                                             handleToggleComplete(act);
                                         }}
