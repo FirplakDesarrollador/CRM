@@ -4,6 +4,7 @@ import { db } from '@/lib/db';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useSyncStore } from '@/lib/stores/useSyncStore';
 import { matchesSearchTokens, getSearchTokens, getPhoneIlikePatterns } from '@/lib/utils';
+import { getCellphoneSearchDigits, phoneMatchesDigits } from '@/lib/phoneSearch';
 import { shouldRestrictContactsByAccountOwner, filterContactsForUser } from '@/lib/contactVisibility';
 
 export type ContactServer = {
@@ -69,6 +70,8 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
         const currentPage = isLoadMore ? pageRef.current + 1 : 1;
         const from = (currentPage - 1) * pageSize;
         const to = from + pageSize - 1;
+        // Búsqueda por celular: el número completo (aunque tenga espacios o guiones) se compara por dígitos
+        const phoneDigits = getCellphoneSearchDigits(searchTerm);
 
         const fetchOffline = async () => {
             console.log("[useContactsServer] Device is offline or server query failed. Falling back to local Dexie database...");
@@ -105,6 +108,7 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
             // Filtering
             if (searchTerm && searchTerm.trim()) {
                 localContacts = localContacts.filter(c => 
+                    phoneMatchesDigits(c.telefono, phoneDigits) ||
                     matchesSearchTokens([c.nombre, c.email, c.telefono, c.cargo], searchTerm)
                 );
             }
@@ -221,7 +225,7 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
             if (principalFilter === 'secondary') query = query.eq('es_principal', false);
 
             if (searchTerm && searchTerm.trim()) {
-                const tokens = getSearchTokens(searchTerm);
+                const tokens = phoneDigits ? [phoneDigits] : getSearchTokens(searchTerm);
                 for (const token of tokens) {
                     const phoneParts = getPhoneIlikePatterns(token).map(pattern => `,telefono.ilike.${pattern}`).join('');
                     query = query.or(`nombre.ilike.%${token}%,email.ilike.%${token}%,telefono.ilike.%${token}%,cargo.ilike.%${token}%${phoneParts}`);
@@ -276,7 +280,7 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
                         // Basic filtering for searchTerm if applicable
                         if (searchTerm) {
                             const term = searchTerm.toLowerCase();
-                            if (!newItem.nombre?.toLowerCase().includes(term) && !newItem.email?.toLowerCase().includes(term)) {
+                            if (!phoneMatchesDigits(newItem.telefono, phoneDigits) && !newItem.nombre?.toLowerCase().includes(term) && !newItem.email?.toLowerCase().includes(term)) {
                                 continue;
                             }
                         }
@@ -326,6 +330,7 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
             let finalData = [...itemsToAdd, ...flattenedResults];
             if (searchTerm && searchTerm.trim()) {
                 finalData = finalData.filter(c =>
+                    phoneMatchesDigits(c.telefono, phoneDigits) ||
                     matchesSearchTokens([c.nombre, c.email, c.telefono, c.cargo, c.account_name, c.account?.nombre], searchTerm)
                 );
             }

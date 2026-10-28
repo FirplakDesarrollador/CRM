@@ -5,6 +5,7 @@ import { db } from '@/lib/db';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useSyncStore } from '@/lib/stores/useSyncStore';
 import { matchesSearchTokens, getSearchTokens, getPhoneIlikePatterns } from '@/lib/utils';
+import { getCellphoneSearchDigits, findPhoneMatchesServer, findPhoneMatchesLocal } from '@/lib/phoneSearch';
 
 export type AccountServer = {
     id: string;
@@ -107,6 +108,8 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
         const currentPage = isLoadMore ? pageRef.current + 1 : 1;
         const from = (currentPage - 1) * pageSize;
         const to = from + pageSize - 1;
+        // Búsqueda por celular: también trae las cuentas cuyo contacto tiene ese celular
+        const phoneDigits = getCellphoneSearchDigits(searchTerm);
 
         const fetchOffline = async () => {
                 console.log("[useAccountsServer] Device is offline or server failed. Executing local Dexie fallback...");
@@ -158,7 +161,11 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                 }
 
                 if (searchTerm && searchTerm.trim()) {
+                    const phoneAccountIds = phoneDigits
+                        ? findPhoneMatchesLocal(await db.contacts.toArray(), localAccounts, phoneDigits).accountIds
+                        : new Set<string>();
                     localAccounts = localAccounts.filter(a =>
+                        phoneAccountIds.has(a.id) ||
                         matchesSearchTokens([a.nombre, a.nit_base, a.ciudad, a.direccion, a.email, a.telefono], searchTerm)
                     );
                 }
@@ -314,14 +321,23 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                 }
             }
 
+            const phoneAccountIds = new Set<string>();
+            if (phoneDigits) {
+                const matches = await findPhoneMatchesServer(supabase, phoneDigits);
+                matches.accountIds.forEach(id => phoneAccountIds.add(id));
+            }
+
             if (searchTerm && searchTerm.trim()) {
-                const tokens = getSearchTokens(searchTerm);
+                const tokens = phoneDigits ? [phoneDigits] : getSearchTokens(searchTerm);
                 const orParts = tokens.flatMap(token => [
                     `nombre.ilike.%${token}%`,
                     `nit_base.ilike.%${token}%`,
                     `telefono.ilike.%${token}%`,
                     ...getPhoneIlikePatterns(token).map(pattern => `telefono.ilike.${pattern}`)
                 ]);
+                if (phoneAccountIds.size > 0) {
+                    orParts.push(`id.in.(${Array.from(phoneAccountIds).join(',')})`);
+                }
                 query = query.or(orParts.join(','));
             }
 
@@ -399,6 +415,7 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
             if (missingPendingIds.size > 0) {
                 const localAccs = await db.accounts.where('id').anyOf(Array.from(missingPendingIds)).toArray();
                 pendingLocalAccounts = localAccs.filter((a: any) => {
+                    if (phoneAccountIds.has(a.id)) return true;
                     if (searchTerm) {
                         const lowerSearch = searchTerm.toLowerCase();
                         if (!a.nombre.toLowerCase().includes(lowerSearch) && !(a.nit_base && a.nit_base.toLowerCase().includes(lowerSearch))) {
@@ -433,6 +450,7 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
             let combinedResults = [...pendingLocalAccounts, ...flattenedResults];
             if (searchTerm && searchTerm.trim()) {
                 combinedResults = combinedResults.filter(a =>
+                    phoneAccountIds.has(a.id) ||
                     matchesSearchTokens([a.nombre, a.nit_base, a.ciudad, (a as any).pais, a.owner_name, a.email, a.telefono], searchTerm)
                 );
             }
