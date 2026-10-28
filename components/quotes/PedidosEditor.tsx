@@ -219,7 +219,7 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
                                             const qItem = quoteItems.find(qi => qi.producto_id === item.producto_id);
                                             return (
                                                 <div key={item.id} className="flex items-center gap-2 bg-slate-50 border border-slate-100 px-2 py-1 rounded-lg text-xs">
-                                                    <span className="font-bold text-slate-700 truncate max-w-[150px]" title={qItem?.descripcion_linea}>
+                                                    <span className="font-bold text-slate-700 text-[13px] sm:text-xs break-words sm:truncate sm:max-w-[150px]" title={qItem?.descripcion_linea}>
                                                         {qItem?.descripcion_linea || 'Producto'}
                                                     </span>
                                                     <span className="bg-blue-100 text-blue-700 px-1.5 rounded font-black">x{item.cantidad}</span>
