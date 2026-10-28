@@ -16,6 +16,7 @@ import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { OpportunityCombobox } from "@/components/opportunities/OpportunityCombobox";
 import { AccountCombobox } from "@/components/accounts/AccountCombobox";
 import { useFormAutoSave } from "@/lib/hooks/useFormAutoSave";
+import { useFormDraft } from "@/lib/hooks/useFormDraft";
 import { AutoSaveIndicator } from "@/components/ui/AutoSaveIndicator";
 import { SearchableSelect } from "@/components/ui/SearchableSelect";
 import { isB2COnlyActivityClassification, userHasB2CAccess } from "@/lib/b2c";
@@ -23,7 +24,7 @@ import { getRecentSubjects, rememberSubject, nextNumberedSubjects, uniqueSubject
 
 interface CreateActivityModalProps {
     onClose: () => void;
-    onSubmit: (data: any) => void;
+    onSubmit: (data: any) => void | Promise<void>;
     opportunities?: unknown[];
     initialOpportunityId?: string;
     initialAccountId?: string;
@@ -93,6 +94,16 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
     });
 
     const { register, handleSubmit, watch, setValue, getValues, reset, formState: { dirtyFields } } = form;
+
+    // Borrador local de una actividad NUEVA: si el asesor recibe una llamada o cambia de
+    // app y el navegador descarta la pestaña, al volver a abrir "Nueva actividad" en el
+    // mismo contexto se recupera lo que llevaba escrito.
+    const activityDraftKey = `crm_draft_activity:${initialOpportunityId || initialAccountId || 'general'}`;
+    const { hasDraft: hasActivityDraft, clearDraft: clearActivityDraft } = useFormDraft(
+        form,
+        activityDraftKey,
+        !isEditing && !initialValues
+    );
 
     const watchedAccountId = watch('account_id');
     const watchedOpportunityId = watch('opportunity_id');
@@ -1346,7 +1357,10 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                 await new Promise(resolve => setTimeout(resolve, 800)); // Brief delay to show feedback
             }
 
-            onSubmit(processed);
+            // Se espera el guardado: si falla (p. ej. sesión local no lista), antes el error
+            // quedaba como promesa rechazada sin aviso y la actividad no se guardaba.
+            await onSubmit(processed);
+            if (!isEditing) clearActivityDraft();
         } catch (e: any) {
             console.error("[CreateActivityModal] Uncaught error in submit:", e);
             alert(`Error interno: ${e.message}`);
@@ -1560,6 +1574,22 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                     }}
                     className="p-4 md:p-6 space-y-4 overflow-y-auto flex-1 overscroll-contain pb-6"
                 >
+                    {!isEditing && hasActivityDraft && (
+                        <div className="flex items-start justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800" data-testid="activity-draft-banner">
+                            <span>Se recuperó lo que estabas escribiendo antes de salir. Revisa y guarda la actividad.</span>
+                            <button
+                                type="button"
+                                className="shrink-0 font-bold underline"
+                                onClick={() => {
+                                    clearActivityDraft();
+                                    reset();
+                                }}
+                            >
+                                Descartar
+                            </button>
+                        </div>
+                    )}
+
                     {/* WIZARD PROGRESS BAR (if not editing) */}
                     {!isEditing && (
                         <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-100 relative">
