@@ -35,7 +35,7 @@ const MOBILE_NAV = [
     { label: "Tiendas-Ferias", href: "/tiendas", icon: Store },
     { label: "Catálogo", href: "/catalogo", icon: BookOpen },
     { label: "Inventarios", href: "/inventarios", icon: Warehouse, requiredRole: "ADMIN" },
-    { label: "Informes", href: "/informes", icon: FileSpreadsheet, requiredRole: "ADMIN" },
+    { label: "Informes", href: "/informes", icon: FileSpreadsheet },
     { label: "Usuarios", href: "/usuarios", icon: UserCircle },
     { label: "Configuración", href: "/configuracion", icon: Settings },
 ];

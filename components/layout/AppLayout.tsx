@@ -93,6 +93,32 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         };
     }, [isPublicPage]);
 
+    // Móvil: al contestar una llamada o cambiar de app no siempre se dispara el blur del
+    // campo que se estaba editando, y muchos campos (comentarios, valores de la oportunidad,
+    // cotización...) guardan en onBlur. Si el sistema descarta la pestaña, el texto se perdía.
+    // Al pasar a segundo plano se fuerza el blur para que esos campos guarden de inmediato.
+    useEffect(() => {
+        if (isPublicPage) return;
+        const commitFocusedField = (event: Event) => {
+            if (event.type === 'visibilitychange' && document.visibilityState !== 'hidden') return;
+            const active = document.activeElement;
+            if (
+                active instanceof HTMLInputElement ||
+                active instanceof HTMLTextAreaElement ||
+                active instanceof HTMLSelectElement ||
+                (active instanceof HTMLElement && active.isContentEditable)
+            ) {
+                active.blur();
+            }
+        };
+        document.addEventListener('visibilitychange', commitFocusedField);
+        window.addEventListener('pagehide', commitFocusedField);
+        return () => {
+            document.removeEventListener('visibilitychange', commitFocusedField);
+            window.removeEventListener('pagehide', commitFocusedField);
+        };
+    }, [isPublicPage]);
+
     // Global monitoring of online status
     useEffect(() => {
         const handleOnline = () => setOnline(true);
