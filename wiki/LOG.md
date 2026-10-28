@@ -3,6 +3,16 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-10-28 - Seguridad: Cierre de Bypass de Autenticación en `/api/mcp` (INC-2026-010)
+
+- **Hallazgo (auditoría):** Dos vías permitían obtener sesión sin credenciales en el endpoint remoto MCP: (1) decodificación de JWT sin verificar firma introducida en `a0ee90b` (aceptaba tokens forjados y revivía expirados) y (2) fallback de headers `x-user-email`/`x-user-role`/`x-user-id` activo en producción.
+- **Cambios Realizados:**
+  - `lib/mcp/auth.ts` (nuevo): resolución de sesión fail-closed; solo autentica `auth.getUser(token)` con firma verificada; headers de prueba únicamente con `MCP_DEV_ALLOW_HEADERS=true` fuera de producción.
+  - `app/api/mcp/route.ts`: `POST` responde `401` sin sesión válida; `GET` sin token retorna solo manifiesto público (preserva el indicador de estado de `McpIntegrationCard`).
+  - `tests/mcp-auth.test.ts` (nuevo): 10 casos; 6 RED contra la lógica vulnerable y luego GREEN, más guardas del flujo legítimo (rol por `id`/`email` en `CRM_Usuarios`).
+- **Validación:** 34/34 en GREEN (`tests/mcp-auth.test.ts`, `tests/crm-mcp.test.ts`, `tests/mcp-token.test.ts`); lint 0 errores/0 warnings en archivos tocados.
+- **Registro:** `docs/failures/2026-10-28-INC-2026-010.md`; fila nueva en `docs/quality/known-regressions.md`; nota de autenticación en `docs/mcp/INSTALACION_Y_USO.md`.
+
 ## 2026-10-27 - UI & Seguridad: Botón de Token Directo en MCP y Garantía de Rol ADMIN en CRM_Usuarios
 
 - **Requerimiento:** Mover la generación de token a la UI principal (botón debajo de "Ver Credenciales y Conexión IA" en la tarjeta MCP) y garantizar que administradores como `ismael.correa@firplak.com` y `alejandro.isaza@firplak.com` tengan acceso MCP con rol `ADMIN`.

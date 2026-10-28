@@ -92,9 +92,9 @@ El CRM expone un endpoint HTTP/SSE en `/api/mcp` que funciona con Custom GPT Act
 
 - **URL de la API**: `https://crm-64yu.vercel.app/api/mcp`
 - **Métodos soportados**:
-  - `GET /api/mcp`: Retorna el manifiesto de herramientas y recursos disponibles.
+  - `GET /api/mcp`: Retorna el manifiesto de herramientas y recursos disponibles (sin token retorna solo el manifiesto público, sin contexto de usuario).
   - `POST /api/mcp`: Acepta llamadas JSON-RPC 2.0 estándar (`tools/call`, `tools/list`, `resources/read`) o `{ tool: "...", args: { ... } }`.
-- **Autenticación**: Encabezado `Authorization: Bearer <token_jwt_supabase>` para resolver automáticamente el comercial autenticado.
+- **Autenticación (obligatoria para `POST`)**: Encabezado `Authorization: Bearer <token_jwt_supabase>` con un access token vigente de Supabase (se obtiene desde *Configuración > Integración MCP*). El token se verifica por firma contra Supabase Auth; un token inválido o expirado recibe `401` y debe regenerarse (expiran ~1 hora). Los encabezados `x-user-email` / `x-user-role` / `x-user-id` solo funcionan en desarrollo local con `MCP_DEV_ALLOW_HEADERS=true` y nunca en producción (INC-2026-010).
 
 ---
 
