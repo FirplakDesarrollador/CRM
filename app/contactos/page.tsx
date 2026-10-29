@@ -48,7 +48,7 @@ function ContactsContent() {
         onLoadMore: loadMore,
     });
 
-    const { user } = useCurrentUser();
+    const { user, isVendedor } = useCurrentUser();
     const { accounts } = useAccounts();
     const { deleteContact } = useContacts();
 
@@ -122,10 +122,16 @@ function ContactsContent() {
                 return;
             }
 
+            // Asesor (VENDEDOR): solo contactos de sus cuentas visibles.
+            const canOpen = (contact: { account_id?: string | null }) => {
+                if (!isVendedor) return true;
+                return !!contact.account_id && (accounts || []).some(a => a.id === contact.account_id);
+            };
+
             // 2. Try local IndexedDB
             try {
                 const localContact = await db.contacts.get(id);
-                if (localContact) {
+                if (localContact && canOpen(localContact)) {
                     setEditingContact(localContact);
                     setIsCreating(false);
                     return;
@@ -142,7 +148,7 @@ function ContactsContent() {
                     .eq('id', id)
                     .single();
 
-                if (contact && !error) {
+                if (contact && !error && canOpen(contact)) {
                     setEditingContact(contact);
                     setIsCreating(false);
                 }
@@ -152,7 +158,7 @@ function ContactsContent() {
         };
 
         findAndOpen();
-    }, [searchParams, contacts]);
+    }, [searchParams, contacts, accounts, isVendedor]);
 
     // Restore state from sessionStorage if navigating from sidebar (empty query)
     useEffect(() => {
