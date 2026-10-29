@@ -5,6 +5,7 @@ import { DetailHeader } from "@/components/ui/DetailHeader";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { FileText, Plus, AlertCircle, Check, Trash2, Loader2, Truck, Package, Building, ChevronRight, ChevronDown, TrendingUp, User, Users, Copy, Tag, MessageSquare } from "lucide-react";
+import { ExpandableTextarea } from "@/components/ui/ExpandableTextarea";
 import Link from "next/link";
 import { cn, formatNumberCO, formatOpportunityAmount } from "@/lib/utils";
 import { db, LocalCuenta } from "@/lib/db";
@@ -1251,7 +1252,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                         <div>
                             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Comentarios</label>
                             <div className="relative group">
-                                <textarea
+                                <ExpandableTextarea
                                     value={localComentarios}
                                     onChange={(e) => setLocalComentarios(e.target.value)}
                                     onBlur={async () => {
@@ -1271,7 +1272,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                         }
                                     }}
                                     rows={3}
-                                    className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none placeholder:text-slate-400 resize-none"
+                                    className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none placeholder:text-slate-400"
                                     placeholder="Agregue comentarios generales aquí..."
                                 />
                                 {isSavingComentariosMain && (
@@ -1337,7 +1338,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                     {!localComentariosPerdida && <span className="text-red-400 ml-1">*</span>}
                                 </label>
                                 <div className="relative group">
-                                    <textarea
+                                    <ExpandableTextarea
                                         data-testid="comentarios-perdida-textarea"
                                         value={localComentariosPerdida}
                                         onChange={(e) => setLocalComentariosPerdida(e.target.value)}
@@ -1360,7 +1361,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                         rows={3}
                                         placeholder="Describe el motivo de la pérdida..."
                                         className={cn(
-                                            "w-full px-3 py-1.5 bg-slate-50 border rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-red-400 focus:bg-white transition-all outline-none placeholder:text-slate-400 resize-none",
+                                            "w-full px-3 py-1.5 bg-slate-50 border rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-red-400 focus:bg-white transition-all outline-none placeholder:text-slate-400",
                                             localComentariosPerdida ? "border-slate-200" : "border-red-200 bg-red-50"
                                         )}
                                     />
