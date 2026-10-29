@@ -18,6 +18,7 @@ import { cn } from "@/components/ui/utils";
 import { AccountDeleteModal } from "@/components/cuentas/AccountDeleteModal";
 import { DataListToolbar } from "@/components/ui/DataListToolbar";
 import { handleEntityLinkClick } from "@/lib/utils/navigation";
+import { formatColombiaDateTime } from "@/lib/date-utils";
 import dynamic from 'next/dynamic';
 
 const HotTable = dynamic(() => import('@/components/HotTableWrapper'), { ssr: false });
@@ -403,7 +404,7 @@ function AccountsContent() {
             potencial_venta: acc.potencial_venta || 0,
             vendedor: acc.owner_name || "Sin asignar",
             nivel: acc.nivel_premium || "-",
-            creacion: acc.created_at ? new Date(acc.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) : "-",
+            creacion: formatColombiaDateTime(acc.created_at),
             actualizado: acc.updated_at ? new Date(acc.updated_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) : "-",
             _original: acc
         };
@@ -498,7 +499,7 @@ function AccountsContent() {
                 return td;
             }
         },
-        { data: 'creacion', title: 'Creación', readOnly: true, width: colWidths['creacion'] || 90, wordWrap: false,
+        { data: 'creacion', title: 'Creación', readOnly: true, width: Math.max(colWidths['creacion'] || 150, 150), wordWrap: false,
             renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 td.innerHTML = `<span style="font-size:12.5px;color:#64748b;font-weight:500;font-variant-numeric:tabular-nums;">${value || '-'}</span>`;
                 return td;
