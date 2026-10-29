@@ -3,6 +3,13 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-10-29 - Seguridad: Token MCP personal permanente (INC-2026-012)
+
+- **Hallazgo:** Los bots usaban el JWT de sesión de Supabase, que expiraba y producía `401` en reportes programados.
+- **Solución:** Token `mcp_pat_...` no expirante, secreto aleatorio de 256 bits, hash SHA-256 guardado en `app_metadata`, comparación en tiempo constante y revocación automática al regenerar.
+- **UI:** Configuración genera, copia y permite regenerar el token; la `service_role` permanece exclusivamente en servidor.
+- **Validación:** 41/41 pruebas MCP en GREEN, incluyendo token alterado/revocado y resolución del rol ADMIN.
+
 ## 2026-10-29 - Seguridad y datos: MCP fail-closed sin fixtures en producción (INC-2026-011)
 
 - **Hallazgo:** Cuando faltaba `SUPABASE_SERVICE_ROLE_KEY`, el MCP usaba la clave pública y podía recibir cero filas por RLS; después devolvía silenciosamente los registros sembrados de pruebas como si fueran datos reales. `crm_agenda_diaria` también enviaba todas las actividades pendientes sin paginación.

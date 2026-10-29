@@ -10,6 +10,13 @@ export interface McpTokenSessionResult {
   error: string | null;
 }
 
+export interface McpPersonalTokenResult {
+  token: string | null;
+  createdAt: string | null;
+  nonExpiring: boolean;
+  error: string | null;
+}
+
 export function formatBearerAuthHeader(token: string): string {
   return `Bearer ${token}`;
 }
@@ -64,6 +71,48 @@ export async function getMcpSessionToken(supabaseClient: {
       formattedExpiresAt: null,
       isExpired: true,
       error: errorMsg,
+    };
+  }
+}
+
+export async function getMcpPersonalToken(
+  supabaseClient: Parameters<typeof getMcpSessionToken>[0],
+  fetcher: typeof fetch = fetch
+): Promise<McpPersonalTokenResult> {
+  const session = await getMcpSessionToken(supabaseClient);
+  if (!session.token || session.error) {
+    return { token: null, createdAt: null, nonExpiring: false, error: session.error };
+  }
+
+  try {
+    const response = await fetcher('/api/mcp/personal-token', {
+      method: 'POST',
+      headers: {
+        Authorization: formatBearerAuthHeader(session.token),
+        'Content-Type': 'application/json',
+      },
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload?.token) {
+      return {
+        token: null,
+        createdAt: null,
+        nonExpiring: false,
+        error: payload?.error || 'No se pudo generar el token MCP permanente.',
+      };
+    }
+    return {
+      token: payload.token,
+      createdAt: payload.created_at || null,
+      nonExpiring: payload.non_expiring === true,
+      error: null,
+    };
+  } catch (error) {
+    return {
+      token: null,
+      createdAt: null,
+      nonExpiring: false,
+      error: error instanceof Error ? error.message : 'No se pudo generar el token MCP permanente.',
     };
   }
 }

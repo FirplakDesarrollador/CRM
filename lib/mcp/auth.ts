@@ -8,10 +8,13 @@
  */
 import { createClient } from '@supabase/supabase-js';
 import { McpSessionContext, McpUserRole } from './types';
+import { parseMcpPersonalToken, verifyMcpPersonalTokenHash } from './personal-token';
 
 export interface McpAuthUser {
   id: string;
   email?: string | null;
+  app_metadata?: Record<string, unknown>;
+  banned_until?: string | null;
 }
 
 interface CrmUserRow {
@@ -23,6 +26,9 @@ interface CrmUserRow {
 export interface McpAuthClient {
   auth: {
     getUser(token: string): Promise<{ data: { user: McpAuthUser | null }; error: unknown }>;
+    admin?: {
+      getUserById(userId: string): Promise<{ data: { user: McpAuthUser | null }; error: unknown }>;
+    };
   };
   from(table: string): {
     select(cols: string): {
@@ -86,14 +92,37 @@ export async function resolveMcpSession(
     try {
       const client = clientFactory(supabaseUrl, (serviceKey || anonKey)!);
       let verifiedUser: McpAuthUser | null = null;
+      const personalToken = parseMcpPersonalToken(token);
 
-      try {
-        const res = await client.auth.getUser(token);
-        if (res.data?.user && !res.error) {
-          verifiedUser = res.data.user;
+      if (personalToken) {
+        // Los tokens personales requieren service role para consultar app_metadata.
+        if (!serviceKey || !client.auth.admin) return null;
+        try {
+          const res = await client.auth.admin.getUserById(personalToken.userId);
+          const user = res.data?.user;
+          const expectedHash = user?.app_metadata?.mcp_personal_token_hash;
+          const isBanned = Boolean(user?.banned_until && new Date(user.banned_until).getTime() > Date.now());
+          if (
+            user &&
+            !res.error &&
+            !isBanned &&
+            typeof expectedHash === 'string' &&
+            verifyMcpPersonalTokenHash(token, expectedHash)
+          ) {
+            verifiedUser = user;
+          }
+        } catch {
+          // Token personal inexistente, alterado o revocado: no autentica.
         }
-      } catch {
-        // Token expirado o inválido según Supabase Auth: no autentica.
+      } else {
+        try {
+          const res = await client.auth.getUser(token);
+          if (res.data?.user && !res.error) {
+            verifiedUser = res.data.user;
+          }
+        } catch {
+          // Token expirado o inválido según Supabase Auth: no autentica.
+        }
       }
 
       if (!verifiedUser) {
