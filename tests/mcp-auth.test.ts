@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { resolveMcpSession, McpAuthClient, McpAuthUser } from '@/lib/mcp/auth';
+import { createMcpPersonalToken } from '@/lib/mcp/personal-token';
 
 /**
  * Contrato de seguridad del endpoint HTTP /api/mcp (incidente 2026-10-28):
@@ -48,6 +49,7 @@ interface MockClientOptions {
   rowById?: { id?: string; email?: string; role?: string } | null;
   /** Fila de CRM_Usuarios resuelta por email (ilike). */
   rowByEmail?: { id?: string; email?: string; role?: string } | null;
+  personalTokenUser?: McpAuthUser | null;
 }
 
 function makeMockClient(opts: MockClientOptions): McpAuthClient {
@@ -57,6 +59,14 @@ function makeMockClient(opts: MockClientOptions): McpAuthClient {
         if (opts.getUserThrows) throw new Error('token is expired');
         if (opts.validUser) return { data: { user: opts.validUser }, error: null };
         return { data: { user: null }, error: { message: 'invalid JWT: signature is invalid' } };
+      },
+      admin: {
+        async getUserById() {
+          return {
+            data: { user: opts.personalTokenUser ?? null },
+            error: opts.personalTokenUser ? null : { message: 'user not found' },
+          };
+        },
       },
     },
     from() {
@@ -211,6 +221,51 @@ describe('Resolución de sesión MCP (/api/mcp) — contrato de seguridad', () =
         clientFactory: () => client,
       });
       expect(session?.role).toBe('VENDEDOR');
+    });
+  });
+
+  describe('4. Token personal MCP no expirante', () => {
+    it('autentica el token personal cuando su hash coincide en app_metadata', async () => {
+      const generated = createMcpPersonalToken('55555555-5555-4555-8555-555555555555');
+      const client = makeMockClient({
+        personalTokenUser: {
+          id: generated.userId,
+          email: 'ismael.correa@firplak.com',
+          app_metadata: { mcp_personal_token_hash: generated.hash },
+        },
+        rowById: { id: generated.userId, email: 'ismael.correa@firplak.com', role: 'ADMIN' },
+      });
+
+      const session = await resolveMcpSession({
+        token: generated.token,
+        headers: makeHeaders(),
+        env: { ...BASE_ENV, SUPABASE_SERVICE_ROLE_KEY: 'service-role-prueba' },
+        clientFactory: () => client,
+      });
+
+      expect(session?.userId).toBe(generated.userId);
+      expect(session?.role).toBe('ADMIN');
+    });
+
+    it('rechaza un token personal alterado o revocado', async () => {
+      const generated = createMcpPersonalToken('55555555-5555-4555-8555-555555555555');
+      const client = makeMockClient({
+        personalTokenUser: {
+          id: generated.userId,
+          email: 'ismael.correa@firplak.com',
+          app_metadata: { mcp_personal_token_hash: '0'.repeat(64) },
+        },
+        rowById: { id: generated.userId, role: 'ADMIN' },
+      });
+
+      const session = await resolveMcpSession({
+        token: generated.token,
+        headers: makeHeaders(),
+        env: { ...BASE_ENV, SUPABASE_SERVICE_ROLE_KEY: 'service-role-prueba' },
+        clientFactory: () => client,
+      });
+
+      expect(session).toBeNull();
     });
   });
 });
