@@ -115,6 +115,8 @@ export async function crmBuscarOportunidades(
         q = q.order('created_at', { ascending: false, nullsFirst: false });
       }
 
+      q = q.order('id', { ascending: false });
+
       // Paginación
       q = q.range(offset, offset + limit - 1);
 

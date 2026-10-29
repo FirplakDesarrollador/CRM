@@ -213,7 +213,7 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
             }
 
             // Order by date (most recent first)
-            query = query.order('fecha_inicio', { ascending: false });
+            query = query.order('fecha_inicio', { ascending: false }).order('id', { ascending: false });
 
             // Paging
             query = query.range(from, to);

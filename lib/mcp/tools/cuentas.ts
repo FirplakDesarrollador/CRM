@@ -84,7 +84,7 @@ export async function crmBuscarCuentas(
         q = q.or(`nombre.ilike.%${query}%,nit_base.ilike.%${query}%`);
       }
 
-      q = q.order('nombre', { ascending: true });
+      q = q.order('nombre', { ascending: true }).order('id', { ascending: true });
       q = q.range(offset, offset + limit - 1);
 
       const { data, count, error } = await q;

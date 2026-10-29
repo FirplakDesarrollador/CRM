@@ -58,7 +58,7 @@ export async function crmListarContactos(
         q = q.or(`nombre.ilike.%${query}%,email.ilike.%${query}%,telefono.ilike.%${query}%`);
       }
 
-      q = q.order('nombre', { ascending: true });
+      q = q.order('nombre', { ascending: true }).order('id', { ascending: true });
       q = q.range(offset, offset + limit - 1);
 
       const { data, count, error } = await q;

@@ -444,7 +444,7 @@ export default function InformesPage() {
 
                 if (selectedUser) oppQuery = oppQuery.eq('owner_user_id', selectedUser);
 
-                oppQuery = oppQuery.order('created_at', { ascending: false });
+                oppQuery = oppQuery.order('created_at', { ascending: false }).order('id', { ascending: false });
                 const opps = await fetchAllInChunks(oppQuery, 2500, (total) => {
                     setExportProgress(`Cargando oportunidades (${total.toLocaleString()})...`);
                 });
@@ -958,7 +958,7 @@ export default function InformesPage() {
                 if (selectedEstadoCumplimiento === 'pendientes') query = query.eq('is_completed', false);
             }
 
-            query = query.order('created_at', { ascending: false });
+            query = query.order('created_at', { ascending: false }).order('id', { ascending: false });
             const data = await fetchAllInChunks(query, 2500, (total) => {
                 setExportProgress(`Descargando registros (${total.toLocaleString()})...`);
             });
