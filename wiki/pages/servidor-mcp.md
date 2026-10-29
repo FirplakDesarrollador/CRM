@@ -6,7 +6,7 @@ El servidor MCP oficial de Firplak expone las operaciones del CRM a modelos de i
 
 - **Transporte Dual:**
   - **`stdio` (Local):** Ejecutable CLI en `bin/crm-mcp.ts` (con wrapper `bin/crm-mcp.mjs`), usado por clientes de escritorio (Claude Desktop, Cursor, Antigravity IDE).
-  - **`HTTP/SSE` (Remoto):** Endpoint en `/api/mcp` (`https://crm-64yu.vercel.app/api/mcp`, implementado en `app/api/mcp/route.ts`) para integraciones remotas y ChatGPT Custom Actions, autenticando el usuario y rol vía token JWT de Supabase. La UI de configuración (`components/config/McpIntegrationCard.tsx`) provee un botón directo para extraer y copiar el token de sesión activo usando `lib/mcp/token.ts`.
+  - **`HTTP/SSE` (Remoto):** Endpoint en `/api/mcp` (`https://crm-64yu.vercel.app/api/mcp`, implementado en `app/api/mcp/route.ts`) para integraciones remotas y ChatGPT Custom Actions. El acceso durable usa un token personal MCP no expirante; el JWT de Supabase solo sirve como acceso temporal y para gestionar ese token. La UI de configuración (`components/config/McpIntegrationCard.tsx`) permite generarlo, copiarlo y regenerarlo mediante `lib/mcp/token.ts`.
 - **SDK Oficial:** Construido sobre `@modelcontextprotocol/sdk`.
 
 ## Política Estricta de Cero Borrado
@@ -20,6 +20,10 @@ El servidor no expone ninguna herramienta de borrado (`delete`, `eliminar`, `bor
 En Production y Preview el MCP exige `SUPABASE_SERVICE_ROLE_KEY` para operar sobre Supabase. La clave pública `anon` no se usa como sustituto para consultas administrativas. Si falta la configuración o Supabase devuelve un error, la herramienta informa que la base no está disponible; los registros sembrados de memoria solo se habilitan durante pruebas o mediante `MCP_ALLOW_MEMORY_FALLBACK=true` de forma explícita.
 
 Las respuestas de agenda y búsquedas están paginadas con un máximo de 30 filas para evitar saturar el contexto del agente.
+
+## Token Personal Permanente
+
+La UI de Configuración genera un token MCP personal con prefijo `mcp_pat_`. No tiene fecha de expiración y está vinculado al usuario autenticado. Supabase Auth conserva únicamente el hash SHA-256 en `app_metadata`; el valor original se muestra una sola vez al generarlo. Al regenerar o revocar el token, el anterior deja de autenticar inmediatamente. Los JWT de sesión continúan disponibles solo como acceso temporal y como autorización para gestionar el token personal.
 
 ## Roles y Filtrado Dinámico de Catálogo
 

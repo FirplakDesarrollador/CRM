@@ -15,7 +15,7 @@ import {
 import { cn } from "@/components/ui/utils";
 import { getMcpPublicUrl } from "@/lib/mcp/types";
 import { supabase } from "@/lib/supabase";
-import { getMcpSessionToken } from "@/lib/mcp/token";
+import { getMcpPersonalToken } from "@/lib/mcp/token";
 
 interface McpIntegrationCardProps {
   user: { email?: string | null; id?: string } | null;
@@ -30,7 +30,7 @@ export function McpIntegrationCard({ user, role }: McpIntegrationCardProps) {
   const [toolsCount, setToolsCount] = useState<number>(17);
   const [token, setToken] = useState<string | null>(null);
   const [tokenLoading, setTokenLoading] = useState(false);
-  const [tokenExpiresAt, setTokenExpiresAt] = useState<string | null>(null);
+  const [tokenIsPermanent, setTokenIsPermanent] = useState(false);
   const [tokenError, setTokenError] = useState<string | null>(null);
 
   // Asegura que aun en localhost:3000 la URL que se muestre y copie sea la desplegada en Vercel
@@ -71,14 +71,20 @@ export function McpIntegrationCard({ user, role }: McpIntegrationCardProps) {
     setTimeout(() => setCopied(null), 2000);
   };
 
-  const handleGenerateToken = async () => {
+  const handleGenerateToken = async (forceRegenerate = false) => {
+    if (token && !forceRegenerate) {
+      await navigator.clipboard.writeText(token);
+      setCopied("token");
+      setTimeout(() => setCopied(null), 2500);
+      return;
+    }
     setTokenLoading(true);
     setTokenError(null);
     try {
-      const result = await getMcpSessionToken(supabase);
+      const result = await getMcpPersonalToken(supabase);
       if (result.token) {
         setToken(result.token);
-        setTokenExpiresAt(result.formattedExpiresAt);
+        setTokenIsPermanent(result.nonExpiring);
         await navigator.clipboard.writeText(result.token);
         setCopied("token");
         setTimeout(() => setCopied(null), 2500);
@@ -223,7 +229,7 @@ export function McpIntegrationCard({ user, role }: McpIntegrationCardProps) {
         {/* Direct Token Generation Button on Main Card */}
         <button
           type="button"
-          onClick={handleGenerateToken}
+          onClick={() => handleGenerateToken()}
           disabled={tokenLoading}
           className={cn(
             "w-full flex items-center justify-center gap-2 px-3.5 py-2.5 bg-white hover:bg-purple-50 text-purple-700 border border-purple-200 hover:border-purple-300 rounded-xl text-xs font-bold transition-all shadow-2xs active:scale-[0.98] disabled:opacity-60 cursor-pointer",
@@ -242,7 +248,7 @@ export function McpIntegrationCard({ user, role }: McpIntegrationCardProps) {
               ? "¡Token Copiado al Portapapeles!"
               : token
               ? "Copiar Token Nuevamente"
-              : "Generar y Copiar Token de Autenticación"}
+              : "Generar y Copiar Token Permanente"}
           </span>
         </button>
 
@@ -252,9 +258,9 @@ export function McpIntegrationCard({ user, role }: McpIntegrationCardProps) {
           </p>
         )}
 
-        {tokenExpiresAt && !tokenError && (
+        {tokenIsPermanent && !tokenError && (
           <p className="text-[10px] text-slate-500 text-center font-medium">
-            Token activo • Válido hasta: {tokenExpiresAt}
+            Token personal activo • No expira
           </p>
         )}
       </div>
@@ -394,15 +400,15 @@ export function McpIntegrationCard({ user, role }: McpIntegrationCardProps) {
                         </div>
                         <span className="text-xs font-bold text-slate-900">Token de Autenticación Bearer</span>
                       </div>
-                      {tokenExpiresAt && (
+                      {tokenIsPermanent && (
                         <span className="text-[10px] font-medium text-purple-700 bg-white px-2 py-0.5 rounded-md border border-purple-200">
-                          Válido hasta: {tokenExpiresAt}
+                          No expira
                         </span>
                       )}
                     </div>
 
                     <p className="text-xs text-slate-600 leading-relaxed">
-                      Genera y copia el token JWT de tu sesión activa en Supabase para autorizar peticiones HTTP remotas en el endpoint MCP:
+                      Genera un token personal permanente para autorizar peticiones HTTP remotas. Solo se guarda su hash; al regenerarlo se revoca automáticamente el anterior:
                     </p>
 
                     {token && (
@@ -423,7 +429,7 @@ export function McpIntegrationCard({ user, role }: McpIntegrationCardProps) {
                     <div className="flex items-center gap-2 pt-1">
                       <button
                         type="button"
-                        onClick={handleGenerateToken}
+                        onClick={() => handleGenerateToken()}
                         disabled={tokenLoading}
                         className="flex items-center gap-1.5 px-3.5 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs active:scale-95 disabled:opacity-60 cursor-pointer"
                       >
@@ -439,13 +445,23 @@ export function McpIntegrationCard({ user, role }: McpIntegrationCardProps) {
                             ? "¡Token Copiado al Portapapeles!"
                             : token
                             ? "Copiar Token Nuevamente"
-                            : "Generar y Copiar Token de Autenticación"}
+                            : "Generar y Copiar Token Permanente"}
                         </span>
                       </button>
+                      {token && (
+                        <button
+                          type="button"
+                          onClick={() => handleGenerateToken(true)}
+                          disabled={tokenLoading}
+                          className="px-3 py-2 bg-white text-rose-700 border border-rose-200 hover:bg-rose-50 rounded-xl text-xs font-bold transition-colors disabled:opacity-60"
+                        >
+                          Regenerar y revocar anterior
+                        </button>
+                      )}
                     </div>
 
                     <p className="text-[10px] text-slate-400">
-                      * Este token se deriva de tu sesión activa en el CRM y valida tus permisos según tu rol ({userRole}).
+                      * No expira. Conserva los permisos actuales de tu usuario ({userRole}) y puede revocarse regenerándolo.
                     </p>
                   </div>
 
