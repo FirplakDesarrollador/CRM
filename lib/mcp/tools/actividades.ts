@@ -30,10 +30,13 @@ function isUuid(val?: string | null): boolean {
 
 export async function crmAgendaDiaria(
   ctx: McpSessionContext,
-  db: CrmDatabaseAdapter
+  db: CrmDatabaseAdapter,
+  args: { limit?: number; offset?: number } = {}
 ): Promise<McpToolResult> {
   const now = new Date();
   const todayStr = now.toISOString().split('T')[0];
+  const limit = Math.min(Math.max(1, Number(args.limit || 10)), 30);
+  const offset = Math.max(0, Number(args.offset || 0));
 
   const supabase = db.getSupabase();
   if (supabase) {
@@ -62,6 +65,8 @@ export async function crmAgendaDiaria(
           const fecha = String(a.updated_at || a.fecha_inicio || '').split('T')[0];
           return fecha === todayStr;
         });
+        const totalCount = pendientesHoy.length;
+        const pendientesPaginadas = pendientesHoy.slice(offset, offset + limit);
 
         return {
           isError: false,
@@ -77,7 +82,11 @@ export async function crmAgendaDiaria(
                     total_pendientes_o_vencidas: pendientesHoy.length,
                     total_completadas_hoy: completadasHoy.length,
                   },
-                  pendientes: pendientesHoy.map((a: ActivityRow) => ({
+                  total_count: totalCount,
+                  limit,
+                  offset,
+                  has_more: offset + limit < totalCount,
+                  pendientes: pendientesPaginadas.map((a: ActivityRow) => ({
                     id: a.id,
                     asunto: a.asunto,
                     tipo: a.tipo_actividad,
@@ -120,6 +129,8 @@ export async function crmAgendaDiaria(
     const fecha = String(a.updated_at || a.fecha_inicio || '').split('T')[0];
     return fecha === todayStr;
   });
+  const totalCount = pendientesHoy.length;
+  const pendientesPaginadas = pendientesHoy.slice(offset, offset + limit);
 
   return {
     isError: false,
@@ -134,7 +145,11 @@ export async function crmAgendaDiaria(
               total_pendientes_o_vencidas: pendientesHoy.length,
               total_completadas_hoy: completadasHoy.length,
             },
-            pendientes: pendientesHoy.map((a) => ({
+            total_count: totalCount,
+            limit,
+            offset,
+            has_more: offset + limit < totalCount,
+            pendientes: pendientesPaginadas.map((a) => ({
               id: a.id,
               asunto: a.asunto,
               tipo: a.tipo_actividad,

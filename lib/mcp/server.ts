@@ -305,8 +305,11 @@ export function createCrmMcpServer(context: McpSessionContext): CrmMcpInstance {
       name: 'crm_agenda_diaria',
       description:
         'Consulta rápida y sintetizada de la agenda del día para el asesor comercial (tareas y eventos pendientes hoy).',
-      schema: {},
-      handler: () => crmAgendaDiaria(context, db),
+      schema: {
+        limit: z.number().min(1).max(30).optional().describe('Máximo de actividades pendientes a devolver (default 10, máx. 30)'),
+        offset: z.number().min(0).optional().describe('Desplazamiento para paginar actividades pendientes'),
+      },
+      handler: (args) => crmAgendaDiaria(context, db, args as Parameters<typeof crmAgendaDiaria>[2]),
     },
     {
       name: 'crm_listar_actividades',
@@ -402,6 +405,26 @@ export function createCrmMcpServer(context: McpSessionContext): CrmMcpInstance {
   // Filtrar dinámicamente las herramientas según el rol activo
   const activeTools = allToolDefinitions.filter((tool) => canExecuteTool(context, tool.name));
 
+  async function executeToolDefinition(
+    tool: McpToolDefinition,
+    args: Record<string, unknown>
+  ): Promise<McpToolResult> {
+    try {
+      db.assertOperational();
+      return await tool.handler(args);
+    } catch (error) {
+      return {
+        isError: true,
+        content: [
+          {
+            type: 'text',
+            text: error instanceof Error ? error.message : 'Base de datos no disponible para ejecutar la herramienta MCP.',
+          },
+        ],
+      };
+    }
+  }
+
   // Registrar las herramientas en la instancia de McpServer
   const dynamicServer = mcpServer as unknown as {
     tool: (
@@ -413,7 +436,7 @@ export function createCrmMcpServer(context: McpSessionContext): CrmMcpInstance {
   };
   for (const t of activeTools) {
     dynamicServer.tool(t.name, t.description, t.schema, async (args: Record<string, unknown>) => {
-      const result = await t.handler(args);
+      const result = await executeToolDefinition(t, args);
       return result;
     });
   }
@@ -456,7 +479,7 @@ export function createCrmMcpServer(context: McpSessionContext): CrmMcpInstance {
         };
       }
 
-      return await found.handler(args);
+      return await executeToolDefinition(found, args);
     },
     async executeRawTool(name: string, args: Record<string, unknown>): Promise<McpToolResult> {
       if (isForbiddenDeleteTool(name)) {
