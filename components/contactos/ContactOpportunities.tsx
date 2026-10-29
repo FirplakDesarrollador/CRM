@@ -7,6 +7,8 @@ import { db } from "@/lib/db";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/components/ui/utils";
 import { formatNumberCO } from "@/lib/utils";
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { isSellerRole, sellerCanSeeOpportunity } from "@/lib/sellerVisibility";
 
 interface ContactOpportunitiesProps {
     contactId: string;
@@ -20,6 +22,7 @@ type ContactOpportunityRow = {
     currency_id: string | null;
     fase: string | null;
     linked: boolean;
+    owner_user_id?: string | null;
 };
 
 /** URL of the "new opportunity" wizard with the account and the contact already selected. */
@@ -34,6 +37,8 @@ export function newOpportunityUrlForContact(accountId: string, contactId: string
  */
 export function ContactOpportunities({ contactId, accountId }: ContactOpportunitiesProps) {
     const [rows, setRows] = useState<ContactOpportunityRow[] | null>(null);
+    const { user: currentUser, role } = useCurrentUser();
+    const sellerId = isSellerRole(role) ? currentUser?.id || null : null;
 
     useEffect(() => {
         let cancelled = false;
@@ -45,7 +50,7 @@ export function ContactOpportunities({ contactId, accountId }: ContactOpportunit
                 try {
                     const { data, error } = await supabase
                         .from('CRM_Oportunidades')
-                        .select('id, nombre, amount, currency_id, contactos_ids, fase_data:CRM_FasesOportunidad(nombre)')
+                        .select('id, nombre, amount, currency_id, owner_user_id, contactos_ids, fase_data:CRM_FasesOportunidad(nombre)')
                         .eq('account_id', accountId)
                         .eq('is_deleted', false)
                         .order('updated_at', { ascending: false })
@@ -58,6 +63,7 @@ export function ContactOpportunities({ contactId, accountId }: ContactOpportunit
                             currency_id?: string | null;
                             fase_data?: { nombre?: string | null } | null;
                             contactos_ids?: string[] | null;
+                            owner_user_id?: string | null;
                         };
                         result = (data as unknown as SupabaseOppRecord[]).map(o => ({
                             id: o.id,
@@ -65,7 +71,8 @@ export function ContactOpportunities({ contactId, accountId }: ContactOpportunit
                             amount: o.amount ?? null,
                             currency_id: o.currency_id || null,
                             fase: o.fase_data?.nombre || null,
-                            linked: Array.isArray(o.contactos_ids) && o.contactos_ids.includes(contactId)
+                            linked: Array.isArray(o.contactos_ids) && o.contactos_ids.includes(contactId),
+                            owner_user_id: o.owner_user_id ?? null
                         }));
                     }
                 } catch (e) {
@@ -85,8 +92,16 @@ export function ContactOpportunities({ contactId, accountId }: ContactOpportunit
                     amount: o.amount ?? null,
                     currency_id: o.currency_id ?? null,
                     fase: phaseMap.get(Number(o.fase_id)) || null,
-                    linked: Array.isArray(o.contactos_ids) && o.contactos_ids.includes(contactId)
+                    linked: Array.isArray(o.contactos_ids) && o.contactos_ids.includes(contactId),
+                    owner_user_id: o.owner_user_id ?? null
                 }));
+            }
+
+            // Asesor (VENDEDOR): solo sus oportunidades (dueño) o donde es colaborador.
+            if (sellerId) {
+                const collabs = await db.opportunityCollaborators.where('usuario_id').equals(sellerId).toArray();
+                const collabOppIds = new Set(collabs.filter(c => !c.is_deleted).map(c => c.oportunidad_id));
+                result = result.filter(o => sellerCanSeeOpportunity(o, sellerId, collabOppIds));
             }
 
             result.sort((a, b) => Number(b.linked) - Number(a.linked));
@@ -95,7 +110,7 @@ export function ContactOpportunities({ contactId, accountId }: ContactOpportunit
 
         load();
         return () => { cancelled = true; };
-    }, [accountId, contactId]);
+    }, [accountId, contactId, sellerId]);
 
     return (
         <section className="mt-6 space-y-3" data-testid="contact-opportunities">
