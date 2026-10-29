@@ -5,6 +5,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { Loader2, Store, DollarSign, CalendarPlus, Search, Trash2, TicketCheck, ChevronDown, ChevronUp, Lock, UserPlus } from "lucide-react";
+import { ExpandableTextarea } from "@/components/ui/ExpandableTextarea";
 import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useOpportunities } from "@/lib/hooks/useOpportunities";
 import { useActivities } from "@/lib/hooks/useActivities";
@@ -1430,10 +1431,11 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                 {/* 5. Comentarios * - de la oportunidad */}
                                 <div className="md:col-span-2">
                                     <label className="text-sm font-medium text-slate-700">Comentarios * (Oportunidad)</label>
-                                    <textarea 
-                                        {...register("comentarios")} 
+                                    <ExpandableTextarea
+                                        {...register("comentarios")}
                                         rows={3}
-                                        className="w-full mt-1 border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none resize-none" 
+                                        wrapperClassName="mt-1"
+                                        className="w-full border p-2 rounded-lg border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none"
                                         placeholder="Detalles sobre el negocio o productos interesados..." 
                                     />
                                     {errors.comentarios && <p className="text-red-500 text-xs mt-1">{errors.comentarios.message}</p>}
