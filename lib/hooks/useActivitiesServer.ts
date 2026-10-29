@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { isSellerRole, sellerCanSeeActivity } from '@/lib/sellerVisibility';
 import { supabase } from '@/lib/supabase';
 import { syncEngine } from '@/lib/sync';
 import { db } from '@/lib/db';
@@ -80,6 +81,11 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
                 const allOpps = await db.opportunities.toArray();
                 const oppMap = new Map(allOpps.map(o => [o.id, o]));
 
+                // Asesor (VENDEDOR): solo actividades asignadas a él, en cualquier vista (lista, cuenta, oportunidad).
+                if (isSellerRole(userRole)) {
+                    localActivities = localActivities.filter(a => sellerCanSeeActivity(a, currentUserId));
+                }
+
                 if (opportunityId) {
                     localActivities = localActivities.filter(a => a.opportunity_id === opportunityId);
                 } else if (accountId) {
@@ -93,7 +99,7 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
                         const idsToMatch = [currentUserId, ...subordinateIds];
                         localActivities = localActivities.filter(a => idsToMatch.includes(a.created_by || 'dummy') || (a.user_id && idsToMatch.includes(a.user_id)));
                     } else if (userRole === 'VENDEDOR') {
-                        localActivities = localActivities.filter(a => a.created_by === currentUserId || a.updated_by === currentUserId || a.user_id === currentUserId);
+                        // Ya filtrado arriba: solo user_id = asesor.
                     }
                 }
 
@@ -168,6 +174,11 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
                 `, { count: 'exact' })
                 .eq('is_deleted', false);
 
+            // Asesor (VENDEDOR): solo actividades asignadas a él, en cualquier vista.
+            if (isSellerRole(userRole)) {
+                query = query.eq('user_id', currentUserId);
+            }
+
             // Apply Filters
             if (opportunityId) {
                 query = query.eq('opportunity_id', opportunityId);
@@ -183,8 +194,6 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
                     const idsToMatch = [currentUserId, ...subordinateIds].filter(Boolean);
                     const idsString = idsToMatch.join(',');
                     query = query.or(`user_id.in.(${idsString}),created_by.in.(${idsString})`);
-                } else if (userRole === 'VENDEDOR') {
-                    query = query.or(`user_id.eq.${currentUserId},created_by.eq.${currentUserId}`);
                 }
             }
 

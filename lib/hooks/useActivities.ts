@@ -3,6 +3,8 @@ import { db, getActiveLocalUserId, useActiveLocalUserId, useActiveDatabaseVersio
 import { syncEngine } from '../sync';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../supabase';
+import { useCurrentUser } from './useCurrentUser';
+import { activitiesVisibleToViewer, isSellerRole } from '../sellerVisibility';
 
 /**
  * Converts a date input value to a proper ISO string.
@@ -47,20 +49,23 @@ export function useActivities(filters?: { opportunity_id?: string, account_id?: 
     const activeUserId = useActiveLocalUserId();
     const dbVersion = useActiveDatabaseVersion();
 
+    const { user: currentUser, role: viewerRole } = useCurrentUser();
+    const viewerId = currentUser?.id || null;
+
     const activities = useLiveQuery(
-        () => {
-            if (filters?.opportunity_id) {
-                return db.activities.where('opportunity_id').equals(filters.opportunity_id).filter(a => !a.is_deleted).toArray();
-            }
-            if (filters?.account_id) {
-                return db.activities.where('account_id').equals(filters.account_id).filter(a => !a.is_deleted).toArray();
-            }
-            if (filters?.advisor_id) {
-                return db.activities.where('user_id').equals(filters.advisor_id).filter(a => !a.is_deleted).toArray();
-            }
-            return db.activities.filter(a => !a.is_deleted).toArray();
+        async () => {
+            const collection = filters?.opportunity_id
+                ? db.activities.where('opportunity_id').equals(filters.opportunity_id)
+                : filters?.account_id
+                    ? db.activities.where('account_id').equals(filters.account_id)
+                    : (filters?.advisor_id && !isSellerRole(viewerRole))
+                        ? db.activities.where('user_id').equals(filters.advisor_id)
+                        : db.activities.toCollection();
+            const list = await collection.filter(a => !a.is_deleted).toArray();
+            // Asesor (VENDEDOR): solo las actividades asignadas a él.
+            return activitiesVisibleToViewer(list, viewerRole, viewerId);
         },
-        [activeUserId, dbVersion, filters?.opportunity_id, filters?.account_id, filters?.advisor_id]
+        [activeUserId, dbVersion, viewerRole, viewerId, filters?.opportunity_id, filters?.account_id, filters?.advisor_id]
     );
 
     // Allowlist of columns that actually exist in CRM_Actividades on Supabase.

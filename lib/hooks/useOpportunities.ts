@@ -1,4 +1,5 @@
 import { useLiveQuery } from "dexie-react-hooks";
+import { sellerCanSeeOpportunity } from '@/lib/sellerVisibility';
 import { db, LocalOportunidad, LocalOpportunityCollaborator, LocalQuote, LocalQuoteItem } from "@/lib/db";
 import { syncEngine } from "@/lib/sync";
 import { useState } from "react";
@@ -81,25 +82,21 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
 
     const opportunities = useLiveQuery(
         async () => {
-            // Priority 1: Specific advisor filter from Dashboard
-            if (filters?.advisor_id) {
-                return db.opportunities.where('owner_user_id').equals(filters.advisor_id).toArray();
-            }
-
-            // Priority 2: Vendedor role restriction
+            // Priority 1: Vendedor role restriction (siempre gana, incluso con filtro de asesor del dashboard)
             if (isVendedor && userId) {
                 // Get IDs of opportunities where user is a collaborator
                 const collaborators = await db.opportunityCollaborators
                     .where('usuario_id')
                     .equals(userId)
                     .toArray();
-                const collaboratedIds = new Set(collaborators.map(c => c.oportunidad_id));
+                const collaboratedIds = new Set(collaborators.filter(c => !c.is_deleted).map(c => c.oportunidad_id));
 
-                return db.opportunities.filter(o => 
-                    o.owner_user_id === userId || 
-                    o.created_by === userId ||
-                    collaboratedIds.has(o.id)
-                ).toArray();
+                return db.opportunities.filter(o => sellerCanSeeOpportunity(o, userId, collaboratedIds)).toArray();
+            }
+
+            // Priority 2: Specific advisor filter from Dashboard
+            if (filters?.advisor_id) {
+                return db.opportunities.where('owner_user_id').equals(filters.advisor_id).toArray();
             }
 
             return db.opportunities.toArray();

@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { generateProvisionalNit, isProvisionalNit } from "@/lib/nitUtils";
 import { sanitizeOpportunityForSync } from "@/lib/hooks/useOpportunities";
+import { sellerCanSeeAccount } from "@/lib/sellerVisibility";
 
 export function useAccounts(filters?: { advisor_id?: string | null, showAll?: boolean }) {
     const { user, isVendedor } = useCurrentUser();
@@ -13,22 +14,23 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
 
     // Live Query from Local DB (Dexie)
     const accounts = useLiveQuery(async () => {
-        // Priority 1: Specific advisor filter from Dashboard
+        // Priority 1: Vendedor role restriction (siempre gana: dashboard, asistente de oportunidad, etc.)
+        if (isVendedor && userId) {
+            const collaborators = await db.opportunityCollaborators.where('usuario_id').equals(userId).toArray();
+            const collabOppIds = collaborators.filter(c => !c.is_deleted).map(c => c.oportunidad_id);
+            const collabOpps = collabOppIds.length > 0 ? await db.opportunities.where('id').anyOf(collabOppIds).toArray() : [];
+            const collabAccountIds = new Set(collabOpps.filter(o => !o.is_deleted && o.account_id).map(o => o.account_id as string));
+            return db.accounts.filter(a => sellerCanSeeAccount(a, userId, collabAccountIds)).toArray();
+        }
+
+        // Priority 2: Specific advisor filter from Dashboard
         if (filters?.advisor_id) {
             return db.accounts.where('owner_user_id').equals(filters.advisor_id).toArray();
         }
 
-        // Priority 2: Global visibility (for Opportunity Wizard)
+        // Priority 3: Global visibility (for Opportunity Wizard)
         if (filters?.showAll) {
             return db.accounts.toArray();
-        }
-
-        // Priority 3: Vendedor role restriction
-        if (isVendedor && userId) {
-            return db.accounts.filter(a => 
-                a.owner_user_id === userId || 
-                a.created_by === userId
-            ).toArray();
         }
 
         return db.accounts.toArray();

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { sellerCanSeeAccount } from '@/lib/sellerVisibility';
 import { supabase } from '@/lib/supabase';
 import { syncEngine } from '@/lib/sync';
 import { db } from '@/lib/db';
@@ -127,11 +128,8 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                 const collabAccIds = collabOpps.filter(o => !o.is_deleted).map(o => o.account_id);
 
                 if (isVendedor && currentUserId) {
-                    localAccounts = localAccounts.filter(a =>
-                        a.owner_user_id === currentUserId || 
-                        a.created_by === currentUserId ||
-                        collabAccIds.includes(a.id)
-                    );
+                    const collabAccIdSet = new Set(collabAccIds);
+                    localAccounts = localAccounts.filter(a => sellerCanSeeAccount(a, currentUserId, collabAccIdSet));
                 } else if (userRole === 'COORDINADOR' && currentUserId) {
                     localAccounts = localAccounts.filter((a: any) => 
                         a.owner_user_id === currentUserId || 
