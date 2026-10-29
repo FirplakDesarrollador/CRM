@@ -1,4 +1,5 @@
 import { matchesSearchTokens } from "@/lib/utils";
+import { sellerCanSeeAccount, sellerCanSeeOpportunity } from "@/lib/sellerVisibility";
 
 // ---------------------------------------------------------------------------
 // OPORTUNIDADES
@@ -87,10 +88,9 @@ export function filterOpportunities<T extends {
         const acc = accountsMap ? accountsMap.get(o.account_id || "") : o.account;
 
         // Role restriction for sellers
-        if (isVendedor && currentUserId && userFilter !== "unrestricted") {
-            const isOwnerOrCreator = o.owner_user_id === currentUserId || o.created_by === currentUserId;
-            const isCollab = collabOppIds.has(o.id);
-            if (!isOwnerOrCreator && !isCollab) {
+        // Asesor: solo dueño o colaborador, en cualquier pestaña (incluida "unrestricted").
+        if (isVendedor && currentUserId) {
+            if (!sellerCanSeeOpportunity(o, currentUserId, collabOppIds)) {
                 return false;
             }
         }
@@ -293,9 +293,7 @@ export function filterAccounts<T extends {
     return accounts.filter(a => {
         // Role permissions
         if (isVendedor && currentUserId) {
-            const isOwner = a.owner_user_id === currentUserId || a.created_by === currentUserId;
-            const isCollab = collabAccountIds.has(a.id);
-            if (!isOwner && !isCollab) return false;
+            if (!sellerCanSeeAccount(a, currentUserId, collabAccountIds)) return false;
         } else if (userRole === "COORDINADOR" && currentUserId) {
             const isOwner = a.owner_user_id === currentUserId || a.created_by === currentUserId;
             const isTeam = (a.owner_user_id && subordinateIds.includes(a.owner_user_id)) ||
