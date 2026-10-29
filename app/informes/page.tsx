@@ -9,6 +9,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { FileSpreadsheet, Loader2, Download, TableProperties, Users, Briefcase, Building2, Calendar as CalendarIcon, Filter, RotateCcw, DollarSign, MapPin, Tag } from 'lucide-react';
 import { cn } from '@/components/ui/utils';
+import { MiInformeCard } from '@/components/informes/MiInformeCard';
 
 // Constantes para filtros
 const ENTIDADES = [
@@ -310,13 +311,24 @@ export default function InformesPage() {
     }
 
     if (role !== 'ADMIN') {
+        // Asesores y coordinadores: solo su informe personal (filtrado en el servidor).
         return (
-            <div className="flex h-screen flex-col items-center justify-center bg-slate-50 space-y-4">
-                <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center text-red-600">
-                    <FileSpreadsheet className="w-8 h-8" />
-                </div>
-                <h1 className="text-2xl font-bold text-slate-800">Acceso Restringido</h1>
-                <p className="text-slate-500">Solo los administradores pueden acceder a este módulo de exportaciones.</p>
+            <div className="flex-1 w-full bg-slate-50 min-h-screen pb-safe">
+                <header className="bg-white border-b border-slate-200/60">
+                    <div className="max-w-3xl mx-auto px-4 sm:px-6 py-5 flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center">
+                            <FileSpreadsheet className="w-5 h-5 text-blue-600" />
+                        </div>
+                        <div>
+                            <h1 className="text-2xl font-bold text-slate-800 tracking-tight leading-tight">Informes</h1>
+                            <p className="text-sm text-slate-500 font-medium mt-0.5">Tu información en Excel</p>
+                        </div>
+                    </div>
+                </header>
+                <main className="max-w-3xl mx-auto px-4 sm:px-6 py-6 space-y-4">
+                    <MiInformeCard />
+                    <p className="text-xs text-slate-400">Los informes generales (todos los asesores, S&amp;OP) siguen siendo solo para administradores.</p>
+                </main>
             </div>
         );
     }
@@ -996,13 +1008,14 @@ export default function InformesPage() {
                         </div>
                         <div>
                             <h1 className="text-2xl font-bold text-slate-800 tracking-tight leading-tight">Informes y Exportaciones</h1>
-                            <p className="text-sm text-slate-500 font-medium mt-0.5">Módulo exclusivo para Administradores</p>
+                            <p className="text-sm text-slate-500 font-medium mt-0.5">Exportaciones generales (administradores) y tu informe personal</p>
                         </div>
                     </div>
                 </div>
             </header>
 
             <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+                <MiInformeCard compact />
 
                 {/* Entidad Selection Grid */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

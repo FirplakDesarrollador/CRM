@@ -1,4 +1,5 @@
 import { useLiveQuery } from "dexie-react-hooks";
+import { sellerCanSeeOpportunity } from '@/lib/sellerVisibility';
 import { db, LocalOportunidad, LocalOpportunityCollaborator, LocalQuote, LocalQuoteItem } from "@/lib/db";
 import { syncEngine } from "@/lib/sync";
 import { useState } from "react";
@@ -8,6 +9,7 @@ import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { sendOpportunityDeletionEmail } from "@/lib/services/notifications";
 import { shouldUpdateOpportunityAmount, getOpportunityAmountFromQuote, resolveActiveQuote } from "@/lib/opportunityQuoteSync";
 import { sanitizeQuoteItemUpdates } from "@/lib/quotePricing";
+import { shouldKeepDiscountOnQtyChange } from "@/lib/discountExceptions";
 
 // Helper to fetch pricing from server
 async function fetchPricing(productId: string, channelId: string, qty: number) {
@@ -80,25 +82,21 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
 
     const opportunities = useLiveQuery(
         async () => {
-            // Priority 1: Specific advisor filter from Dashboard
-            if (filters?.advisor_id) {
-                return db.opportunities.where('owner_user_id').equals(filters.advisor_id).toArray();
-            }
-
-            // Priority 2: Vendedor role restriction
+            // Priority 1: Vendedor role restriction (siempre gana, incluso con filtro de asesor del dashboard)
             if (isVendedor && userId) {
                 // Get IDs of opportunities where user is a collaborator
                 const collaborators = await db.opportunityCollaborators
                     .where('usuario_id')
                     .equals(userId)
                     .toArray();
-                const collaboratedIds = new Set(collaborators.map(c => c.oportunidad_id));
+                const collaboratedIds = new Set(collaborators.filter(c => !c.is_deleted).map(c => c.oportunidad_id));
 
-                return db.opportunities.filter(o => 
-                    o.owner_user_id === userId || 
-                    o.created_by === userId ||
-                    collaboratedIds.has(o.id)
-                ).toArray();
+                return db.opportunities.filter(o => sellerCanSeeOpportunity(o, userId, collaboratedIds)).toArray();
+            }
+
+            // Priority 2: Specific advisor filter from Dashboard
+            if (filters?.advisor_id) {
+                return db.opportunities.where('owner_user_id').equals(filters.advisor_id).toArray();
             }
 
             return db.opportunities.toArray();
@@ -267,6 +265,10 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
         const collaborators = await db.opportunityCollaborators.where('oportunidad_id').equals(id).toArray();
         const activities = await db.activities.where('opportunity_id').equals(id).toArray();
         const pedidos = await db.pedidos.where('opportunity_id').equals(id).toArray();
+        // Un asesor solo borra "basura": si ya hay pedidos generados, debe hacerlo un administrador.
+        if (!isAdmin && !isCoordinador && pedidos.some(p => !(p as { is_deleted?: boolean }).is_deleted)) {
+            throw new Error("Esta oportunidad ya tiene pedidos. Solo un administrador o coordinador puede eliminarla.");
+        }
         const pedidoUuids = pedidos.map(p => p.uuid_generado);
         const pedidoItemsAll = pedidoUuids.length > 0
             ? await db.pedidoItems.where('pedido_uuid').anyOf(pedidoUuids).toArray()
@@ -763,6 +765,7 @@ export function useQuoteItems(quoteId?: string) {
         // If quantity changed, re-calculate pricing ONLY for linked products
         if (safeUpdates.cantidad !== undefined && safeUpdates.cantidad !== current.cantidad && current.producto_id) {
             let pricing = null;
+            let keepDiscount = false;
             try {
                 const parentQuote = await db.quotes.get(current.cotizacion_id);
                 if (parentQuote) {
@@ -771,6 +774,12 @@ export function useQuoteItems(quoteId?: string) {
                         const acc = await db.accounts.get(opp.account_id);
                         if (acc) {
                             pricing = await fetchPricing(current.producto_id, acc.canal_id, updated.cantidad);
+                            keepDiscount = shouldKeepDiscountOnQtyChange({
+                                channel: acc.canal_id,
+                                ignorarLimites: !!acc.ignorar_limites_descuento,
+                                currentDiscountPct: current.discount_pct,
+                                previousMaxPct: current.max_discount_pct
+                            });
                         }
                     }
                 }
@@ -785,7 +794,7 @@ export function useQuoteItems(quoteId?: string) {
 
                 // Cap existing manual discount if it now exceeds the new maximum allowed
                 const manualDiscount = updated.discount_pct !== undefined ? updated.discount_pct : (current.discount_pct || 0);
-                if (manualDiscount > pricing.discount_pct) {
+                if (!keepDiscount && manualDiscount > pricing.discount_pct) {
                     updated.discount_pct = pricing.discount_pct;
                 }
             }

@@ -148,7 +148,8 @@ describe('Filtros internos de tabla de oportunidades', () => {
         const hotRow = buildOpportunityHotRow(mockOpp, {});
         // "cierre" debe incluir año de 4 dígitos para que Handsontable lo reconozca como fecha
         expect(hotRow.cierre).toMatch(/^\d{2}\/\d{2}\/\d{4}$/);
-        expect(hotRow.creada).toMatch(/^\d{2}\/\d{2}\/\d{4}$/);
+        // "creada" muestra fecha y hora Colombia; empieza por DD/MM/AAAA para que el filtro de fecha siga funcionando
+        expect(hotRow.creada).toBe('21/10/2026 03:00 a. m.');
     });
 
     it('parseHandsontableDate debe convertir DD/MM/AAAA a YYYY-MM-DD para el servidor Supabase', () => {

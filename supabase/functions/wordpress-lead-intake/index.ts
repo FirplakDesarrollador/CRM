@@ -7,7 +7,8 @@ const ASESORES_POR_CORREO: Record<string, string> = {
   "comercial@firplak.com": "31472414-6416-4c11-baa7-11448c44074b", // Juan Fernando Ospina
   "claudia.granada@firplak.com": "9bca54d7-45d6-4e79-8dba-be6983a78556", // Claudia Granada
   "comercial2@firplak.com": "ef4e2895-cc89-461b-96ca-cc677247f247", // Comercial 2
-  "brian.rua@firplak.com": "e42aa99a-f359-4cae-b7c7-4a48267bbdb6"  // Brian Rua
+  "brian.rua@firplak.com": "e42aa99a-f359-4cae-b7c7-4a48267bbdb6", // Brian Rua
+  "juan.giraldo@firplak.com": "565833bd-ba1d-4819-967f-cc87fa60d13f" // Juan Diego Giraldo
 };
 const CANAL_ID          = "PROPIO";
 const ESTADO_ID         = 8; // Contacto Inicial

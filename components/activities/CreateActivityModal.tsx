@@ -7,7 +7,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { cn } from "@/components/ui/utils";
 import { toInputDate, toInputDateTime, parseColombiaDate } from "@/lib/date-utils";
-import { db, LocalActivity, LocalActivityClassification, LocalActivitySubclassification } from "@/lib/db";
+import { db, LocalActivity, LocalActivityClassification, LocalActivitySubclassification, useActiveLocalUserId, useActiveDatabaseVersion } from "@/lib/db";
 import { syncEngine } from "@/lib/sync";
 import { supabase } from "@/lib/supabase";
 import { DateTimePicker } from "@/components/ui/DateTimePicker";
@@ -16,13 +16,15 @@ import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { OpportunityCombobox } from "@/components/opportunities/OpportunityCombobox";
 import { AccountCombobox } from "@/components/accounts/AccountCombobox";
 import { useFormAutoSave } from "@/lib/hooks/useFormAutoSave";
+import { useFormDraft } from "@/lib/hooks/useFormDraft";
 import { AutoSaveIndicator } from "@/components/ui/AutoSaveIndicator";
 import { SearchableSelect } from "@/components/ui/SearchableSelect";
 import { isB2COnlyActivityClassification, userHasB2CAccess } from "@/lib/b2c";
+import { getRecentSubjects, rememberSubject, nextNumberedSubjects, uniqueSubjects } from "@/lib/activitySubjects";
 
 interface CreateActivityModalProps {
     onClose: () => void;
-    onSubmit: (data: any) => void;
+    onSubmit: (data: any) => void | Promise<void>;
     opportunities?: unknown[];
     initialOpportunityId?: string;
     initialAccountId?: string;
@@ -92,6 +94,16 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
     });
 
     const { register, handleSubmit, watch, setValue, getValues, reset, formState: { dirtyFields } } = form;
+
+    // Borrador local de una actividad NUEVA: si el asesor recibe una llamada o cambia de
+    // app y el navegador descarta la pestaña, al volver a abrir "Nueva actividad" en el
+    // mismo contexto se recupera lo que llevaba escrito.
+    const activityDraftKey = `crm_draft_activity:${initialOpportunityId || initialAccountId || 'general'}`;
+    const { hasDraft: hasActivityDraft, clearDraft: clearActivityDraft } = useFormDraft(
+        form,
+        activityDraftKey,
+        !isEditing && !initialValues
+    );
 
     const watchedAccountId = watch('account_id');
     const watchedOpportunityId = watch('opportunity_id');
@@ -1061,6 +1073,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
             const currentAsunto = data.asunto?.trim() || getAutoAsunto(data.clasificacion_id, data.opportunity_id, data.account_id);
             data.asunto = currentAsunto;
             setValue('asunto', currentAsunto);
+            if (!isEditing) rememberSubject(currentAsunto, currentUser?.id);
 
             console.log("[CreateActivityModal] Raw Submit Data:", data);
 
@@ -1344,7 +1357,10 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                 await new Promise(resolve => setTimeout(resolve, 800)); // Brief delay to show feedback
             }
 
-            onSubmit(processed);
+            // Se espera el guardado: si falla (p. ej. sesión local no lista), antes el error
+            // quedaba como promesa rechazada sin aviso y la actividad no se guardaba.
+            await onSubmit(processed);
+            if (!isEditing) clearActivityDraft();
         } catch (e: any) {
             console.error("[CreateActivityModal] Uncaught error in submit:", e);
             alert(`Error interno: ${e.message}`);
@@ -1407,6 +1423,32 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
     };
 
     const tipo = watch('tipo_actividad');
+    const watchedAsunto = watch('asunto');
+
+    // Asuntos previos de la misma oportunidad (más recientes primero) para sugerirlos
+    const activeLocalUserId = useActiveLocalUserId();
+    const activeDbVersion = useActiveDatabaseVersion();
+    const opportunitySubjects = useLiveQuery(async () => {
+        if (isEditing || !watchedOpportunityId) return [] as string[];
+        const acts = await db.activities.where('opportunity_id').equals(watchedOpportunityId).toArray();
+        return acts
+            .filter(a => !a.is_deleted && a.asunto && a.id !== initialData?.id)
+            .sort((a, b) => String(b.created_at || b.fecha_inicio || '').localeCompare(String(a.created_at || a.fecha_inicio || '')))
+            .map(a => a.asunto);
+    }, [isEditing, watchedOpportunityId, initialData?.id, activeLocalUserId, activeDbVersion]);
+
+    const [recentSubjects, setRecentSubjects] = useState<string[]>([]);
+    useEffect(() => {
+        if (!isEditing) setRecentSubjects(getRecentSubjects(currentUser?.id));
+    }, [isEditing, currentUser?.id]);
+
+    const subjectSuggestions = useMemo(() => {
+        if (isEditing) return [] as string[];
+        return uniqueSubjects(
+            [nextNumberedSubjects(opportunitySubjects ?? []), opportunitySubjects ?? [], recentSubjects],
+            watchedAsunto
+        );
+    }, [isEditing, opportunitySubjects, recentSubjects, watchedAsunto]);
     const fechaInicio = watch('fecha_inicio');
     const selectedClasificacionId = watch('clasificacion_id');
 
@@ -1532,6 +1574,22 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                     }}
                     className="p-4 md:p-6 space-y-4 overflow-y-auto flex-1 overscroll-contain pb-6"
                 >
+                    {!isEditing && hasActivityDraft && (
+                        <div className="flex items-start justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800" data-testid="activity-draft-banner">
+                            <span>Se recuperó lo que estabas escribiendo antes de salir. Revisa y guarda la actividad.</span>
+                            <button
+                                type="button"
+                                className="shrink-0 font-bold underline"
+                                onClick={() => {
+                                    clearActivityDraft();
+                                    reset();
+                                }}
+                            >
+                                Descartar
+                            </button>
+                        </div>
+                    )}
+
                     {/* WIZARD PROGRESS BAR (if not editing) */}
                     {!isEditing && (
                         <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-100 relative">
@@ -1755,6 +1813,22 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                                 placeholder={tipo === 'TAREA' ? "Ej. Llamar a seguimiento (o autogenerar)" : "Ej. Reunión de presentación (o autogenerar)"}
                             />
+                            {!isEditing && subjectSuggestions.length > 0 && (
+                                <div className="flex flex-wrap items-center gap-1.5 pt-1" data-testid="asunto-sugerencias">
+                                    <span className="text-[10px] text-slate-400 font-semibold uppercase">Usar:</span>
+                                    {subjectSuggestions.map(s => (
+                                        <button
+                                            key={s}
+                                            type="button"
+                                            title={s}
+                                            onClick={() => setValue('asunto', s, { shouldDirty: true, shouldValidate: true })}
+                                            className="max-w-full truncate px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 transition"
+                                        >
+                                            {s}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     )}
 

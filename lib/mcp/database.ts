@@ -234,19 +234,40 @@ export function createMemoryStore(): MemoryStore {
 export class CrmDatabaseAdapter {
   private memory: MemoryStore;
   private supabaseClient: SupabaseClient | null = null;
+  private readonly memoryFallbackAllowed: boolean;
+  private configurationError: string | null = null;
 
   constructor() {
     this.memory = createMemoryStore();
+    this.memoryFallbackAllowed =
+      process.env.NODE_ENV === 'test' || process.env.MCP_ALLOW_MEMORY_FALLBACK === 'true';
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    if (url && serviceKey && !url.includes('example.supabase.co')) {
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!url || url.includes('example.supabase.co')) {
+      this.configurationError =
+        'Base de datos no disponible: falta NEXT_PUBLIC_SUPABASE_URL válida para el MCP.';
+    } else if (!serviceKey) {
+      this.configurationError =
+        'Base de datos no disponible: falta SUPABASE_SERVICE_ROLE_KEY en el entorno del servidor MCP.';
+    } else {
       try {
         this.supabaseClient = createClient(url, serviceKey, {
           auth: { persistSession: false },
         });
-      } catch {
+      } catch (error) {
         this.supabaseClient = null;
+        this.configurationError = `Base de datos no disponible: no se pudo inicializar Supabase (${error instanceof Error ? error.message : 'error desconocido'}).`;
       }
+    }
+  }
+
+  assertOperational(): void {
+    if (!this.supabaseClient && !this.memoryFallbackAllowed) {
+      throw new Error(
+        this.configurationError ||
+          'Base de datos no disponible: el fallback de memoria está deshabilitado fuera de pruebas.'
+      );
     }
   }
 
@@ -255,6 +276,12 @@ export class CrmDatabaseAdapter {
   }
 
   getMemory(): MemoryStore {
+    if (!this.memoryFallbackAllowed) {
+      throw new Error(
+        this.configurationError ||
+          'Base de datos no disponible: una consulta Supabase falló y el fallback de memoria está deshabilitado en este entorno.'
+      );
+    }
     return this.memory;
   }
 }

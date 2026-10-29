@@ -4,7 +4,8 @@ import { useOpportunities, useQuotes, useQuoteItems } from "@/lib/hooks/useOppor
 import { DetailHeader } from "@/components/ui/DetailHeader";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { FileText, Plus, AlertCircle, Check, Trash2, Loader2, Truck, Package, Building, ChevronRight, ChevronDown, TrendingUp, User, Users, Copy, Tag } from "lucide-react";
+import { FileText, Plus, AlertCircle, Check, Trash2, Loader2, Truck, Package, Building, ChevronRight, ChevronDown, TrendingUp, User, Users, Copy, Tag, MessageSquare } from "lucide-react";
+import { ExpandableTextarea } from "@/components/ui/ExpandableTextarea";
 import Link from "next/link";
 import { cn, formatNumberCO, formatOpportunityAmount } from "@/lib/utils";
 import { db, LocalCuenta } from "@/lib/db";
@@ -43,7 +44,7 @@ export default function OpportunityDetailPage() {
     const params = useParams();
     const router = useRouter();
     const id = params.id as string;
-    const { opportunities, deleteOpportunity } = useOpportunities();
+    const { opportunities, deleteOpportunity, updateOpportunity } = useOpportunities();
     const { user: currentUser, role: userRole, isAdmin } = useCurrentUser();
     const setIsLoadingData = useSyncStore(state => state.setIsLoadingData);
     const phases = useLiveQuery(() => db.phases.toArray());
@@ -87,14 +88,15 @@ export default function OpportunityDetailPage() {
 
                             if (collabs && !collabsError) {
                                 await db.opportunityCollaborators.bulkPut(collabs);
-                                isCollab = collabs.some(c => c.usuario_id === currentUser?.id);
+                                isCollab = collabs.some(c => c.usuario_id === currentUser?.id && !c.is_deleted);
                             }
                         } catch (err) {
                             console.warn("Could not fetch collaborators from server (table might be missing):", err);
                         }
 
                         if (userRole === 'VENDEDOR') {
-                            const isOwner = oppData.owner_user_id === currentUser?.id || oppData.created_by === currentUser?.id;
+                            // Asesor: solo dueño o colaborador (crear la oportunidad para otro no da acceso).
+                            const isOwner = oppData.owner_user_id === currentUser?.id;
                             if (!isOwner && !isCollab) {
                                 setServerOpportunity('UNAUTHORIZED');
                                 return;
@@ -159,11 +161,18 @@ export default function OpportunityDetailPage() {
             console.error("Error deleting opportunity:", error);
             setIsDeleting(false);
             setIsDeleteModalOpen(false);
+            alert(error instanceof Error ? error.message : "No se pudo eliminar la oportunidad");
         }
     };
 
     // Note: Splash screen removed to allow non-blocking navigation.
     // Progress is now shown via the global LoadingOverlay.
+
+    // Eliminar (borrado lógico): administradores y coordinadores cualquier oportunidad;
+    // el asesor solo las suyas (dueño o creador). El hook valida lo mismo antes de borrar.
+    const isOpportunityOwner = !!currentUser?.id && !!opportunity &&
+        (opportunity.owner_user_id === currentUser.id || opportunity.created_by === currentUser.id);
+    const canDeleteOpportunity = userRole === 'ADMIN' || isAdmin || userRole === 'COORDINADOR' || isOpportunityOwner;
 
     if (!opportunity) {
         if (serverOpportunity === 'NOT_FOUND') {
@@ -211,8 +220,12 @@ export default function OpportunityDetailPage() {
                                 (phaseMap.get(opportunity.fase_id) || opportunity.fase || 'Prospecto')
                 }
                 backHref="/oportunidades?view=list"
+                onTitleSave={async (nombre) => {
+                    await updateOpportunity(opportunity.id, { nombre });
+                }}
+                titleEditLabel="Editar nombre de la oportunidad"
                 actions={[
-                    ...(userRole === 'ADMIN' || isAdmin ? [{
+                    ...(canDeleteOpportunity ? [{
                         label: "Eliminar Oportunidad",
                         icon: Trash2,
                         variant: 'danger' as const,
@@ -289,7 +302,7 @@ export default function OpportunityDetailPage() {
                 onClose={() => setIsDeleteModalOpen(false)}
                 onConfirm={handleDelete}
                 title="Eliminar Oportunidad"
-                message="¿Estás seguro de que deseas eliminar esta oportunidad? Esta acción no se puede deshacer."
+                message={`¿Eliminar la oportunidad "${opportunity.nombre}"? Dejará de verse en el CRM junto con sus cotizaciones y actividades. El registro no se borra físicamente (queda marcado como eliminado), así que se puede recuperar si fue un error.`}
                 confirmLabel="Eliminar Oportunidad"
                 variant="danger"
                 isLoading={isDeleting}
@@ -1100,143 +1113,10 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                 </div>
                             </div>
                         </div>
-
-                        {/* Comentarios Section */}
-                        <div className="pt-4 border-t border-slate-100">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Comentarios</label>
-                            <div className="relative group">
-                                <textarea
-                                    value={localComentarios}
-                                    onChange={(e) => setLocalComentarios(e.target.value)}
-                                    onBlur={async () => {
-                                        if (localComentarios !== (opportunity.comentarios || "")) {
-                                            setIsSavingComentariosMain(true);
-                                            try {
-                                                await updateOpportunity(opportunity.id, { comentarios: localComentarios });
-                                            } finally {
-                                                setIsSavingComentariosMain(false);
-                                            }
-                                        }
-                                    }}
-                                    onKeyDown={(e) => {
-                                        if (e.key === 'Enter' && !e.shiftKey) {
-                                            e.preventDefault();
-                                            (e.target as HTMLTextAreaElement).blur();
-                                        }
-                                    }}
-                                    rows={3}
-                                    className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none placeholder:text-slate-400 resize-none"
-                                    placeholder="Agregue comentarios generales aquí..."
-                                />
-                                {isSavingComentariosMain && (
-                                    <div className="absolute right-3 top-3">
-                                        <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* Loss Reason Section — Required for Cerrada Perdida */}
-                        <div className="pt-4 border-t border-red-100 space-y-3" data-testid="loss-reason-section">
-                            <div className="flex items-center gap-2 mb-1">
-                                <div className="w-2 h-2 rounded-full bg-red-400" />
-                                <span className="text-[10px] font-bold text-red-500 uppercase tracking-wider">Pérdida</span>
-                                <span className="text-[10px] text-slate-400">(obligatorio para cerrar como perdida)</span>
-                            </div>
-
-                            {/* Razón de pérdida */}
-                            <div>
-                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                                    Razón de Pérdida
-                                    {!localRazonPerdida && <span className="text-red-400 ml-1">*</span>}
-                                </label>
-                                <div className="relative group">
-                                    <select
-                                        data-testid="razon-perdida-select"
-                                        value={localRazonPerdida}
-                                        onChange={async (e) => {
-                                            setLocalRazonPerdida(e.target.value);
-                                            setIsSavingLossReason(true);
-                                            try {
-                                                await updateOpportunity(opportunity.id, { razon_perdida: e.target.value || null });
-                                            } finally {
-                                                setIsSavingLossReason(false);
-                                            }
-                                        }}
-                                        className={cn(
-                                            "w-full px-3 py-1.5 bg-slate-50 border rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-red-400 focus:bg-white transition-all outline-none",
-                                            localRazonPerdida ? "border-slate-200" : "border-red-200 bg-red-50"
-                                        )}
-                                    >
-                                        <option value="">Seleccione una razón...</option>
-                                        {localRazonPerdida && !LOSS_REASONS.includes(localRazonPerdida) && (
-                                            <option value={localRazonPerdida}>{localRazonPerdida}</option>
-                                        )}
-                                        {LOSS_REASONS.map(r => (
-                                            <option key={r} value={r}>{r}</option>
-                                        ))}
-                                    </select>
-                                    {isSavingLossReason && (
-                                        <div className="absolute right-8 top-1/2 -translate-y-1/2">
-                                            <Loader2 className="w-3 h-3 text-red-400 animate-spin" />
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-
-                            {/* Comentarios de pérdida */}
-                            <div>
-                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                                    Comentarios de Pérdida
-                                    {!localComentariosPerdida && <span className="text-red-400 ml-1">*</span>}
-                                </label>
-                                <div className="relative group">
-                                    <textarea
-                                        data-testid="comentarios-perdida-textarea"
-                                        value={localComentariosPerdida}
-                                        onChange={(e) => setLocalComentariosPerdida(e.target.value)}
-                                        onBlur={async () => {
-                                            if (localComentariosPerdida !== (opportunity.comentarios_perdida || "")) {
-                                                setIsSavingComentarios(true);
-                                                try {
-                                                    await updateOpportunity(opportunity.id, { comentarios_perdida: localComentariosPerdida || null });
-                                                } finally {
-                                                    setIsSavingComentarios(false);
-                                                }
-                                            }
-                                        }}
-                                        onKeyDown={(e) => {
-                                            if (e.key === 'Enter' && !e.shiftKey) {
-                                                e.preventDefault();
-                                                (e.target as HTMLTextAreaElement).blur();
-                                            }
-                                        }}
-                                        rows={3}
-                                        placeholder="Describe el motivo de la pérdida..."
-                                        className={cn(
-                                            "w-full px-3 py-1.5 bg-slate-50 border rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-red-400 focus:bg-white transition-all outline-none placeholder:text-slate-400 resize-none",
-                                            localComentariosPerdida ? "border-slate-200" : "border-red-200 bg-red-50"
-                                        )}
-                                    />
-                                    {isSavingComentarios && (
-                                        <div className="absolute right-3 top-3">
-                                            <Loader2 className="w-3 h-3 text-red-400 animate-spin" />
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-
-                            {!lossFieldsComplete && (
-                                <p className="text-[10px] text-red-400 flex items-center gap-1">
-                                    <span>🔒</span>
-                                    Completa estos campos para poder marcar la oportunidad como <strong>Cerrada Perdida</strong>.
-                                </p>
-                            )}
-                        </div>
                     </div>
                 </div>
 
-                {/* Right Column: Account Card + Setter Card */}
+                {/* Right Column: Account Card + Comentarios/Pérdida Card + Setter Card */}
                 <div className="space-y-6 flex flex-col">
                     {/* Account Card */}
                     <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-blue-300 transition-all flex flex-col justify-between h-fit">
@@ -1355,6 +1235,152 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                         >
                             Ver detalles en Cuentas <ChevronRight className="w-4 h-4" />
                         </button>
+                    </div>
+
+                    {/* Comentarios y Pérdida Card */}
+                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:border-blue-300 transition-all space-y-4" data-testid="comentarios-card">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 bg-amber-50 text-amber-600 rounded-lg">
+                                <MessageSquare className="w-6 h-6" />
+                            </div>
+                            <div>
+                                <h3 className="font-bold text-slate-900 text-lg">Comentarios</h3>
+                                <p className="text-xs text-slate-500">Notas generales y razón de pérdida</p>
+                            </div>
+                        </div>
+
+                        {/* Comentarios Section */}
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Comentarios</label>
+                            <div className="relative group">
+                                <ExpandableTextarea
+                                    value={localComentarios}
+                                    onChange={(e) => setLocalComentarios(e.target.value)}
+                                    onBlur={async () => {
+                                        if (localComentarios !== (opportunity.comentarios || "")) {
+                                            setIsSavingComentariosMain(true);
+                                            try {
+                                                await updateOpportunity(opportunity.id, { comentarios: localComentarios });
+                                            } finally {
+                                                setIsSavingComentariosMain(false);
+                                            }
+                                        }
+                                    }}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && !e.shiftKey) {
+                                            e.preventDefault();
+                                            (e.target as HTMLTextAreaElement).blur();
+                                        }
+                                    }}
+                                    rows={3}
+                                    className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none placeholder:text-slate-400"
+                                    placeholder="Agregue comentarios generales aquí..."
+                                />
+                                {isSavingComentariosMain && (
+                                    <div className="absolute right-3 top-3">
+                                        <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Loss Reason Section — Required for Cerrada Perdida */}
+                        <div className="pt-4 border-t border-red-100 space-y-3" data-testid="loss-reason-section">
+                            <div className="flex items-center gap-2 mb-1">
+                                <div className="w-2 h-2 rounded-full bg-red-400" />
+                                <span className="text-[10px] font-bold text-red-500 uppercase tracking-wider">Pérdida</span>
+                                <span className="text-[10px] text-slate-400">(obligatorio para cerrar como perdida)</span>
+                            </div>
+
+                            {/* Razón de pérdida */}
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                                    Razón de Pérdida
+                                    {!localRazonPerdida && <span className="text-red-400 ml-1">*</span>}
+                                </label>
+                                <div className="relative group">
+                                    <select
+                                        data-testid="razon-perdida-select"
+                                        value={localRazonPerdida}
+                                        onChange={async (e) => {
+                                            setLocalRazonPerdida(e.target.value);
+                                            setIsSavingLossReason(true);
+                                            try {
+                                                await updateOpportunity(opportunity.id, { razon_perdida: e.target.value || null });
+                                            } finally {
+                                                setIsSavingLossReason(false);
+                                            }
+                                        }}
+                                        className={cn(
+                                            "w-full px-3 py-1.5 bg-slate-50 border rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-red-400 focus:bg-white transition-all outline-none",
+                                            localRazonPerdida ? "border-slate-200" : "border-red-200 bg-red-50"
+                                        )}
+                                    >
+                                        <option value="">Seleccione una razón...</option>
+                                        {localRazonPerdida && !LOSS_REASONS.includes(localRazonPerdida) && (
+                                            <option value={localRazonPerdida}>{localRazonPerdida}</option>
+                                        )}
+                                        {LOSS_REASONS.map(r => (
+                                            <option key={r} value={r}>{r}</option>
+                                        ))}
+                                    </select>
+                                    {isSavingLossReason && (
+                                        <div className="absolute right-8 top-1/2 -translate-y-1/2">
+                                            <Loader2 className="w-3 h-3 text-red-400 animate-spin" />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Comentarios de pérdida */}
+                            <div>
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
+                                    Comentarios de Pérdida
+                                    {!localComentariosPerdida && <span className="text-red-400 ml-1">*</span>}
+                                </label>
+                                <div className="relative group">
+                                    <ExpandableTextarea
+                                        data-testid="comentarios-perdida-textarea"
+                                        value={localComentariosPerdida}
+                                        onChange={(e) => setLocalComentariosPerdida(e.target.value)}
+                                        onBlur={async () => {
+                                            if (localComentariosPerdida !== (opportunity.comentarios_perdida || "")) {
+                                                setIsSavingComentarios(true);
+                                                try {
+                                                    await updateOpportunity(opportunity.id, { comentarios_perdida: localComentariosPerdida || null });
+                                                } finally {
+                                                    setIsSavingComentarios(false);
+                                                }
+                                            }
+                                        }}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter' && !e.shiftKey) {
+                                                e.preventDefault();
+                                                (e.target as HTMLTextAreaElement).blur();
+                                            }
+                                        }}
+                                        rows={3}
+                                        placeholder="Describe el motivo de la pérdida..."
+                                        className={cn(
+                                            "w-full px-3 py-1.5 bg-slate-50 border rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-red-400 focus:bg-white transition-all outline-none placeholder:text-slate-400",
+                                            localComentariosPerdida ? "border-slate-200" : "border-red-200 bg-red-50"
+                                        )}
+                                    />
+                                    {isSavingComentarios && (
+                                        <div className="absolute right-3 top-3">
+                                            <Loader2 className="w-3 h-3 text-red-400 animate-spin" />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {!lossFieldsComplete && (
+                                <p className="text-[10px] text-red-400 flex items-center gap-1">
+                                    <span>🔒</span>
+                                    Completa estos campos para poder marcar la oportunidad como <strong>Cerrada Perdida</strong>.
+                                </p>
+                            )}
+                        </div>
                     </div>
 
                     {/* Setter Card */}
@@ -1625,7 +1651,7 @@ function ProductsTab({ opportunityId }: { opportunityId: string }) {
                             return (
                                 <tr key={item.id || item.product_id}>
                                     <td className="px-4 py-3 font-medium text-slate-900 min-w-[300px] max-w-sm">
-                                        <div className="line-clamp-2 leading-tight">
+                                        <div className="leading-snug break-words sm:line-clamp-2" title={item.descripcion_linea || item.nombre}>
                                             {item.descripcion_linea || item.nombre}
                                         </div>
                                     </td>
@@ -1843,7 +1869,13 @@ function ActivitiesTab({ opportunityId, accountId }: { opportunityId: string, ac
     });
     const handleToggleComplete = async (act: LocalActivity) => {
         const willComplete = !act.is_completed;
-        await toggleComplete(act.id, willComplete);
+        try {
+            await toggleComplete(act.id, willComplete);
+        } catch (error) {
+            console.error('[Actividades] No se pudo cambiar el estado de la actividad:', error);
+            alert(`No se pudo ${willComplete ? 'completar' : 'reabrir'} la actividad: ${error instanceof Error ? error.message : String(error)}`);
+            return;
+        }
         if (willComplete) requestFollowUp(act);
         else resetFollowUp(act.id);
     };
@@ -1917,6 +1949,9 @@ function ActivitiesTab({ opportunityId, accountId }: { opportunityId: string, ac
                                 <div className="flex items-start gap-4">
                                     <button
                                         onClick={(e) => {
+                                            // El botón está dentro de un <a href>: sin preventDefault el navegador
+                                            // sigue el enlace (recarga /actividades?id=...) y la actividad no queda completada.
+                                            e.preventDefault();
                                             e.stopPropagation();
                                             handleToggleComplete(act);
                                         }}

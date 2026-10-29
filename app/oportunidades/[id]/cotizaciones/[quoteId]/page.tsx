@@ -9,6 +9,7 @@ import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { db, LocalQuote } from "@/lib/db";
 import { Save, AlertTriangle, Truck, Receipt, Calendar, Search, Plus, Trash2, Loader2, Package, Download, Send } from "lucide-react";
+import { ExpandableTextarea } from "@/components/ui/ExpandableTextarea";
 import { cn } from "@/components/ui/utils";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useConfig } from "@/lib/hooks/useConfig";
@@ -16,6 +17,14 @@ import { SendQuoteModal } from "@/components/quotes/SendQuoteModal";
 import { useCommissionCategories } from "@/lib/hooks/useCommissionCategories";
 import { PedidosList } from "@/components/quotes/PedidosEditor";
 import { isQuoteItemPriceEditable } from "@/lib/quotePricing";
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import {
+    appendNote,
+    buildDiscountExceptionNote,
+    canAuthorizeDiscountException,
+    channelAllowsDiscountException,
+    resolveDiscountChange
+} from "@/lib/discountExceptions";
 
 export default function QuoteEditorPage() {
     const params = useParams();
@@ -156,6 +165,7 @@ function QuoteItemsEditor({ quote, onItemsChange, onSaveQuote }: {
     const { data: categories } = useCommissionCategories();
     const [comentarios, setComentarios] = useState(quote.comentarios || "");
     const [isSaving, setIsSaving] = useState(false);
+    const { user: currentUser, role: currentRole } = useCurrentUser();
 
     useEffect(() => {
         setComentarios(quote.comentarios || "");
@@ -180,9 +190,35 @@ function QuoteItemsEditor({ quote, onItemsChange, onSaveQuote }: {
         const acc = await db.accounts.get(opp.account_id);
         return { 
             channel: acc?.canal_id || 'DIST_NAC',
-            ignorar_limites_descuento: acc?.ignorar_limites_descuento || false
+            ignorar_limites_descuento: acc?.ignorar_limites_descuento || false,
+            accountId: opp.account_id as string | undefined,
+            accountCached: !!acc
         };
     });
+
+    // Si la cuenta no está en la caché local (la carga inicial no trae las ~50k cuentas),
+    // el canal caía en 'DIST_NAC' y se usaban precios/topes de otro canal. Se trae la
+    // cuenta del servidor (solo lectura) y se guarda en la caché local.
+    useEffect(() => {
+        if (!context || context.accountCached || !context.accountId) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const { supabase } = await import('@/lib/supabase');
+                const { data, error } = await supabase
+                    .from('CRM_Cuentas')
+                    .select('*')
+                    .eq('id', context.accountId!)
+                    .maybeSingle();
+                if (cancelled || error || !data) return;
+                const already = await db.accounts.get(data.id);
+                if (!already) await db.accounts.put(data);
+            } catch (e) {
+                console.warn('[Quote] No se pudo cargar la cuenta para el canal:', e);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [context]);
 
     // Auto-fetch max_discount_pct for items that are missing it (legacy or failed RPC)
     useEffect(() => {
@@ -295,10 +331,63 @@ function QuoteItemsEditor({ quote, onItemsChange, onSaveQuote }: {
         const item = items?.find(i => i.id === itemId);
         if (!item) return;
 
-        let validPct = Math.max(0, Math.min(100, pct));
-        if (!context?.ignorar_limites_descuento && item.max_discount_pct && validPct > item.max_discount_pct) {
-            validPct = item.max_discount_pct;
-            alert(`El descuento máximo permitido para esta cantidad es ${item.max_discount_pct}%`);
+        const decision = resolveDiscountChange({
+            requestedPct: pct,
+            maxPct: item.max_discount_pct,
+            channel: context?.channel,
+            role: currentRole,
+            ignorarLimites: context?.ignorar_limites_descuento
+        });
+        const productLabel = item.descripcion_linea || 'Producto';
+        const userName = currentUser?.full_name || currentUser?.email || 'Usuario';
+
+        let validPct: number;
+        if (decision.kind === 'ok') {
+            validPct = decision.pct;
+        } else if (decision.kind === 'needs_authorization') {
+            // Canal constructor (Obras): ADMIN/COORDINADOR puede autorizar un descuento mayor
+            // dejando motivo; queda registrado en los comentarios de la cotización.
+            const reason = window.prompt(
+                `El descuento máximo para el canal Obras en esta cantidad es ${decision.maxPct}%.\n` +
+                `Vas a autorizar una EXCEPCIÓN de ${decision.requestedPct}% para "${productLabel}".\n\n` +
+                `Escribe el motivo (queda registrado en los comentarios de la cotización):`
+            );
+            if (reason && reason.trim().length >= 3) {
+                validPct = decision.requestedPct;
+                const note = buildDiscountExceptionNote({
+                    type: 'AUTORIZADA', productLabel, requestedPct: decision.requestedPct,
+                    maxPct: decision.maxPct, userName, reason
+                });
+                const nextComments = appendNote(comentarios, note);
+                setComentarios(nextComments);
+                await onSaveQuote({ comentarios: nextComments });
+            } else {
+                validPct = decision.maxPct;
+                alert(`Sin motivo no se aplica la excepción. Se deja el máximo permitido (${decision.maxPct}%).`);
+            }
+        } else {
+            validPct = decision.pct;
+            if (decision.canRequest) {
+                const wantsRequest = window.confirm(
+                    `El descuento máximo permitido para esta cantidad es ${decision.maxPct}%.\n\n` +
+                    `Si es un caso especial del canal Obras, puedes dejar registrada una solicitud de excepción ` +
+                    `(${decision.requestedPct}%) para que un coordinador o administrador la autorice. ¿Registrar la solicitud?`
+                );
+                if (wantsRequest) {
+                    const reason = window.prompt('Motivo de la solicitud de excepción:');
+                    if (reason && reason.trim().length >= 3) {
+                        const note = buildDiscountExceptionNote({
+                            type: 'SOLICITUD', productLabel, requestedPct: decision.requestedPct,
+                            maxPct: decision.maxPct, userName, reason
+                        });
+                        const nextComments = appendNote(comentarios, note);
+                        setComentarios(nextComments);
+                        await onSaveQuote({ comentarios: nextComments });
+                    }
+                }
+            } else {
+                alert(`El descuento máximo permitido para esta cantidad es ${decision.maxPct}%`);
+            }
         }
 
         const finalPrice = parseFloat((item.precio_unitario * (1 - validPct / 100)).toFixed(10));
@@ -409,8 +498,8 @@ function QuoteItemsEditor({ quote, onItemsChange, onSaveQuote }: {
                                                 className="w-full text-left px-3.5 py-3 sm:px-5 sm:py-3.5 hover:bg-blue-50/70 flex items-center justify-between gap-3 border-b border-slate-100 last:border-0 transition-colors group cursor-pointer"
                                             >
                                                 <div className="flex-1 min-w-0 pr-2">
-                                                    <div className="font-medium text-xs sm:text-sm text-slate-900 line-clamp-2 leading-snug group-hover:text-blue-700">{product.descripcion}</div>
-                                                    <div className="text-[11px] text-slate-400 mt-0.5">{product.numero_articulo}</div>
+                                                    <div className="font-medium text-[15px] sm:text-sm text-slate-900 leading-snug break-words sm:line-clamp-2 group-hover:text-blue-700" title={product.descripcion}>{product.descripcion}</div>
+                                                    <div className="text-xs sm:text-[11px] text-slate-500 sm:text-slate-400 mt-0.5">{product.numero_articulo}</div>
                                                 </div>
                                                 <div className="flex items-center gap-2 sm:gap-3 shrink-0">
                                                     <span className="text-[11px] sm:text-xs font-semibold text-slate-800 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 whitespace-nowrap">
@@ -444,15 +533,15 @@ function QuoteItemsEditor({ quote, onItemsChange, onSaveQuote }: {
                                         {item.producto_id === null ? (
                                             <input 
                                                 type="text"
-                                                className="font-semibold text-xs sm:text-sm text-slate-800 w-full bg-slate-50 border-b border-slate-200 focus:outline-none focus:border-blue-500 rounded px-1.5 py-0.5 mb-1"
+                                                className="font-semibold text-base sm:text-sm text-slate-800 w-full bg-slate-50 border-b border-slate-200 focus:outline-none focus:border-blue-500 rounded px-1.5 py-1 sm:py-0.5 mb-1"
                                                 defaultValue={item.descripcion_linea}
                                                 onBlur={(e) => updateItem(item.id, { descripcion_linea: e.target.value })}
                                             />
                                         ) : (
-                                            <h4 className="font-semibold text-xs sm:text-sm text-slate-800 line-clamp-2 leading-snug">{item.descripcion_linea}</h4>
+                                            <h4 className="font-semibold text-[15px] sm:text-sm text-slate-800 leading-snug break-words sm:line-clamp-2" title={item.descripcion_linea}>{item.descripcion_linea}</h4>
                                         )}
                                         
-                                        <div className="flex flex-wrap items-center gap-1.5 mt-1 text-[11px] sm:text-xs text-slate-500">
+                                        <div className="flex flex-wrap items-center gap-1.5 mt-1 text-[13px] sm:text-xs text-slate-500">
                                             <span>Unitario: $</span>
                                             {isQuoteItemPriceEditable(item) ? (
                                                 <input 
@@ -530,20 +619,24 @@ function QuoteItemsEditor({ quote, onItemsChange, onSaveQuote }: {
                                                 {context?.ignorar_limites_descuento 
                                                     ? 'Desc. (ignorado)' 
                                                     : item.max_discount_pct 
-                                                        ? `Desc. max ${item.max_discount_pct}%` 
+                                                        ? ((item.discount_pct || 0) > item.max_discount_pct && channelAllowsDiscountException(context?.channel)
+                                                            ? `Excepción · max ${item.max_discount_pct}%`
+                                                            : `Desc. max ${item.max_discount_pct}%`)
                                                         : 'Desc. (sin escala)'}
                                             </div>
                                             <div className="flex items-center gap-1">
                                                 <input
                                                     type="number"
                                                     min="0"
-                                                    max={item.max_discount_pct || 100}
+                                                    max={canAuthorizeDiscountException(currentRole, context?.channel) ? 100 : (item.max_discount_pct || 100)}
                                                     defaultValue={item.discount_pct || 0}
                                                     key={`${item.id}-${item.discount_pct}`}
                                                     onBlur={(e) => handleUpdateDiscount(item.id, parseFloat(e.target.value) || 0)}
                                                     className={cn(
                                                         "w-12 sm:w-16 text-right font-medium text-slate-800 border rounded-md py-1 px-1.5 text-xs sm:text-sm focus:ring-2 focus:ring-blue-500",
-                                                        !context?.ignorar_limites_descuento && (item.discount_pct || 0) > (item.max_discount_pct || 0) && item.max_discount_pct ? "border-red-500 text-red-600 bg-red-50" : "border-slate-200"
+                                                        !context?.ignorar_limites_descuento && (item.discount_pct || 0) > (item.max_discount_pct || 0) && item.max_discount_pct
+                                                            ? (channelAllowsDiscountException(context?.channel) ? "border-amber-400 text-amber-700 bg-amber-50" : "border-red-500 text-red-600 bg-red-50")
+                                                            : "border-slate-200"
                                                     )}
                                                 />
                                                 <span className="text-slate-500 text-xs sm:text-sm">%</span>
@@ -582,11 +675,11 @@ function QuoteItemsEditor({ quote, onItemsChange, onSaveQuote }: {
                         {isSaving && <Loader2 className="w-3 h-3 animate-spin text-blue-500" />}
                     </h3>
                 </div>
-                <textarea
+                <ExpandableTextarea
                     value={comentarios}
                     onChange={(e) => setComentarios(e.target.value)}
                     onBlur={handleSaveComments}
-                    className="w-full p-3 sm:p-4 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 transition-all text-xs sm:text-sm outline-none resize-none"
+                    className="w-full p-3 sm:p-4 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 transition-all text-xs sm:text-sm outline-none"
                     placeholder="Agregue notas adicionales sobre esta cotización..."
                     rows={4}
                 />

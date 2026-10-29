@@ -39,7 +39,13 @@ export default function AccountActivitiesTab({ accountId }: { accountId: string 
 
     const handleToggleComplete = async (act: ActivityServer) => {
         const willComplete = !act.is_completed;
-        await toggleComplete(act.id, willComplete);
+        try {
+            await toggleComplete(act.id, willComplete);
+        } catch (error) {
+            console.error('[Actividades] No se pudo cambiar el estado de la actividad:', error);
+            alert(`No se pudo ${willComplete ? 'completar' : 'reabrir'} la actividad: ${error instanceof Error ? error.message : String(error)}`);
+            return;
+        }
         if (willComplete) requestFollowUp({ ...act, opportunity_id: act.opportunity_id, account_id: accountId });
         else resetFollowUp(act.id);
         refresh();

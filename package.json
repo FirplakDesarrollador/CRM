@@ -9,7 +9,7 @@
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
-    "test:sync": "vitest run lib/sync-runtime.test.ts lib/sync-engine.test.ts lib/hooks/useFormAutoSave.test.tsx",
+    "test:sync": "vitest run lib/sync-runtime.test.ts lib/sync-engine.test.ts lib/sync-save-fixes.test.ts lib/hooks/useFormAutoSave.test.tsx",
     "typecheck:sync": "tsc -p tsconfig.sync.json",
     "qa:focused": "node quality/qa.mjs focused",
     "qa:quick": "node quality/qa.mjs quick",

@@ -11,6 +11,7 @@ import {
     isRetryDue,
     isSyncLeaseExpired,
     shouldRefreshCatalogs,
+    isCatalogVersionNewer,
     syncCursorId
 } from './sync-runtime';
 
@@ -53,6 +54,26 @@ export interface LocalMutationRequest {
     entityId: string;
     changes: object;
     options?: { isSnapshot?: boolean };
+}
+
+/**
+ * Combina en orden cronológico (field_timestamp) los valores pendientes de un mismo
+ * registro en el outbox: snapshots completos/parciales y mutaciones de un solo campo.
+ * El valor más reciente de cada campo gana.
+ */
+export function mergePendingOutboxValues(items: OutboxItem[]): Record<string, unknown> {
+    const merged: Record<string, unknown> = {};
+    const ordered = [...items].sort((a, b) => (a.field_timestamp || 0) - (b.field_timestamp || 0));
+    for (const item of ordered) {
+        if (item.field_name === '_complete_snapshot_') {
+            if (item.new_value && typeof item.new_value === 'object') {
+                Object.assign(merged, item.new_value as Record<string, unknown>);
+            }
+        } else if (item.field_name && item.field_name !== '_sync_metadata' && item.field_name !== 'id') {
+            merged[item.field_name] = item.new_value;
+        }
+    }
+    return merged;
 }
 
 export class SyncEngine {
@@ -326,8 +347,10 @@ export class SyncEngine {
         // Universal Outbox Deduplication & Compaction:
         // Consolidates redundant snapshots and duplicate field mutations across all entities
         try {
+            // SYNCING no entra: tras liberar los leases vencidos, lo que sigue en SYNCING
+            // está en vuelo (p. ej. en otra pestaña) y borrarlo perdía ese cambio.
             const activeItems = await db.outbox
-                .where('status').anyOf(['PENDING', 'SYNCING', 'FAILED'])
+                .where('status').anyOf(['PENDING', 'FAILED'])
                 .toArray();
 
             if (activeItems.length > 1) {
@@ -349,6 +372,16 @@ export class SyncEngine {
                     if (snapshots.length > 0) {
                         snapshots.sort((a, b) => (b.field_timestamp || 0) - (a.field_timestamp || 0));
                         const keepSnapshot = snapshots[0];
+
+                        // Antes se borraban los demás items sin más: un cambio de campo
+                        // posterior al snapshot (o un snapshot parcial) se perdía. Ahora se
+                        // fusionan en orden cronológico dentro del snapshot que se conserva.
+                        const mergedValue = mergePendingOutboxValues(items);
+                        const latestTimestamp = Math.max(...items.map(i => i.field_timestamp || 0));
+                        await db.outbox.update(keepSnapshot.id, {
+                            new_value: mergedValue,
+                            field_timestamp: latestTimestamp
+                        });
 
                         for (const item of items) {
                             if (item.id !== keepSnapshot.id) {
@@ -1569,6 +1602,23 @@ export class SyncEngine {
         return null;
     }
 
+    /** max(updated_at) de CRM_FasesOportunidad, o null si no se pudo consultar. */
+    private async fetchPhasesCatalogVersion(): Promise<string | null> {
+        try {
+            const { data, error } = await supabase
+                .from('CRM_FasesOportunidad')
+                .select('updated_at')
+                .not('updated_at', 'is', null)
+                .order('updated_at', { ascending: false })
+                .limit(1);
+            if (error) throw error;
+            return (data?.[0]?.updated_at as string | undefined) ?? null;
+        } catch (err: unknown) {
+            console.warn('[Sync] Could not check phases catalog version:', err instanceof Error ? err.message : err);
+            return null;
+        }
+    }
+
     private async setSyncCursor(userId: string, tableName: string, cursor: string): Promise<void> {
         await db.syncCursors.put({
             id: syncCursorId(userId, tableName),
@@ -1627,7 +1677,16 @@ export class SyncEngine {
             db.departments.count(),
             db.cities.count()
         ])).every(count => count > 0);
-        const refreshCatalogs = !catalogsReady || shouldRefreshCatalogs(catalogCursor);
+        // Las fases (y su probabilidad) pueden cambiar en el servidor antes de que venza
+        // el TTL de 24 h. Consulta barata de max(updated_at); si falla (sin conexión)
+        // se sigue con el comportamiento anterior.
+        const phasesVersion = await this.fetchPhasesCatalogVersion();
+        const storedPhasesVersion = await this.getSyncCursor(_user.id, '__phases_version__');
+        const phasesChanged = isCatalogVersionNewer(phasesVersion, storedPhasesVersion);
+        if (phasesChanged) {
+            console.log('[Sync] Phases catalog changed on server; refreshing catalogs before TTL.');
+        }
+        const refreshCatalogs = !catalogsReady || shouldRefreshCatalogs(catalogCursor) || phasesChanged;
 
         try {
             // Pull Accounts (CRM_Cuentas)
@@ -2021,6 +2080,9 @@ export class SyncEngine {
 
             if (catalogErrors.length === 0) {
                 await this.setSyncCursor(_user.id, '__catalogs__', upperBound);
+                if (phasesVersion) {
+                    await this.setSyncCursor(_user.id, '__phases_version__', phasesVersion);
+                }
             }
             } else {
                 console.log('[Sync] Catalog refresh skipped; cached catalogs are still within TTL.');
@@ -2557,10 +2619,14 @@ export class SyncEngine {
         if (options.isSnapshot) {
             const [primary, ...duplicates] = activeItems;
             if (primary) {
+                // Fusionar (no reemplazar): si había cambios pendientes de campos que no
+                // vienen en este snapshot (snapshot parcial, p. ej. solo is_deleted), se
+                // perdían al sobrescribir el item del outbox.
+                const pendingValues = mergePendingOutboxValues(activeItems);
                 await db.outbox.update(primary.id, {
                     ...resetForNewEdit,
                     field_name: '_complete_snapshot_',
-                    new_value: changes
+                    new_value: { ...pendingValues, ...changes }
                 });
                 if (duplicates.length > 0) await db.outbox.bulkDelete(duplicates.map(item => item.id));
             } else {

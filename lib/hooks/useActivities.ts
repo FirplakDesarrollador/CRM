@@ -3,6 +3,8 @@ import { db, getActiveLocalUserId, useActiveLocalUserId, useActiveDatabaseVersio
 import { syncEngine } from '../sync';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../supabase';
+import { useCurrentUser } from './useCurrentUser';
+import { activitiesVisibleToViewer, isSellerRole } from '../sellerVisibility';
 
 /**
  * Converts a date input value to a proper ISO string.
@@ -47,20 +49,23 @@ export function useActivities(filters?: { opportunity_id?: string, account_id?: 
     const activeUserId = useActiveLocalUserId();
     const dbVersion = useActiveDatabaseVersion();
 
+    const { user: currentUser, role: viewerRole } = useCurrentUser();
+    const viewerId = currentUser?.id || null;
+
     const activities = useLiveQuery(
-        () => {
-            if (filters?.opportunity_id) {
-                return db.activities.where('opportunity_id').equals(filters.opportunity_id).filter(a => !a.is_deleted).toArray();
-            }
-            if (filters?.account_id) {
-                return db.activities.where('account_id').equals(filters.account_id).filter(a => !a.is_deleted).toArray();
-            }
-            if (filters?.advisor_id) {
-                return db.activities.where('user_id').equals(filters.advisor_id).filter(a => !a.is_deleted).toArray();
-            }
-            return db.activities.filter(a => !a.is_deleted).toArray();
+        async () => {
+            const collection = filters?.opportunity_id
+                ? db.activities.where('opportunity_id').equals(filters.opportunity_id)
+                : filters?.account_id
+                    ? db.activities.where('account_id').equals(filters.account_id)
+                    : (filters?.advisor_id && !isSellerRole(viewerRole))
+                        ? db.activities.where('user_id').equals(filters.advisor_id)
+                        : db.activities.toCollection();
+            const list = await collection.filter(a => !a.is_deleted).toArray();
+            // Asesor (VENDEDOR): solo las actividades asignadas a él.
+            return activitiesVisibleToViewer(list, viewerRole, viewerId);
         },
-        [activeUserId, dbVersion, filters?.opportunity_id, filters?.account_id, filters?.advisor_id]
+        [activeUserId, dbVersion, viewerRole, viewerId, filters?.opportunity_id, filters?.account_id, filters?.advisor_id]
     );
 
     // Allowlist of columns that actually exist in CRM_Actividades on Supabase.
@@ -210,8 +215,18 @@ export function useActivities(filters?: { opportunity_id?: string, account_id?: 
         await syncEngine.commitLocalChanges([db.activities], async () => {
             const current = await db.activities.get(id);
             if (!current) return [];
-            const fullActivity = { ...current, is_completed: isCompleted, updated_at };
-            await db.activities.put(fullActivity);
+            // Marca de tiempo por campo: evita que un pull posterior (LWW por campo)
+            // revierta el check con el valor anterior del servidor.
+            const syncMetadata = {
+                ...((current as { _sync_metadata?: Record<string, unknown> })._sync_metadata || {}),
+                is_completed: Date.now()
+            };
+            const merged: Record<string, unknown> = { ...current, is_completed: isCompleted, updated_at, _sync_metadata: syncMetadata };
+            // Igual que updateActivity: solo columnas reales de CRM_Actividades.
+            const fullActivity = Object.fromEntries(
+                Object.entries(merged).filter(([key]) => DB_COLUMNS.has(key))
+            ) as unknown as LocalActivity;
+            await db.activities.put({ ...current, ...fullActivity });
             return [{
                 entityTable: 'CRM_Actividades', entityId: id, changes: fullActivity,
                 options: { isSnapshot: true }

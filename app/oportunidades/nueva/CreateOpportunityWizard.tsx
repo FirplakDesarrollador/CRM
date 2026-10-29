@@ -13,6 +13,7 @@ import { cn } from "@/components/ui/utils";
 import { AccountForm } from "@/components/cuentas/AccountForm";
 import { useProductSearch, PriceListProduct } from "@/lib/hooks/useProducts";
 import { Trash2, PlusCircle, Search, Loader2 } from "lucide-react";
+import { ExpandableTextarea } from "@/components/ui/ExpandableTextarea";
 import { db } from "@/lib/db";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
@@ -935,9 +936,9 @@ export default function CreateOpportunityWizard() {
 
                         <div>
                             <label className="text-sm font-medium">Comentarios / Observaciones</label>
-                            <textarea 
-                                {...register("comentarios")} 
-                                className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-none" 
+                            <ExpandableTextarea
+                                {...register("comentarios")}
+                                className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                                 rows={3} 
                                 placeholder="Notas adicionales sobre esta oportunidad..."
                             />
@@ -1002,10 +1003,10 @@ export default function CreateOpportunityWizard() {
                                                     className="w-full text-left px-3 py-2 sm:px-4 sm:py-2.5 hover:bg-blue-50/70 flex items-center justify-between gap-2 border-b last:border-0 transition-colors group cursor-pointer"
                                                 >
                                                     <div className="flex-1 min-w-0 pr-2">
-                                                        <div className="font-medium text-xs sm:text-sm text-slate-900 line-clamp-2 leading-snug group-hover:text-blue-700">
+                                                        <div className="font-medium text-[15px] sm:text-sm text-slate-900 leading-snug break-words sm:line-clamp-2 group-hover:text-blue-700" title={product.descripcion}>
                                                             {product.descripcion}
                                                         </div>
-                                                        <div className="text-[11px] text-slate-400 mt-0.5">
+                                                        <div className="text-xs sm:text-[11px] text-slate-500 sm:text-slate-400 mt-0.5">
                                                             {product.numero_articulo}
                                                         </div>
                                                     </div>
@@ -1038,7 +1039,7 @@ export default function CreateOpportunityWizard() {
                                     return (
                                         <div key={item.product_id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-white border border-slate-200 rounded-xl shadow-sm">
                                             <div className="flex-1 min-w-0">
-                                                <div className="font-medium text-xs sm:text-sm text-slate-800 line-clamp-2 leading-snug">{item.nombre}</div>
+                                                <div className="font-medium text-[15px] sm:text-sm text-slate-800 leading-snug break-words sm:line-clamp-2" title={item.nombre}>{item.nombre}</div>
                                                 <div className="text-[11px] sm:text-xs text-slate-500 mt-0.5">{currencyId} {basePriceFormatted} c/u base</div>
                                                 {(Number(item.descuento_porcentaje) || 0) > 0 && (
                                                     <div className="text-[11px] sm:text-xs text-emerald-600 font-medium mt-0.5">

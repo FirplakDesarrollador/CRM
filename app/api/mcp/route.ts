@@ -1,92 +1,40 @@
 /**
  * Endpoint HTTP / SSE para el Servidor MCP de CRM FIRPLAK
  * Permite integraciones remotas (ChatGPT Custom Actions, Webhooks y Pasarelas de Agentes)
+ *
+ * Autenticación: token Bearer de Supabase verificado por firma (lib/mcp/auth.ts).
+ * Sin sesión válida, POST responde 401 y GET retorna solo un manifiesto público
+ * (estado y catálogo de herramientas) sin contexto de usuario.
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { createCrmMcpServer } from '@/lib/mcp/server';
-import { McpSessionContext, McpUserRole } from '@/lib/mcp/types';
-import { createClient } from '@supabase/supabase-js';
+import { McpSessionContext } from '@/lib/mcp/types';
+import { resolveMcpSession } from '@/lib/mcp/auth';
 
-async function resolveSessionFromRequest(req: NextRequest): Promise<McpSessionContext> {
+function extractBearerToken(req: NextRequest): string | null {
   const authHeader = req.headers.get('authorization') || '';
   const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (token && supabaseUrl && (serviceKey || anonKey)) {
-    try {
-      const client = createClient(supabaseUrl, serviceKey || anonKey!);
-      const { data: { user }, error } = await client.auth.getUser(token);
-
-      if (user && !error) {
-        // Consultar rol en CRM_Usuarios (la columna en BD es role)
-        const { data: crmUser } = await client
-          .from('CRM_Usuarios')
-          .select('id, email, role')
-          .eq('id', user.id)
-          .single();
-
-        let resolvedRole = crmUser?.role;
-        if (!resolvedRole && user.email) {
-          const { data: crmUserByEmail } = await client
-            .from('CRM_Usuarios')
-            .select('id, email, role')
-            .ilike('email', user.email)
-            .single();
-          resolvedRole = crmUserByEmail?.role;
-        }
-
-        const role: McpUserRole = (resolvedRole || user.app_metadata?.role || 'VENDEDOR').toUpperCase() as McpUserRole;
-
-        return {
-          userId: user.id,
-          email: user.email || 'comercial@firplak.com',
-          role,
-          transport: 'sse',
-        };
-      }
-    } catch (e) {
-      console.warn('[MCP-API] No se pudo verificar token JWT:', e);
-    }
-  }
-
-  // Fallback para pruebas o llamadas con clave de servicio / headers
-  const defaultEmail = req.headers.get('x-user-email') || process.env.CRM_USER_EMAIL || 'vendedor@firplak.com';
-  let defaultRole = (req.headers.get('x-user-role') || process.env.CRM_USER_ROLE || 'VENDEDOR').toUpperCase() as McpUserRole;
-  let defaultId = req.headers.get('x-user-id') || '11111111-1111-1111-1111-111111111111';
-
-  if (supabaseUrl && (serviceKey || anonKey)) {
-    try {
-      const client = createClient(supabaseUrl, serviceKey || anonKey!);
-      const { data: crmUser } = await client
-        .from('CRM_Usuarios')
-        .select('id, email, role')
-        .ilike('email', defaultEmail)
-        .single();
-      if (crmUser?.role) {
-        defaultRole = crmUser.role.toUpperCase() as McpUserRole;
-      }
-      if (crmUser?.id) {
-        defaultId = crmUser.id;
-      }
-    } catch (e) {
-      console.warn('[MCP-API] Error al resolver usuario fallback:', e);
-    }
-  }
-
-  return {
-    userId: defaultId,
-    email: defaultEmail,
-    role: defaultRole,
-    transport: 'sse',
-  };
+  return token || null;
 }
+
+async function resolveSessionFromRequest(req: NextRequest): Promise<McpSessionContext | null> {
+  return resolveMcpSession({
+    token: extractBearerToken(req),
+    headers: req.headers,
+  });
+}
+
+/** Contexto mínimo solo para listar el catálogo público en GET sin sesión. No ejecuta herramientas. */
+const PUBLIC_MANIFEST_CONTEXT: McpSessionContext = {
+  userId: 'anonimo',
+  email: 'anonimo@firplak.com',
+  role: 'VENDEDOR',
+  transport: 'sse',
+};
 
 export async function GET(req: NextRequest) {
   const ctx = await resolveSessionFromRequest(req);
-  const server = createCrmMcpServer(ctx);
+  const server = createCrmMcpServer(ctx ?? PUBLIC_MANIFEST_CONTEXT);
 
   const tools = await server.listTools();
   const resources = await server.listResources();
@@ -95,10 +43,13 @@ export async function GET(req: NextRequest) {
     status: 'online',
     server: 'crm-firplak-mcp',
     version: '1.2.0',
-    user_context: {
-      email: ctx.email,
-      role: ctx.role,
-    },
+    authenticated: Boolean(ctx),
+    user_context: ctx
+      ? {
+          email: ctx.email,
+          role: ctx.role,
+        }
+      : null,
     capabilities: {
       tools_count: tools.length,
       resources_count: resources.length,
@@ -117,6 +68,16 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const ctx = await resolveSessionFromRequest(req);
+    if (!ctx) {
+      return NextResponse.json(
+        {
+          error:
+            'No autorizado: se requiere un token Bearer válido de Supabase (Authorization: Bearer <access_token>). Genera el token desde Configuración > Integración MCP.',
+        },
+        { status: 401 }
+      );
+    }
+
     const server = createCrmMcpServer(ctx);
     const body = await req.json();
 

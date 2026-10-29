@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { createCrmMcpServer } from '@/lib/mcp/server';
 import { McpSessionContext, getMcpPublicUrl, VERCEL_MCP_PRODUCTION_URL } from '@/lib/mcp/types';
 
@@ -344,6 +344,54 @@ describe('Servidor MCP CRM FIRPLAK', () => {
         value: true,
       });
       expect(res.isError).toBe(false);
+    });
+  });
+
+  describe('15. Producción fail-closed y consultas acotadas', () => {
+    it('no devuelve datos de memoria cuando falta SUPABASE_SERVICE_ROLE_KEY en producción', async () => {
+      vi.stubEnv('NODE_ENV', 'production');
+      vi.stubEnv('SUPABASE_SERVICE_ROLE_KEY', '');
+      vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', 'https://abcproyecto.supabase.co');
+      vi.stubEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY', 'anon-key-no-privilegiada');
+
+      try {
+        const server = createCrmMcpServer(adminContext);
+        const res = await server.callTool('crm_buscar_oportunidades', {
+          incluir_archivadas: true,
+          limit: 10,
+        });
+
+        expect(res.isError).toBe(true);
+        expect(res.content[0].text).toMatch(/SUPABASE_SERVICE_ROLE_KEY|base de datos no disponible/i);
+        expect(res.content[0].text).not.toContain('opp-archivada-1');
+      } finally {
+        vi.unstubAllEnvs();
+      }
+    });
+
+    it('pagina la agenda diaria y reporta el total sin devolver toda la agenda', async () => {
+      const server = createCrmMcpServer(adminContext);
+      const today = new Date().toISOString();
+      const memory = server.db.getMemory();
+      for (let i = 1; i <= 3; i += 1) {
+        memory.activities.set(`act-paginada-${i}`, {
+          id: `act-paginada-${i}`,
+          asunto: `Actividad ${i}`,
+          tipo_actividad: 'TAREA',
+          fecha_inicio: today,
+          is_completed: false,
+          user_id: adminContext.userId,
+        });
+      }
+
+      const res = await server.callTool('crm_agenda_diaria', { limit: 1, offset: 1 });
+      expect(res.isError).toBe(false);
+      const data = JSON.parse(res.content[0].text);
+      expect(data.pendientes).toHaveLength(1);
+      expect(data.total_count).toBe(3);
+      expect(data.limit).toBe(1);
+      expect(data.offset).toBe(1);
+      expect(data.has_more).toBe(true);
     });
   });
 });

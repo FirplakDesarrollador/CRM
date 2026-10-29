@@ -36,7 +36,8 @@ import { cn } from '@/components/ui/utils';
 import { CreateActivityModal } from '@/components/activities/CreateActivityModal';
 import { useActivityFollowUp } from '@/components/activities/ActivityFollowUp';
 import { isB2COnlyActivityClassification, userHasB2CAccess } from '@/lib/b2c';
-import { digitsOnly, isPhoneLikeQuery } from '@/lib/utils';
+import { getCellphoneSearchDigits, findPhoneMatchesLocal, findPhoneMatchesServer, opportunityMatchesPhone, PhoneSearchMatches } from '@/lib/phoneSearch';
+import { supabase } from '@/lib/supabase';
 import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { UserPickerFilter } from '@/components/cuentas/UserPickerFilter';
 
@@ -54,7 +55,13 @@ function ActivitiesContent() {
     // Completing an activity: offer to schedule the next follow-up (B2C) right away
     const handleToggleComplete = async (act: LocalActivity) => {
         const willComplete = !act.is_completed;
-        await toggleComplete(act.id, willComplete);
+        try {
+            await toggleComplete(act.id, willComplete);
+        } catch (error) {
+            console.error('[Actividades] No se pudo cambiar el estado de la actividad:', error);
+            alert(`No se pudo ${willComplete ? 'completar' : 'reabrir'} la actividad: ${error instanceof Error ? error.message : String(error)}`);
+            return;
+        }
         if (willComplete) requestFollowUp(act);
         else resetFollowUp(act.id);
     };
@@ -338,17 +345,19 @@ function ActivitiesContent() {
     const opportunities = useLiveQuery(() => db.opportunities.toArray(), [activeUserId, dbVersion]) || [];
     const contacts = useLiveQuery(() => db.contacts.toArray(), [activeUserId, dbVersion]) || [];
 
-    // Phones of each account's contacts, so activities can be found by the customer's mobile number
-    const contactPhonesByAccount = useMemo(() => {
-        const map = new Map<string, string[]>();
-        for (const c of contacts) {
-            if (c.is_deleted || !c.telefono) continue;
-            const list = map.get(c.account_id) || [];
-            list.push(c.telefono);
-            map.set(c.account_id, list);
-        }
-        return map;
-    }, [contacts]);
+    // Búsqueda por celular: la copia local no trae todos los contactos, así que en línea también se
+    // consulta en Supabase (con la sesión del usuario, respeta RLS) qué cuentas/contactos tienen ese celular.
+    const [serverPhoneMatches, setServerPhoneMatches] = useState<{ digits: string; matches: PhoneSearchMatches } | null>(null);
+    useEffect(() => {
+        const digits = getCellphoneSearchDigits(debouncedSearchQuery);
+        if (!digits || typeof navigator === 'undefined' || !navigator.onLine) return;
+        let cancelled = false;
+        findPhoneMatchesServer(supabase, digits)
+            .then(matches => { if (!cancelled) setServerPhoneMatches({ digits, matches }); })
+            .catch(err => console.warn('[ActivitiesPage] phone lookup failed', err));
+        return () => { cancelled = true; };
+    }, [debouncedSearchQuery]);
+
 
 
 
@@ -462,8 +471,16 @@ function ActivitiesContent() {
         const sourceActivities = activities || [];
         if (sourceActivities.length === 0) return [];
         const lowerQuery = debouncedSearchQuery.toLowerCase();
-        const queryIsPhone = isPhoneLikeQuery(debouncedSearchQuery);
-        const queryDigits = digitsOnly(debouncedSearchQuery);
+        // Búsqueda por celular: cuentas y contactos cuyo teléfono coincide (solo el número, sin indicativo)
+        const queryDigits = getCellphoneSearchDigits(debouncedSearchQuery);
+        let phoneMatches: PhoneSearchMatches | null = null;
+        if (queryDigits) {
+            phoneMatches = findPhoneMatchesLocal(contacts, accounts, queryDigits);
+            if (serverPhoneMatches?.digits === queryDigits) {
+                serverPhoneMatches.matches.accountIds.forEach(id => phoneMatches!.accountIds.add(id));
+                serverPhoneMatches.matches.contactIds.forEach(id => phoneMatches!.contactIds.add(id));
+            }
+        }
 
         // Optimize lookup for search matches (O(1) instead of O(N))
         const oppMap = new Map(opportunities.map(o => [o.id, o]));
@@ -490,11 +507,14 @@ function ActivitiesContent() {
                 const opp = act.opportunity_id ? oppMap.get(act.opportunity_id) : null;
                 const acc = act.account_id ? accMap.get(act.account_id) : (opp?.account_id ? accMap.get(opp.account_id) : null);
 
-                // Phone/mobile search: account phone or any of the account's contacts (digits only, format-agnostic)
+                // Búsqueda por celular: la cuenta de la actividad (o de su oportunidad) tiene ese celular
+                // o alguno de sus contactos; o la oportunidad tiene ligado un contacto con ese celular
                 let phoneMatch = false;
-                if (queryIsPhone && acc) {
-                    const phones = [acc.telefono, ...(contactPhonesByAccount.get(acc.id) || [])];
-                    phoneMatch = phones.some(p => digitsOnly(p).includes(queryDigits));
+                if (phoneMatches) {
+                    phoneMatch =
+                        (act.account_id ? phoneMatches.accountIds.has(act.account_id) : false) ||
+                        (acc ? phoneMatches.accountIds.has(acc.id) : false) ||
+                        (opp ? opportunityMatchesPhone(opp, phoneMatches) : false);
                 }
 
                 const searchMatch =
@@ -549,7 +569,7 @@ function ActivitiesContent() {
         });
 
         return filtered;
-    }, [activities, filterType, filterClassification, filterSubclassification, debouncedSearchQuery, canViewAll, user, activeUserId, collaborativeOppIds, filterUser, filterStatus, omitCompleted, filterChannel, filterDateFrom, filterDateTo, opportunities, accounts, contactPhonesByAccount]);
+    }, [activities, filterType, filterClassification, filterSubclassification, debouncedSearchQuery, canViewAll, user, activeUserId, collaborativeOppIds, filterUser, filterStatus, omitCompleted, filterChannel, filterDateFrom, filterDateTo, opportunities, accounts, contacts, serverPhoneMatches]);
 
     // Count overdue activities for badge (computed from role-filtered but ignoring current status filter)
     const overdueCount = useMemo(() => {
@@ -1157,6 +1177,9 @@ function ActivitiesContent() {
                                                 <div className="flex items-start gap-4">
                                                     <button
                                                         onClick={(e) => {
+                                                            // El botón está dentro de un <a href>: sin preventDefault el navegador
+                                                            // sigue el enlace (recarga /actividades?id=...) y la actividad no queda completada.
+                                                            e.preventDefault();
                                                             e.stopPropagation();
                                                             handleToggleComplete(act);
                                                         }}
@@ -1356,6 +1379,9 @@ function ActivitiesContent() {
                                                                     </a>
                                                                     <button
                                                                         onClick={(e) => {
+                                                                            // El botón está dentro de un <a href>: sin preventDefault el navegador
+                                                                            // sigue el enlace (recarga /actividades?id=...) y la actividad no queda completada.
+                                                                            e.preventDefault();
                                                                             e.stopPropagation();
                                                                             handleToggleComplete(act);
                                                                         }}
@@ -1432,6 +1458,9 @@ function ActivitiesContent() {
                                                                             </div>
                                                                             <button
                                                                                 onClick={(e) => {
+                                                                                    // El botón está dentro de un <a href>: sin preventDefault el navegador
+                                                                                    // sigue el enlace (recarga /actividades?id=...) y la actividad no queda completada.
+                                                                                    e.preventDefault();
                                                                                     e.stopPropagation();
                                                                                     handleToggleComplete(act);
                                                                                 }}

@@ -4,10 +4,12 @@ import { syncEngine } from '@/lib/sync';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { db } from '@/lib/db';
 import { useSyncStore } from '@/lib/stores/useSyncStore';
-import { matchesSearchTokens, getSearchTokens, getPhoneIlikePatterns, isPhoneLikeQuery } from '@/lib/utils';
-import { computeOpportunityActivitySummary, OpportunityActivitySummary } from '@/lib/opportunityActivities';
+import { matchesSearchTokens, getSearchTokens, getPhoneIlikePatterns } from '@/lib/utils';
+import { getCellphoneSearchDigits, findPhoneMatchesServer, findPhoneMatchesLocal, opportunityMatchesPhone, PhoneSearchMatches } from '@/lib/phoneSearch';
+import { computeOpportunityActivitySummary, OpportunityActivitySummary, ActivityItem } from '@/lib/opportunityActivities';
 import { PROSPECTO_PHASE_ID, getEquivalentPhaseIds, PhaseCatalogItem, calculateTotalAmount, computeProgressiveBatch, DEFAULT_OPPORTUNITIES_PAGE_SIZE } from '@/lib/opportunityColumnFilterHelpers';
 import { toStartOfDayISO, toEndOfDayISO } from '@/lib/dateFilterHelpers';
+import { activitiesVisibleToViewer, sellerCanSeeOpportunity, sellerOpportunityOrFilter } from '@/lib/sellerVisibility';
 
 export type OpportunityServer = {
     id: string;
@@ -29,7 +31,7 @@ export type OpportunityServer = {
     fase_data?: { nombre: string } | null; // Joined data
     estado_data?: { nombre: string } | null; // Joined data
     vendedor?: { full_name: string } | null; // Joined data
-    actividades?: Array<{ id: string; fecha_fin?: string | null; is_completed?: boolean; is_deleted?: boolean }> | null;
+    actividades?: Array<{ id: string; user_id?: string | null; fecha_fin?: string | null; is_completed?: boolean; is_deleted?: boolean }> | null;
     activity_summary?: OpportunityActivitySummary;
 };
 
@@ -211,17 +213,21 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
             const userMap = new Map((usersData || []).map(u => [u.id, u]));
             const phaseMap = new Map(allPhases.map(p => [p.id, p]));
 
+            // Asesor (VENDEDOR): solo sus oportunidades (dueño) y aquellas donde es colaborador,
+            // sin importar la pestaña (Todas, Web, etc.).
             if (isVendedor && currentUserId) {
-                localOpps = localOpps.filter(o =>
-                    o.owner_user_id === currentUserId ||
-                    o.created_by === currentUserId
-                );
+                const sellerCollabs = await db.opportunityCollaborators.where('usuario_id').equals(currentUserId).toArray();
+                const sellerCollabIds = new Set(sellerCollabs.filter(c => !c.is_deleted).map(c => c.oportunidad_id));
+                localOpps = localOpps.filter(o => sellerCanSeeOpportunity(o, currentUserId, sellerCollabIds));
             }
 
             if (searchTerm && searchTerm.trim()) {
-                // Búsqueda por celular/teléfono: el de la cuenta o el de cualquiera de sus contactos
+                // Búsqueda por celular: el de la cuenta, el de cualquiera de sus contactos
+                // o el de un contacto ligado directamente a la oportunidad (contactos_ids)
                 const contactPhonesByAccount = new Map<string, string[]>();
-                if (isPhoneLikeQuery(searchTerm)) {
+                let localPhoneMatches: PhoneSearchMatches | null = null;
+                const localPhoneDigits = getCellphoneSearchDigits(searchTerm);
+                if (localPhoneDigits) {
                     const allContacts = await db.contacts.toArray();
                     for (const c of allContacts) {
                         if (c.is_deleted || !c.telefono) continue;
@@ -229,8 +235,10 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                         list.push(c.telefono);
                         contactPhonesByAccount.set(c.account_id, list);
                     }
+                    localPhoneMatches = findPhoneMatchesLocal(allContacts, allAccounts, localPhoneDigits);
                 }
                 localOpps = localOpps.filter(o =>
+                    opportunityMatchesPhone(o, localPhoneMatches) ||
                     matchesSearchTokens([
                         o.nombre,
                         accMap.get(o.account_id)?.nombre,
@@ -327,7 +335,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
 
             if (userFilter !== 'unrestricted') {
                 if (userFilter === 'mine' && currentUserId) {
-                    localOpps = localOpps.filter(o => o.owner_user_id === currentUserId || o.created_by === currentUserId);
+                    localOpps = localOpps.filter(o => o.owner_user_id === currentUserId || (!isVendedor && o.created_by === currentUserId));
                 } else if (userFilter === 'collab') {
                     const localCollabs = await db.opportunityCollaborators.where('usuario_id').equals(currentUserId || '').toArray();
                     const collabOppIds = new Set(localCollabs.filter(c => !c.is_deleted).map(c => c.oportunidad_id));
@@ -338,7 +346,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                         const collabOppIds = new Set(localCollabs.filter(c => !c.is_deleted).map(c => c.oportunidad_id));
                         localOpps = localOpps.filter(o =>
                             o.owner_user_id === currentUserId ||
-                            o.created_by === currentUserId ||
+                            (!isVendedor && o.created_by === currentUserId) ||
                             collabOppIds.has(o.id) ||
                             (userRole === 'COORDINADOR' && o.owner_user_id && subordinateIds.includes(o.owner_user_id))
                         );
@@ -396,7 +404,11 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
             const totalCount = localOpps.length;
             const paginatedOpps = localOpps.slice(from, to + 1);
             const oppIds = paginatedOpps.map(i => i.id);
-            const localActs = await db.activities.where('opportunity_id').anyOf(oppIds).toArray();
+            const localActs = activitiesVisibleToViewer(
+                await db.activities.where('opportunity_id').anyOf(oppIds).toArray(),
+                userRole,
+                currentUserId
+            );
             const actsByOpp = new Map<string, any[]>();
             localActs.forEach(act => {
                 if (act.opportunity_id) {
@@ -452,18 +464,17 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
             let searchAccountIds: string[] = [];
             let searchUserIds: string[] = [];
             // Cuando la búsqueda completa es un celular/teléfono: cuentas cuyo teléfono (o el de alguno de sus contactos) coincide
-            const searchIsPhone = isPhoneLikeQuery(searchTerm);
+            const phoneDigits = getCellphoneSearchDigits(searchTerm);
+            const searchIsPhone = Boolean(phoneDigits);
             const phoneAccountIds = new Set<string>();
+            const phoneContactIds = new Set<string>();
 
-            if (searchIsPhone) {
-                const phoneOr = getPhoneIlikePatterns(searchTerm).map(pattern => `telefono.ilike.${pattern}`).join(',');
-                const [phoneAccRes, phoneContactRes] = await Promise.all([
-                    supabase.from('CRM_Cuentas').select('id').eq('is_deleted', false).or(phoneOr).limit(100),
-                    supabase.from('CRM_Contactos').select('account_id').eq('is_deleted', false).or(phoneOr).limit(100)
-                ]);
-                ((phoneAccRes.data || []) as Array<{ id: string }>).forEach((a) => a.id && phoneAccountIds.add(a.id));
-                ((phoneContactRes.data || []) as Array<{ account_id: string | null }>).forEach((c) => c.account_id && phoneAccountIds.add(c.account_id));
+            if (phoneDigits) {
+                const matches = await findPhoneMatchesServer(supabase, phoneDigits);
+                matches.accountIds.forEach(id => phoneAccountIds.add(id));
+                matches.contactIds.forEach(id => phoneContactIds.add(id));
             }
+            const serverPhoneMatches: PhoneSearchMatches = { accountIds: phoneAccountIds, contactIds: phoneContactIds };
 
             if (searchTerm && searchTerm.trim() && !searchIsPhone) {
                 const tokens = getSearchTokens(searchTerm);
@@ -483,11 +494,12 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
             }
 
             let collabOppIds: string[] = [];
-            if (userFilter === 'collab' || (userFilter === 'all' && userRole !== 'ADMIN')) {
+            if (isVendedor || userFilter === 'collab' || (userFilter === 'all' && userRole !== 'ADMIN')) {
                 const { data: collabRows } = await supabase
                     .from('CRM_Oportunidades_Colaboradores')
                     .select('oportunidad_id')
-                    .eq('usuario_id', currentUserId);
+                    .eq('usuario_id', currentUserId)
+                    .eq('is_deleted', false);
                 collabOppIds = Array.from(new Set((collabRows || []).map(row => row.oportunidad_id).filter(Boolean)));
             }
 
@@ -499,9 +511,13 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 let q = targetQuery.eq('is_deleted', false);
 
                 if (searchTerm && searchTerm.trim() && searchIsPhone) {
-                    const phoneConditions = [`nombre.ilike.${getPhoneIlikePatterns(searchTerm)[0]}`];
+                    const phoneConditions = [`nombre.ilike.${getPhoneIlikePatterns(phoneDigits)[0]}`];
                     if (phoneAccountIds.size > 0) {
                         phoneConditions.push(`account_id.in.(${Array.from(phoneAccountIds).join(',')})`);
+                    }
+                    if (phoneContactIds.size > 0) {
+                        // Oportunidades donde el contacto con ese celular está ligado directamente
+                        phoneConditions.push(`contactos_ids.ov.{${Array.from(phoneContactIds).join(',')}}`);
                     }
                     q = q.or(phoneConditions.join(','));
                 } else if (searchTerm && searchTerm.trim()) {
@@ -613,10 +629,11 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                         q = q.or(ownershipConditions.join(','));
                     } else if (userFilter === 'all') {
                         if (userRole !== 'ADMIN') {
-                            const visibleConditions = [
-                                `owner_user_id.eq.${currentUserId}`,
-                                `created_by.eq.${currentUserId}`
-                            ];
+                            const visibleConditions = [`owner_user_id.eq.${currentUserId}`];
+                            // El asesor solo ve las suyas (dueño) y en las que colabora; no las que creó para otro.
+                            if (!isVendedor) {
+                                visibleConditions.push(`created_by.eq.${currentUserId}`);
+                            }
                             if (collabOppIds.length > 0) {
                                 visibleConditions.push(`id.in.(${collabOppIds.join(',')})`);
                             }
@@ -628,6 +645,11 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                     } else if (userFilter === 'web') {
                         q = q.or('url_origen.not.is.null,origen_oportunidad.ilike.%web%,origen_oportunidad.ilike.%pagina%');
                     }
+                }
+
+                // Asesor (VENDEDOR): restricción fija en cualquier pestaña/filtro (Todas, Web, cuenta, búsqueda).
+                if (isVendedor && currentUserId) {
+                    q = q.or(sellerOpportunityOrFilter(currentUserId, collabOppIds));
                 }
 
                 return q;
@@ -651,11 +673,12 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                     created_by,
                     origen_oportunidad,
                     categoria_oportunidad,
+                    contactos_ids,
                     ${accountRelation},
                     fase_data:CRM_FasesOportunidad(nombre),
                     estado_data:CRM_EstadosOportunidad(nombre),
                     vendedor:CRM_Usuarios!owner_user_id(full_name),
-                    actividades:CRM_Actividades(id, fecha_inicio, fecha_fin, tipo_actividad, is_completed, is_deleted)
+                    actividades:CRM_Actividades(id, user_id, fecha_inicio, fecha_fin, tipo_actividad, is_completed, is_deleted)
                 `);
 
             dataQuery = applyCommonFilters(dataQuery);
@@ -719,7 +742,11 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
             let pendingLocalOpps: any[] = [];
             if (missingPendingIds.size > 0) {
                 const localOpps = await db.opportunities.where('id').anyOf(Array.from(missingPendingIds)).toArray();
+                const pendingCollabIds = new Set(collabOppIds);
                 pendingLocalOpps = localOpps.filter((o: any) => {
+                    if (isVendedor && currentUserId && !sellerCanSeeOpportunity(o, currentUserId, pendingCollabIds) && o.created_by !== currentUserId) return false;
+                    if (accountIdFilter && o.account_id !== accountIdFilter) return false;
+                    if (searchIsPhone && opportunityMatchesPhone(o, serverPhoneMatches)) return true;
                     if (searchTerm) {
                         const lowerSearch = searchTerm.toLowerCase();
                         if (!o.nombre?.toLowerCase().includes(lowerSearch)) {
@@ -736,11 +763,11 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
 
             let combinedResults = [...pendingLocalOpps, ...(result as any[])].map((o: any) => ({
                 ...o,
-                activity_summary: o.activity_summary || computeOpportunityActivitySummary(o.actividades)
+                activity_summary: computeOpportunityActivitySummary(activitiesVisibleToViewer<ActivityItem>(o.actividades, userRole, currentUserId))
             }));
             if (searchTerm && searchTerm.trim()) {
                 combinedResults = combinedResults.filter(o =>
-                    (searchIsPhone && phoneAccountIds.has(o.account_id)) ||
+                    (searchIsPhone && opportunityMatchesPhone(o, serverPhoneMatches)) ||
                     matchesSearchTokens([
                         o.nombre,
                         o.account?.nombre,
@@ -783,7 +810,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
             setLoading(false);
             useSyncStore.getState().setIsLoadingData(false);
         }
-    }, [currentUserId, subordinateIds, pageSize, userFilter, searchTerm, accountIdFilter, accountOwnerIds, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, originFilter, countryFilter, cityFilter, phasesReady, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc]);
+    }, [currentUserId, isVendedor, subordinateIds, pageSize, userFilter, searchTerm, accountIdFilter, accountOwnerIds, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, originFilter, countryFilter, cityFilter, phasesReady, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc]);
 
     useEffect(() => {
         fetchOpportunities(false);

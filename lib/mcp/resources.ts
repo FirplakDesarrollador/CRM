@@ -65,7 +65,7 @@ export function listCrmResources(): McpResourceDefinition[] {
     {
       uri: 'crm://metricas-embudo',
       name: 'Métricas Resumidas del Pipeline',
-      description: 'Totales agregados de oportunidades por fase',
+      description: 'Totales agregados de oportunidades en tiempo real',
       mimeType: 'application/json',
     },
   ];
@@ -89,17 +89,43 @@ export async function readCrmResource(
   } else if (uri === 'crm://origenes-oportunidad') {
     data = ORIGENES_OPORTUNIDAD;
   } else if (uri === 'crm://metricas-embudo') {
-    const opps = Array.from(db.getMemory().opportunities.values()).filter((o) => !o.is_deleted);
-    const totalMonto = opps.reduce((sum, o) => sum + (Number(o.valor) || 0), 0);
-    data = {
-      total_oportunidades_activas: opps.length,
-      monto_total_pipeline_cop: totalMonto,
-      distribucion_canal: {
-        OBRAS_NAC: opps.filter((o) => o.canal_id === 'OBRAS_NAC').length,
-        DIST_NAC: opps.filter((o) => o.canal_id === 'DIST_NAC').length,
-        PROPIO: opps.filter((o) => o.canal_id === 'PROPIO').length,
-      },
-    };
+    const supabase = db.getSupabase();
+    if (supabase) {
+      try {
+        const { count: totalAbiertas } = await supabase
+          .from('CRM_Oportunidades')
+          .select('*', { count: 'exact', head: true })
+          .or('is_deleted.is.null,is_deleted.eq.false')
+          .eq('estado_id', 1);
+
+        const { count: totalGeneral } = await supabase
+          .from('CRM_Oportunidades')
+          .select('*', { count: 'exact', head: true })
+          .or('is_deleted.is.null,is_deleted.eq.false');
+
+        data = {
+          total_oportunidades_abiertas: totalAbiertas ?? 0,
+          total_oportunidades_activas: totalGeneral ?? 0,
+          fuente: 'Supabase Live',
+        };
+      } catch (err) {
+        console.warn('[CRM-MCP] Error en metricas-embudo de Supabase:', err);
+      }
+    }
+
+    if (!data) {
+      const opps = Array.from(db.getMemory().opportunities.values()).filter((o) => !o.is_deleted);
+      const totalMonto = opps.reduce((sum, o) => sum + (Number(o.valor) || 0), 0);
+      data = {
+        total_oportunidades_activas: opps.length,
+        monto_total_pipeline_cop: totalMonto,
+        distribucion_canal: {
+          OBRAS_NAC: opps.filter((o) => o.canal_id === 'OBRAS_NAC').length,
+          DIST_NAC: opps.filter((o) => o.canal_id === 'DIST_NAC').length,
+          PROPIO: opps.filter((o) => o.canal_id === 'PROPIO').length,
+        },
+      };
+    }
   } else {
     throw new Error(`Recurso no encontrado: ${uri}`);
   }

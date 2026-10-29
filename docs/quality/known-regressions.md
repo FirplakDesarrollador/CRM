@@ -14,6 +14,8 @@ La memoria historica detallada continua en `bugs-knowhow.md`. Esta vista conecta
 | Migraciones locales ausentes del control de versiones | `supabase/migrations/`; `.gitignore` | R1-R8 | `migration-static` | BROKEN: 22 archivos locales no versionados bloquean `qa:gate` |
 | Campos editables aceptados localmente pero ausentes del esquema remoto o descartados por el pull | `bugs-knowhow.md` Bug 20260904-01; `docs/failures/2026-09-04-INC-2026-009.md`; `lib/persistence-contracts.test.ts` | R2, R3, R4 | `product-tests`, `migration-static` | VERIFIED enfocado: contrato RED/GREEN de columnas y mapeos |
 | Reseteo involuntario de formulario tras submit/autoguardado de cuenta y visibilidad de duplicados | `bugs-knowhow.md` Bugs 20260908-01 y 20260908-02; `tests/accountFormReset.test.ts`; `tests/duplicateAccountModal.test.ts` | R3 | `product-tests` | VERIFIED: 2/2 pruebas integradas en el trinquete de `product-tests` en `qa:gate` |
+| Bypass de autenticacion en `/api/mcp`: JWT aceptado sin verificar firma y sesion anonima via headers `x-user-*` en produccion | `docs/failures/2026-10-28-INC-2026-010.md`; `lib/mcp/auth.ts`; `tests/mcp-auth.test.ts` | R1 | `product-tests` | VERIFIED enfocado: 10/10 (6 RED contra la logica vulnerable, luego GREEN) |
+| MCP devolvia fixtures como datos reales al faltar `SUPABASE_SERVICE_ROLE_KEY` y agenda sin paginacion | `docs/failures/2026-10-29-INC-2026-011.md`; `lib/mcp/database.ts`; `tests/crm-mcp.test.ts` | R1 | `product-tests` | VERIFIED enfocado: 2 RED por causa esperada; suite MCP GREEN 36/36 |
 
 Una regresion nueva se registra con `npm run qa:incident`. La nota debe identificar la prueba RED, la etapa que la ejecuta y la evidencia GREEN.
 

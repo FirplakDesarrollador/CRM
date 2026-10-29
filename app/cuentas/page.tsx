@@ -10,6 +10,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, LocalPais } from "@/lib/db";
 import { Plus, Search, Building, User, Pencil, Medal, Trash2, ArrowUpDown, ChevronUp, ChevronDown, MapPin, Briefcase, DollarSign, Globe } from "lucide-react";
 import { UserPickerFilter } from "@/components/cuentas/UserPickerFilter";
+import { sellerCanSeeAccount } from "@/lib/sellerVisibility";
 import { AccountFilters } from "@/components/cuentas/AccountFilters";
 import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
@@ -17,6 +18,7 @@ import { cn } from "@/components/ui/utils";
 import { AccountDeleteModal } from "@/components/cuentas/AccountDeleteModal";
 import { DataListToolbar } from "@/components/ui/DataListToolbar";
 import { handleEntityLinkClick } from "@/lib/utils/navigation";
+import { formatColombiaDateTime } from "@/lib/date-utils";
 import dynamic from 'next/dynamic';
 
 const HotTable = dynamic(() => import('@/components/HotTableWrapper'), { ssr: false });
@@ -32,7 +34,7 @@ const formatCurrency = (value: number) => {
 function AccountsContent() {
     const searchParams = useSearchParams();
     const router = useRouter();
-    const { isAdmin, hasCoordinatorAccess } = useCurrentUser();
+    const { isAdmin, hasCoordinatorAccess, isVendedor, user: currentUser } = useCurrentUser();
     const { deleteAccount } = useAccounts();
 
     const {
@@ -245,6 +247,21 @@ function AccountsContent() {
                     .single();
 
                 if (account && !error) {
+                    // Asesor (VENDEDOR): solo abre cuentas propias o donde colabora en alguna oportunidad.
+                    if (isVendedor && currentUser?.id && !sellerCanSeeAccount(account, currentUser.id, new Set())) {
+                        const { data: collabRows } = await supabase
+                            .from('CRM_Oportunidades_Colaboradores')
+                            .select('oportunidad_id, CRM_Oportunidades!inner(account_id)')
+                            .eq('usuario_id', currentUser.id)
+                            .eq('is_deleted', false)
+                            .eq('CRM_Oportunidades.account_id', id)
+                            .limit(1);
+                        if (!collabRows || collabRows.length === 0) {
+                            alert('No tienes permisos para ver esta cuenta.');
+                            router.replace('/cuentas');
+                            return;
+                        }
+                    }
                     setEditingAccount(account);
                     setShowCreate(false);
                 }
@@ -387,7 +404,7 @@ function AccountsContent() {
             potencial_venta: acc.potencial_venta || 0,
             vendedor: acc.owner_name || "Sin asignar",
             nivel: acc.nivel_premium || "-",
-            creacion: acc.created_at ? new Date(acc.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) : "-",
+            creacion: formatColombiaDateTime(acc.created_at),
             actualizado: acc.updated_at ? new Date(acc.updated_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) : "-",
             _original: acc
         };
@@ -482,7 +499,7 @@ function AccountsContent() {
                 return td;
             }
         },
-        { data: 'creacion', title: 'Creación', readOnly: true, width: colWidths['creacion'] || 90, wordWrap: false,
+        { data: 'creacion', title: 'Creación', readOnly: true, width: Math.max(colWidths['creacion'] || 150, 150), wordWrap: false,
             renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 td.innerHTML = `<span style="font-size:12.5px;color:#64748b;font-weight:500;font-variant-numeric:tabular-nums;">${value || '-'}</span>`;
                 return td;
