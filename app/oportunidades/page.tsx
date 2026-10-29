@@ -753,7 +753,7 @@ function OpportunitiesContent() {
             correctFormat: true,
             title: 'Creada',
             readOnly: true,
-            width: Math.max(colWidths['creada'] || 125, 120),
+            width: Math.max(colWidths['creada'] || 150, 150),
             wordWrap: false,
             renderer(_: unknown, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 td.innerHTML = `<span style="font-size:12.5px;color:#64748b;font-weight:500;font-variant-numeric:tabular-nums;">${value || '-'}</span>`;
