@@ -13,6 +13,7 @@ import { cn } from "@/components/ui/utils";
 import { AccountForm } from "@/components/cuentas/AccountForm";
 import { useProductSearch, PriceListProduct } from "@/lib/hooks/useProducts";
 import { Trash2, PlusCircle, Search, Loader2 } from "lucide-react";
+import { ExpandableTextarea } from "@/components/ui/ExpandableTextarea";
 import { db } from "@/lib/db";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
@@ -935,9 +936,9 @@ export default function CreateOpportunityWizard() {
 
                         <div>
                             <label className="text-sm font-medium">Comentarios / Observaciones</label>
-                            <textarea 
-                                {...register("comentarios")} 
-                                className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-none" 
+                            <ExpandableTextarea
+                                {...register("comentarios")}
+                                className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                                 rows={3} 
                                 placeholder="Notas adicionales sobre esta oportunidad..."
                             />
