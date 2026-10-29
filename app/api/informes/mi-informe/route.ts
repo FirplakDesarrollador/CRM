@@ -33,7 +33,7 @@ async function fetchByIds(supabase: SupabaseClient, table: string, select: strin
         const rows = await fetchAll((from, to) => {
             let q: any = supabase.from(table).select(select).in(column, chunk);
             if (extra) q = extra(q);
-            return q.range(from, to);
+            return q.order('id').range(from, to);
         });
         out.push(...rows);
     }
@@ -73,7 +73,7 @@ export async function GET() {
         const cuentas = await fetchAll((from, to) => supabase
             .from('CRM_Cuentas').select('*')
             .eq('owner_user_id', uid).eq('is_deleted', false)
-            .order('nombre').range(from, to));
+            .order('nombre').order('id').range(from, to));
         const myAccountIds = cuentas.map((c) => String(c.id));
 
         // 2. Oportunidades del asesor
@@ -81,13 +81,13 @@ export async function GET() {
             .from('CRM_Oportunidades')
             .select('id, nombre, account_id, estado_id, fase_id, amount, currency_id, probabilidad, probability, fecha_cierre_estimada, segmento_id, departamento_id, ciudad_id, origen_oportunidad, created_at')
             .eq('owner_user_id', uid).eq('is_deleted', false)
-            .order('created_at', { ascending: false }).range(from, to));
+            .order('created_at', { ascending: false }).order('id', { ascending: false }).range(from, to));
 
         // 3. Contactos: de sus cuentas o creados por él
         const contactSelect = 'id, nombre, cargo, email, telefono, account_id, es_principal, created_at';
         const contactosPropios = await fetchAll((from, to) => supabase
             .from('CRM_Contactos').select(contactSelect)
-            .eq('created_by', uid).eq('is_deleted', false).range(from, to));
+            .eq('created_by', uid).eq('is_deleted', false).order('id').range(from, to));
         const contactosDeCuentas = await fetchByIds(supabase, 'CRM_Contactos', contactSelect, 'account_id', myAccountIds,
             (q) => q.eq('is_deleted', false));
         const contactos = uniqueById([...contactosDeCuentas, ...contactosPropios]);
@@ -96,10 +96,10 @@ export async function GET() {
         const actSelect = 'id, asunto, descripcion, fecha_inicio, fecha_fin, is_completed, tipo_actividad, tipo_actividad_id, clasificacion_id, subclasificacion_id, account_id, opportunity_id, created_at';
         const actividadesAsignadas = await fetchAll((from, to) => supabase
             .from('CRM_Actividades').select(actSelect)
-            .eq('user_id', uid).eq('is_deleted', false).range(from, to));
+            .eq('user_id', uid).eq('is_deleted', false).order('id').range(from, to));
         const actividadesCreadas = await fetchAll((from, to) => supabase
             .from('CRM_Actividades').select(actSelect)
-            .eq('created_by', uid).eq('is_deleted', false).range(from, to));
+            .eq('created_by', uid).eq('is_deleted', false).order('id').range(from, to));
         const actividades = uniqueById([...actividadesAsignadas, ...actividadesCreadas])
             .sort((a, b) => String(b.fecha_inicio || '').localeCompare(String(a.fecha_inicio || '')));
 
@@ -123,7 +123,7 @@ export async function GET() {
             supabase.from('CRM_EstadosOportunidad').select('id, nombre'),
             supabase.from('CRM_Segmentos').select('id, nombre'),
             supabase.from('CRM_Departamentos').select('id, nombre'),
-            fetchAll((from, to) => supabase.from('CRM_Ciudades').select('id, nombre').range(from, to)),
+            fetchAll((from, to) => supabase.from('CRM_Ciudades').select('id, nombre').order('id').range(from, to)),
             supabase.from('CRM_TiposActividad').select('id, nombre'),
             supabase.from('CRM_Activity_Clasificacion').select('id, nombre'),
             supabase.from('CRM_Activity_Subclasificacion').select('id, nombre')
