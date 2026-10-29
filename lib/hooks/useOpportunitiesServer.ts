@@ -398,7 +398,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
 
                 if (valA < valB) return sortAsc ? -1 : 1;
                 if (valA > valB) return sortAsc ? 1 : -1;
-                return 0;
+                return String(b.id).localeCompare(String(a.id));
             });
 
             const totalCount = localOpps.length;
@@ -684,12 +684,13 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
             dataQuery = applyCommonFilters(dataQuery);
 
             if (sortField === 'account_nombre') {
-                dataQuery = dataQuery.order('nombre', { foreignTable: 'account', ascending: sortAsc });
+                dataQuery = dataQuery.order('account(nombre)', { ascending: sortAsc });
             } else if (sortField === 'vendedor_nombre') {
-                dataQuery = dataQuery.order('full_name', { foreignTable: 'vendedor', ascending: sortAsc });
+                dataQuery = dataQuery.order('vendedor(full_name)', { ascending: sortAsc });
             } else {
                 dataQuery = dataQuery.order(sortField as any, { ascending: sortAsc });
             }
+            if (sortField !== 'id') dataQuery = dataQuery.order('id', { ascending: false });
 
             dataQuery = dataQuery.range(from, to);
 
