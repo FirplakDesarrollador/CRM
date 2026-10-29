@@ -710,7 +710,8 @@ export default function InformesPage() {
                     cuenta:CRM_Cuentas(nombre, canal_id, pais_id),
                     fase:CRM_FasesOportunidad(nombre, canal_id),
                     estado_info:CRM_EstadosOportunidad(nombre),
-                    segmento:CRM_Segmentos(nombre)
+                    segmento:CRM_Segmentos(nombre),
+                    actividades:CRM_Actividades(id, fecha_inicio, fecha_fin, is_completed, created_at, is_deleted)
                 `;
                 columns = [
                     { header: 'ID', key: 'id' },
@@ -729,6 +730,8 @@ export default function InformesPage() {
                     { header: 'PROBABILIDAD (%)', key: 'probabilidad', width: 15 },
                     { header: 'FECHA CIERRE EST.', key: 'fecha_cierre_estimada', width: 18 },
                     { header: 'FECHA ENTREGA', key: 'fecha_entrega', width: 18 },
+                    { header: 'FECHA ACTIVIDAD', key: 'fecha_actividad', width: 20 },
+                    { header: 'ESTADO ACTIVIDAD', key: 'estado_actividad', width: 18 },
                     { header: 'SETTER', key: 'setter', width: 15 },
                     { header: 'ORIGEN', key: 'origen_oportunidad', width: 20 },
                     { header: 'DEPARTAMENTO', key: 'departamento_nombre', width: 20 },

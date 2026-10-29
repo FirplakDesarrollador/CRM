@@ -97,6 +97,105 @@ describe('Exportación de Oportunidades a Excel', () => {
         const resultWithoutCats = mapOpportunityReportRow(itemWithoutCats, mockLookups);
         expect(resultWithoutCats.categorias_interes).toBe('-');
     });
+
+    it('incluye fecha_actividad y estado_actividad cuando tiene actividad pendiente', () => {
+        const item = {
+            id: 'opp-act-1',
+            nombre: 'Oportunidad con Actividad Pendiente',
+            actividades: [
+                {
+                    id: 'act-1',
+                    fecha_fin: '2026-10-27T13:26:00-05:00',
+                    is_completed: false,
+                    is_deleted: false
+                }
+            ]
+        };
+        const result = mapOpportunityReportRow(item, mockLookups);
+        expect(result.fecha_actividad).toBe('27/10/2026 13:26');
+        expect(result.estado_actividad).toBe('Pendiente');
+    });
+
+    it('prioriza la actividad pendiente más próxima frente a completadas o lejanas', () => {
+        const item = {
+            id: 'opp-act-2',
+            nombre: 'Oportunidad con Múltiples Actividades',
+            actividades: [
+                {
+                    id: 'act-past-completed',
+                    fecha_fin: '2026-10-01T10:00:00-05:00',
+                    is_completed: true,
+                    is_deleted: false
+                },
+                {
+                    id: 'act-next-pending',
+                    fecha_fin: '2026-10-27T13:26:00-05:00',
+                    is_completed: false,
+                    is_deleted: false
+                },
+                {
+                    id: 'act-later-pending',
+                    fecha_fin: '2026-11-15T09:00:00-05:00',
+                    is_completed: false,
+                    is_deleted: false
+                }
+            ]
+        };
+        const result = mapOpportunityReportRow(item, mockLookups);
+        expect(result.fecha_actividad).toBe('27/10/2026 13:26');
+        expect(result.estado_actividad).toBe('Pendiente');
+    });
+
+    it('muestra la actividad completada más reciente si todas están completadas', () => {
+        const item = {
+            id: 'opp-act-3',
+            nombre: 'Oportunidad con Solo Completadas',
+            actividades: [
+                {
+                    id: 'act-old-completed',
+                    fecha_fin: '2026-09-10T10:00:00-05:00',
+                    is_completed: true,
+                    is_deleted: false
+                },
+                {
+                    id: 'act-latest-completed',
+                    fecha_fin: '2026-10-20T16:00:00-05:00',
+                    is_completed: true,
+                    is_deleted: false
+                }
+            ]
+        };
+        const result = mapOpportunityReportRow(item, mockLookups);
+        expect(result.fecha_actividad).toBe('20/10/2026 16:00');
+        expect(result.estado_actividad).toBe('Completada');
+    });
+
+    it('devuelve "-" en fecha_actividad y estado_actividad si no tiene actividades o están borradas', () => {
+        const itemWithoutActs = {
+            id: 'opp-act-4',
+            nombre: 'Oportunidad Sin Actividades',
+            actividades: []
+        };
+        const result1 = mapOpportunityReportRow(itemWithoutActs, mockLookups);
+        expect(result1.fecha_actividad).toBe('-');
+        expect(result1.estado_actividad).toBe('-');
+
+        const itemWithDeleted = {
+            id: 'opp-act-5',
+            nombre: 'Oportunidad Borrada',
+            actividades: [
+                {
+                    id: 'act-del',
+                    fecha_fin: '2026-10-27T13:26:00-05:00',
+                    is_completed: false,
+                    is_deleted: true
+                }
+            ]
+        };
+        const result2 = mapOpportunityReportRow(itemWithDeleted, mockLookups);
+        expect(result2.fecha_actividad).toBe('-');
+        expect(result2.estado_actividad).toBe('-');
+    });
 });
 
 describe('Exportación de Actividades a Excel', () => {

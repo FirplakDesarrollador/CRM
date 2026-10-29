@@ -46,4 +46,29 @@ describe('Mi informe (Excel personal del asesor)', () => {
     it('nombre de archivo sin tildes ni espacios', () => {
         expect(miInformeFileName('José Muñoz', new Date('2026-10-28T15:00:00Z'))).toBe('Mi_informe_Jose_Munoz_2026-10-28.xlsx');
     });
+
+    it('incluye fecha_actividad y estado_actividad en la hoja de Oportunidades', () => {
+        const sheetsWithAct = buildMiInformeSheets({
+            cuentas: [],
+            contactos: [],
+            oportunidades: [
+                {
+                    id: 'opp-1',
+                    nombre: 'Torre Norte',
+                    actividades: [{ id: 'a-1', fecha_fin: '2026-10-27T13:26:00-05:00', is_completed: false }]
+                },
+                {
+                    id: 'opp-2',
+                    nombre: 'Torre Sur',
+                    actividades: []
+                }
+            ],
+            actividades: []
+        }, lookups);
+
+        expect(sheetsWithAct[2].columns.some(c => c.key === 'fecha_actividad')).toBe(true);
+        expect(sheetsWithAct[2].columns.some(c => c.key === 'estado_actividad')).toBe(true);
+        expect(sheetsWithAct[2].rows[0]).toMatchObject({ fecha_actividad: '27/10/2026 13:26', estado_actividad: 'Pendiente' });
+        expect(sheetsWithAct[2].rows[1]).toMatchObject({ fecha_actividad: '-', estado_actividad: '-' });
+    });
 });

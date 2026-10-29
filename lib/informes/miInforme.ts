@@ -1,4 +1,5 @@
 import * as ExcelJS from 'exceljs';
+import { resolveOpportunityActivityInfo } from '@/lib/utils/informes';
 
 /**
  * "Mi informe": Excel personal de cada asesor con SUS cuentas, contactos,
@@ -116,6 +117,8 @@ export function buildMiInformeSheets(data: MiInformeData, lk: MiInformeLookups):
             { header: 'MONEDA', key: 'currency_id', width: 10 },
             { header: 'PROBABILIDAD (%)', key: 'probabilidad', width: 15 },
             { header: 'FECHA CIERRE EST.', key: 'fecha_cierre_estimada', width: 18 },
+            { header: 'FECHA ACTIVIDAD', key: 'fecha_actividad', width: 20 },
+            { header: 'ESTADO ACTIVIDAD', key: 'estado_actividad', width: 18 },
             { header: 'SEGMENTO', key: 'segmento', width: 22 },
             { header: 'DEPARTAMENTO', key: 'departamento', width: 20 },
             { header: 'CIUDAD', key: 'ciudad', width: 20 },
@@ -123,22 +126,27 @@ export function buildMiInformeSheets(data: MiInformeData, lk: MiInformeLookups):
             { header: 'CREADA EL', key: 'created_at', width: 18 },
             { header: 'ID', key: 'id', width: 38 }
         ],
-        rows: data.oportunidades.map((o) => ({
-            id: o.id,
-            nombre: asText(o.nombre),
-            cuenta: lookup(lk.cuentas, o.account_id),
-            estado: lookup(lk.estados, o.estado_id),
-            fase: lookup(lk.fases, o.fase_id),
-            amount: Number(o.amount) || 0,
-            currency_id: asText(o.currency_id),
-            probabilidad: o.probabilidad ?? o.probability ?? '',
-            fecha_cierre_estimada: asDate(o.fecha_cierre_estimada),
-            segmento: lookup(lk.segmentos, o.segmento_id),
-            departamento: lookup(lk.departamentos, o.departamento_id),
-            ciudad: lookup(lk.ciudades, o.ciudad_id),
-            origen: asText(o.origen_oportunidad),
-            created_at: asDate(o.created_at)
-        }))
+        rows: data.oportunidades.map((o) => {
+            const actInfo = resolveOpportunityActivityInfo(o.actividades as any);
+            return {
+                id: o.id,
+                nombre: asText(o.nombre),
+                cuenta: lookup(lk.cuentas, o.account_id),
+                estado: lookup(lk.estados, o.estado_id),
+                fase: lookup(lk.fases, o.fase_id),
+                amount: Number(o.amount) || 0,
+                currency_id: asText(o.currency_id),
+                probabilidad: o.probabilidad ?? o.probability ?? '',
+                fecha_cierre_estimada: asDate(o.fecha_cierre_estimada),
+                fecha_actividad: actInfo.fecha_actividad,
+                estado_actividad: actInfo.estado_actividad,
+                segmento: lookup(lk.segmentos, o.segmento_id),
+                departamento: lookup(lk.departamentos, o.departamento_id),
+                ciudad: lookup(lk.ciudades, o.ciudad_id),
+                origen: asText(o.origen_oportunidad),
+                created_at: asDate(o.created_at)
+            };
+        })
     };
 
     const actividades: SheetDef = {

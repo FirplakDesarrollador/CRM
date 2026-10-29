@@ -79,7 +79,7 @@ export async function GET() {
         // 2. Oportunidades del asesor
         const oportunidades = await fetchAll((from, to) => supabase
             .from('CRM_Oportunidades')
-            .select('id, nombre, account_id, estado_id, fase_id, amount, currency_id, probabilidad, probability, fecha_cierre_estimada, segmento_id, departamento_id, ciudad_id, origen_oportunidad, created_at')
+            .select('id, nombre, account_id, estado_id, fase_id, amount, currency_id, probabilidad, probability, fecha_cierre_estimada, segmento_id, departamento_id, ciudad_id, origen_oportunidad, created_at, actividades:CRM_Actividades(id, fecha_inicio, fecha_fin, is_completed, is_deleted)')
             .eq('owner_user_id', uid).eq('is_deleted', false)
             .order('created_at', { ascending: false }).range(from, to));
 
