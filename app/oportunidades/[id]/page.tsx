@@ -88,14 +88,15 @@ export default function OpportunityDetailPage() {
 
                             if (collabs && !collabsError) {
                                 await db.opportunityCollaborators.bulkPut(collabs);
-                                isCollab = collabs.some(c => c.usuario_id === currentUser?.id);
+                                isCollab = collabs.some(c => c.usuario_id === currentUser?.id && !c.is_deleted);
                             }
                         } catch (err) {
                             console.warn("Could not fetch collaborators from server (table might be missing):", err);
                         }
 
                         if (userRole === 'VENDEDOR') {
-                            const isOwner = oppData.owner_user_id === currentUser?.id || oppData.created_by === currentUser?.id;
+                            // Asesor: solo dueño o colaborador (crear la oportunidad para otro no da acceso).
+                            const isOwner = oppData.owner_user_id === currentUser?.id;
                             if (!isOwner && !isCollab) {
                                 setServerOpportunity('UNAUTHORIZED');
                                 return;
