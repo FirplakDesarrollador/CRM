@@ -916,7 +916,8 @@ function OpportunitiesContent() {
                         { id: 'mine', label: 'Mis Oportunidades' },
                         { id: 'collab', label: 'Colaboración' },
                         ...(userRole === 'ADMIN' ? [{ id: 'team', label: 'Equipo' }] : []),
-                        { id: 'web', label: 'Web' }
+                        // El asesor no ve la pestaña Web (mostraría oportunidades de otros).
+                        ...(userRole === 'VENDEDOR' ? [] : [{ id: 'web', label: 'Web' }])
                     ].map(t => (
                         <button
                             key={t.id}
