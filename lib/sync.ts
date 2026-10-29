@@ -11,6 +11,7 @@ import {
     isRetryDue,
     isSyncLeaseExpired,
     shouldRefreshCatalogs,
+    isCatalogVersionNewer,
     syncCursorId
 } from './sync-runtime';
 
@@ -1601,6 +1602,23 @@ export class SyncEngine {
         return null;
     }
 
+    /** max(updated_at) de CRM_FasesOportunidad, o null si no se pudo consultar. */
+    private async fetchPhasesCatalogVersion(): Promise<string | null> {
+        try {
+            const { data, error } = await supabase
+                .from('CRM_FasesOportunidad')
+                .select('updated_at')
+                .not('updated_at', 'is', null)
+                .order('updated_at', { ascending: false })
+                .limit(1);
+            if (error) throw error;
+            return (data?.[0]?.updated_at as string | undefined) ?? null;
+        } catch (err: unknown) {
+            console.warn('[Sync] Could not check phases catalog version:', err instanceof Error ? err.message : err);
+            return null;
+        }
+    }
+
     private async setSyncCursor(userId: string, tableName: string, cursor: string): Promise<void> {
         await db.syncCursors.put({
             id: syncCursorId(userId, tableName),
@@ -1659,7 +1677,16 @@ export class SyncEngine {
             db.departments.count(),
             db.cities.count()
         ])).every(count => count > 0);
-        const refreshCatalogs = !catalogsReady || shouldRefreshCatalogs(catalogCursor);
+        // Las fases (y su probabilidad) pueden cambiar en el servidor antes de que venza
+        // el TTL de 24 h. Consulta barata de max(updated_at); si falla (sin conexión)
+        // se sigue con el comportamiento anterior.
+        const phasesVersion = await this.fetchPhasesCatalogVersion();
+        const storedPhasesVersion = await this.getSyncCursor(_user.id, '__phases_version__');
+        const phasesChanged = isCatalogVersionNewer(phasesVersion, storedPhasesVersion);
+        if (phasesChanged) {
+            console.log('[Sync] Phases catalog changed on server; refreshing catalogs before TTL.');
+        }
+        const refreshCatalogs = !catalogsReady || shouldRefreshCatalogs(catalogCursor) || phasesChanged;
 
         try {
             // Pull Accounts (CRM_Cuentas)
@@ -2053,6 +2080,9 @@ export class SyncEngine {
 
             if (catalogErrors.length === 0) {
                 await this.setSyncCursor(_user.id, '__catalogs__', upperBound);
+                if (phasesVersion) {
+                    await this.setSyncCursor(_user.id, '__phases_version__', phasesVersion);
+                }
             }
             } else {
                 console.log('[Sync] Catalog refresh skipped; cached catalogs are still within TTL.');

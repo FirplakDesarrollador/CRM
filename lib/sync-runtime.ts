@@ -99,3 +99,21 @@ export function shouldRefreshCatalogs(
     const timestamp = Date.parse(refreshedAt);
     return !Number.isFinite(timestamp) || now - timestamp >= ttlMs;
 }
+
+/**
+ * True cuando el catálogo en el servidor cambió después de la última descarga
+ * (por ejemplo, la probabilidad de una fase). `remoteVersion` es el max(updated_at)
+ * del catálogo en Supabase y `storedVersion` el que se guardó localmente.
+ * Si no se pudo consultar el servidor (sin conexión) no fuerza nada.
+ */
+export function isCatalogVersionNewer(
+    remoteVersion: string | null | undefined,
+    storedVersion: string | null | undefined
+): boolean {
+    if (!remoteVersion) return false;
+    const remote = Date.parse(remoteVersion);
+    if (!Number.isFinite(remote)) return false;
+    if (!storedVersion) return true;
+    const stored = Date.parse(storedVersion);
+    return !Number.isFinite(stored) || remote > stored;
+}
