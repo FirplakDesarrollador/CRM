@@ -20,6 +20,7 @@ import { AccountCombobox } from "@/components/accounts/AccountCombobox";
 import { ArrowUpDown, ChevronDown, ChevronUp, X } from "lucide-react";
 import { DataListToolbar } from "@/components/ui/DataListToolbar";
 import { handleEntityLinkClick } from "@/lib/utils/navigation";
+import { formatColombiaDateTime } from "@/lib/date-utils";
 
 const HotTable = dynamic(() => import('@/components/HotTableWrapper'), { ssr: false });
 
@@ -73,7 +74,7 @@ function ContactsContent() {
             width = arg2;
         }
         const fields: Record<number, string> = {
-            0: 'nombre', 1: 'cargo', 2: 'principal', 3: 'cuenta', 4: 'email', 5: 'telefono'
+            0: 'nombre', 1: 'cargo', 2: 'principal', 3: 'cuenta', 4: 'email', 5: 'telefono', 6: 'creacion'
         };
         const fieldName = fields[colIndex];
         if (fieldName && width > 30) {
@@ -177,7 +178,7 @@ function ContactsContent() {
         }
     }, [searchParams, router]);
 
-    const handleSort = (field: 'updated_at' | 'nombre' | 'email') => {
+    const handleSort = (field: 'updated_at' | 'created_at' | 'nombre' | 'email') => {
         if (sortField === field) setSortAsc(!sortAsc);
         else {
             setSortField(field);
@@ -254,7 +255,7 @@ function ContactsContent() {
         const saved = new URLSearchParams(typeof window !== 'undefined' ? sessionStorage.getItem('crm_contactos_state') || '' : '');
         const account = searchParams.get('account') || saved.get('account') || '';
         const principal = (searchParams.get('principal') || saved.get('principal') || 'all') as 'all' | 'principal' | 'secondary';
-        const sort = (searchParams.get('sort') || saved.get('sort')) as 'updated_at' | 'nombre' | 'email' | null;
+        const sort = (searchParams.get('sort') || saved.get('sort')) as 'updated_at' | 'created_at' | 'nombre' | 'email' | null;
         const direction = searchParams.get('dir') || saved.get('dir');
         const search = searchParams.get('search') || saved.get('search') || '';
 
@@ -435,6 +436,7 @@ function ContactsContent() {
             cuenta: accountName,
             email: contact.email || "-",
             telefono: contact.telefono || "-",
+            creacion: formatColombiaDateTime(contact.created_at),
             _original: contact
         };
     });
@@ -494,6 +496,12 @@ function ContactsContent() {
         },
         { data: 'telefono', title: 'Teléfono', readOnly: true, width: colWidths['telefono'] || 130, wordWrap: false,
             renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+                td.innerHTML = `<span style="font-size:12.5px;color:#64748b;font-weight:500;font-variant-numeric:tabular-nums;">${value || '-'}</span>`;
+                return td;
+            }
+        },
+        { data: 'creacion', title: 'Creación', readOnly: true, width: Math.max(colWidths['creacion'] || 150, 150), wordWrap: false,
+            renderer(_: unknown, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: unknown) {
                 td.innerHTML = `<span style="font-size:12.5px;color:#64748b;font-weight:500;font-variant-numeric:tabular-nums;">${value || '-'}</span>`;
                 return td;
             }
@@ -816,7 +824,7 @@ function ContactsContent() {
                                             // User clicked the filter dropdown button [▼], do NOT toggle sort!
                                             return;
                                         }
-                                        const fields: Record<number, 'nombre' | 'email'> = { 0: 'nombre', 4: 'email' };
+                                        const fields: Record<number, 'nombre' | 'email' | 'created_at'> = { 0: 'nombre', 4: 'email', 6: 'created_at' };
                                         if (fields[coords.col]) handleSort(fields[coords.col]);
                                         return;
                                     }
@@ -827,7 +835,7 @@ function ContactsContent() {
                                             // Clic derecho: permitir menú contextual nativo del enlace
                                             return;
                                         }
-                                        if (coords.col === 6 && contact?.account_id) {
+                                        if (coords.col === 7 && contact?.account_id) {
                                             const action = (mouseEvent?.target as HTMLElement | null)?.closest?.('[data-action]')?.getAttribute('data-action');
                                             if (action === 'new') {
                                                 const url = newOpportunityUrlForContact(contact.account_id, contact.id);
@@ -850,11 +858,11 @@ function ContactsContent() {
                                     }
                                 }}
                                 afterGetColHeader={(column: number, TH: HTMLTableCellElement) => {
-                                    const fields: Record<number, 'nombre' | 'email'> = { 0: 'nombre', 4: 'email' };
-                                    const labels: Record<number, string> = { 0: 'Contacto', 4: 'Email' };
+                                    const fields: Record<number, 'nombre' | 'email' | 'created_at'> = { 0: 'nombre', 4: 'email', 6: 'created_at' };
+                                    const labels: Record<number, string> = { 0: 'Contacto', 4: 'Email', 6: 'Creación' };
                                     if (fields[column]) {
                                         TH.style.cursor = 'pointer';
-                                        TH.title = 'Clic para ordenar A–Z o Z–A';
+                                        TH.title = fields[column] === 'created_at' ? 'Clic para ordenar por fecha de creación' : 'Clic para ordenar A–Z o Z–A';
                                         const header = TH.querySelector('.colHeader');
                                         if (header) header.textContent = `${labels[column]} ${sortField === fields[column] ? (sortAsc ? '↑' : '↓') : '↕'}`;
                                     }
