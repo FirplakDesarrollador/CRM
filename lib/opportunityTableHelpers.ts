@@ -1,3 +1,4 @@
+import { formatColombiaDateTime } from './date-utils';
 import { computeOpportunityActivitySummary } from './opportunityActivities';
 import { formatOpportunityCategories } from './opportunityCategories';
 
@@ -96,9 +97,7 @@ export function buildOpportunityHotRow(
         origen: opp.origen_oportunidad || '-',
         fase: opp.fase_data?.nombre || 'Pros.',
         estado: opp.estado_data?.nombre || 'Abierta',
-        creada: opp.created_at
-            ? new Date(opp.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })
-            : '-',
+        creada: formatColombiaDateTime(opp.created_at),
         categoria: formatOpportunityCategories(opp.categoria_oportunidad) || '-',
         valor: opp.amount || 0,
         cierre: opp.fecha_cierre_estimada
