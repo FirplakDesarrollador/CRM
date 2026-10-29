@@ -39,7 +39,7 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
     const [searchTerm, setSearchTerm] = useState<string>("");
     const [accountFilter, setAccountFilter] = useState<string | null>(null);
     const [principalFilter, setPrincipalFilter] = useState<'all' | 'principal' | 'secondary'>('all');
-    const [sortField, setSortField] = useState<'updated_at' | 'nombre' | 'email'>('updated_at');
+    const [sortField, setSortField] = useState<'updated_at' | 'created_at' | 'nombre' | 'email'>('updated_at');
     const [sortAsc, setSortAsc] = useState(false);
 
     // User Context
@@ -119,8 +119,11 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
 
             // Sorting
             localContacts.sort((a, b) => {
-                const valueA = sortField === 'updated_at' ? (a.updated_at ? new Date(a.updated_at).getTime() : 0) : ((a as any)[sortField] || '').toLocaleLowerCase();
-                const valueB = sortField === 'updated_at' ? (b.updated_at ? new Date(b.updated_at).getTime() : 0) : ((b as any)[sortField] || '').toLocaleLowerCase();
+                const isDateField = sortField === 'updated_at' || sortField === 'created_at';
+                const rawA = (a as unknown as Record<string, unknown>)[sortField];
+                const rawB = (b as unknown as Record<string, unknown>)[sortField];
+                const valueA = isDateField ? (rawA ? new Date(String(rawA)).getTime() : 0) : String(rawA || '').toLocaleLowerCase();
+                const valueB = isDateField ? (rawB ? new Date(String(rawB)).getTime() : 0) : String(rawB || '').toLocaleLowerCase();
                 if (valueA < valueB) return sortAsc ? -1 : 1;
                 if (valueA > valueB) return sortAsc ? 1 : -1;
                 return 0;
