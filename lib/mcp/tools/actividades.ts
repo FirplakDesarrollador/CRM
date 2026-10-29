@@ -211,7 +211,7 @@ export async function crmListarActividades(
         q = q.eq('user_id', ctx.userId);
       }
 
-      q = q.order('fecha_inicio', { ascending: false, nullsFirst: false });
+      q = q.order('fecha_inicio', { ascending: false, nullsFirst: false }).order('id', { ascending: false });
       q = q.range(offset, offset + limit - 1);
 
       const { data, count, error } = await q;
