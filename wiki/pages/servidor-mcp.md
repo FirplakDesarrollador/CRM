@@ -15,6 +15,12 @@ El servidor no expone ninguna herramienta de borrado (`delete`, `eliminar`, `bor
 1. **Actualización de estado:** Para descartar una oportunidad se marca en estado `Perdida` con su `razon_perdida_id`. Para cuentas y contactos se marcan inactivos.
 2. **Recuperación determinista (`crm_recuperar_*`):** Reactiva registros desarchivando (`is_deleted = false`), restaurando estados operativos y limpiando motivos de pérdida.
 
+## Conexión de Datos Fail-Closed
+
+En Production y Preview el MCP exige `SUPABASE_SERVICE_ROLE_KEY` para operar sobre Supabase. La clave pública `anon` no se usa como sustituto para consultas administrativas. Si falta la configuración o Supabase devuelve un error, la herramienta informa que la base no está disponible; los registros sembrados de memoria solo se habilitan durante pruebas o mediante `MCP_ALLOW_MEMORY_FALLBACK=true` de forma explícita.
+
+Las respuestas de agenda y búsquedas están paginadas con un máximo de 30 filas para evitar saturar el contexto del agente.
+
 ## Roles y Filtrado Dinámico de Catálogo
 
 Para prevenir sobrecarga cognitiva y alucinaciones en los LLMs, el método `tools/list` filtra las herramientas dinámicamente según el rol autenticado:

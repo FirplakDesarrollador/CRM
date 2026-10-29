@@ -3,6 +3,17 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-10-29 - Seguridad y datos: MCP fail-closed sin fixtures en producción (INC-2026-011)
+
+- **Hallazgo:** Cuando faltaba `SUPABASE_SERVICE_ROLE_KEY`, el MCP usaba la clave pública y podía recibir cero filas por RLS; después devolvía silenciosamente los registros sembrados de pruebas como si fueran datos reales. `crm_agenda_diaria` también enviaba todas las actividades pendientes sin paginación.
+- **Cambios Realizados:**
+  - `lib/mcp/database.ts`: la conexión operativa exige service role; la memoria solo se habilita en tests o con `MCP_ALLOW_MEMORY_FALLBACK=true` explícito.
+  - `lib/mcp/server.ts`: HTTP y stdio aplican la misma guarda y devuelven un error claro ante configuración o consulta fallida.
+  - `lib/mcp/tools/actividades.ts`: agenda paginada con `limit`/`offset`, máximo 30, total y `has_more`.
+  - `tests/crm-mcp.test.ts`: dos pruebas RED/GREEN permanentes para fail-closed y paginación.
+- **Validación:** 36/36 pruebas MCP en GREEN; TypeScript, ESLint y `git diff --check` sin errores. Consulta real verificada contra Supabase principal con oportunidades, cuentas, contactos y actividades.
+- **Registro:** `docs/failures/2026-10-29-INC-2026-011.md` y `docs/quality/known-regressions.md`.
+
 ## 2026-10-28 - Seguridad: Cierre de Bypass de Autenticación en `/api/mcp` (INC-2026-010)
 
 - **Hallazgo (auditoría):** Dos vías permitían obtener sesión sin credenciales en el endpoint remoto MCP: (1) decodificación de JWT sin verificar firma introducida en `a0ee90b` (aceptaba tokens forjados y revivía expirados) y (2) fallback de headers `x-user-email`/`x-user-role`/`x-user-id` activo en producción.

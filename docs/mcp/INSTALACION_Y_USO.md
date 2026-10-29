@@ -11,6 +11,7 @@ El servidor MCP (**Model Context Protocol**) del CRM FIRPLAK permite a modelos d
    - **COORDINADOR**: Supervisa la cartera de su equipo, reasigna oportunidades/cuentas y gestiona clasificaciones.
    - **ADMINISTRADOR**: Acceso total al catálogo y parámetros operativos (`CRM_Configuracion`).
 3. **Presupuesto de Contexto**: Búsquedas paginadas (`limit` máx. 30) y respuestas compactas para no saturar los tokens del modelo.
+4. **Conexión Fail-Closed**: Fuera de pruebas, el servidor exige `SUPABASE_SERVICE_ROLE_KEY`. Si la conexión o una consulta falla, responde con un error explícito y nunca sustituye datos reales por registros de memoria.
 
 ---
 
@@ -124,7 +125,7 @@ El CRM expone un endpoint HTTP/SSE en `/api/mcp` que funciona con Custom GPT Act
 - `crm_recuperar_contacto`: Reactiva contactos archivados.
 
 ### Actividades y Agenda
-- `crm_agenda_diaria`: Consulta rápida de tareas y compromisos para el día de hoy.
+- `crm_agenda_diaria`: Consulta paginada de tareas y compromisos para el día de hoy (`limit` default 10, máximo 30; `offset` para continuar).
 - `crm_listar_actividades`: Filtros por estado (`pendientes`, `vencidas`, `completadas`).
 - `crm_consultar_actividad`: Detalle de tarea o evento.
 - `crm_crear_actividad`: Programa actividad con autogeneración de asunto.
