@@ -9,6 +9,7 @@ import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { db, LocalQuote } from "@/lib/db";
 import { Save, AlertTriangle, Truck, Receipt, Calendar, Search, Plus, Trash2, Loader2, Package, Download, Send } from "lucide-react";
+import { ExpandableTextarea } from "@/components/ui/ExpandableTextarea";
 import { cn } from "@/components/ui/utils";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useConfig } from "@/lib/hooks/useConfig";
@@ -674,11 +675,11 @@ function QuoteItemsEditor({ quote, onItemsChange, onSaveQuote }: {
                         {isSaving && <Loader2 className="w-3 h-3 animate-spin text-blue-500" />}
                     </h3>
                 </div>
-                <textarea
+                <ExpandableTextarea
                     value={comentarios}
                     onChange={(e) => setComentarios(e.target.value)}
                     onBlur={handleSaveComments}
-                    className="w-full p-3 sm:p-4 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 transition-all text-xs sm:text-sm outline-none resize-none"
+                    className="w-full p-3 sm:p-4 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 transition-all text-xs sm:text-sm outline-none"
                     placeholder="Agregue notas adicionales sobre esta cotización..."
                     rows={4}
                 />
