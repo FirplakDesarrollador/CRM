@@ -490,7 +490,8 @@ export function mapOpportunityReportRow(
     vendedor_nombre: lookups.userMap.get(item.owner_user_id) || '-',
     creador_nombre: lookups.userMap.get(item.created_by) || '-',
     segmento_nombre: segmentoNombre,
-    canal_nombre: lookups.canalMap.get(faseObj?.canal_id || cuentaObj?.canal_id) || '-',
+    // Canal: primero el de la cuenta (como en la app); la fase solo como respaldo.
+    canal_nombre: lookups.canalMap.get(cuentaObj?.canal_id || faseObj?.canal_id) || '-',
     departamento_nombre: lookups.deptMap.get(item.departamento_id) || '-',
     ciudad_nombre: lookups.cityMap.get(item.ciudad_id) || '-',
     probabilidad: item.probabilidad ?? item.probability ?? 0,
