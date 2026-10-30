@@ -1,6 +1,7 @@
 import { activateLocalDatabase, db, getActiveLocalUserId, OutboxItem } from './db';
 import type { Table } from 'dexie';
 import { supabase } from './supabase';
+import { hydrateOwnActivities } from './serverHydration';
 import { v4 as uuidv4 } from 'uuid';
 import { useSyncStore } from './stores/useSyncStore';
 import { generateProvisionalNit } from './nitUtils';
@@ -2562,6 +2563,19 @@ export class SyncEngine {
             } catch (actErr: any) {
                 console.error('[Sync] Failed to pull activities:', actErr.message);
                 pullErrors.push(`CRM_Actividades: ${actErr.message}`);
+            }
+
+            // Actividades propias fuera del caché de 3.000 (una vez por copia local).
+            // No bloquea el sync: si falla, se reintenta en la próxima sincronización.
+            const ownActivitiesKey = '__own_activities_v1__';
+            if (_user?.id && !(await this.getSyncCursor(_user.id, ownActivitiesKey))) {
+                try {
+                    const added = await hydrateOwnActivities(_user.id);
+                    await this.setSyncCursor(_user.id, ownActivitiesKey, upperBound);
+                    console.log(`[Sync] Own activities backfill: ${added} added.`);
+                } catch (ownErr: unknown) {
+                    console.warn('[Sync] Own activities backfill failed (will retry):', ownErr instanceof Error ? ownErr.message : ownErr);
+                }
             }
 
             if (pullErrors.length > 0) {

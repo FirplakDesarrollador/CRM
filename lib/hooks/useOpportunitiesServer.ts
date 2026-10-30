@@ -4,7 +4,7 @@ import { syncEngine } from '@/lib/sync';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { db } from '@/lib/db';
 import { useSyncStore } from '@/lib/stores/useSyncStore';
-import { matchesSearchTokens, getSearchTokens, getPhoneIlikePatterns } from '@/lib/utils';
+import { matchesSearchTokens, getSearchTokens, getPhoneIlikePatterns, accentInsensitiveCondition, applyAccentInsensitiveFilter } from '@/lib/utils';
 import { getCellphoneSearchDigits, findPhoneMatchesServer, findPhoneMatchesLocal, opportunityMatchesPhone, PhoneSearchMatches } from '@/lib/phoneSearch';
 import { computeOpportunityActivitySummary, OpportunityActivitySummary, ActivityItem } from '@/lib/opportunityActivities';
 import { PROSPECTO_PHASE_ID, getEquivalentPhaseIds, PhaseCatalogItem, calculateTotalAmount, computeProgressiveBatch, DEFAULT_OPPORTUNITIES_PAGE_SIZE } from '@/lib/opportunityColumnFilterHelpers';
@@ -398,7 +398,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
 
                 if (valA < valB) return sortAsc ? -1 : 1;
                 if (valA > valB) return sortAsc ? 1 : -1;
-                return 0;
+                return String(b.id).localeCompare(String(a.id));
             });
 
             const totalCount = localOpps.length;
@@ -480,9 +480,10 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 const tokens = getSearchTokens(searchTerm);
                 let accQuery = supabase.from('CRM_Cuentas').select('id').eq('is_deleted', false);
                 let userQuery = supabase.from('CRM_Usuarios').select('id');
+                // Sin depender de tildes/eñes: el token viene normalizado ("cataluna") y el dato no ("CATALUÑA").
                 for (const token of tokens) {
-                    accQuery = accQuery.ilike('nombre', `%${token}%`);
-                    userQuery = userQuery.ilike('full_name', `%${token}%`);
+                    accQuery = applyAccentInsensitiveFilter(accQuery, 'nombre', token);
+                    userQuery = applyAccentInsensitiveFilter(userQuery, 'full_name', token);
                 }
                 const [accountsRes, usersRes] = await Promise.all([
                     accQuery.limit(100),
@@ -523,7 +524,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 } else if (searchTerm && searchTerm.trim()) {
                     const tokens = getSearchTokens(searchTerm);
                     for (const token of tokens) {
-                        const orConditions = [`nombre.ilike.%${token}%`];
+                        const orConditions = [accentInsensitiveCondition('nombre', token)];
                         if (searchAccountIds.length > 0) {
                             orConditions.push(`account_id.in.(${searchAccountIds.join(',')})`);
                         }
@@ -684,12 +685,13 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
             dataQuery = applyCommonFilters(dataQuery);
 
             if (sortField === 'account_nombre') {
-                dataQuery = dataQuery.order('nombre', { foreignTable: 'account', ascending: sortAsc });
+                dataQuery = dataQuery.order('account(nombre)', { ascending: sortAsc });
             } else if (sortField === 'vendedor_nombre') {
-                dataQuery = dataQuery.order('full_name', { foreignTable: 'vendedor', ascending: sortAsc });
+                dataQuery = dataQuery.order('vendedor(full_name)', { ascending: sortAsc });
             } else {
                 dataQuery = dataQuery.order(sortField as any, { ascending: sortAsc });
             }
+            if (sortField !== 'id') dataQuery = dataQuery.order('id', { ascending: false });
 
             dataQuery = dataQuery.range(from, to);
 

@@ -397,6 +397,72 @@ export interface OpportunityFlattenLookups {
   countryMap: Map<number | string, string>;
 }
 
+export function formatActivityDate(rawDate: unknown): string {
+  if (!rawDate) return '-';
+  const d = new Date(String(rawDate));
+  if (isNaN(d.getTime())) return '-';
+
+  return new Intl.DateTimeFormat('es-CO', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'America/Bogota'
+  }).format(d).replace(',', '');
+}
+
+export function resolveOpportunityActivityInfo(actividades: any[] | any) {
+  if (!actividades) {
+    return {
+      fecha_actividad: '-',
+      estado_actividad: '-'
+    };
+  }
+
+  const actList = (Array.isArray(actividades) ? actividades : [actividades])
+    .filter(a => a && !a.is_deleted);
+
+  if (actList.length === 0) {
+    return {
+      fecha_actividad: '-',
+      estado_actividad: '-'
+    };
+  }
+
+  // 1. Prioridad: actividades pendientes
+  const pending = actList.filter(a => !a.is_completed);
+  let target: any;
+
+  if (pending.length > 0) {
+    // Ordenar ascendente por vencimiento (la fecha pendiente más próxima primero)
+    pending.sort((a, b) => {
+      const dateA = new Date(a.fecha_fin || a.fecha_inicio || 0).getTime();
+      const dateB = new Date(b.fecha_fin || b.fecha_inicio || 0).getTime();
+      return dateA - dateB;
+    });
+    target = pending[0];
+  } else {
+    // Si no hay pendientes, la completada más reciente
+    actList.sort((a, b) => {
+      const dateA = new Date(a.fecha_fin || a.fecha_inicio || 0).getTime();
+      const dateB = new Date(b.fecha_fin || b.fecha_inicio || 0).getTime();
+      return dateB - dateA;
+    });
+    target = actList[0];
+  }
+
+  const rawDate = target.fecha_fin || target.fecha_inicio;
+  const fechaStr = formatActivityDate(rawDate);
+  const estadoStr = target.is_completed ? 'Completada' : 'Pendiente';
+
+  return {
+    fecha_actividad: fechaStr,
+    estado_actividad: estadoStr
+  };
+}
+
 export function mapOpportunityReportRow(
   item: any,
   lookups: OpportunityFlattenLookups
@@ -413,6 +479,8 @@ export function mapOpportunityReportRow(
     || (segId ? (lookups.segmentMap.get(segId) || lookups.segmentMap.get(Number(segId)) || lookups.segmentMap.get(String(segId))) : null)
     || '-';
 
+  const activityInfo = resolveOpportunityActivityInfo(item.actividades || item.actividad);
+
   return {
     ...item,
     cuenta_nombre: cuentaObj?.nombre || '-',
@@ -422,14 +490,17 @@ export function mapOpportunityReportRow(
     vendedor_nombre: lookups.userMap.get(item.owner_user_id) || '-',
     creador_nombre: lookups.userMap.get(item.created_by) || '-',
     segmento_nombre: segmentoNombre,
-    canal_nombre: lookups.canalMap.get(faseObj?.canal_id || cuentaObj?.canal_id) || '-',
+    // Canal: primero el de la cuenta (como en la app); la fase solo como respaldo.
+    canal_nombre: lookups.canalMap.get(cuentaObj?.canal_id || faseObj?.canal_id) || '-',
     departamento_nombre: lookups.deptMap.get(item.departamento_id) || '-',
     ciudad_nombre: lookups.cityMap.get(item.ciudad_id) || '-',
     probabilidad: item.probabilidad ?? item.probability ?? 0,
     probability: item.probabilidad ?? item.probability ?? 0,
     razon_perdida_label: item.razon_perdida_id ? (lookups.lossReasonMap.get(item.razon_perdida_id) || item.razon_perdida) : (item.razon_perdida || '-'),
     categorias_interes: formatOpportunityCategories(item.categoria_oportunidad) || '-',
-    setter: item.setter || '-'
+    setter: item.setter || '-',
+    fecha_actividad: activityInfo.fecha_actividad,
+    estado_actividad: activityInfo.estado_actividad
   };
 }
 

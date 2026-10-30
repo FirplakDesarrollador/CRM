@@ -444,7 +444,7 @@ export default function InformesPage() {
 
                 if (selectedUser) oppQuery = oppQuery.eq('owner_user_id', selectedUser);
 
-                oppQuery = oppQuery.order('created_at', { ascending: false });
+                oppQuery = oppQuery.order('created_at', { ascending: false }).order('id', { ascending: false });
                 const opps = await fetchAllInChunks(oppQuery, 2500, (total) => {
                     setExportProgress(`Cargando oportunidades (${total.toLocaleString()})...`);
                 });
@@ -710,7 +710,8 @@ export default function InformesPage() {
                     cuenta:CRM_Cuentas(nombre, canal_id, pais_id),
                     fase:CRM_FasesOportunidad(nombre, canal_id),
                     estado_info:CRM_EstadosOportunidad(nombre),
-                    segmento:CRM_Segmentos(nombre)
+                    segmento:CRM_Segmentos(nombre),
+                    actividades:CRM_Actividades(id, fecha_inicio, fecha_fin, is_completed, created_at, is_deleted)
                 `;
                 columns = [
                     { header: 'ID', key: 'id' },
@@ -729,6 +730,8 @@ export default function InformesPage() {
                     { header: 'PROBABILIDAD (%)', key: 'probabilidad', width: 15 },
                     { header: 'FECHA CIERRE EST.', key: 'fecha_cierre_estimada', width: 18 },
                     { header: 'FECHA ENTREGA', key: 'fecha_entrega', width: 18 },
+                    { header: 'FECHA ACTIVIDAD', key: 'fecha_actividad', width: 20 },
+                    { header: 'ESTADO ACTIVIDAD', key: 'estado_actividad', width: 18 },
                     { header: 'SETTER', key: 'setter', width: 15 },
                     { header: 'ORIGEN', key: 'origen_oportunidad', width: 20 },
                     { header: 'DEPARTAMENTO', key: 'departamento_nombre', width: 20 },
@@ -869,6 +872,12 @@ export default function InformesPage() {
                 });
             }
 
+            // Filtro de canal en oportunidades: por el canal de la CUENTA (igual que la app).
+            // Se usa join !inner para poder filtrar por cuenta.canal_id en el servidor.
+            if (selectedCanal && selectedEntidad === 'oportunidades') {
+                selectStr = selectStr.replace('cuenta:CRM_Cuentas(', 'cuenta:CRM_Cuentas!inner(');
+            }
+
             let query = supabase.from(entidadDef.table).select(selectStr);
 
             if (dateFrom) query = query.gte('created_at', `${dateFrom}T00:00:00Z`);
@@ -891,9 +900,7 @@ export default function InformesPage() {
                 if (selectedEntidad === 'cuentas') {
                     query = query.eq('canal_id', selectedCanal);
                 } else if (selectedEntidad === 'oportunidades') {
-                    const { data: faseData } = await supabase.from('CRM_FasesOportunidad').select('id').eq('canal_id', selectedCanal);
-                    const faseIds = faseData?.map(f => f.id) || [];
-                    query = query.in('fase_id', faseIds);
+                    query = query.eq('cuenta.canal_id', selectedCanal);
                 }
             }
 
@@ -955,7 +962,7 @@ export default function InformesPage() {
                 if (selectedEstadoCumplimiento === 'pendientes') query = query.eq('is_completed', false);
             }
 
-            query = query.order('created_at', { ascending: false });
+            query = query.order('created_at', { ascending: false }).order('id', { ascending: false });
             const data = await fetchAllInChunks(query, 2500, (total) => {
                 setExportProgress(`Descargando registros (${total.toLocaleString()})...`);
             });

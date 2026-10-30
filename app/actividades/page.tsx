@@ -38,6 +38,8 @@ import { useActivityFollowUp } from '@/components/activities/ActivityFollowUp';
 import { isB2COnlyActivityClassification, userHasB2CAccess } from '@/lib/b2c';
 import { getCellphoneSearchDigits, findPhoneMatchesLocal, findPhoneMatchesServer, opportunityMatchesPhone, PhoneSearchMatches } from '@/lib/phoneSearch';
 import { supabase } from '@/lib/supabase';
+import { hydrateActivitiesForSearch } from '@/lib/serverHydration';
+import { matchesSearchTokens } from '@/lib/utils';
 import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { UserPickerFilter } from '@/components/cuentas/UserPickerFilter';
 
@@ -358,7 +360,24 @@ function ActivitiesContent() {
         return () => { cancelled = true; };
     }, [debouncedSearchQuery]);
 
-
+    // Búsqueda por texto (nombre, POT, cuenta, asunto): en línea también se busca en Supabase, porque la
+    // copia local solo tiene las 3.000 actividades más recientes. Lo encontrado se guarda localmente y
+    // los filtros de la pantalla (canal, estado, fechas, permisos) se aplican igual que siempre.
+    const [isSearchingServer, setIsSearchingServer] = useState(false);
+    useEffect(() => {
+        const text = debouncedSearchQuery.trim();
+        if (text.length < 3 || !role || typeof navigator === 'undefined' || !navigator.onLine) return;
+        let cancelled = false;
+        Promise.resolve()
+            .then(() => {
+                if (cancelled) return 0;
+                setIsSearchingServer(true);
+                return hydrateActivitiesForSearch(text, { viewerId: user?.id || null, viewerRole: role });
+            })
+            .catch(err => console.warn('[ActivitiesPage] server search failed', err))
+            .finally(() => { if (!cancelled) setIsSearchingServer(false); });
+        return () => { cancelled = true; };
+    }, [debouncedSearchQuery, role, user?.id]);
 
 
     const lastProcessedUrlIdRef = useRef<string | null>(null);
@@ -470,7 +489,6 @@ function ActivitiesContent() {
     const globallyFilteredActivities = useMemo(() => {
         const sourceActivities = activities || [];
         if (sourceActivities.length === 0) return [];
-        const lowerQuery = debouncedSearchQuery.toLowerCase();
         // Búsqueda por celular: cuentas y contactos cuyo teléfono coincide (solo el número, sin indicativo)
         const queryDigits = getCellphoneSearchDigits(debouncedSearchQuery);
         let phoneMatches: PhoneSearchMatches | null = null;
@@ -517,11 +535,10 @@ function ActivitiesContent() {
                         (opp ? opportunityMatchesPhone(opp, phoneMatches) : false);
                 }
 
+                // Por palabras y sin depender de tildes (igual que la búsqueda en el servidor):
+                // "pot42202 joswal" o "olga perez" encuentran "POT42202 - Joswal..." / "Olga Pérez".
                 const searchMatch =
-                    act.asunto?.toLowerCase().includes(lowerQuery) ||
-                    act.descripcion?.toLowerCase().includes(lowerQuery) ||
-                    acc?.nombre?.toLowerCase().includes(lowerQuery) ||
-                    opp?.nombre?.toLowerCase().includes(lowerQuery) ||
+                    matchesSearchTokens([act.asunto, act.descripcion, acc?.nombre, opp?.nombre], debouncedSearchQuery) ||
                     phoneMatch;
 
                 if (!searchMatch) return false;
@@ -686,6 +703,9 @@ function ActivitiesContent() {
                                 onChange={(e) => setSearchQuery(e.target.value)}
                                 className="bg-white border text-slate-600 border-slate-200 font-semibold text-sm rounded-xl pl-9 pr-4 py-2.5 w-full sm:w-64 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                             />
+                            {isSearchingServer && (
+                                <Loader2 aria-label="Buscando en el servidor" className="w-4 h-4 text-blue-500 animate-spin absolute right-3 top-1/2 -translate-y-1/2" />
+                            )}
                         </div>
 
                         {canViewAll && (

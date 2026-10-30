@@ -25,7 +25,7 @@ Reportes exportables a Excel (`exceljs`/`xlsx`, utilidades en `lib/utils/informe
 Permisos `view_reports` / `view_team_reports` / `export_reports` (ver [[roles-y-permisos]]).
 
 - **Filtros Avanzados y Exportación por Entidad:**
-  - **Oportunidades:** Rango fechas creación, asesor, canal, estado, fase, segmento, origen, rango de valor ($ min/max) y departamento/ciudad. La exportación incluye la columna **Categorías de Interés** (`categorias_interes` / `categoria_oportunidad`), país de la cuenta, fase, canal, vendedor y montos.
+  - **Oportunidades:** Rango fechas creación, asesor, canal, estado, fase, segmento, origen, rango de valor ($ min/max) y departamento/ciudad. La exportación incluye la columna **Categorías de Interés** (`categorias_interes` / `categoria_oportunidad`), país de la cuenta, fase, canal, vendedor, montos, y las columnas de actividad vinculada: **FECHA ACTIVIDAD** (vencimiento/cierre formateado `DD/MM/YYYY HH:mm`, priorizando la actividad pendiente más próxima o la última completada) y **ESTADO ACTIVIDAD** (`Pendiente`, `Completada` o `-`).
   - **Cuentas:** Rango fechas creación, asesor asignado, canal, tipo cliente premium/VIP y departamento/ciudad.
   - **Contactos:** Rango fechas creación, asesor/creador y cargo/rol de decisión.
   - **Cotizaciones:** Rango fechas creación, asesor, estado (DRAFT, SENT, WINNER, REJECTED, EXPIRED) y rango de valor ($ min/max).

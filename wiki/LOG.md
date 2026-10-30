@@ -23,6 +23,19 @@
   - `tests/salesChannels.test.ts`: Pruebas permanentes actualizadas y verificadas (7/7 GREEN).
 - **Páginas actualizadas:** `wiki/pages/canales-de-venta.md`, `wiki/LOG.md`.
 
+## 2026-10-29 - Informes: Columnas de Actividad en Reporte de Oportunidades
+
+- **Operación:** Ingest en `pages/dashboard-e-indicadores.md`.
+- **Cambio:** Agregadas las columnas `FECHA ACTIVIDAD` y `ESTADO ACTIVIDAD` a la exportación de Oportunidades en `/informes` y en `Mi informe`.
+  - Muestra la fecha de cierre/vencimiento formateada como `DD/MM/YYYY HH:mm` en zona horaria Colombia (`America/Bogota`).
+  - Prioriza la actividad pendiente (`is_completed = false`) más próxima en el tiempo; si no hay pendientes, muestra la completada más reciente; si no tiene actividades, muestra `-`.
+  - Columna de estado indica `Pendiente`, `Completada` o `-`.
+- **Código y Pruebas:**
+  - `lib/utils/informes.ts`: funciones `formatActivityDate`, `resolveOpportunityActivityInfo` y actualización de `mapOpportunityReportRow`.
+  - `app/informes/page.tsx`: join con `CRM_Actividades` y columnas en la exportación Excel/CSV.
+  - `app/api/informes/mi-informe/route.ts` y `lib/informes/miInforme.ts`: soporte en la hoja de Oportunidades de "Mi informe".
+  - Pruebas en `pruebas unitarias/informes.test.ts` y `pruebas unitarias/miInforme.test.ts` (100% GREEN).
+
 ## 2026-10-29 - Seguridad: Token MCP personal permanente (INC-2026-012)
 
 - **Hallazgo:** Los bots usaban el JWT de sesión de Supabase, que expiraba y producía `401` en reportes programados.
