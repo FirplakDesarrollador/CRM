@@ -51,6 +51,52 @@ export function getSearchTokens(searchQuery: string | null | undefined): string[
     return removeAccents(searchQuery).trim().split(/\s+/).filter(Boolean);
 }
 
+// Variantes con tilde/eñe de cada letra, para buscar en el servidor sin depender de tildes.
+const ACCENT_VARIANTS: Record<string, string> = {
+    a: '[aáàäâãAÁÀÄÂÃ]',
+    e: '[eéèëêEÉÈËÊ]',
+    i: '[iíìïîIÍÌÏÎ]',
+    o: '[oóòöôõOÓÒÖÔÕ]',
+    u: '[uúùüûUÚÙÜÛ]',
+    n: '[nñNÑ]',
+    c: '[cçCÇ]',
+};
+
+/**
+ * Convierte un token de búsqueda (ya sin tildes, ver getSearchTokens) en una expresión regular
+ * POSIX que ignora tildes y eñes, para usar con `imatch` (~*) en Supabase.
+ * Ej.: "cataluna" -> encuentra "CATALUÑA"; "perez" -> encuentra "Pérez".
+ * Devuelve null si el token tiene caracteres especiales (en ese caso usar ilike).
+ */
+export function accentInsensitiveRegex(token: string | null | undefined): string | null {
+    const normalized = removeAccents(token || '').trim();
+    if (!normalized || !/^[a-z0-9\-_@#\/&]+$/.test(normalized)) return null;
+    return normalized.split('').map(ch => ACCENT_VARIANTS[ch] || ch).join('');
+}
+
+/**
+ * Condición PostgREST (para usar dentro de `.or()`) que busca `token` en `column`
+ * ignorando mayúsculas y tildes. Ej.: `nombre.imatch."c[aá...]t..."`.
+ */
+export function accentInsensitiveCondition(column: string, token: string): string {
+    const regex = accentInsensitiveRegex(token);
+    // Entre comillas: los corchetes de la expresión no se confunden con la sintaxis de `.or()`.
+    return regex ? `${column}.imatch."${regex}"` : `${column}.ilike.%${token}%`;
+}
+
+/**
+ * Aplica a una consulta de Supabase el filtro "column contiene token" ignorando tildes y mayúsculas.
+ */
+export function applyAccentInsensitiveFilter<Q>(query: Q, column: string, token: string): Q {
+    const regex = accentInsensitiveRegex(token);
+    // Constructor de consultas de Supabase (PostgrestFilterBuilder); `filter` genera `column=imatch.<regex>`.
+    const builder = query as unknown as {
+        filter: (column: string, operator: string, value: string) => Q;
+        ilike: (column: string, pattern: string) => Q;
+    };
+    return regex ? builder.filter(column, 'imatch', regex) : builder.ilike(column, `%${token}%`);
+}
+
 /**
  * Verifica si `text` contiene `searchQuery` ignorando tildes y mayúsculas/minúsculas.
  * Si no hay término de búsqueda o está vacío, retorna true.
