@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { syncEngine } from '@/lib/sync';
 import { db } from '@/lib/db';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
-import { matchesSearchTokens, getSearchTokens } from '@/lib/utils';
+import { matchesSearchTokens, getSearchTokens, accentInsensitiveCondition } from '@/lib/utils';
 import { useSyncStore } from '@/lib/stores/useSyncStore';
 
 export type ActivityServer = {
@@ -200,7 +200,7 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
             if (searchTerm && searchTerm.trim()) {
                 const tokens = getSearchTokens(searchTerm);
                 for (const token of tokens) {
-                    query = query.or(`asunto.ilike.%${token}%,descripcion.ilike.%${token}%`);
+                    query = query.or(`${accentInsensitiveCondition('asunto', token)},${accentInsensitiveCondition('descripcion', token)}`);
                 }
             }
 
