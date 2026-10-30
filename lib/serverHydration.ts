@@ -25,6 +25,8 @@ const ID_CHUNK = 100;
 const MAX_SEARCH_MATCHES = 100;
 const MAX_SEARCH_ACTIVITIES = 2000;
 const MAX_OPPORTUNITY_ACTIVITIES = 5000;
+const MAX_OWN_ACTIVITIES = 30000;
+const OWN_HISTORY_MONTHS = 12;
 
 type Viewer = { viewerId?: string | null; viewerRole?: string | null };
 type Row = { id: string; [key: string]: unknown };
@@ -189,6 +191,31 @@ export async function hydrateActivitiesForSearch(searchText: string, viewer: Vie
         if (isSellerRole(viewer.viewerRole)) query = query.eq('user_id', viewer.viewerId as string);
         return query.order('fecha_inicio', { ascending: false }).order('id', { ascending: false }).range(from, to);
     }, MAX_SEARCH_ACTIVITIES);
+
+    await hydrateReferences(rows);
+    return addMissing('activities', 'CRM_Actividades', rows);
+}
+
+/**
+ * Actividades propias del usuario (user_id = él): todas las pendientes y las de los
+ * últimos 12 meses. La sincronización inicial solo trae las 3.000 más recientes de TODA
+ * la empresa, así que a un asesor le faltaban casi todas las suyas en /actividades.
+ * Se ejecuta una vez por copia local (ver syncEngine.pullChanges). Devuelve cuántas agregó.
+ */
+export async function hydrateOwnActivities(userId: string, now: Date = new Date()): Promise<number> {
+    if (!userId || !isOnline()) return 0;
+    const since = new Date(now);
+    since.setMonth(since.getMonth() - OWN_HISTORY_MONTHS);
+
+    const rows = await fetchPaged((from, to) => supabase
+        .from('CRM_Actividades')
+        .select('*')
+        .eq('is_deleted', false)
+        .eq('user_id', userId)
+        .or(`is_completed.eq.false,fecha_inicio.gte.${since.toISOString()}`)
+        .order('fecha_inicio', { ascending: false })
+        .order('id', { ascending: false })
+        .range(from, to), MAX_OWN_ACTIVITIES);
 
     await hydrateReferences(rows);
     return addMissing('activities', 'CRM_Actividades', rows);

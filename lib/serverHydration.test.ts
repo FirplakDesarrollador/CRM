@@ -36,7 +36,7 @@ vi.mock('./supabase', () => ({
 }));
 
 import { db } from './db';
-import { hydrateOpportunityActivities, hydrateActivitiesForSearch } from './serverHydration';
+import { hydrateOpportunityActivities, hydrateActivitiesForSearch, hydrateOwnActivities } from './serverHydration';
 import { accentInsensitiveRegex, accentInsensitiveCondition } from './utils';
 
 const OPP = 'opp-1';
@@ -110,5 +110,23 @@ describe('serverHydration', () => {
         expect(await hydrateActivitiesForSearch('po', { viewerId: 'a', viewerRole: 'ADMIN' })).toBe(0);
         expect(await hydrateActivitiesForSearch('3001234567', { viewerId: 'a', viewerRole: 'ADMIN' })).toBe(0);
         expect(calls.length).toBe(0);
+    });
+
+    it('backfills the user own activities (pending + last 12 months) with their opportunity', async () => {
+        responses.CRM_Actividades = [act('m1', { is_completed: false }), act('m2')];
+        responses.CRM_Oportunidades = [{ id: OPP, nombre: 'POT58474 - Oscar l Leal', account_id: 'acc-1', is_deleted: false }];
+        responses.CRM_Cuentas = [{ id: 'acc-1', nombre: 'Oscar', is_deleted: false }];
+        await db.activities.add(act('m2', { asunto: 'local' }) as unknown as Parameters<typeof db.activities.add>[0]);
+
+        const added = await hydrateOwnActivities('seller-1', new Date('2026-10-30T12:00:00Z'));
+
+        expect(added).toBe(1);
+        expect(await db.activities.get('m1')).toBeTruthy();
+        expect((await db.activities.get('m2'))?.asunto).toBe('local');
+        expect(await db.opportunities.get(OPP)).toBeTruthy();
+        const actCall = calls.find(c => c.table === 'CRM_Actividades')!;
+        const ops = actCall.ops.map(([op, args]) => `${op}:${args.join('|')}`);
+        expect(ops).toContain('eq:user_id|seller-1');
+        expect(ops).toContain('or:is_completed.eq.false,fecha_inicio.gte.2025-10-30T12:00:00.000Z');
     });
 });
