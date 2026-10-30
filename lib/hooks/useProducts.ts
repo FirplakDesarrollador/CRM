@@ -135,6 +135,27 @@ export async function fetchFullCatalog(forceRefresh = false): Promise<PriceListP
     return fetchCatalogPromise;
 }
 
+/**
+ * Inserta o reemplaza un producto en la caché local del catálogo (memoria + IndexedDB)
+ * después de que un administrador lo crea o edita desde el CRM.
+ */
+export function upsertCatalogCacheProduct(product: PriceListProduct): PriceListProduct[] {
+    const current = catalogCache ? [...catalogCache] : [];
+    const index = current.findIndex(p => p.id === product.id);
+    if (index >= 0) {
+        current[index] = product;
+    } else {
+        current.push(product);
+        current.sort((a, b) => (a.numero_articulo || '').localeCompare(b.numero_articulo || ''));
+    }
+    catalogCache = current;
+    const uniquePlants = Array.from(new Set(current.map(p => p.planta).filter(Boolean))).sort() as string[];
+    const uniqueFamilies = Array.from(new Set(current.map(p => p.familia).filter(Boolean))).sort() as string[];
+    filterOptionsCache = { plants: uniquePlants, families: uniqueFamilies };
+    void setStoredCatalogIDB({ products: current, plants: uniquePlants, families: uniqueFamilies });
+    return current;
+}
+
 export function useFullCatalog() {
     const [products, setProducts] = useState<PriceListProduct[]>(catalogCache || []);
     const [isLoading, setIsLoading] = useState(!catalogCache);
@@ -168,7 +189,11 @@ export function useFullCatalog() {
         }
     };
 
-    return { products, isLoading, refresh };
+    const applyLocalChange = (product: PriceListProduct) => {
+        setProducts(upsertCatalogCacheProduct(product));
+    };
+
+    return { products, isLoading, refresh, applyLocalChange };
 }
 
 export interface ProductSearchOptions {

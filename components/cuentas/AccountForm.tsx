@@ -19,7 +19,8 @@ import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { AccountAssignedTab } from "./AccountAssignedTab";
 import AccountBranchesTab from "./AccountBranchesTab";
 import AccountActivitiesTab from "./AccountActivitiesTab";
-import { ListTodo } from "lucide-react";
+import { ListTodo, History } from "lucide-react";
+import { EntityAuditHistoryTab } from "@/components/shared/EntityAuditHistoryTab";
 import { useFormAutoSave } from "@/lib/hooks/useFormAutoSave";
 import { AutoSaveIndicator } from "@/components/ui/AutoSaveIndicator";
 import { isProvisionalNit } from "@/lib/nitUtils";
@@ -66,7 +67,7 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
     const { createAccount, updateAccount, deleteAccount } = useAccounts();
     const { role: userRole, isAdmin } = useCurrentUser();
     const [parents, setParents] = useState<any[]>([]);
-    const [activeTab, setActiveTab] = useState<'info' | 'contacts' | 'opportunities' | 'branches' | 'assigned' | 'activities'>('info');
+    const [activeTab, setActiveTab] = useState<'info' | 'contacts' | 'opportunities' | 'branches' | 'assigned' | 'activities' | 'history'>('info');
     const [hasBranches, setHasBranches] = useState(false);
     const [showDeleteModal, setShowDeleteModal] = useState(false);
     const [manualSaveSuccess, setManualSaveSuccess] = useState(false);
@@ -582,6 +583,20 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
                             Actividades
                         </button>
                     )}
+
+                    {account?.id && (
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('history')}
+                            className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'history'
+                                ? "border-blue-600 text-blue-600"
+                                : "border-transparent text-gray-500 hover:text-gray-700"
+                                }`}
+                        >
+                            <History size={16} />
+                            Historial
+                        </button>
+                    )}
                 </div>
 
                 {account?.id && (
@@ -1070,6 +1085,21 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
                                 <span>Eliminar Cuenta</span>
                             </button>
                         ) : <div />}
+                        <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded font-medium">
+                            Cerrar
+                        </button>
+                    </div>
+                </div>
+            ) : activeTab === 'history' ? (
+                <div className="p-4">
+                    {account?.id && (
+                        <EntityAuditHistoryTab
+                            entityType="CUENTA"
+                            entityId={account.id}
+                            entityName={account.nombre}
+                        />
+                    )}
+                    <div className="flex justify-end items-center pt-4 border-t mt-4">
                         <button type="button" onClick={onCancel} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded font-medium">
                             Cerrar
                         </button>

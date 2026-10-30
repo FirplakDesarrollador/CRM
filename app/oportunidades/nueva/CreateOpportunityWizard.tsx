@@ -6,16 +6,19 @@ import * as z from "zod";
 import { useOpportunities } from "@/lib/hooks/useOpportunities";
 import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useState, useEffect, useMemo } from "react";
+import { OPPORTUNITY_SETTER_OPTIONS } from "@/lib/opportunitySetter";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronRight, Check } from "lucide-react";
 import { cn } from "@/components/ui/utils";
 import { AccountForm } from "@/components/cuentas/AccountForm";
 import { useProductSearch, PriceListProduct } from "@/lib/hooks/useProducts";
 import { Trash2, PlusCircle, Search, Loader2 } from "lucide-react";
+import { ExpandableTextarea } from "@/components/ui/ExpandableTextarea";
 import { db } from "@/lib/db";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { useConfig } from "@/lib/hooks/useConfig";
+import { getPriceClarification } from "@/lib/salesChannels";
 import { CollaboratorSelector, CollaboratorEntry } from "@/components/oportunidades/CollaboratorSelector";
 import { useUsers } from "@/lib/hooks/useUsers";
 import { useFormDraft } from "@/lib/hooks/useFormDraft";
@@ -37,6 +40,7 @@ const schema = z.object({
     departamento_id: z.coerce.number().nullable().optional(),
     ciudad_id: z.coerce.number().nullable().optional(),
     fecha_cierre_estimada: z.string().optional().nullable(),
+    fecha_entrega: z.string().optional().nullable(),
     origen_oportunidad: z.string().optional().nullable(),
     url_origen: z.string().optional().nullable(),
     fuente_conversion: z.string().optional().nullable(),
@@ -53,7 +57,8 @@ const schema = z.object({
         nombre: z.string(),
         descuento_porcentaje: z.union([z.number(), z.string()]).optional().nullable()
     })).default([]),
-    owner_user_id: z.string().optional()
+    owner_user_id: z.string().optional(),
+    setter: z.string().optional().nullable()
 });
 
 export default function CreateOpportunityWizard() {
@@ -199,7 +204,8 @@ export default function CreateOpportunityWizard() {
             contactos_ids: [],
             clientes_atendidos: 1,
             items: [],
-            owner_user_id: ''
+            owner_user_id: '',
+            setter: ''
         },
         shouldUnregister: false
     });
@@ -321,6 +327,16 @@ export default function CreateOpportunityWizard() {
 
         resolveAccount();
     }, [searchParams, accounts, setValue, step]);
+
+    // Pre-select the contact when coming from a contact (?contact_id=...), once the account's contacts are loaded
+    useEffect(() => {
+        const contactId = searchParams.get('contact_id');
+        if (!contactId || !selectedAccount) return;
+        if (!localAccountContacts.some(c => c.id === contactId)) return;
+        if ((form.getValues("contactos_ids") || []).length > 0) return;
+        setValue("contactos_ids", [contactId]);
+        setValue("clientes_atendidos", 1);
+    }, [searchParams, selectedAccount, localAccountContacts, form, setValue]);
 
     const { products: searchResults, isLoading: isSearching } = useProductSearch(searchTerm);
 
@@ -462,7 +478,7 @@ export default function CreateOpportunityWizard() {
                 price = Number(product.lista_base_exportaciones) || 0;
                 break;
             case 'PROPIO':
-                price = Number(product.distribuidor_pvp_iva) || 0;
+                price = Number(product.pvp_sin_iva) || 0;
                 break;
             case 'DIST_NAC':
             default:
@@ -533,6 +549,9 @@ export default function CreateOpportunityWizard() {
                 categoria_oportunidad: formatOpportunityCategories(data.categoria_oportunidad as any) || undefined,
                 contactos_ids: data.contactos_ids || [],
                 clientes_atendidos: data.clientes_atendidos !== undefined && data.clientes_atendidos !== null && data.clientes_atendidos !== "" ? Number(data.clientes_atendidos) : 0,
+                fecha_entrega: data.fecha_entrega || null,
+                fecha_cierre_estimada: data.fecha_cierre_estimada || null,
+                setter: data.setter || null,
                 collaborators: collaborators
             };
 
@@ -759,7 +778,7 @@ export default function CreateOpportunityWizard() {
                                 disabled={!selectedAccount?.subclasificacion_id}
                             >
                                 <option value="">Seleccione un segmento...</option>
-                                {segments
+                                {displaySegments
                                     .filter((seg: any) => selectedAccount?.subclasificacion_id && seg.subclasificacion_id === Number(selectedAccount.subclasificacion_id))
                                     .map((seg: any) => (
                                         <option key={seg.id} value={seg.id}>
@@ -842,7 +861,7 @@ export default function CreateOpportunityWizard() {
                             </p>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                             <div>
                                 <label className="text-sm font-medium">Valor Estimado</label>
                                 <input type="number" {...register("amount")} className="w-full p-2 border rounded-lg" />
@@ -851,6 +870,10 @@ export default function CreateOpportunityWizard() {
                             <div>
                                 <label className="text-sm font-medium">Fecha Cierre Estimada</label>
                                 <input type="date" {...register("fecha_cierre_estimada")} className="w-full p-2 border rounded-lg" />
+                            </div>
+                            <div>
+                                <label className="text-sm font-medium">Fecha de Entrega</label>
+                                <input type="date" {...register("fecha_entrega")} className="w-full p-2 border rounded-lg" />
                             </div>
                         </div>
 
@@ -897,10 +920,26 @@ export default function CreateOpportunityWizard() {
                         </div>
                         
                         <div>
+                            <label className="text-sm font-medium">Setter (Opcional)</label>
+                            <select
+                                {...register("setter")}
+                                className="w-full p-2 border rounded-lg bg-white"
+                            >
+                                <option value="">Ninguna</option>
+                                {OPPORTUNITY_SETTER_OPTIONS.map(opt => (
+                                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                ))}
+                            </select>
+                            <p className="text-[10px] text-slate-500 mt-0.5">
+                                Clasificación de prospección comercial. Se puede cambiar luego desde el detalle de la oportunidad.
+                            </p>
+                        </div>
+
+                        <div>
                             <label className="text-sm font-medium">Comentarios / Observaciones</label>
-                            <textarea 
-                                {...register("comentarios")} 
-                                className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-none" 
+                            <ExpandableTextarea
+                                {...register("comentarios")}
+                                className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                                 rows={3} 
                                 placeholder="Notas adicionales sobre esta oportunidad..."
                             />
@@ -947,7 +986,7 @@ export default function CreateOpportunityWizard() {
                                                 case 'OBRAS_NAC': displayPrice = Number(product.lista_base_obras) || 0; break;
                                                 case 'OBRAS_INT':
                                                 case 'DIST_INT': displayPrice = Number(product.lista_base_exportaciones) || 0; break;
-                                                case 'PROPIO': displayPrice = Number(product.distribuidor_pvp_iva) || 0; break;
+                                                case 'PROPIO': displayPrice = Number(product.pvp_sin_iva) || 0; break;
                                                 default: displayPrice = Number(product.lista_base_cop) || 0;
                                             }
                                             if (Number(displayPrice) === 0) displayPrice = Number(product.lista_base_cop) || Number(product.pvp_sin_iva) || 0;
@@ -965,10 +1004,10 @@ export default function CreateOpportunityWizard() {
                                                     className="w-full text-left px-3 py-2 sm:px-4 sm:py-2.5 hover:bg-blue-50/70 flex items-center justify-between gap-2 border-b last:border-0 transition-colors group cursor-pointer"
                                                 >
                                                     <div className="flex-1 min-w-0 pr-2">
-                                                        <div className="font-medium text-xs sm:text-sm text-slate-900 line-clamp-2 leading-snug group-hover:text-blue-700">
+                                                        <div className="font-medium text-[15px] sm:text-sm text-slate-900 leading-snug break-words sm:line-clamp-2 group-hover:text-blue-700" title={product.descripcion}>
                                                             {product.descripcion}
                                                         </div>
-                                                        <div className="text-[11px] text-slate-400 mt-0.5">
+                                                        <div className="text-xs sm:text-[11px] text-slate-500 sm:text-slate-400 mt-0.5">
                                                             {product.numero_articulo}
                                                         </div>
                                                     </div>
@@ -993,7 +1032,8 @@ export default function CreateOpportunityWizard() {
                                     <div className="text-xs text-slate-400">Usa la búsqueda para agregar productos desde la primera fase.</div>
                                 </div>
                             ) : (
-                                items.map((item: any, idx: number) => {
+                                items.map((item: any) => {
+                                    const channel = selectedAccount?.canal_id || 'DIST_NAC';
                                     const basePriceFormatted = new Intl.NumberFormat('es-CO', { maximumFractionDigits: 0 }).format(Math.round(item.precio || 0));
                                     const discountedPrice = (item.precio || 0) * (1 - (Number(item.descuento_porcentaje) || 0) / 100);
                                     const discountedPriceFormatted = new Intl.NumberFormat('es-CO', { maximumFractionDigits: 0 }).format(Math.round(discountedPrice));
@@ -1001,8 +1041,9 @@ export default function CreateOpportunityWizard() {
                                     return (
                                         <div key={item.product_id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-white border border-slate-200 rounded-xl shadow-sm">
                                             <div className="flex-1 min-w-0">
-                                                <div className="font-medium text-xs sm:text-sm text-slate-800 line-clamp-2 leading-snug">{item.nombre}</div>
+                                                <div className="font-medium text-[15px] sm:text-sm text-slate-800 leading-snug break-words sm:line-clamp-2" title={item.nombre}>{item.nombre}</div>
                                                 <div className="text-[11px] sm:text-xs text-slate-500 mt-0.5">{currencyId} {basePriceFormatted} c/u base</div>
+                                                <div className="text-[10px] text-slate-400">{getPriceClarification(channel, currencyId === 'USD', false)}</div>
                                                 {(Number(item.descuento_porcentaje) || 0) > 0 && (
                                                     <div className="text-[11px] sm:text-xs text-emerald-600 font-medium mt-0.5">
                                                         Precio con desc: {currencyId} {discountedPriceFormatted} c/u

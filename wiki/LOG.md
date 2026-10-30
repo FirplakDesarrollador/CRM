@@ -3,6 +3,502 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-10-30 - Feature: Botones «Todo» para cantidades máximas disponibles en Pedido
+
+- **Requerimiento:** Facilitar la asignación de cantidades al formalizar o editar pedidos incorporando un botón «Todo» por cada línea de producto y un botón «Todo» global en el encabezado de Cantidades a Pedir.
+- **Cambios Realizados:**
+  - `lib/pedidoHelpers.ts`: Implementadas las funciones puras `calculateItemAvailableQty` y `buildMaxSelectedQuantities`.
+  - `components/quotes/PedidosEditor.tsx`: Añadido botón «Todo» por fila y botón «Todo» en la cabecera de «1. Cantidades a Pedir» de `PedidoEditorForm`.
+  - `tests/pedidoQuantities.test.ts`: Suite permanente de pruebas unitarias verificada en GREEN (3/3).
+- **Páginas actualizadas:** `wiki/pages/cotizaciones-y-pedidos.md`, `wiki/LOG.md`.
+
+## 2026-10-30 - Fix: Corrección de Mapeo de Lista de Precios B2C (`PROPIO` a `pvp_sin_iva`)
+
+- **Hallazgo:** Para productos B2C (`PROPIO`), el sistema cotizaba mapeando a la columna `distribuidor_pvp_iva`, la cual ya contiene el 19% de IVA en la lista de precios. Dado que el generador de documentos formales y pedidos (F-V-29) aplica el IVA al final sobre el subtotal neto, en B2C se duplicaba el IVA en el documento PDF.
+- **Cambios Realizados:**
+  - `lib/salesChannels.ts`: Se actualizó el mapeo del canal `PROPIO` a `pvp_sin_iva` en `getProductPrice`.
+  - `lib/hooks/useOpportunities.ts`: La selección de tarifa unitaria toma `prodData.pvp_sin_iva` para `PROPIO`.
+  - `app/oportunidades/[id]/cotizaciones/[quoteId]/page.tsx` y `app/oportunidades/nueva/CreateOpportunityWizard.tsx`: Mapeados a `pvp_sin_iva`.
+  - `supabase/migrations/20261030122500_map_propio_to_pvp_sin_iva.sql`: Migración append-only para actualizar `CRM_Canales.columna_precio = 'pvp_sin_iva'` para el canal `PROPIO`.
+  - `tests/salesChannels.test.ts`: Pruebas permanentes actualizadas y verificadas (7/7 GREEN).
+- **Páginas actualizadas:** `wiki/pages/canales-de-venta.md`, `wiki/LOG.md`.
+
+## 2026-10-29 - Informes: Columnas de Actividad en Reporte de Oportunidades
+
+- **Operación:** Ingest en `pages/dashboard-e-indicadores.md`.
+- **Cambio:** Agregadas las columnas `FECHA ACTIVIDAD` y `ESTADO ACTIVIDAD` a la exportación de Oportunidades en `/informes` y en `Mi informe`.
+  - Muestra la fecha de cierre/vencimiento formateada como `DD/MM/YYYY HH:mm` en zona horaria Colombia (`America/Bogota`).
+  - Prioriza la actividad pendiente (`is_completed = false`) más próxima en el tiempo; si no hay pendientes, muestra la completada más reciente; si no tiene actividades, muestra `-`.
+  - Columna de estado indica `Pendiente`, `Completada` o `-`.
+- **Código y Pruebas:**
+  - `lib/utils/informes.ts`: funciones `formatActivityDate`, `resolveOpportunityActivityInfo` y actualización de `mapOpportunityReportRow`.
+  - `app/informes/page.tsx`: join con `CRM_Actividades` y columnas en la exportación Excel/CSV.
+  - `app/api/informes/mi-informe/route.ts` y `lib/informes/miInforme.ts`: soporte en la hoja de Oportunidades de "Mi informe".
+  - Pruebas en `pruebas unitarias/informes.test.ts` y `pruebas unitarias/miInforme.test.ts` (100% GREEN).
+
+## 2026-10-29 - Seguridad: Token MCP personal permanente (INC-2026-012)
+
+- **Hallazgo:** Los bots usaban el JWT de sesión de Supabase, que expiraba y producía `401` en reportes programados.
+- **Solución:** Token `mcp_pat_...` no expirante, secreto aleatorio de 256 bits, hash SHA-256 guardado en `app_metadata`, comparación en tiempo constante y revocación automática al regenerar.
+- **UI:** Configuración genera, copia y permite regenerar el token; la `service_role` permanece exclusivamente en servidor.
+- **Validación:** 41/41 pruebas MCP en GREEN, incluyendo token alterado/revocado y resolución del rol ADMIN.
+
+## 2026-10-29 - Seguridad y datos: MCP fail-closed sin fixtures en producción (INC-2026-011)
+
+- **Hallazgo:** Cuando faltaba `SUPABASE_SERVICE_ROLE_KEY`, el MCP usaba la clave pública y podía recibir cero filas por RLS; después devolvía silenciosamente los registros sembrados de pruebas como si fueran datos reales. `crm_agenda_diaria` también enviaba todas las actividades pendientes sin paginación.
+- **Cambios Realizados:**
+  - `lib/mcp/database.ts`: la conexión operativa exige service role; la memoria solo se habilita en tests o con `MCP_ALLOW_MEMORY_FALLBACK=true` explícito.
+  - `lib/mcp/server.ts`: HTTP y stdio aplican la misma guarda y devuelven un error claro ante configuración o consulta fallida.
+  - `lib/mcp/tools/actividades.ts`: agenda paginada con `limit`/`offset`, máximo 30, total y `has_more`.
+  - `tests/crm-mcp.test.ts`: dos pruebas RED/GREEN permanentes para fail-closed y paginación.
+- **Validación:** 36/36 pruebas MCP en GREEN; TypeScript, ESLint y `git diff --check` sin errores. Consulta real verificada contra Supabase principal con oportunidades, cuentas, contactos y actividades.
+- **Registro:** `docs/failures/2026-10-29-INC-2026-011.md` y `docs/quality/known-regressions.md`.
+
+## 2026-10-28 - Seguridad: Cierre de Bypass de Autenticación en `/api/mcp` (INC-2026-010)
+
+- **Hallazgo (auditoría):** Dos vías permitían obtener sesión sin credenciales en el endpoint remoto MCP: (1) decodificación de JWT sin verificar firma introducida en `a0ee90b` (aceptaba tokens forjados y revivía expirados) y (2) fallback de headers `x-user-email`/`x-user-role`/`x-user-id` activo en producción.
+- **Cambios Realizados:**
+  - `lib/mcp/auth.ts` (nuevo): resolución de sesión fail-closed; solo autentica `auth.getUser(token)` con firma verificada; headers de prueba únicamente con `MCP_DEV_ALLOW_HEADERS=true` fuera de producción.
+  - `app/api/mcp/route.ts`: `POST` responde `401` sin sesión válida; `GET` sin token retorna solo manifiesto público (preserva el indicador de estado de `McpIntegrationCard`).
+  - `tests/mcp-auth.test.ts` (nuevo): 10 casos; 6 RED contra la lógica vulnerable y luego GREEN, más guardas del flujo legítimo (rol por `id`/`email` en `CRM_Usuarios`).
+- **Validación:** 34/34 en GREEN (`tests/mcp-auth.test.ts`, `tests/crm-mcp.test.ts`, `tests/mcp-token.test.ts`); lint 0 errores/0 warnings en archivos tocados.
+- **Registro:** `docs/failures/2026-10-28-INC-2026-010.md`; fila nueva en `docs/quality/known-regressions.md`; nota de autenticación en `docs/mcp/INSTALACION_Y_USO.md`.
+
+## 2026-10-27 - UI & Seguridad: Botón de Token Directo en MCP y Garantía de Rol ADMIN en CRM_Usuarios
+
+- **Requerimiento:** Mover la generación de token a la UI principal (botón debajo de "Ver Credenciales y Conexión IA" en la tarjeta MCP) y garantizar que administradores como `ismael.correa@firplak.com` y `alejandro.isaza@firplak.com` tengan acceso MCP con rol `ADMIN`.
+- **Cambios Realizados:**
+  - `components/config/McpIntegrationCard.tsx`: Se añadió el botón directo "Generar y Copiar Token de Autenticación" en la tarjeta principal, con estado de carga, verificación de expiración y feedback de copiado. Se renombró la pestaña en el modal a "Token / ChatGPT".
+  - `app/configuracion/page.tsx`: Se envía `realRole || role` al componente para asegurar que si un administrador simula vista de vendedor en la UI, sus credenciales MCP preserven el rol `ADMIN`.
+  - `app/api/mcp/route.ts`: Se corrigió el bug en la consulta a `CRM_Usuarios` (se consultaba `rol` en vez de `role`, lo que provocaba que la consulta fallara y cayera en `VENDEDOR`). Se implementó resolución resiliente por `id` y por `email`.
+  - `bin/crm-mcp.ts`: El entrypoint CLI ahora consulta dinámicamente `CRM_Usuarios` por email en la base de datos para auto-asignar `ADMIN` cuando no se especifique `CRM_USER_ROLE`.
+- **Validación:**
+  - 24/24 pruebas unitarias verificadas en GREEN (`tests/crm-mcp.test.ts` y `tests/mcp-token.test.ts`).
+  - `npx tsc --noEmit` verificado con 0 errores de compilación.
+- **Páginas actualizadas:** `wiki/pages/servidor-mcp.md`, `wiki/LOG.md`.
+
+## 2026-10-27 - Feature: Generación y Copiado de Token Bearer en Conexión MCP
+
+- **Requerimiento:** Incluir botón para generar y copiar el token de autenticación Bearer de la sesión de Supabase en la tarjeta de integración MCP (`/configuracion`).
+- **Lógica e Integración (`lib/mcp/token.ts`, `components/config/McpIntegrationCard.tsx`):**
+  - Creado helper `lib/mcp/token.ts` con funciones `getMcpSessionToken`, `formatBearerAuthHeader` e `isTokenExpired`.
+  - En `McpIntegrationCard.tsx`, añadido bloque interactivo en la pestaña "ChatGPT / HTTP" con botón "Generar y Copiar Token de Autenticación", visualizador del token de acceso, indicador de hora de expiración y feedback de copiado al portapapeles.
+- **Validación:**
+  - 4/4 pruebas unitarias verificadas en GREEN en `tests/mcp-token.test.ts`.
+  - 19/19 pruebas verificadas en GREEN en `tests/crm-mcp.test.ts`.
+- **Páginas actualizadas:** `wiki/pages/servidor-mcp.md`, `wiki/LOG.md`.
+
+## 2026-10-27 - Ajuste: controles de vista de Actividades movidos al encabezado
+
+- **Pedido de Esteban:** ubicar arriba también los controles de la tarjeta "Vista Agenda".
+- **`app/actividades/page.tsx`:** pestañas Todo/Agenda/Mes, navegador de fecha (solo Agenda y Mes), toggle "Hasta la fecha / Solo este día" (solo Agenda), insignia "Rango activo" y "Omitir terminadas" pasan a una fila `activities-view-controls` en el encabezado, encima de la barra de filtros. Se eliminó la fila de título "Vista Agenda"; "Total de registros" queda junto a la lista. Comportamiento sin cambios.
+- **Pruebas:** `tests/activitiesInlineFilters.test.ts`.
+
+## 2026-10-27 - Ajuste: filtros de Actividades siempre visibles + rango Desde/Hasta (rama `cambio-que-pidio-daniela`)
+
+- **Pedido de Esteban:** todos los filtros arriba, visibles; el filtro Desde–Hasta no se veía.
+- **`app/actividades/page.tsx`:** se eliminó el botón/panel "Filtros"; canal, estado, tipo/clasificación/subclasificación, orden y el rango **Desde / Hasta** quedan en una barra inline (con wrap en pantallas pequeñas) bajo el título, junto a búsqueda, usuario y Atrasadas. Se mantiene el botón limpiar filtros.
+- **Rango Desde/Hasta (sin gate B2C, visible para todos):** funciona en Todo, Agenda y Mes. En Agenda reemplaza el navegador de fecha única y el toggle "Hasta la fecha / Solo este día" (se muestra "Rango activo: … – …" con botón para quitarlo); al limpiarlo vuelve el comportamiento anterior. En Mes, al elegir fecha se salta al mes del rango.
+- **Pruebas:** `tests/activitiesInlineFilters.test.ts`.
+
+## 2026-10-27 - Feature: Funcionalidades CRM B2C (rama `cambio-que-pidio-daniela`)
+
+- **Seguimiento tras completar actividad** (`components/activities/ActivityFollowUp.tsx`): al completar una actividad se ofrece programar un seguimiento con cuenta/oportunidad prellenadas (solo usuarios con canal `PROPIO`/ADMIN o actividades de cuentas `PROPIO`). En el detalle de la oportunidad también ofrece "Ver actividad".
+- **Búsqueda por celular** (`lib/utils.ts`: `isPhoneLikeQuery`, `getPhoneIlikePatterns`, `matchesSearchTokens`): cuentas, contactos, oportunidades (teléfono de cuenta y contactos) y actividades.
+- **Contacto → oportunidades** (`components/contactos/ContactOpportunities.tsx`, lista y detalle de contactos): ver oportunidades de la cuenta del contacto o crear una con `?account_id=&contact_id=` prellenados (`CreateOpportunityWizard`).
+- **Actividades:** filtro de fecha Desde–Hasta efectivo también en la vista agenda, con etiquetas y botón limpiar.
+- **Setter:** opciones compartidas en `lib/opportunitySetter.ts`; selector también en el asistente de creación de oportunidades.
+- **Clasificaciones SETTER / Cliente frecuente** (`lib/b2c.ts`): visibles solo para usuarios B2C. Requiere migración `20261027100000_add_setter_cliente_frecuente_activity_classifications.sql` (NO aplicada).
+- **Pruebas:** `tests/b2cCrmFeatures.test.ts`.
+
+## 2026-10-23 - Feature: Columna Categoría de Interés en Lista Principal de Oportunidades
+
+- **Requerimiento:** Agregar la columna **Categoría de Interés** a la tabla interactiva de oportunidades (`/oportunidades`).
+- **Mapeo de Datos (`lib/opportunityTableHelpers.ts`, `lib/hooks/useOpportunitiesServer.ts`):**
+  - Añadido `categoria_oportunidad` a la consulta de `CRM_Oportunidades` en Supabase.
+  - Añadida la clave `categoria` a `OPPORTUNITY_TABLE_COLUMN_KEYS`, `OpportunityHotRow` y `OpportunityInput`.
+  - En `buildOpportunityHotRow`, normalización y formateo con `formatOpportunityCategories(opp.categoria_oportunidad) || '-'` para garantizar tipos primitivos string y compatibilidad con búsquedas y filtros internos de Handsontable.
+- **Frontend y UI (`app/oportunidades/page.tsx`):**
+  - Añadido `{ key: 'categoria', label: 'Categoría de Interés' }` en `ALL_COLUMNS` ubicado estratégicamente antes de Valor (`creada` $\rightarrow$ `categoria` $\rightarrow$ `valor`).
+  - Añadida la definición en `ALL_COLUMN_DEFS` con badge visual suave (`#f8fafc`, borde `#e2e8f0`), elipsis y tooltip seguro.
+  - Clave de localStorage actualizada a `crm_opp_visible_cols_v4` asegurando que todos los usuarios vean la nueva columna activa por defecto.
+- **Validación:**
+  - 16/16 pruebas unitarias verificadas en GREEN en `tests/opportunityTableFilters.test.ts`.
+  - Pruebas relacionadas verificadas: `tests/opportunityCategories.test.ts` (7/7) y `tests/opportunitySetter.test.ts` (6/6).
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+
+## 2026-10-23 - Feature: Selector y Campo Setter en Oportunidades con Exportación en Informes
+
+- **Base de Datos y Modelo (`supabase/migrations/20261023110000_add_setter_to_oportunidades.sql`, `lib/db.ts`):**
+  - **Requerimiento:** Campo opcional "Setter" para oportunidades con opciones `CO` y `REC` (por defecto Ninguna / null).
+  - **Columna `setter`:** Agregada a `public."CRM_Oportunidades"` (`TEXT NULL`) y a la interfaz local `LocalOportunidad`.
+  - **Auditoría:** Trigger `trg_audit_opportunity_changes` actualizado para registrar cambios en `setter` dentro de `CRM_HistorialModificaciones`.
+- **UI de Oportunidades (`app/oportunidades/[id]/page.tsx`):**
+  - Ubicación: Columna derecha de la vista de detalle de la oportunidad, inmediatamente debajo de la tarjeta "Información del Cliente" (área indicada por el usuario).
+  - Botón desplegable que muestra el estado actual (`Setter: Ninguna | CO | REC`) con badge visual temático (azul para CO, esmeralda para REC, neutro para Ninguna), chevron indicador y opciones clickeables con cierre exterior automático.
+  - Guardado reactivo en Supabase y Dexie al seleccionar cualquier opción, con spinner de guardado.
+- **Informes y Exportaciones (`lib/utils/informes.ts`, `app/informes/page.tsx`):**
+  - Se agregó la columna **SETTER** al informe de oportunidades descargable en Excel y CSV (`/informes`).
+  - `mapOpportunityReportRow` mapea el valor `setter` o `-` si está vacío.
+- **Validación:**
+  - 6/6 pruebas unitarias verificadas en GREEN en `tests/opportunitySetter.test.ts`.
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/pages/modelo-de-datos.md`, `wiki/LOG.md`.
+
+## 2026-10-23 - Feature: Log y Trazabilidad Transversal de Modificaciones en Oportunidades, Cuentas y Contactos
+
+- **Base de Datos y Triggers (`supabase/migrations/20261023100000_audit_history_log.sql`):**
+  - **Requerimiento:** Auditoría y trazabilidad en la nube de quién realizó modificaciones en oportunidades, contactos y cuentas, qué campos cambiaron, valores previos y nuevos, y fecha/hora exacta.
+  - **Tabla `CRM_HistorialModificaciones`:** Append-only con RLS, índices compuestos (`idx_historial_mod_entity`, `idx_historial_mod_changed_by`) y función `public.get_audit_user_name(UUID)` para resolución de nombre y correo.
+  - **Triggers en PostgreSQL:**
+    - `trg_audit_opportunity_changes`: Audita cambios en `fase_id`, `estado_id`, `owner_user_id`, `amount`, `razon_perdida`, `nombre`, `fecha_cierre_estimada`, `probabilidad`, `comentarios_perdida`, `is_deleted`.
+    - `trg_audit_account_changes_full`: Audita cambios en `nombre`, `owner_user_id`, `canal_id`, `telefono`, `email`, `nit`, `direccion`, `ciudad`, `is_deleted`.
+    - `trg_audit_contact_changes_full`: Audita cambios en `nombre`, `cargo`, `telefono`, `email`, `account_id`, `es_principal`, `is_deleted`.
+- **Frontend y UI Reutilizable (`lib/hooks/useEntityAuditHistory.ts`, `components/shared/EntityAuditHistoryTab.tsx`):**
+  - Hook reactivo `useEntityAuditHistory` con orden descendente, paginación configurable y fallback de error.
+  - Componente `EntityAuditHistoryTab` con buscador en tiempo real, filtro selector por campo (`fieldsList`), resolución de tiempos relativos y formateo regional colombiano (`es-CO`), y visualizador diff (rojo tachado valor anterior $\rightarrow$ verde negrita valor nuevo).
+  - Integrado en:
+    - **Oportunidades:** `app/oportunidades/[id]/page.tsx` (pestaña *Historial*).
+    - **Cuentas:** `components/cuentas/AccountForm.tsx` (pestaña *Historial*).
+    - **Contactos:** `components/contactos/ContactForm.tsx` (pestañas *Información* e *Historial de Cambios*).
+- **Validación:**
+  - 3/3 pruebas unitarias en `tests/auditHistory.test.ts` ejecutadas con `npm run qa:focused` y verificadas en GREEN.
+- **Páginas actualizadas:** `wiki/pages/modelo-de-datos.md`, `wiki/pages/oportunidades.md`, `wiki/pages/cuentas.md`, `wiki/pages/contactos.md`, `wiki/pages/auditoria-local.md`, `wiki/INDEX.md`, `wiki/LOG.md`.
+
+## 2026-10-23 - Fix: Deduplicación Inteligente de Leads Entrantes en wordpress-lead-intake
+
+- **Integración Web (`supabase/functions/wordpress-lead-intake/index.ts`, `lib/leadDeduplication.ts`, `tests/leadDeduplication.test.ts`):**
+  - **Problema:** Múltiples oportunidades entraban duplicadas por re-envíos rápidos (15-35 s) o combinación de formularios OptIn y WhatsApp (1-4 min), obligando a los asesores a cerrarlas manualmente como *Perdida - Duplicado*.
+  - **Causa Raíz:** `wordpress-lead-intake` deduplicaba cuentas y contactos pero insertaba incondicionalmente una oportunidad nueva en cada webhook. El trigger de BD solo evaluaba 10 segundos.
+  - **Solución Implementada:** Se integró deduplicación inteligente en la Edge Function para oportunidades entrantes de ahora en adelante. Si la cuenta ya cuenta con una oportunidad abierta (`Abierta` o `Contacto Inicial`) en las últimas 24 horas, no genera una segunda oportunidad, sino que consolida los nuevos datos/URL/asesor en los comentarios de la oportunidad existente y actualiza `updated_at`.
+  - Las oportunidades históricas previas se preservaron intactas sin modificaciones retroactivas.
+  - Se desplegó versión 19 de la Edge Function en Supabase activa para tráfico real.
+  - 5/5 pruebas unitarias en `tests/leadDeduplication.test.ts` verificadas en GREEN.
+- **Páginas actualizadas:** `wiki/pages/integraciones.md`, `wiki/LOG.md`.
+
+## 2026-10-22 - Feature: Visibilidad y Búsqueda Global de Contactos para Rol VENDEDOR
+
+- **Módulo de Contactos (`lib/contactVisibility.ts`, `lib/hooks/useContactsServer.ts`, `tests/contactVisibility.test.ts`):**
+  - **Problema Detectado:** Los usuarios con rol `VENDEDOR` (asesores comerciales) no podían encontrar contactos en `/contactos` (p. ej. al buscar por teléfono `3007367088`) si la cuenta asociada pertenecía a otro usuario, debido a un filtro restrictivo por `owner_user_id` de cuentas en `useContactsServer.ts`.
+  - **Alineación de Negocio:** Según el modelo de permisos de [[contactos]] y [[roles-y-permisos]], todos los roles tienen permiso de lectura y búsqueda en el directorio de contactos para evitar duplicidad de prospectos y agilizar la atención.
+  - **Solución Implementada:** Se introdujo `lib/contactVisibility.ts` con la función `shouldRestrictContactsByAccountOwner` (que retorna `false`) y `filterContactsForUser`. Se eliminó el filtro forzado `inner` join en `useContactsServer.ts` tanto para la consulta online a Supabase como para el fallback local de Dexie.
+  - **Validación:** 5/5 pruebas unitarias en `tests/contactVisibility.test.ts` aprobadas (VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/contactos.md`, `wiki/LOG.md`.
+
+## 2026-10-22 - UI/UX: Reubicación de Categorías de Interés antes de Valor de Oportunidad
+
+- **Detalle de Oportunidad (`app/oportunidades/[id]/page.tsx`):**
+  - Se trasladó el campo **Categorías de Interés** (`categoria_oportunidad` con componente `MultiSelect` y opciones `OPPORTUNITY_CATEGORIES`) a la tarjeta principal de **Información de Negocio**, situándose inmediatamente antes del campo **Valor de la Oportunidad (Importe)**.
+  - Se eliminó la ocurrencia duplicada inferior en la sección de orígenes para simplificar el flujo visual y permitir que el usuario califique comercialmente las líneas de interés antes de ingresar el valor estimado de negociación.
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+
+
+## 2026-10-22 - Fix: Corrección de Zona Horaria en Filtro de Fechas (UTC vs Colombia) y Alineación UX con Contactos
+
+- **Módulo de Oportunidades (`lib/dateFilterHelpers.ts`, `lib/hooks/useOpportunitiesServer.ts`, `app/oportunidades/page.tsx`, `tests/opportunityTableFilters.test.ts`):**
+  - **Bug de Zona Horaria en Fecha Fin:** `new Date("YYYY-MM-DD")` en JavaScript interpreta medianoche UTC (`00:00:00Z`), lo que en Colombia (UTC-5) correspondía a las 7:00 PM del día anterior. Al aplicar `end.setHours(23, 59, 59, 999)`, el límite superior se transformaba en las 11:59:59 PM de **ayer**, excluyendo sistemáticamente todas las oportunidades creadas hoy.
+  - **Helpers `toStartOfDayISO` y `toEndOfDayISO`:** Descomponen la fecha en componentes numéricos locales y calculan con precisión el inicio (00:00:00.000) y fin (23:59:59.999) del día local en ISO UTC (`2026-10-23T04:59:59.999Z` para Colombia), asegurando que todas las oportunidades ingresadas hoy queden dentro del filtro.
+  - **Alineación con Módulo Contactos:**
+    - Contador superior unificado visible en escritorio y móvil: `Total de registros: X` y `Total valor: $Y`.
+    - Skeleton loader estilizado de 6 filas idéntico a contactos.
+    - Paginación de 100 registros (`pageSize: 100`).
+    - Botones de "Cargar más oportunidades" con animación `Loader2`.
+  - 15/15 pruebas unitarias verificadas (15/15 VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+
+## 2026-10-22 - Perf: Carga Progresiva de Oportunidades y Consulta de Totales Desacoplada
+
+- **Módulo de Oportunidades (`app/oportunidades/page.tsx`, `lib/hooks/useOpportunitiesServer.ts`, `lib/opportunityColumnFilterHelpers.ts`, `tests/opportunityTableFilters.test.ts`):**
+  - **Desacoplamiento de Totales (`countQuery` con `head: true`):** Se eliminó el parámetro `{ count: 'exact' }` de la consulta principal con joins relacionales de actividades. El conteo total se obtiene mediante una petición `HEAD` ultraligera indexada paralela, evaluando en 11-13 ms sin transferir datos de fila y ejecutándose únicamente al montar la vista o cambiar filtros (se omite en el scroll de paginación).
+  - **Carga Progresiva Inicial Rápida (`pageSize = 30`):** Reducción del tamaño de lote de 100 a 30 registros, permitiendo un First Contentful Paint inferior a 200 ms y montaje instantáneo de Handsontable y la vista de tarjetas móvil.
+  - **Suma y Presentación de Totales (`calculateTotalAmount`):** Exposición de `totalAmount` en `useOpportunitiesServer` y visualización de "Total valor cargado" en el pie de tabla de escritorio y en la cabecera móvil.
+  - 13 pruebas unitarias aprobadas en `tests/opportunityTableFilters.test.ts` y pruebas de scroll en `pruebas unitarias/infiniteScroll.test.ts` (VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+
+## 2026-10-22 - Fix: Embudo de Fases por Canal Comercial, Deduplicación y Filtro de Prospectos en Oportunidades
+
+- **Módulo de Oportunidades (`components/oportunidades/FloatingColumnFilterPopover.tsx`, `lib/opportunityColumnFilterHelpers.ts`, `lib/hooks/useOpportunitiesServer.ts`, `tests/opportunityTableFilters.test.ts`):**
+  - **Alcance del Embudo por Canal:** El filtro de cabecera de la columna **FASE** restringe sus opciones al canal activo (`selectedChannel` o canales asignados al usuario en `CRM_Usuarios.canales`), impidiendo que se listen fases combinadas de todos los canales.
+  - **Eliminación de Estados Cerrados Repetidos:** Se excluyen del embudo comercial de fases las etapas de cierre ("Cerrada Ganada", "Cerrada Perdida"), ya que corresponden al filtro de **ESTADO**.
+  - **Deduplicación Limpia:** Se deduplican los nombres de etapas repetidas en base de datos (ej. ID 56 y 97 para "Visita" en `OBRAS_NAC`) mostrando cada paso una sola vez ordenado y numerado.
+  - **Mapeo de IDs Equivalentes (`getEquivalentPhaseIds`):** La consulta en Supabase/Dexie busca todos los IDs equivalentes asociados a la fase elegida mediante `.in('fase_id', equivalentIds)` sin alterar registros en base de datos.
+  - **Filtro Explícito de Prospectos (`PROSPECTO_PHASE_ID = -1`):** Adición de la opción "Prospectos (Sin fase)" que consulta en Supabase `.is('fase_id', null)` y en local `!o.fase_id`, permitiendo filtrar las 1.292 oportunidades en etapa de prospección.
+  - **Selector de Canales en Popover:** Si no hay canal activo, el popover orienta al usuario para elegir su canal comercial o filtrar directamente por prospectos.
+  - 11 pruebas unitarias pasando (11/11 VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+
+## 2026-10-22 - Feature: Filtros Flotantes por Catálogo Maestro en Cabeceras de Oportunidades
+
+- **Módulo de Oportunidades (`app/oportunidades/page.tsx`, `components/oportunidades/FloatingColumnFilterPopover.tsx`, `lib/opportunityColumnFilterHelpers.ts`, `lib/hooks/useOpportunitiesServer.ts`, `tests/opportunityTableFilters.test.ts`):**
+  - Implementación de `FloatingColumnFilterPopover` anclado a las cabeceras de columnas (**Canal**, **Fase**, **Vendedor**, **Estado**, **Origen**, **País**, **Ciudad**).
+  - Intercepción del plugin nativo `filter_by_value` de Handsontable, el cual únicamente escaneaba las primeras 100 filas en memoria del navegador y filtraba de manera ciega sin consultar la base de datos.
+  - Carga bajo demanda de catálogos maestros ligeros (`CRM_Canales`, `CRM_FasesOportunidad`, `CRM_Usuarios`, `CRM_OrigenesOportunidad`, `CRM_Paises`) para desplegar el universo completo de opciones sin sobrecargar la red ni descargar 60.000 oportunidades completas.
+  - Sincronización del filtrado en Supabase (`useOpportunitiesServer`: `setChannelFilter`, `setPhaseFilter`, `setAccountOwnerIds`, `setStatusFilter`, `setOriginFilter`, `setCountryFilter`, `setCityFilter`).
+  - Indicadores visuales de columna filtrada `🔵` dinámicos en todas las cabeceras activas.
+  - 10 pruebas unitarias verificadas (10/10 VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+
+## 2026-10-22 - Data Restoration: Restauración Masiva de Oportunidades Nativas 2026 Afectadas por Cruce vTiger
+
+- **Base de Datos y Módulo de Oportunidades (`CRM_Oportunidades`, `execution/execute_complete_restoration.mjs`):**
+  - Creación de snapshot de seguridad previo: `CRM_Oportunidades_pre_restore_20261022`.
+  - Reactivación de **4.153 oportunidades** legítimas creadas en 2026 que fueron erróneamente soft-deleted durante la purga de duplicados (`is_deleted = false`).
+  - Reapertura de **244 oportunidades** de 2026 cambiadas indebidamente a *Cerrada Perdida* (`estado_id = 1` y motivos de pérdida reseteados a NULL).
+  - Limpieza del prefijo `POT[0-9]+ - ` en **4.904 nombres** de oportunidades nativas de 2026.
+  - Limpieza de notas `--- [HISTORIAL VTIGER] ---` en **4.224 comentarios**.
+  - Desvinculación de metadatos `vtiger_potentialid` / `vtiger_potential_no` en **4.904 oportunidades** de 2026.
+  - Verificación en CRM de la oportunidad de Edison Porras (*Hidromasaje Galapagos 250, DELTA INGENIERA GROUP* por $18.276.435,98 con cotizaciones, productos y estado abierto 100% íntegros).
+- **Páginas actualizadas:** `wiki/LOG.md`.
+
+## 2026-10-22 - Fix: Barra de Herramientas Responsiva y Ancho Mínimo de Buscador en Oportunidades
+
+- **Módulo de Oportunidades (`app/oportunidades/page.tsx`, `tests/opportunityToolbarResponsive.test.ts`):**
+  - Corrección del fallo de diseño responsivo reportado por el equipo comercial, donde la barra de búsqueda en `/oportunidades` quedaba colapsada a un cuadro diminuto de 42px al visualizarse en pantallas de laptop y monitores entre 1280px y 1536px.
+  - Implementación de ancho mínimo garantizado en el buscador (`min-w-[200px] sm:min-w-[220px]`), impidiendo que `flex-1` comprima el input ante múltiples botones de filtrado adyacentes (`UserPickerFilter`, `QuickDateFilter`, `Filtros`, `ColumnPicker`).
+  - Ajuste de breakpoint de barra principal a `flex-col 2xl:flex-row`: en pantallas estándar de portátiles (1280px–1536px), las pestañas de módulos se posicionan en la primera fila con scroll táctil, y los controles de filtrado se ubican en la segunda fila con espacio completo (>320px para el buscador). En pantallas grandes (>= 1536px), conviven fluidamente en una sola fila.
+  - Inclusión de botón `X` de limpieza rápida dentro del input cuando hay texto escrito.
+  - Creación de prueba de regresión automatizada en `tests/opportunityToolbarResponsive.test.ts` (4/4 VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+
+## 2026-10-21 - Feature: Vista Agenda con Filtro "Hasta la fecha" Acumulativo y Control de "Omitir terminadas"
+
+- **Módulo de Actividades (`app/actividades/page.tsx`, `lib/filterUtils.ts`, `pruebas unitarias/actividades.test.ts`):**
+  - Implementación del modo `agendaDateMode` ("Hasta la fecha" por defecto vs "Solo este día"):
+    - "Hasta la fecha" (`up_to`): filtra todas las actividades con `fecha_inicio <= endOfSelectedDay`, trayendo todas las actividades pendientes y vencidas acumuladas hasta el día actual o seleccionado, evitando que las actividades atrasadas queden ocultas al consultar la agenda del día.
+    - "Solo este día" (`exact`): acota los resultados estrictamente al día seleccionado (`actDate === selectedDate`).
+  - Control visual interactivo tipo píldora segmentada `[ Hasta la fecha | Solo este día ]` integrado en la barra de navegación de fecha de la Vista Agenda.
+  - Indicador de cabecera dinámico: muestra `Hasta: Mié, 21 Oct` cuando está activo el modo acumulativo, o la fecha sin prefijo en modo exacto.
+  - Casilla de verificación `[x] Omitir terminadas` (`omitCompleted`): activa por defecto para excluir las actividades finalizadas (`act.is_completed`) y evitar que los miles de registros completados históricos inunden la agenda de trabajo diaria. Permite desmarcarla en cualquier momento para visualizar el historial completo.
+  - Al hacer clic en el botón de acceso rápido `Atrasadas`, si el modo estaba en `Solo este día`, se conmuta automáticamente a `Hasta la fecha` para garantizar la visualización de las actividades vencidas. Al pulsar `Hechas`, se desmarca automáticamente `Omitir terminadas`.
+  - Persistencia de `agendaDateMode` y `omitCompleted` en URL y en `sessionStorage` para mantener la preferencia al navegar entre módulos.
+  - Pruebas unitarias ampliadas y verificadas en `pruebas unitarias/actividades.test.ts` (11/11 VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/actividades.md`, `wiki/LOG.md`.
+
+## 2026-10-21 - Feature: Filtros de Fecha Históricos ("Hasta la fecha"), Popover Flotante y Ordenamiento por Creación Descendente
+
+- **Módulo de Oportunidades (`app/oportunidades/page.tsx`, `components/oportunidades/QuickDateFilter.tsx`, `components/HotTableWrapper.tsx`, `lib/hooks/useOpportunitiesServer.ts`, `lib/dateFilterHelpers.ts`, `lib/opportunityTableHelpers.ts`):**
+  - Ordenamiento predeterminado cambiado a `sortField = 'created_at'` y `sortAsc = false` (descendente: de la más nueva a la más antigua), tanto en PostgreSQL online como en el respaldo local Dexie.
+  - En la cabecera de la columna Creada, la flecha de ordenamiento indica activamente `Creada ↓`.
+  - Reemplazo del menú genérico de la tabla en columnas de fecha por `FloatingDateFilterPopover`, un panel intuitivo y moderno anclado a la cabecera.
+  - Botón principal de 1 clic: "Hasta la fecha (Anteriores a hoy)" con corte hasta hoy y consulta histórica completa.
+  - Opciones rápidas adicionales ("Creadas hoy", "Últimos 7 días", "Últimos 30 días", "Este mes", "Año actual", "Todo el historial") y rango manual.
+  - Checkbox para "Traer todos los datos (incluir ganadas y perdidas)" cambiando `statusFilter: 'all'`.
+  - Ajuste de ancho mínimo a 125px para evitar truncamiento de texto a `CR...`.
+  - Suite de pruebas ampliada en `tests/opportunityTableFilters.test.ts` (9/9 VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+
+## 2026-10-16 - Feature: Campo Fecha de Entrega en Oportunidades (Detalle, Wizard, Informes, DB)
+
+- **Módulo de Oportunidades (`CRM_Oportunidades`, `app/oportunidades/[id]/page.tsx`, `CreateOpportunityWizard.tsx`, `app/informes/page.tsx`):**
+  - Adición de la columna `fecha_entrega DATE` en PostgreSQL `CRM_Oportunidades` (`lnphhmowklqiomownurw`) mediante migración `20261016000000_add_fecha_entrega_to_oportunidades.sql`.
+  - Integración en el modelo Dexie/Local-first (`lib/db.ts`) y sanitización en `useOpportunities.ts` (string vacío normalizado a `null` para prevenir errores de casteo en Postgres).
+  - En la vista de detalle (`/oportunidades/[id]`), inclusión del selector de fecha en la grilla superior (`grid-cols-1 sm:grid-cols-3`) junto a "Fecha Cierre Estimada" y "Moneda", con feedback visual de guardado y auto-guardado en `onBlur`.
+  - Integración en el formulario de creación `/oportunidades/nueva` (`CreateOpportunityWizard`).
+  - Inclusión de la columna `FECHA ENTREGA` en el reporte Excel de oportunidades (`/informes`).
+  - Suite de pruebas de regresión y contrato verificada en `tests/opportunityFechaEntrega.test.ts` (6/6 casos pasados).
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+
+## 2026-10-15 - Migración: Oportunidades Asesor Juan Diego Giraldo (Excel Escritorio + vTiger MySQL)
+
+- **Migración de Oportunidades Juan Diego Giraldo (`MIGRACION JUAN DIGO (2).xlsx`, MySQL `cfirplak_crmv`):**
+  - Homologación completa de las 21 oportunidades del asesor comercial Juan Diego Giraldo desde la base de datos MySQL vTiger (`cfirplak_crmv`) hacia Supabase CRM Firplak (`lnphhmowklqiomownurw`).
+  - Mapeo estricto de etapas a fases (`fase_id` 119, 120, 121, 122) y estados (`estado_id` 1, 2, 3) conforme al embudo de Canal Propio.
+  - Sincronización de 31 actividades (`CRM_Actividades`), incluyendo seguimientos recientes.
+  - Normalización de categorías de producto (`Hidromasajes`, `Baños`, `Cocinas`, `Zona de Labores`), subclasificación de cuentas (`subclasificacion_id = 17` Cliente final), y propagación de teléfonos WhatsApp a contactos y cuentas.
+  - Aplicación de regla Local-First con `updated_at = NOW()` para descarga inmediata en clientes PWA.
+
+## 2026-10-08 - Ingest: Protocolo Estándar de Migración y Homologación de Oportunidades (vTiger → CRM Firplak)
+
+- **Protocolo de Migración Integral de Oportunidades (`directives/migracion_completa_oportunidades_vtiger.md`, `execution/migrate_vtiger_opportunities.mjs`):**
+  - Estandarización de las 8 reglas obligatorias de migración: homologación de fases según embudo del Canal Propio, formato estricto ISO `YYYY-MM-DD` en fechas de cierre, sincronización de cargo en `CRM_Contactos` y `subclasificacion_id` en `CRM_Cuentas`, concatenación cronológica de bitácora (`vtiger_modcomments`), backfill de actividades históricas (`CRM_Actividades`), normalización de categorías comerciales (`cf_1152`), propagación bidireccional de correos y actualización con `updated_at = NOW()` para sincronización offline/PWA.
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`.
+
+## 2026-10-02 - Ingest: Reactividad de Base Local en useLiveQuery y Protección de Recarga en AppLayout (v1.1.4.9)
+
+- **Módulo de Actividades y Ciclo de Vida Local-First (`lib/db.ts`, `lib/hooks/useActivities.ts`, `components/layout/AppLayout.tsx`, `app/actividades/page.tsx`):**
+  - Corrección de la condición de carrera en recargas en frío (F5 / reload) que provocaba la desaparición de actividades en la vista "Mes".
+  - Implementación de un bus reactivo de cambio de base (`onDatabaseChange`, `useActiveLocalUserId`, `useActiveDatabaseVersion` vía `useSyncExternalStore`) en `lib/db.ts` con incremento de versión en `switchLocalDatabase`.
+  - Vinculación de `activeUserId` y `dbVersion` en las dependencias de `useLiveQuery` en `useActivities` y en catálogos de `app/actividades/page.tsx` (`classifications`, `subclassifications`, `accounts`, `opportunities`).
+  - Protección en `AppLayout.tsx` para retrasar el montaje de `{children}` hasta que `isLocalDataReady === true` con feedback visual de carga.
+  - Creación de prueba de regresión `lib/activities-database-reactivity.test.ts` (VERIFIED).
+  - Limpieza de marcadores de conflicto de stash en `SalesFunnelTile.tsx` y `dashboard-e-indicadores.md`.
+  - Corrección de tipo en `informes.ts` (`segmentMap`).
+  - **Incremento de versión a `1.1.4.9`.**
+- **Páginas actualizadas:** `wiki/pages/actividades.md`, `wiki/pages/dashboard-e-indicadores.md`.
+
+## 2026-09-29 - Ingest: Actualización de Contraseñas por Administradores
+
+- **Seguridad y Usuarios (`components/usuarios/UserForm.tsx` y `lib/hooks/useUsers.ts`):**
+  - Implementación de la funcionalidad para que los Administradores puedan actualizar contraseñas de otros usuarios directamente desde el modal de edición.
+  - Se utiliza un RPC de PostgreSQL (`admin_change_password`) con `SECURITY DEFINER` para actualizar la contraseña en `auth.users`, lo que evade la restricción de seguridad del cliente y elimina la dependencia absoluta de la llave maestra (Service Role Key) en el frontend.
+- **Incremento de versión a `1.1.4.8`.**
+
+## 2026-09-22 - Ingest: Servidor MCP Oficial del CRM FIRPLAK (`lib/mcp/`, `bin/`, `app/api/mcp/`)
+
+- **Arquitectura Dual y SDK Oficial:**
+  - Implementación con `@modelcontextprotocol/sdk` soportando transporte Stdio local (`bin/crm-mcp.ts` y wrapper `bin/crm-mcp.mjs`) para Claude Desktop, Antigravity IDE y Cursor, y transporte HTTP/SSE (`app/api/mcp/route.ts`) para ChatGPT Custom Actions con autenticación multiusuario vía JWT Bearer de Supabase.
+- **Seguridad y Control de Roles:**
+  - Política categórica de **Cero Borrado (No-Delete)**: exclusión de herramientas destructivas e interceptor de seguridad.
+  - Filtrado dinámico de herramientas en `tools/list` según rol (`VENDEDOR`, `COORDINADOR`, `ADMIN`) para mitigar tool bloat y alucinaciones.
+  - Aislamiento estricto de cartera para vendedores y permisos de reasignación y supervisión para coordinadores.
+  - Paginación obligatoria (máx 30) y prevención de duplicados vía `idempotency_key`.
+- **Recursos Nativos (`crm://`):**
+  - Publicación de canales, fases, clasificaciones, motivos de pérdida, orígenes y métricas de pipeline.
+- **Aseguramiento de Calidad (QA):**
+  - Suite de pruebas completa en `tests/crm-mcp.test.ts` (19/19 casos VERIFIED) validando roles, no-delete, idempotencia, auto-corrección de errores, recursos y resolución forzada de URL pública de producción Vercel (`https://crm-64yu.vercel.app/api/mcp`) incluso en entornos localhost.
+- **Páginas creadas/actualizadas:** `wiki/pages/servidor-mcp.md`, `wiki/INDEX.md`.
+
+## 2026-09-22 - Ingest: Buscador Interactivo en Desplegable Reasignar Actividad (`CreateActivityModal.tsx`)
+
+- **Modal de Creación y Edición de Actividades (`components/activities/CreateActivityModal.tsx`):**
+  - Sustitución del `<select>` HTML nativo de **Reasignar Actividad** (visible para administradores y coordinadores) por el componente `<SearchableSelect>`.
+  - Soporte de filtrado rápido en memoria por nombre completo y correo electrónico (`searchValue`), normalizado sin distinción de mayúsculas ni acentos.
+  - Conservación de la persistencia inmediata mediante `updateActivity(initialData.id, { user_id: newUserId })`.
+- **Componente Reutilizable (`components/ui/SearchableSelect.tsx`):**
+  - Extensión de la interfaz `SearchableSelectOption` con propiedad opcional `searchValue` para búsquedas multi-campo.
+- **Páginas actualizadas:** `wiki/pages/actividades.md`.
+
+## 2026-09-22 - Ingest: Saneamiento Integral del Módulo de Actividades, Persistencia Autosave, Dexie v15 y Prioridad
+
+- **Saneamiento y Vistas de Actividades (`app/actividades/page.tsx`):**
+  - Corrección de click bubbling en la vista de Mes: inserción de `e.stopPropagation()` en los enlaces y tarjetas de actividad para evitar que la celda del día conmute inesperadamente a la vista 'agenda' al abrir el modal.
+  - Asignación de `group/day` en el contenedor de día mensual para habilitar la visibilidad de los tooltips de actividades en hover.
+  - Eliminación de texto de depuración temporal `"Error L: {act.clasificacion_id}"` en la vista Todo.
+  - Filtrado estricto `!act.is_deleted` en el listado global de actividades.
+- **Modal de Creación y Edición (`components/activities/CreateActivityModal.tsx`):**
+  - Corrección de sobreescritura destructiva de `fecha_fin`: el efecto que calcula `fecha_inicio + 1 hora` ahora ignora el montaje inicial en modo edición y solo actúa si el usuario modifica activamente `fecha_inicio` o `tipo_actividad`.
+  - Habilitación de edición de actividades vencidas e históricas: eliminación de la restricción `minDate={new Date()}` en modo edición en todos los selectores `DateTimePicker`.
+  - Persistencia reactiva de reasignación de usuario (`reassignUserId`) y colaboradores/invitados (`attendees` y `_sync_metadata`) al mutar en modo edición.
+  - Asignación de `{ shouldDirty: true, shouldValidate: true }` en los botones de prioridad.
+  - Incorporación del interruptor de reuniones de Microsoft Teams para eventos con cuenta conectada.
+  - Limpieza de `console.log` de depuración en renders y `useMemo`.
+  - Eliminación de archivo muerto duplicado `components/activities/CreateActivityModal-isazaale.tsx`.
+- **Base de Datos y Hook (`lib/db.ts`, `lib/hooks/useActivities.ts` y Supabase):**
+  - Migración `20260922000000_add_prioridad_to_activities.sql`: adición de columna `prioridad TEXT DEFAULT 'Media'` en `CRM_Actividades`.
+  - Actualización de Dexie a versión 15 indexando `account_id` en la tabla `activities` (`'id, opportunity_id, account_id, user_id, fecha_inicio, tipo_actividad'`), resolviendo el `SchemaError` en `lib/sync.ts`.
+  - Adición de `prioridad` a `DB_COLUMNS` y `createActivity` en `useActivities.ts`, junto con filtro `!a.is_deleted`.
+  - Eliminación de archivo muerto duplicado `lib/hooks/useActivitiesServer-isazaale.ts`.
+- **Pruebas y Verificación:** `pruebas unitarias/actividades.test.ts` (8/8 GREEN), `lib/local-database.test.ts` (2/2 GREEN), `pruebas unitarias/opportunityActivities.test.ts` (8/8 GREEN), `npx tsc --noEmit` (0 errores).
+- **Páginas actualizadas:** `wiki/pages/actividades.md`.
+
+
+## 2026-09-15 - Ingest: Corrección y Persistencia de Formularios de Pedidos y Normalización de Fechas
+
+- **Persistencia y Sincronización de Pedidos (`lib/pedidoHelpers.ts` y `lib/hooks/usePedidos.ts`):**
+  - Mapeo bidireccional de `fecha_entrega` y `fecha_minima_requerida` hacia `EXTRA_Fecha mínima requerida por comercial/cliente` y columna nativa `fecha_entrega`.
+  - Preservación de columnas nativas booleanas `cierre_facturacion` y `es_muestra` en el payload de sincronización de PostgreSQL en lugar de eliminarlas al mapear a columnas `EXTRA_` de SAP.
+- **Normalización de Fechas HTML5 (`lib/pedidoHelpers.ts`):**
+  - Implementación de `normalizeDateToInput` para adaptar fechas de SAP en formato `DD/MM/YYYY` o ISO con timestamps a cadenas `YYYY-MM-DD` requeridas por `<input type="date">`.
+- **Formularios de Pedidos (`components/quotes/PedidosEditor.tsx`):**
+  - Configuración de `useForm` con `shouldUnregister: false`.
+  - Normalización de fechas en `defaultValues` y `useEffect` de carga del pedido.
+  - Sincronización de `fecha_minima_requerida` y `fecha_entrega` en `pedData` tanto en autoguardado (`onAutoSave`) como en confirmación (`onSubmit`).
+- **Base de Datos (Supabase):**
+  - Aplicación de migración idempotente `20260904193842_persist_crm_editable_fields.sql`, creando las columnas faltantes en `CRM_Pedidos` (`fecha_entrega`, `email_contacto`, `tiene_escaleras`, `planos_hidromasaje`) y 16 columnas en `CRM_Cotizaciones`.
+- **Pruebas:** Suite permanente creada en `tests/pedidoPersistence.test.ts` (9/9 VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/cotizaciones-y-pedidos.md`.
+
+## 2026-09-15 - Ingest: Protección y Bloqueo de Alteración Manual de Precios en Ítems de Catálogo
+
+- **Seguridad y Control de Precios (`lib/quotePricing.ts`):**
+  - Creación de funciones puras `isManualQuoteItem`, `isQuoteItemPriceEditable` y `sanitizeQuoteItemUpdates`.
+  - Regla: los productos del catálogo (`producto_id !== null`) tienen precio unitario protegido; no se permite su alteración manual ni en UI ni a través de mutaciones del hook.
+  - Los **Ítems Manuales** (`producto_id === null`) mantienen edición libre de descripción y precio unitario.
+- **Hook de Ítems de Cotización (`lib/hooks/useOpportunities.ts` y `-isazaale.ts`):**
+  - Invocación de `sanitizeQuoteItemUpdates` en `updateItem` para descartar cualquier modificación arbitraria de `precio_unitario` en ítems de catálogo, preservando el cálculo de escalas de volumen en cambios de cantidad.
+- **Interfaz del Editor de Cotización (`app/oportunidades/[id]/cotizaciones/[quoteId]/page.tsx` y `-isazaale.tsx`):**
+  - Renderizado condicional: texto de solo lectura formateado para productos del catálogo vs. input numérico editable para ítems manuales.
+- **Pruebas:** Suite permanente creada en `tests/quotePricingSecurity.test.ts` (4/4 VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/cotizaciones-y-pedidos.md`.
+
+## 2026-09-15 - Ingest: Corrección de Precios sin IVA y Adición de IVA al Final en Exportación a PDF (F-V-29)
+
+- **Generador de PDF (`lib/pdfGenerator.ts`):**
+  - Eliminación de la deducción indebida `/ 1.19` en precios unitarios y subtotales de líneas de cotización/pedido.
+  - Creación y exportación de funciones puras `calculatePdfItemRow` y `calculatePdfTotals`.
+  - Regla: todos los precios de lista son base neta sin IVA (`VALOR UNITARIO` = precio exacto de lista). El subtotal de línea es el valor neto con descuento. El `SUBTOTAL` del documento es la suma de subtotales de línea. El `IVA 19%` se adiciona al final tras el descuento (`subtotal * 0.19` para COP; 0 para exportación USD). El `GRAN TOTAL` equivale a `SUBTOTAL + IVA`.
+- **Pruebas:** Suite permanente creada en `tests/pdfGeneratorTotals.test.ts` (3/3 VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/cotizaciones-y-pedidos.md`.
+
+## 2026-09-15 - Ingest: Sincronización Inmediata de Importe de Oportunidad con Cotizaciones y Reconciliación Global
+
+
+- **Módulo de Sincronización (`lib/opportunityQuoteSync.ts`):**
+  - Implementación de `resolveActiveQuote`: resolución jerárquica de cotización activa (selección manual de usuario -> `WINNER` -> coincidencia de importe -> cotización más reciente).
+  - Implementación de `shouldUpdateOpportunityAmount`: garantiza que si una cotización es `WINNER`, esta mande sobre la oportunidad; y si todas están en borrador, la cotización en edición o seleccionada actualice de inmediato el importe padre.
+  - Implementación de `getOpportunityAmountFromQuote`: extracción determinista de montos.
+- **Hooks de Oportunidades (`lib/hooks/useOpportunities.ts`):**
+  - `createQuote`: actualiza atómicamente la oportunidad padre con el importe de la cotización creada dentro del mismo `commitLocalChanges`.
+  - `updateQuote`: propaga inmediatamente el `total_amount` al `amount` de la oportunidad padre en la misma transacción Dexie + Outbox.
+  - `deleteQuote`: reasigna el importe de la oportunidad a la siguiente cotización activa restante (o 0 si no quedan).
+- **Interfaz de Detalle de Oportunidad (`app/oportunidades/[id]/page.tsx`):**
+  - `ProductsTab`: el selector desplegable de cotizaciones actualiza inmediatamente el importe de la oportunidad y el timestamp de la cotización seleccionada, resolviendo la cotización activa sin saltos visuales ni bucles.
+  - `SummaryTab`: sincronización reactiva de `localAmount` con `opportunity?.amount` vía `useEffect`.
+- **Reconciliación Global de Datos:**
+  - Ejecución de actualización en base de datos (`CRM_Oportunidades`) para alinear 185 oportunidades históricas con su cotización activa. Verificación final: 0 oportunidades desalineadas.
+- **Pruebas:** Suite permanente creada en `tests/opportunityQuoteAmountSync.test.ts` (9/9 VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/pages/cotizaciones-y-pedidos.md`.
+
+## 2026-09-14 - Ingest: Campo desplegable Tipo POD en el Wizard de Pedido Parcial y Mapeo en Supabase
+
+- **Interfaz de Usuario (`components/quotes/PedidosEditor.tsx`):**
+  - Incorporación del selector desplegable **Tipo POD** (`tipo_pod`) en el **Paso 2 ("Datos logísticos SAP")** del wizard de creación y edición de pedidos parciales.
+  - Opciones disponibles: `POD Total` (valor por defecto preseleccionado), `POD Parcial` y `Sin POD`.
+  - Visualización del valor `Tipo POD` en la lista y tarjeta resumen de pedidos parciales asociados a la cotización.
+- **Modelo Local y Persistencia (`lib/db.ts`, `lib/pedidoFormalization.ts`, `components/quotes/PedidosEditor.tsx`):**
+  - Adición de `tipo_pod` y `pod` a las interfaces `LocalPedido` y `LocalQuote`.
+  - Propagación automática de `tipo_pod` y `pod` en `PEDIDO_DOCUMENT_FIELDS` para sincronización con cotización y generación de documentos.
+  - Persistencia y soporte en autosave (`onAutoSave`) y submit manual (`onSubmit`).
+- **Base de Datos y Supabase:**
+  - Migración append-only `supabase/migrations/20260914180000_add_pod_to_orders_and_quotes.sql`.
+  - Columnas `tipo_pod` y `pod` añadidas con default `'POD Total'` a las tablas `CRM_Pedidos` y `CRM_Cotizaciones`, ejecutada y verificada mediante el MCP de Supabase.
+- **Pruebas:** Suite permanente creada en `tests/pedidoPodField.test.ts` (3/3 VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/cotizaciones-y-pedidos.md`.
+
+## 2026-09-14 - Ingest: Corrección y optimización de filtros de columna en tablas Handsontable (Oportunidades y Cuentas)
+
+- **Normalización de Tipos Primitivos (`lib/opportunityTableHelpers.ts`):**
+  - Mapeo de `actividades` a `string` primitivo (`actSummary.label || 'Sin actividad'`) y preservación de `actividades_status` para renderizado visual de badges.
+  - Corrección del bug `[object Object]` en el dropdown de filtros y restauración de la funcionalidad de búsqueda en la columna de actividades.
+- **Resolución de Filas Físicas (`instance.toPhysicalRow`):**
+  - Corrección en renderers de enlaces (`cuenta`, `nombre`, `cierre`, `_original`) y en `afterOnCellMouseDown` para resolver la entidad correspondiente mediante el índice físico real, eliminando el desalineamiento y navegación errónea cuando la tabla está filtrada.
+- **Alineación de Columnas y Anchos (`app/oportunidades/page.tsx`):**
+  - Inclusión de `'actividades'` en `OPPORTUNITY_TABLE_COLUMN_KEYS` para sincronizar `handleColumnResize` y almacenamiento de anchos en `localStorage`.
+- **Localización Oficial en Español (`components/HotTableWrapper.tsx`):**
+  - Registro del diccionario de idioma `es-MX` de `handsontable/i18n` para traducir los controles de filtro ("Filtrar por valor:", "Buscar", "Seleccionar todo", "Borrar", "Aceptar", "Cancelar").
+- **Pruebas:** Suite permanente creada en `tests/opportunityTableFilters.test.ts` (5/5 VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`.
+
+## 2026-09-14 - Ingest: Soporte de Apertura en Nueva Pestaña con Clic Derecho en Todos los Módulos
+
+- **Estandarización de Navegación (`lib/utils/navigation.ts`):**
+  - Creación de `getEntityUrl` para centralizar las URLs canónicas de todas las entidades (`/oportunidades/:id`, `/cuentas?id=:id`, `/contactos?id=:id`, `/actividades?id=:id`, `/oportunidades/:oppId/cotizaciones/:quoteId`).
+  - Creación de `handleEntityLinkClick` para discernir de forma estándar entre clic primario (modal/SPA local) y clic modificado con Ctrl, Cmd, Shift, clic derecho o rueda del ratón (apertura en nueva pestaña).
+- **Módulos Actualizados:**
+  - **Cuentas (`app/cuentas/page.tsx`):** Tarjetas móviles y renderers de columnas en Handsontable envueltos en `<a>` con `href` hacia `/cuentas?id=:id`; soporte en `afterOnCellMouseDown` para auxclick/middle-click.
+  - **Contactos (`app/contactos/page.tsx`):** Tarjetas móviles y celdas Handsontable convertidas en enlaces navegables a contactos y cuentas.
+  - **Oportunidades (`app/oportunidades/page.tsx`, `app/(dashboard)/page.tsx`):** Celdas Handsontable, tarjetas móviles y tabla de oportunidades recientes en el dashboard envueltas en `<Link>` / `<a>` hacia `/oportunidades/:id`.
+  - **Actividades (`app/actividades/page.tsx`, `components/cuentas/AccountActivitiesTab.tsx`, `app/oportunidades/[id]/page.tsx`):** Vistas lista, agenda, mes y pestañas de detalle actualizadas con enlaces `<a>` hacia `/actividades?id=:id` y fallback a IndexedDB en deep-linking.
+- **Pruebas:** Suite permanente creada en `tests/openInNewTab.test.ts` (5/5 VERIFIED / GREEN).
+- **Páginas actualizadas:** `wiki/pages/arquitectura-general.md`.
+
+## 2026-09-11 - Ingest: Filtro de Origen de Oportunidad en el Dashboard de Inicio
+
+- **Filtros Globales (`components/dashboard/DashboardFilters.tsx`, `lib/hooks/useDashboardFilters.ts`):**
+  - Se agregó el campo `origen_oportunidad` en `DashboardFilterState` y el selector `FilterCombobox` correspondiente (placeholder "Origen de Oportunidad") alimentado dinámicamente con las opciones de `CRM_OrigenesOportunidad` (ordenadas por `orden, nombre`).
+  - Se actualizaron `hasFilters` y `clearFilters` para incluir `origen_oportunidad`.
+- **Vista Principal (`app/(dashboard)/page.tsx`):**
+  - Se actualizó el estado inicial y la lógica de filtrado reactivo de `filteredOpps` y `filteredAccs` (vía `origen_cuenta`) considerando alias como 'wp' para WhatsApp.
+- **Embudo de Ventas (`lib/hooks/useSalesFunnel.ts`, `components/dashboard/SalesFunnelTile.tsx`, `get_sales_funnel_data`):**
+  - Se extendió el hook `useSalesFunnel` con `origen_oportunidad` y se actualizó la función RPC `get_sales_funnel_data` (migración `20260911_add_origin_filter_to_sales_funnel.sql`) agregando el parámetro `p_origen_oportunidad DEFAULT NULL::text` y filtrando en ambas ramas (con canal y agrupada).
+  - Se configuró una capa interna de etiquetas en `SalesFunnelTile.tsx` (`position: 'inside'`) para desplegar visiblemente dentro de cada sección trapezoidal del embudo la cantidad exacta de oportunidades que contiene cada fase (e.g. `24 oportunidades`).
+- **Pruebas:** Suite de prueba unitaria en `pruebas unitarias/dashboardFilters.test.ts` (**VERIFIED / GREEN**).
+- **Páginas actualizadas:** `wiki/pages/dashboard-e-indicadores.md`.
+=======
+## 2026-09-11 - INGEST - Filtro de Origen y Tasa de Churn en Embudo
+
+- Se actualizó `dashboard-e-indicadores.md` para reflejar la inclusión del filtro por `origen_oportunidad` en el DashboardGrid y el cálculo de la Tasa de Churn (pérdidas) en el `SalesFunnelTile` extrayendo las oportunidades con `estado_id = 3` desde el RPC `get_sales_funnel_data`.
+>>>>>>> Stashed changes
+
 ## 2026-09-08 - Formato Estándar de Moneda con Separadores es-CO en Oportunidades (`formatNumberCO` / `formatOpportunityAmount`)
 
 - **Mejora Visual en Oportunidades (`lib/utils.ts`, `app/oportunidades/[id]/page.tsx`, `OpportunityQuickView.tsx`, `AccountOpportunitiesTab.tsx`):**

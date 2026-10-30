@@ -28,17 +28,15 @@ que determina su lista de precios.
 - Prueba E2E dev-only en `/e2e/cuentas-wizard` para validar el wizard sin depender
   de cookies de Supabase; en producción la ruta devuelve 404.
 - Listado con filtros (`AccountFilters`, `UserPickerFilter`): vista móvil con tarjetas responsivas y vista desktop con tabla interactiva (Handsontable) donde la columna "País" (mapeada dinámicamente desde `pais_id` / catálogos) se visualiza en la vista inicial junto a Ubicación, y la edición se activa directamente al hacer clic/seleccionar la fila.
-- Detalle con pestañas: contactos, oportunidades, actividades, sucursales (branches) y
-  asignados (`components/cuentas/Account*Tab.tsx`). La reasignación de responsable desde la cuenta matriz reasigna automáticamente en cascada todas sus oportunidades vinculadas en un traspaso directo. La reasignación desde una oportunidad individual aplica únicamente a esa oportunidad.
+- Detalle con pestañas: contactos, oportunidades, actividades, sucursales (branches), asignados e **Historial de Cambios** (`components/cuentas/Account*Tab.tsx` y `EntityAuditHistoryTab`). La reasignación de responsable desde la cuenta matriz reasigna automáticamente en cascada todas sus oportunidades vinculadas en un traspaso directo. La reasignación desde una oportunidad individual aplica únicamente a esa oportunidad.
 - Formulario `AccountForm` con pestañas (usa `shouldUnregister: false` — ver
-  `bugs-knowhow.md` §1) y botón de eliminación visible en el encabezado y en los footers de todas las pestañas. Utiliza `lastSyncedAccountIdRef` y `lastSyncedUpdatedAtRef` para garantizar que el `useEffect` de sincronización con la propiedad `account` no sobreescriba los cambios guardados tras el submit (`isDirty = false`).
+  `bugs-knowhow.md` §1), botón de eliminación visible en el encabezado y en los footers de todas las pestañas, y pestaña de **Historial** (`activeTab === 'history'`) que muestra todas las modificaciones de nombre, NIT, canal, teléfono, dirección o propietario auditadas en tiempo real. Utiliza `lastSyncedAccountIdRef` y `lastSyncedUpdatedAtRef` para garantizar que el `useEffect` de sincronización con la propiedad `account` no sobreescriba los cambios guardados tras el submit (`isDirty = false`).
 - Carga masiva de cuentas: `BulkAccountUploader` + API `app/api/bulk-accounts`.
 - Borrado (`delete_account` / `AccountDeleteModal`): funcionalidad restringida estrictamente a usuarios con rol `ADMIN` (`isAdmin`), con modal de confirmación que permite borrado en cascada de la cuenta junto con sus contactos y oportunidades asociadas (además de permitir borrado individual de registros relacionados).
 
 ## Auditoría
 
-`CRM_Audit_Cuentas` registra cambios (creada en la migración de canales
-`20260108_sales_channels.sql`).
+`CRM_HistorialModificaciones` (respaldada por el trigger `trg_audit_account_changes_full`) registra de forma automática y append-only cualquier modificación en nombre, NIT, teléfono, canal, dirección, ciudad y propietario (`owner_user_id`), asociando el ID y nombre del usuario responsable. La tabla histórica previa `CRM_Audit_Cuentas` se preserva como referencia histórica.
 
 ## Relaciones
 

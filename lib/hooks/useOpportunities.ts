@@ -1,4 +1,5 @@
 import { useLiveQuery } from "dexie-react-hooks";
+import { sellerCanSeeOpportunity } from '@/lib/sellerVisibility';
 import { db, LocalOportunidad, LocalOpportunityCollaborator, LocalQuote, LocalQuoteItem } from "@/lib/db";
 import { syncEngine } from "@/lib/sync";
 import { useState } from "react";
@@ -6,6 +7,9 @@ import { supabase } from "@/lib/supabase";
 import { v4 as uuidv4 } from 'uuid';
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { sendOpportunityDeletionEmail } from "@/lib/services/notifications";
+import { shouldUpdateOpportunityAmount, getOpportunityAmountFromQuote, resolveActiveQuote } from "@/lib/opportunityQuoteSync";
+import { sanitizeQuoteItemUpdates } from "@/lib/quotePricing";
+import { shouldKeepDiscountOnQtyChange } from "@/lib/discountExceptions";
 
 // Helper to fetch pricing from server
 async function fetchPricing(productId: string, channelId: string, qty: number) {
@@ -78,25 +82,21 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
 
     const opportunities = useLiveQuery(
         async () => {
-            // Priority 1: Specific advisor filter from Dashboard
-            if (filters?.advisor_id) {
-                return db.opportunities.where('owner_user_id').equals(filters.advisor_id).toArray();
-            }
-
-            // Priority 2: Vendedor role restriction
+            // Priority 1: Vendedor role restriction (siempre gana, incluso con filtro de asesor del dashboard)
             if (isVendedor && userId) {
                 // Get IDs of opportunities where user is a collaborator
                 const collaborators = await db.opportunityCollaborators
                     .where('usuario_id')
                     .equals(userId)
                     .toArray();
-                const collaboratedIds = new Set(collaborators.map(c => c.oportunidad_id));
+                const collaboratedIds = new Set(collaborators.filter(c => !c.is_deleted).map(c => c.oportunidad_id));
 
-                return db.opportunities.filter(o => 
-                    o.owner_user_id === userId || 
-                    o.created_by === userId ||
-                    collaboratedIds.has(o.id)
-                ).toArray();
+                return db.opportunities.filter(o => sellerCanSeeOpportunity(o, userId, collaboratedIds)).toArray();
+            }
+
+            // Priority 2: Specific advisor filter from Dashboard
+            if (filters?.advisor_id) {
+                return db.opportunities.where('owner_user_id').equals(filters.advisor_id).toArray();
             }
 
             return db.opportunities.toArray();
@@ -265,6 +265,10 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
         const collaborators = await db.opportunityCollaborators.where('oportunidad_id').equals(id).toArray();
         const activities = await db.activities.where('opportunity_id').equals(id).toArray();
         const pedidos = await db.pedidos.where('opportunity_id').equals(id).toArray();
+        // Un asesor solo borra "basura": si ya hay pedidos generados, debe hacerlo un administrador.
+        if (!isAdmin && !isCoordinador && pedidos.some(p => !(p as { is_deleted?: boolean }).is_deleted)) {
+            throw new Error("Esta oportunidad ya tiene pedidos. Solo un administrador o coordinador puede eliminarla.");
+        }
         const pedidoUuids = pedidos.map(p => p.uuid_generado);
         const pedidoItemsAll = pedidoUuids.length > 0
             ? await db.pedidoItems.where('pedido_uuid').anyOf(pedidoUuids).toArray()
@@ -335,6 +339,7 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
             comentarios_perdida: updates.comentarios_perdida !== undefined ? (updates.comentarios_perdida || null) : undefined,
             clientes_atendidos: updates.clientes_atendidos !== undefined ? (updates.clientes_atendidos !== null && updates.clientes_atendidos !== "" ? Number(updates.clientes_atendidos) : 0) : undefined,
             contactos_ids: updates.contactos_ids !== undefined ? (Array.isArray(updates.contactos_ids) ? updates.contactos_ids : []) : undefined,
+            setter: updates.setter !== undefined ? (updates.setter || null) : undefined,
         };
 
         // Remove undefined fields to avoid overwriting with undefined
@@ -345,10 +350,12 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
             ...sanitizedUpdates,
             updated_at: new Date().toISOString(),
             // Sanitize critical dates (Postgres dislikes empty strings for DATE type)
-            fecha_cierre_estimada: (updates.fecha_cierre_estimada === "" ? null : (updates.fecha_cierre_estimada ?? current.fecha_cierre_estimada))
+            fecha_cierre_estimada: (updates.fecha_cierre_estimada === "" ? null : (updates.fecha_cierre_estimada ?? current.fecha_cierre_estimada)),
+            fecha_entrega: (updates.fecha_entrega === "" ? null : (updates.fecha_entrega ?? current.fecha_entrega))
         };
         // Double check if the merged result is still "" (from current)
         if (updated.fecha_cierre_estimada === "") updated.fecha_cierre_estimada = null;
+        if (updated.fecha_entrega === "") updated.fecha_entrega = null;
 
         const quoteUpdates: LocalQuote[] = [];
         if (updates.segmento_id !== undefined) {
@@ -475,15 +482,40 @@ export function useQuotes(opportunityId?: string) {
             }))
             : [];
 
-        await syncEngine.commitLocalChanges([db.quotes, db.quoteItems], async () => {
+        let updatedOpp: LocalOportunidad | null = null;
+        if (oppId) {
+            const opp = await db.opportunities.get(oppId);
+            if (opp) {
+                const existingQuotes = await db.quotes.where('opportunity_id').equals(oppId).toArray();
+                if (shouldUpdateOpportunityAmount(newQuote, {}, existingQuotes)) {
+                    const nextAmount = getOpportunityAmountFromQuote(newQuote);
+                    if (opp.amount !== nextAmount) {
+                        updatedOpp = {
+                            ...opp,
+                            amount: nextAmount,
+                            updated_at: new Date().toISOString()
+                        };
+                    }
+                }
+            }
+        }
+
+        await syncEngine.commitLocalChanges([db.quotes, db.quoteItems, ...(updatedOpp ? [db.opportunities] : [])], async () => {
             await db.quotes.add(newQuote);
             if (newItems.length > 0) await db.quoteItems.bulkAdd(newItems);
+            if (updatedOpp) await db.opportunities.put(updatedOpp);
             return [
                 { entityTable: 'CRM_Cotizaciones', entityId: id, changes: newQuote, options: { isSnapshot: true } },
                 ...newItems.map(item => {
                     const { subtotal, ...itemData } = item;
                     return { entityTable: 'CRM_CotizacionItems', entityId: item.id, changes: itemData, options: { isSnapshot: true } };
-                })
+                }),
+                ...(updatedOpp ? [{
+                    entityTable: 'CRM_Oportunidades',
+                    entityId: updatedOpp.id,
+                    changes: sanitizeOpportunityForSync(updatedOpp),
+                    options: { isSnapshot: true }
+                }] : [])
             ];
         });
 
@@ -498,16 +530,37 @@ export function useQuotes(opportunityId?: string) {
             return;
         }
 
-        const updatedQuote = { ...currentQuote, ...updates, updated_at: new Date().toISOString() };
+        const updatedQuote = { ...currentQuote, ...updates, updated_at: updates.updated_at || new Date().toISOString() };
         let updatedOpp: LocalOportunidad | null = null;
-        if (updates.segmento_id !== undefined && currentQuote.opportunity_id) {
+        if (currentQuote.opportunity_id) {
             const opp = await db.opportunities.get(currentQuote.opportunity_id);
-            if (opp && opp.segmento_id !== updates.segmento_id) {
-                updatedOpp = { ...opp, segmento_id: updates.segmento_id, updated_at: new Date().toISOString() };
+            if (opp) {
+                let needsOppUpdate = false;
+                const oppChanges: Partial<LocalOportunidad> = {};
+
+                if (updates.segmento_id !== undefined && opp.segmento_id !== updates.segmento_id) {
+                    oppChanges.segmento_id = updates.segmento_id;
+                    needsOppUpdate = true;
+                }
+
+                if (updates.total_amount !== undefined) {
+                    const allQuotes = await db.quotes.where('opportunity_id').equals(currentQuote.opportunity_id).toArray();
+                    if (shouldUpdateOpportunityAmount(currentQuote, updates, allQuotes)) {
+                        const nextAmount = getOpportunityAmountFromQuote(currentQuote, updates);
+                        if (opp.amount !== nextAmount) {
+                            oppChanges.amount = nextAmount;
+                            needsOppUpdate = true;
+                        }
+                    }
+                }
+
+                if (needsOppUpdate) {
+                    updatedOpp = { ...opp, ...oppChanges, updated_at: new Date().toISOString() };
+                }
             }
         }
 
-        await syncEngine.commitLocalChanges([db.quotes, db.opportunities], async () => {
+        await syncEngine.commitLocalChanges([db.quotes, ...(updatedOpp ? [db.opportunities] : [])], async () => {
             await db.quotes.put(updatedQuote);
             if (updatedOpp) await db.opportunities.put(updatedOpp);
             return [
@@ -566,21 +619,42 @@ export function useQuotes(opportunityId?: string) {
         if (!quote) return;
 
         const items = await db.quoteItems.where('cotizacion_id').equals(id).toArray();
-        await syncEngine.commitLocalChanges([db.quotes, db.quoteItems], async () => {
+        let updatedOpp: LocalOportunidad | null = null;
+
+        if (quote.opportunity_id) {
+            const opp = await db.opportunities.get(quote.opportunity_id);
+            if (opp) {
+                const remainingQuotes = (await db.quotes.where('opportunity_id').equals(quote.opportunity_id).toArray())
+                    .filter(q => q.id !== id && !q.is_deleted);
+                const nextActiveQuote = resolveActiveQuote(remainingQuotes);
+                const nextAmount = nextActiveQuote ? (nextActiveQuote.total_amount || 0) : 0;
+                if (opp.amount !== nextAmount) {
+                    updatedOpp = { ...opp, amount: nextAmount, updated_at: new Date().toISOString() };
+                }
+            }
+        }
+
+        await syncEngine.commitLocalChanges([db.quotes, db.quoteItems, ...(updatedOpp ? [db.opportunities] : [])], async () => {
             if (items.length > 0) await db.quoteItems.bulkDelete(items.map(item => item.id));
             await db.quotes.delete(id);
+            if (updatedOpp) await db.opportunities.put(updatedOpp);
             return [
                 ...items.map(item => {
                     const { subtotal, ...itemData } = item;
                     return { entityTable: 'CRM_CotizacionItems', entityId: item.id, changes: { ...itemData, is_deleted: true }, options: { isSnapshot: true } };
                 }),
-                { entityTable: 'CRM_Cotizaciones', entityId: id, changes: { ...quote, is_deleted: true }, options: { isSnapshot: true } }
+                { entityTable: 'CRM_Cotizaciones', entityId: id, changes: { ...quote, is_deleted: true }, options: { isSnapshot: true } },
+                ...(updatedOpp ? [{
+                    entityTable: 'CRM_Oportunidades', entityId: updatedOpp.id,
+                    changes: sanitizeOpportunityForSync(updatedOpp), options: { isSnapshot: true }
+                }] : [])
             ];
         });
     };
 
     return { quotes, createQuote, updateQuote, updateQuoteTotal, markAsWinner, deleteQuote };
 }
+
 
 export function useQuoteItems(quoteId?: string) {
     const items = useLiveQuery(
@@ -624,7 +698,7 @@ export function useQuoteItems(quoteId?: string) {
                                     unitPrice = Number(prodData.lista_base_exportaciones) || 0;
                                     break;
                                 case 'PROPIO':
-                                    unitPrice = Number(prodData.distribuidor_pvp_iva) || 0;
+                                    unitPrice = Number(prodData.pvp_sin_iva) || 0;
                                     break;
                                 case 'DIST_NAC':
                                 default:
@@ -685,11 +759,13 @@ export function useQuoteItems(quoteId?: string) {
         const current = await db.quoteItems.get(itemId);
         if (!current) return;
 
-        const updated = { ...current, ...updates };
+        const safeUpdates = sanitizeQuoteItemUpdates(current, updates);
+        const updated = { ...current, ...safeUpdates };
 
         // If quantity changed, re-calculate pricing ONLY for linked products
-        if (updates.cantidad !== undefined && updates.cantidad !== current.cantidad && current.producto_id) {
+        if (safeUpdates.cantidad !== undefined && safeUpdates.cantidad !== current.cantidad && current.producto_id) {
             let pricing = null;
+            let keepDiscount = false;
             try {
                 const parentQuote = await db.quotes.get(current.cotizacion_id);
                 if (parentQuote) {
@@ -698,6 +774,12 @@ export function useQuoteItems(quoteId?: string) {
                         const acc = await db.accounts.get(opp.account_id);
                         if (acc) {
                             pricing = await fetchPricing(current.producto_id, acc.canal_id, updated.cantidad);
+                            keepDiscount = shouldKeepDiscountOnQtyChange({
+                                channel: acc.canal_id,
+                                ignorarLimites: !!acc.ignorar_limites_descuento,
+                                currentDiscountPct: current.discount_pct,
+                                previousMaxPct: current.max_discount_pct
+                            });
                         }
                     }
                 }
@@ -712,7 +794,7 @@ export function useQuoteItems(quoteId?: string) {
 
                 // Cap existing manual discount if it now exceeds the new maximum allowed
                 const manualDiscount = updated.discount_pct !== undefined ? updated.discount_pct : (current.discount_pct || 0);
-                if (manualDiscount > pricing.discount_pct) {
+                if (!keepDiscount && manualDiscount > pricing.discount_pct) {
                     updated.discount_pct = pricing.discount_pct;
                 }
             }

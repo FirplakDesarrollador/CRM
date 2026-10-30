@@ -1,5 +1,6 @@
 export interface ActivityItem {
     id: string;
+    user_id?: string | null;
     fecha_inicio?: string | null;
     fecha_fin?: string | null;
     tipo_actividad?: string | null;

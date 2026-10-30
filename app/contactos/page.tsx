@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useState, useMemo, useEffect, useCallback, Suspense } from "react";
 import { ContactForm } from "@/components/contactos/ContactForm";
+import { ContactOpportunities, newOpportunityUrlForContact } from "@/components/contactos/ContactOpportunities";
 import Link from "next/link";
 import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
 import { Edit2, Trash2, Phone, Mail, User, Building, Search, Plus, CloudUpload, Loader2 } from "lucide-react";
@@ -18,6 +19,8 @@ import dynamic from 'next/dynamic';
 import { AccountCombobox } from "@/components/accounts/AccountCombobox";
 import { ArrowUpDown, ChevronDown, ChevronUp, X } from "lucide-react";
 import { DataListToolbar } from "@/components/ui/DataListToolbar";
+import { handleEntityLinkClick } from "@/lib/utils/navigation";
+import { formatColombiaDateTime } from "@/lib/date-utils";
 
 const HotTable = dynamic(() => import('@/components/HotTableWrapper'), { ssr: false });
 
@@ -46,7 +49,7 @@ function ContactsContent() {
         onLoadMore: loadMore,
     });
 
-    const { user } = useCurrentUser();
+    const { user, isVendedor } = useCurrentUser();
     const { accounts } = useAccounts();
     const { deleteContact } = useContacts();
 
@@ -71,7 +74,7 @@ function ContactsContent() {
             width = arg2;
         }
         const fields: Record<number, string> = {
-            0: 'nombre', 1: 'cargo', 2: 'principal', 3: 'cuenta', 4: 'email', 5: 'telefono'
+            0: 'nombre', 1: 'cargo', 2: 'principal', 3: 'cuenta', 4: 'email', 5: 'telefono', 6: 'creacion'
         };
         const fieldName = fields[colIndex];
         if (fieldName && width > 30) {
@@ -120,10 +123,16 @@ function ContactsContent() {
                 return;
             }
 
+            // Asesor (VENDEDOR): solo contactos de sus cuentas visibles.
+            const canOpen = (contact: { account_id?: string | null }) => {
+                if (!isVendedor) return true;
+                return !!contact.account_id && (accounts || []).some(a => a.id === contact.account_id);
+            };
+
             // 2. Try local IndexedDB
             try {
                 const localContact = await db.contacts.get(id);
-                if (localContact) {
+                if (localContact && canOpen(localContact)) {
                     setEditingContact(localContact);
                     setIsCreating(false);
                     return;
@@ -140,7 +149,7 @@ function ContactsContent() {
                     .eq('id', id)
                     .single();
 
-                if (contact && !error) {
+                if (contact && !error && canOpen(contact)) {
                     setEditingContact(contact);
                     setIsCreating(false);
                 }
@@ -150,7 +159,7 @@ function ContactsContent() {
         };
 
         findAndOpen();
-    }, [searchParams, contacts]);
+    }, [searchParams, contacts, accounts, isVendedor]);
 
     // Restore state from sessionStorage if navigating from sidebar (empty query)
     useEffect(() => {
@@ -169,7 +178,7 @@ function ContactsContent() {
         }
     }, [searchParams, router]);
 
-    const handleSort = (field: 'updated_at' | 'nombre' | 'email') => {
+    const handleSort = (field: 'updated_at' | 'created_at' | 'nombre' | 'email') => {
         if (sortField === field) setSortAsc(!sortAsc);
         else {
             setSortField(field);
@@ -246,7 +255,7 @@ function ContactsContent() {
         const saved = new URLSearchParams(typeof window !== 'undefined' ? sessionStorage.getItem('crm_contactos_state') || '' : '');
         const account = searchParams.get('account') || saved.get('account') || '';
         const principal = (searchParams.get('principal') || saved.get('principal') || 'all') as 'all' | 'principal' | 'secondary';
-        const sort = (searchParams.get('sort') || saved.get('sort')) as 'updated_at' | 'nombre' | 'email' | null;
+        const sort = (searchParams.get('sort') || saved.get('sort')) as 'updated_at' | 'created_at' | 'nombre' | 'email' | null;
         const direction = searchParams.get('dir') || saved.get('dir');
         const search = searchParams.get('search') || saved.get('search') || '';
 
@@ -409,6 +418,9 @@ function ContactsContent() {
                     onSuccess={resetView}
                     onCancel={resetView}
                 />
+                {editingContact && (
+                    <ContactOpportunities contactId={editingContact.id} accountId={editingContact.account_id} />
+                )}
             </div>
         );
     }
@@ -424,25 +436,30 @@ function ContactsContent() {
             cuenta: accountName,
             email: contact.email || "-",
             telefono: contact.telefono || "-",
+            creacion: formatColombiaDateTime(contact.created_at),
             _original: contact
         };
     });
 
     const hotColumns = [
         { data: 'nombre', title: 'Contacto', readOnly: true, width: colWidths['nombre'] || 200, wordWrap: false,
-            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+            renderer(instance: any, td: HTMLTableCellElement, row: number, col: number, prop: string, value: any) {
                 const v = value || '';
                 const safe = v.replace(/"/g, '&quot;');
-                td.innerHTML = `<div style="font-weight:700;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</div>`;
+                const contact = instance.getSourceDataAtRow(row)?._original;
+                const url = contact?.id ? `/contactos?id=${contact.id}` : '#';
+                td.innerHTML = `<a href="${url}" onclick="if (!event.ctrlKey && !event.metaKey && event.button === 0) { event.preventDefault(); }" style="font-weight:700;color:#0f172a;text-decoration:none;display:block;width:100%;height:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</a>`;
                 td.style.overflow = 'hidden';
                 return td;
             }
         },
         { data: 'cargo', title: 'Cargo', readOnly: true, width: colWidths['cargo'] || 160, wordWrap: false,
-            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+            renderer(instance: any, td: HTMLTableCellElement, row: number, col: number, prop: string, value: any) {
                 const v = value || '';
                 const safe = v.replace(/"/g, '&quot;');
-                td.innerHTML = `<div style="color:#475569;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</div>`;
+                const contact = instance.getSourceDataAtRow(row)?._original;
+                const url = contact?.id ? `/contactos?id=${contact.id}` : '#';
+                td.innerHTML = `<a href="${url}" onclick="if (!event.ctrlKey && !event.metaKey && event.button === 0) { event.preventDefault(); }" style="color:#475569;text-decoration:none;display:block;width:100%;height:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</a>`;
                 td.style.overflow = 'hidden';
                 return td;
             }
@@ -458,10 +475,12 @@ function ContactsContent() {
             }
         },
         { data: 'cuenta', title: 'Cuenta', readOnly: true, width: colWidths['cuenta'] || 180, wordWrap: false,
-            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+            renderer(instance: any, td: HTMLTableCellElement, row: number, col: number, prop: string, value: any) {
                 const v = value || '';
                 const safe = v.replace(/"/g, '&quot;');
-                td.innerHTML = `<div style="font-weight:600;color:#3b82f6;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</div>`;
+                const contact = instance.getSourceDataAtRow(row)?._original;
+                const url = contact?.account_id ? `/cuentas?id=${contact.account_id}` : (contact?.id ? `/contactos?id=${contact.id}` : '#');
+                td.innerHTML = `<a href="${url}" onclick="if (!event.ctrlKey && !event.metaKey && event.button === 0) { event.preventDefault(); }" style="font-weight:600;color:#3b82f6;text-decoration:none;display:block;width:100%;height:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</a>`;
                 td.style.overflow = 'hidden';
                 return td;
             }
@@ -478,6 +497,21 @@ function ContactsContent() {
         { data: 'telefono', title: 'Teléfono', readOnly: true, width: colWidths['telefono'] || 130, wordWrap: false,
             renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 td.innerHTML = `<span style="font-size:12.5px;color:#64748b;font-weight:500;font-variant-numeric:tabular-nums;">${value || '-'}</span>`;
+                return td;
+            }
+        },
+        { data: 'creacion', title: 'Creación', readOnly: true, width: Math.max(colWidths['creacion'] || 150, 150), wordWrap: false,
+            renderer(_: unknown, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: unknown) {
+                td.innerHTML = `<span style="font-size:12.5px;color:#64748b;font-weight:500;font-variant-numeric:tabular-nums;">${value || '-'}</span>`;
+                return td;
+            }
+        },
+        { data: 'oportunidades', title: 'Oportunidades', readOnly: true, width: colWidths['oportunidades'] || 150, wordWrap: false,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            renderer(_: any, td: HTMLTableCellElement) {
+                // Quick actions: "Ver" opens the contact (with its opportunities), "+ Nueva" opens the prefilled wizard
+                td.innerHTML = `<div style="display:flex;align-items:center;gap:6px;height:100%;"><span data-action="view" style="cursor:pointer;font-size:11px;font-weight:700;color:#475569;background:#f1f5f9;padding:2px 8px;border-radius:6px;">Ver</span><span data-action="new" style="cursor:pointer;font-size:11px;font-weight:700;color:#2563eb;background:#eff6ff;padding:2px 8px;border-radius:6px;white-space:nowrap;">+ Nueva</span></div>`;
+                td.style.overflow = 'visible';
                 return td;
             }
         }
@@ -574,10 +608,11 @@ function ContactsContent() {
                         {contacts.map((contact) => {
                             const accountName = contact.account_name || accountMap.get(contact.account_id) || "Sin cuenta";
                             return (
-                                <div 
+                                <a 
                                     key={contact.id}
-                                    onClick={() => handleEdit(contact)}
-                                    className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col hover:border-blue-300 active:scale-[0.99] transition-all relative cursor-pointer"
+                                    href={`/contactos?id=${contact.id}`}
+                                    onClick={(e) => handleEntityLinkClick(e, `/contactos?id=${contact.id}`, () => handleEdit(contact))}
+                                    className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col hover:border-blue-300 active:scale-[0.99] transition-all relative cursor-pointer no-underline text-inherit block"
                                 >
                                     <div className="p-4 border-b border-slate-100 flex justify-between items-start gap-3">
                                         <div className="flex-1 min-w-0">
@@ -614,7 +649,7 @@ function ContactsContent() {
                                             </div>
                                         </div>
                                     </div>
-                                </div>
+                                </a>
                             );
                         })}
                     </div>
@@ -789,23 +824,45 @@ function ContactsContent() {
                                             // User clicked the filter dropdown button [▼], do NOT toggle sort!
                                             return;
                                         }
-                                        const fields: Record<number, 'nombre' | 'email'> = { 0: 'nombre', 4: 'email' };
+                                        const fields: Record<number, 'nombre' | 'email' | 'created_at'> = { 0: 'nombre', 4: 'email', 6: 'created_at' };
                                         if (fields[coords.col]) handleSort(fields[coords.col]);
                                         return;
                                     }
                                     if (coords.row >= 0) {
+                                        const mouseEvent = event as MouseEvent;
                                         const contact = hotData[coords.row]?._original;
+                                        if (mouseEvent?.button === 2) {
+                                            // Clic derecho: permitir menú contextual nativo del enlace
+                                            return;
+                                        }
+                                        if (coords.col === 7 && contact?.account_id) {
+                                            const action = (mouseEvent?.target as HTMLElement | null)?.closest?.('[data-action]')?.getAttribute('data-action');
+                                            if (action === 'new') {
+                                                const url = newOpportunityUrlForContact(contact.account_id, contact.id);
+                                                if (mouseEvent?.button === 1 || mouseEvent?.ctrlKey || mouseEvent?.metaKey) window.open(url, '_blank');
+                                                else router.push(url);
+                                                return;
+                                            }
+                                        }
+                                        if (mouseEvent?.button === 1 || mouseEvent?.ctrlKey || mouseEvent?.metaKey) {
+                                            if (coords.col === 3 && contact?.account_id) {
+                                                window.open(`/cuentas?id=${contact.account_id}`, '_blank');
+                                            } else if (contact?.id) {
+                                                window.open(`/contactos?id=${contact.id}`, '_blank');
+                                            }
+                                            return;
+                                        }
                                         if (contact) {
                                             handleEdit(contact);
                                         }
                                     }
                                 }}
                                 afterGetColHeader={(column: number, TH: HTMLTableCellElement) => {
-                                    const fields: Record<number, 'nombre' | 'email'> = { 0: 'nombre', 4: 'email' };
-                                    const labels: Record<number, string> = { 0: 'Contacto', 4: 'Email' };
+                                    const fields: Record<number, 'nombre' | 'email' | 'created_at'> = { 0: 'nombre', 4: 'email', 6: 'created_at' };
+                                    const labels: Record<number, string> = { 0: 'Contacto', 4: 'Email', 6: 'Creación' };
                                     if (fields[column]) {
                                         TH.style.cursor = 'pointer';
-                                        TH.title = 'Clic para ordenar A–Z o Z–A';
+                                        TH.title = fields[column] === 'created_at' ? 'Clic para ordenar por fecha de creación' : 'Clic para ordenar A–Z o Z–A';
                                         const header = TH.querySelector('.colHeader');
                                         if (header) header.textContent = `${labels[column]} ${sortField === fields[column] ? (sortAsc ? '↑' : '↓') : '↕'}`;
                                     }

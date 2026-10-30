@@ -2,15 +2,21 @@
 
 import { useOpportunitiesServer } from "@/lib/hooks/useOpportunitiesServer";
 import { useInfiniteScroll } from "@/lib/hooks/useInfiniteScroll";
-import React, { useState, useEffect, useCallback, Suspense, useMemo } from "react";
+import React, { useState, useEffect, useCallback, Suspense, useMemo, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Plus, Search, Filter, Briefcase, ArrowUpDown, ChevronUp, ChevronDown, Columns3, Check } from "lucide-react";
+import { Plus, Search, Filter, Briefcase, ArrowUpDown, ChevronUp, ChevronDown, Columns3, Check, X, Loader2 } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/components/ui/utils";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { UserPickerFilter } from "@/components/cuentas/UserPickerFilter";
 import { OpportunityFilters } from "@/components/oportunidades/OpportunityFilters";
+import { QuickDateFilter, FloatingDateFilterPopover } from "@/components/oportunidades/QuickDateFilter";
+import { FloatingColumnFilterPopover, FloatingColumnFilterAnchor } from "@/components/oportunidades/FloatingColumnFilterPopover";
+import { isColumnFilterActive, formatColumnHeaderTitle } from "@/lib/opportunityColumnFilterHelpers";
+import { parseHandsontableDate } from "@/lib/dateFilterHelpers";
 import { computeOpportunityActivitySummary } from "@/lib/opportunityActivities";
+import { isNewTabClick, openLinkInBackgroundTab, wrapCellInRowLink } from "@/lib/rowLinks";
+import { buildOpportunityHotRow, resolveHotRowData, type HotInstanceLike, OPPORTUNITY_TABLE_COLUMN_KEYS } from "@/lib/opportunityTableHelpers";
 import { supabase } from "@/lib/supabase";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/db";
@@ -51,6 +57,7 @@ function OpportunitiesContent() {
     const {
         data: opportunities,
         count,
+        totalAmount,
         loading,
         hasMore,
         loadMore,
@@ -64,6 +71,8 @@ function OpportunitiesContent() {
         setPhaseFilter,
         setStatusFilter,
         setOriginFilter,
+        setCountryFilter,
+        setCityFilter,
         setStartDate,
         setEndDate,
         setStartClosingDate,
@@ -101,13 +110,22 @@ function OpportunitiesContent() {
         }
         return [];
     });
+    const [headerDateFilterAnchor, setHeaderDateFilterAnchor] = useState<{
+        top: number;
+        left: number;
+        title?: string;
+        colKey: 'creada' | 'cierre';
+    } | null>(null);
+    const [headerColumnFilterAnchor, setHeaderColumnFilterAnchor] = useState<FloatingColumnFilterAnchor | null>(null);
 
     const handleSort = (field: string) => {
         if (sortField === field) {
             setSortAsc(!sortAsc);
         } else {
             setSortField(field);
-            setSortAsc(true);
+            // Para fechas (created_at, fecha_cierre_estimada) y montos (amount), el primer clic ordena de más nuevo/mayor a menor (descendente)
+            const isDescByDefault = field === 'created_at' || field === 'fecha_cierre_estimada' || field === 'amount';
+            setSortAsc(!isDescByDefault);
         }
     };
 
@@ -220,6 +238,29 @@ function OpportunitiesContent() {
         return null;
     });
 
+    const [selectedCountry, setSelectedCountry] = useState<number | null>(() => {
+        const fromUrl = searchParams.get('country');
+        if (fromUrl) return Number(fromUrl);
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_oportunidades_state');
+            if (saved) {
+                const val = new URLSearchParams(saved).get('country');
+                return val ? Number(val) : null;
+            }
+        }
+        return null;
+    });
+
+    const [selectedCity, setSelectedCity] = useState<string | null>(() => {
+        const fromUrl = searchParams.get('city');
+        if (fromUrl) return fromUrl;
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_oportunidades_state');
+            if (saved) return new URLSearchParams(saved).get('city') || null;
+        }
+        return null;
+    });
+
     // Synchronize initial & restored filter values from URL or sessionStorage to the server hook
     useEffect(() => {
         const savedState = typeof window !== 'undefined' ? sessionStorage.getItem('crm_oportunidades_state') : null;
@@ -234,12 +275,15 @@ function OpportunitiesContent() {
         const initialPhase = searchParams.get('phase') || saved.get('phase') || null;
         const initialStatus = searchParams.get('status') || saved.get('status') || 'open';
         const initialOrigin = searchParams.get('origin') || saved.get('origin') || null;
-        const initialSort = searchParams.get('sort') || saved.get('sort');
-        const initialDirection = searchParams.get('dir') || saved.get('dir');
+        const rawSort = searchParams.get('sort') || saved.get('sort');
+        const initialSort = (rawSort && rawSort !== 'updated_at') ? rawSort : 'created_at';
+        const initialDirection = searchParams.get('dir') || saved.get('dir') || 'desc';
         const start = searchParams.get('start') || saved.get('start') || null;
         const end = searchParams.get('end') || saved.get('end') || null;
         const startClose = searchParams.get('startClose') || saved.get('startClose') || null;
         const endClose = searchParams.get('endClose') || saved.get('endClose') || null;
+        const initialCountry = searchParams.get('country') || saved.get('country') || null;
+        const initialCity = searchParams.get('city') || saved.get('city') || null;
 
         setSearchTerm(initialSearch);
         setInputValue(initialSearch);
@@ -257,6 +301,11 @@ function OpportunitiesContent() {
         const phaseNum = initialPhase ? Number(initialPhase) : null;
         setPhaseFilter(phaseNum);
         setSelectedPhase(phaseNum);
+        const countryNum = initialCountry ? Number(initialCountry) : null;
+        setCountryFilter(countryNum);
+        setSelectedCountry(countryNum);
+        setCityFilter(initialCity);
+        setSelectedCity(initialCity);
         setStatusFilter(initialStatus as any);
         setStatusFilterState(initialStatus as any);
         setOriginFilter(initialOrigin);
@@ -269,8 +318,8 @@ function OpportunitiesContent() {
         setStartClosingDateState(startClose);
         setEndClosingDate(endClose);
         setEndClosingDateState(endClose);
-        if (initialSort) setSortField(initialSort);
-        if (initialDirection) setSortAsc(initialDirection === 'asc');
+        setSortField(initialSort);
+        setSortAsc(initialDirection === 'asc');
         setUserFilter(initialTab as any);
         setTab(initialTab as any);
     }, [searchParams]);
@@ -358,7 +407,13 @@ function OpportunitiesContent() {
         if (endClosingDate) params.set('endClose', endClosingDate);
         else params.delete('endClose');
 
-        if (sortField !== 'updated_at') params.set('sort', sortField);
+        if (selectedCountry) params.set('country', String(selectedCountry));
+        else params.delete('country');
+
+        if (selectedCity && selectedCity.trim() !== '') params.set('city', selectedCity.trim());
+        else params.delete('city');
+
+        if (sortField !== 'created_at') params.set('sort', sortField);
         else params.delete('sort');
         if (sortAsc) params.set('dir', 'asc');
         else params.delete('dir');
@@ -382,7 +437,7 @@ function OpportunitiesContent() {
         
         const query = queryString ? `?${queryString}` : window.location.pathname;
         router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
-    }, [tab, selectedAccountOwnerIds, selectedChannel, selectedSubclass, selectedSegment, selectedPhase, selectedOrigin, statusFilter, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc, searchParams, router]); // Search is handled by the debounced effect above.
+    }, [tab, selectedAccountOwnerIds, selectedChannel, selectedSubclass, selectedSegment, selectedPhase, selectedOrigin, selectedCountry, selectedCity, statusFilter, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc, searchParams, router]); // Search is handled by the debounced effect above.
 
 
     const handleFilterChange = useCallback(({ 
@@ -480,6 +535,7 @@ function OpportunitiesContent() {
         { key: 'fase',        label: 'Fase' },
         { key: 'estado',      label: 'Estado' },
         { key: 'creada',      label: 'Creada' },
+        { key: 'categoria',   label: 'Categoría de Interés' },
         { key: 'valor',       label: 'Valor' },
         { key: 'cierre',      label: 'Cierre' },
         { key: 'vendedor',    label: 'Vendedor' },
@@ -488,7 +544,7 @@ function OpportunitiesContent() {
     const [visibleColumns, setVisibleColumns] = useState<string[]>(() => {
         const defaultKeys = ALL_COLUMNS.map(c => c.key);
         if (typeof window !== 'undefined') {
-            const saved = localStorage.getItem('crm_opp_visible_cols_v3') || localStorage.getItem('crm_opp_visible_cols_v2') || localStorage.getItem('crm_opp_visible_cols');
+            const saved = localStorage.getItem('crm_opp_visible_cols_v4') || localStorage.getItem('crm_opp_visible_cols_v3') || localStorage.getItem('crm_opp_visible_cols_v2') || localStorage.getItem('crm_opp_visible_cols');
             if (saved) {
                 try {
                     const parsed: string[] = JSON.parse(saved);
@@ -496,7 +552,7 @@ function OpportunitiesContent() {
                         const savedSet = new Set(parsed);
                         const missingKeys = defaultKeys.filter(k => !savedSet.has(k));
                         const reordered = defaultKeys.filter(k => savedSet.has(k) || missingKeys.includes(k));
-                        localStorage.setItem('crm_opp_visible_cols_v3', JSON.stringify(reordered));
+                        localStorage.setItem('crm_opp_visible_cols_v4', JSON.stringify(reordered));
                         return reordered;
                     }
                 } catch (e) {}
@@ -508,32 +564,16 @@ function OpportunitiesContent() {
     const toggleColumn = (key: string) => {
         setVisibleColumns(prev => {
             const next = prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key];
-            localStorage.setItem('crm_opp_visible_cols_v3', JSON.stringify(next));
+            localStorage.setItem('crm_opp_visible_cols_v4', JSON.stringify(next));
             return next;
         });
     };
 
-    const hotData = opportunities.map(opp => {
-        const actSummary = opp.activity_summary || computeOpportunityActivitySummary(opp.actividades);
-        const countryName = opp.account?.pais_id ? (countryMap[opp.account.pais_id] || "Colombia") : (opp.account?.pais || "Colombia");
-        return {
-            id: opp.id,
-            nombre: opp.nombre || "Sin nombre",
-            cuenta: opp.account?.nombre || "Sin cuenta",
-            actividades: actSummary,
-            pais: countryName,
-            ciudad: opp.account?.ciudad || "Sin ciudad",
-            canal: opp.account?.canal_id || "-",
-            origen: opp.origen_oportunidad || "-",
-            fase: opp.fase_data?.nombre || 'Pros.',
-            estado: opp.estado_data?.nombre || 'Abierta',
-            creada: opp.created_at ? new Date(opp.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' }) : "-",
-            valor: opp.amount || 0,
-            cierre: opp.fecha_cierre_estimada ? new Date(opp.fecha_cierre_estimada).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) : "-",
-            cierre_overdue: opp.fecha_cierre_estimada ? new Date(opp.fecha_cierre_estimada) < new Date() : false,
-            vendedor: opp.vendedor?.full_name || "Sin asignar"
-        };
-    });
+    const hotTableRef = useRef<{ hotInstance?: { toPhysicalRow?: (r: number) => number; getSourceDataAtRow?: (r: number) => unknown } } | null>(null);
+
+    const hotData = useMemo(() => {
+        return opportunities.map(opp => buildOpportunityHotRow(opp, countryMap));
+    }, [opportunities, countryMap]);
 
     const { user } = useCurrentUser();
     const colStorageKey = `crm_col_widths_oportunidades_${user?.id || 'default'}`;
@@ -555,7 +595,7 @@ function OpportunitiesContent() {
             colIndex = arg1;
             width = arg2;
         }
-        const activeKeys = ['nombre','cuenta','pais','ciudad','canal','origen','fase','estado','creada','valor','cierre','vendedor']
+        const activeKeys = OPPORTUNITY_TABLE_COLUMN_KEYS
             .filter(key => visibleColumns.includes(key));
         const keyName = activeKeys[colIndex];
         if (keyName && width > 30) {
@@ -572,10 +612,14 @@ function OpportunitiesContent() {
     const ALL_COLUMN_DEFS: Record<string, any> = {
         cuenta: {
             data: 'cuenta', title: 'Cuenta', readOnly: true, width: colWidths['cuenta'] || 220, wordWrap: false,
-            renderer(_: unknown, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+            renderer(instance: unknown, td: HTMLTableCellElement, row: number, _col: number, _prop: string, value: any) {
                 const v = value || '';
                 const safe = v.replace(/"/g, '&quot;');
-                td.innerHTML = `<div style="font-weight:600;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</div>`;
+                const inst = instance as { toPhysicalRow?: (r: number) => number; getSourceDataAtRow?: (r: number) => { id?: string; account_id?: string } } | null | undefined;
+                const physicalRow = inst && typeof inst.toPhysicalRow === 'function' ? inst.toPhysicalRow(row) : row;
+                const rowData = inst && typeof inst.getSourceDataAtRow === 'function' ? inst.getSourceDataAtRow(physicalRow) : undefined;
+                const url = rowData?.id ? `/oportunidades/${rowData.id}` : '#';
+                td.innerHTML = `<a href="${url}" onclick="event.preventDefault();" style="font-weight:600;color:#0f172a;text-decoration:none;display:block;width:100%;height:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</a>`;
                 td.style.overflow = 'hidden';
                 return td;
             }
@@ -612,44 +656,54 @@ function OpportunitiesContent() {
         },
         nombre: {
             data: 'nombre', title: 'Oportunidad', readOnly: true, width: colWidths['nombre'] || 240, wordWrap: false,
-            renderer(_: unknown, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+            renderer(instance: unknown, td: HTMLTableCellElement, row: number, _col: number, _prop: string, value: any) {
                 const v = value || '';
                 const safe = v.replace(/"/g, '&quot;');
-                td.innerHTML = `<div style="font-weight:600;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</div>`;
+                const inst = instance as { toPhysicalRow?: (r: number) => number; getSourceDataAtRow?: (r: number) => { id?: string } } | null | undefined;
+                const physicalRow = inst && typeof inst.toPhysicalRow === 'function' ? inst.toPhysicalRow(row) : row;
+                const rowData = inst && typeof inst.getSourceDataAtRow === 'function' ? inst.getSourceDataAtRow(physicalRow) : undefined;
+                const oppId = rowData?.id;
+                const url = oppId ? `/oportunidades/${oppId}` : '#';
+                td.innerHTML = `<a href="${url}" onclick="event.preventDefault();" style="font-weight:600;color:#0f172a;text-decoration:none;display:block;width:100%;height:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</a>`;
                 td.style.overflow = 'hidden';
                 return td;
             }
         },
         actividades: {
             data: 'actividades', title: 'Actividad', readOnly: true, width: 155, wordWrap: false,
-            renderer(_: unknown, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
-                const summary = (value && typeof value === 'object' && 'status' in value)
-                    ? value
-                    : { status: 'none', label: 'Sin actividad', overdue: 0, scheduled: 0, completed: 0, hasActivity: false };
+            renderer(instance: unknown, td: HTMLTableCellElement, row: number, _col: number, _prop: string, value: unknown) {
+                const inst = instance as { toPhysicalRow?: (r: number) => number; getSourceDataAtRow?: (r: number) => unknown } | null | undefined;
+                const physicalRow = inst && typeof inst.toPhysicalRow === 'function' ? inst.toPhysicalRow(row) : row;
+                const rowData = (inst && typeof inst.getSourceDataAtRow === 'function')
+                    ? (inst.getSourceDataAtRow(physicalRow) as { actividades_status?: string } | undefined)
+                    : undefined;
+                const label = (typeof value === 'string' && value) ? value : ((value as { label?: string })?.label || 'Sin actividad');
+                const status = rowData?.actividades_status || ((value as { status?: string })?.status) ||
+                    (label.includes('atrasad') ? 'overdue' : label.includes('programad') ? 'scheduled' : label.includes('completad') ? 'completed' : 'none');
 
                 let bg = '#f8fafc';
                 let c = '#94a3b8';
                 let bd = '#e2e8f0';
                 let icon = '';
 
-                if (summary.status === 'overdue') {
+                if (status === 'overdue') {
                     bg = '#fee2e2';
                     c = '#b91c1c';
                     bd = '#fca5a5';
                     icon = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`;
-                } else if (summary.status === 'scheduled') {
+                } else if (status === 'scheduled') {
                     bg = '#eff6ff';
                     c = '#1d4ed8';
                     bd = '#bfdbfe';
                     icon = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>`;
-                } else if (summary.status === 'completed') {
+                } else if (status === 'completed') {
                     bg = '#f0fdf4';
                     c = '#15803d';
                     bd = '#bbf7d0';
                     icon = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;"><polyline points="20 6 9 17 4 12"/></svg>`;
                 }
 
-                td.innerHTML = `<div style="display:flex;align-items:center;height:100%;"><span style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:8px;font-size:11.5px;font-weight:700;white-space:nowrap;background:${bg};color:${c};border:1px solid ${bd};line-height:1.3;">${icon}<span>${summary.label || 'Sin actividad'}</span></span></div>`;
+                td.innerHTML = `<div style="display:flex;align-items:center;height:100%;"><span style="display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:8px;font-size:11.5px;font-weight:700;white-space:nowrap;background:${bg};color:${c};border:1px solid ${bd};line-height:1.3;">${icon}<span>${label}</span></span></div>`;
                 td.style.overflow = 'visible';
                 return td;
             }
@@ -693,9 +747,30 @@ function OpportunitiesContent() {
             }
         },
         creada: {
-            data: 'creada', title: 'Creada', readOnly: true, width: colWidths['creada'] || 105, wordWrap: false,
+            data: 'creada',
+            type: 'date',
+            dateFormat: 'DD/MM/YYYY',
+            correctFormat: true,
+            title: 'Creada',
+            readOnly: true,
+            width: Math.max(colWidths['creada'] || 150, 150),
+            wordWrap: false,
             renderer(_: unknown, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 td.innerHTML = `<span style="font-size:12.5px;color:#64748b;font-weight:500;font-variant-numeric:tabular-nums;">${value || '-'}</span>`;
+                return td;
+            }
+        },
+        categoria: {
+            data: 'categoria', title: 'Categoría de Interés', readOnly: true, width: colWidths['categoria'] || 165, wordWrap: false,
+            renderer(_: unknown, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+                const v = value || '-';
+                const safe = String(v).replace(/"/g, '&quot;');
+                if (v === '-') {
+                    td.innerHTML = `<div style="display:flex;align-items:center;height:100%;"><span style="font-size:12.5px;color:#94a3b8;font-weight:500;">-</span></div>`;
+                } else {
+                    td.innerHTML = `<div style="display:flex;align-items:center;height:100%;overflow:hidden;"><span style="display:inline-block;padding:2px 8px;border-radius:6px;font-size:11.5px;font-weight:600;white-space:nowrap;background:#f8fafc;color:#334155;border:1px solid #e2e8f0;overflow:hidden;text-overflow:ellipsis;max-width:100%;line-height:1.4;" title="${safe}">${v}</span></div>`;
+                }
+                td.style.overflow = 'hidden';
                 return td;
             }
         },
@@ -710,9 +785,17 @@ function OpportunitiesContent() {
             }
         },
         cierre: {
-            data: 'cierre', title: 'Cierre', readOnly: true, width: colWidths['cierre'] || 90, wordWrap: false,
+            data: 'cierre',
+            type: 'date',
+            dateFormat: 'DD/MM/YYYY',
+            correctFormat: true,
+            title: 'Cierre',
+            readOnly: true,
+            width: Math.max(colWidths['cierre'] || 120, 115),
+            wordWrap: false,
             renderer(instance: any, td: HTMLTableCellElement, row: number, ___: number, ____: string, value: any) {
-                const rowData = instance.getSourceDataAtRow(row);
+                const physicalRow = instance.toPhysicalRow ? instance.toPhysicalRow(row) : row;
+                const rowData = instance.getSourceDataAtRow(physicalRow);
                 const overdue = rowData?.cierre_overdue;
                 const clr = overdue ? '#dc2626' : '#64748b';
                 const fw = overdue ? '700' : '500';
@@ -739,12 +822,33 @@ function OpportunitiesContent() {
         },
     };
 
+    // Convierte cada celda en un enlace real a la oportunidad (las columnas "nombre" y
+    // "cuenta" ya lo son), para que clic central / Ctrl+clic / clic derecho abran
+    // una pestaña nueva de forma nativa.
+    const withOpportunityRowLink = <T extends { data: string; renderer?: unknown }>(def: T): T => {
+        if (def.data === 'nombre' || def.data === 'cuenta' || typeof def.renderer !== 'function') return def;
+        const baseRenderer = def.renderer as (...args: unknown[]) => unknown;
+        return {
+            ...def,
+            renderer(instance: HotInstanceLike | null | undefined, td: HTMLTableCellElement, row: number, ...rest: unknown[]) {
+                const result = baseRenderer(instance, td, row, ...rest);
+                const physicalRow = instance && typeof instance.toPhysicalRow === 'function' ? instance.toPhysicalRow(row) : row;
+                const rowData = instance && typeof instance.getSourceDataAtRow === 'function'
+                    ? (instance.getSourceDataAtRow(physicalRow) as { id?: string } | undefined)
+                    : undefined;
+                if (rowData?.id) wrapCellInRowLink(td, `/oportunidades/${rowData.id}`);
+                return result ?? td;
+            }
+        } as T;
+    };
+
     const hotColumns = [
         // Solo incluir las columnas marcadas como visibles, manteniendo el orden original
-        ...['nombre','cuenta','actividades','pais','ciudad','canal','origen','fase','estado','creada','valor','cierre','vendedor']
+        ...OPPORTUNITY_TABLE_COLUMN_KEYS
             .filter(key => visibleColumns.includes(key))
             .map(key => ALL_COLUMN_DEFS[key])
             .filter(Boolean)
+            .map(withOpportunityRowLink)
     ];
 
     const getPhaseBadge = (fase: string) => {
@@ -774,7 +878,8 @@ function OpportunitiesContent() {
     const activeFilterCount = selectedAccountOwnerIds.length + (selectedChannel ? 1 : 0) + (selectedSubclass ? 1 : 0) +
         (selectedSegment ? 1 : 0) + (selectedPhase ? 1 : 0) + (selectedOrigin ? 1 : 0) +
         (statusFilter !== 'open' ? 1 : 0) + (startDate ? 1 : 0) + (endDate ? 1 : 0) +
-        (startClosingDate ? 1 : 0) + (endClosingDate ? 1 : 0);
+        (startClosingDate ? 1 : 0) + (endClosingDate ? 1 : 0) +
+        (selectedCountry ? 1 : 0) + (selectedCity ? 1 : 0);
 
     return (
         <div data-testid="opportunities-page" className="space-y-3.5 max-w-[1600px] mx-auto pb-8 md:pb-2 animate-in fade-in duration-300">
@@ -803,15 +908,16 @@ function OpportunitiesContent() {
             </div>
 
             {/* Controles Principales */}
-            <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-sm flex flex-col xl:flex-row justify-between gap-4 relative z-20">
+            <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-sm flex flex-col 2xl:flex-row justify-between gap-3 relative z-20">
                 {/* Segmented Control para Tabs */}
-                <div className="flex p-1 bg-slate-100/80 rounded-xl overflow-x-auto hide-scrollbar ring-1 ring-slate-200/50 inset-ring w-full xl:w-auto touch-pan-x">
+                <div className="flex p-1 bg-slate-100/80 rounded-xl overflow-x-auto hide-scrollbar ring-1 ring-slate-200/50 inset-ring w-full 2xl:w-auto touch-pan-x shrink-0">
                     {[
                         { id: 'all', label: 'Todas' },
                         { id: 'mine', label: 'Mis Oportunidades' },
                         { id: 'collab', label: 'Colaboración' },
                         ...(userRole === 'ADMIN' ? [{ id: 'team', label: 'Equipo' }] : []),
-                        { id: 'web', label: 'Web' }
+                        // El asesor no ve la pestaña Web (mostraría oportunidades de otros).
+                        ...(userRole === 'VENDEDOR' ? [] : [{ id: 'web', label: 'Web' }])
                     ].map(t => (
                         <button
                             key={t.id}
@@ -831,52 +937,79 @@ function OpportunitiesContent() {
                     ))}
                 </div>
 
-                <div className="flex gap-2 items-center w-full xl:w-auto">
-                    <div className="hidden sm:block">
+                <div className="flex flex-wrap sm:flex-nowrap gap-2 items-center w-full 2xl:w-auto">
+                    <div className="hidden sm:block shrink-0">
                         <UserPickerFilter
                             multiple={true}
                             selectedUserIds={selectedAccountOwnerIds}
                             onUsersSelect={handleUsersSelect}
                         />
                     </div>
-                    <div className="relative flex-1">
-                        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                    <div className="shrink-0">
+                        <QuickDateFilter
+                            startDate={startDate}
+                            endDate={endDate}
+                            statusFilter={statusFilter}
+                            onDateChange={({ startDate: sD, endDate: eD, statusFilter: newStatus }) => {
+                                setStartDateState(sD);
+                                setStartDate(sD);
+                                setEndDateState(eD);
+                                setEndDate(eD);
+                                if (newStatus) {
+                                    setStatusFilterState(newStatus);
+                                    setStatusFilter(newStatus);
+                                }
+                            }}
+                        />
+                    </div>
+                    <div className="relative flex-1 min-w-[200px] sm:min-w-[220px]">
+                        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
                         <input
                             type="text"
-                            placeholder="Buscar..."
-                            className="w-full pl-10 pr-4 py-3 sm:py-2.5 bg-slate-50 hover:bg-slate-100 focus:bg-white border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400 placeholder:font-normal"
+                            placeholder="Buscar oportunidades, cliente o celular..."
+                            className="w-full pl-10 pr-9 py-2.5 sm:py-2 bg-slate-50 hover:bg-slate-100 focus:bg-white border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-slate-400 placeholder:font-normal"
                             value={inputValue}
                             onChange={(e) => setInputValue(e.target.value)}
                         />
+                        {inputValue && (
+                            <button
+                                type="button"
+                                onClick={() => setInputValue("")}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-200 transition-colors cursor-pointer"
+                                title="Limpiar búsqueda"
+                            >
+                                <X className="w-3.5 h-3.5" />
+                            </button>
+                        )}
                     </div>
                     <button 
                         onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
                         className={cn(
-                            "p-3 sm:p-2.5 rounded-xl border transition-all duration-300 flex items-center justify-center shrink-0",
+                            "p-2.5 sm:p-2 rounded-xl border transition-all duration-300 flex items-center justify-center shrink-0 cursor-pointer",
                             showAdvancedFilters 
                                 ? "bg-blue-50 border-blue-200 text-blue-700 shadow-inner" 
                                 : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-800 hover:border-slate-300 shadow-sm"
                         )}
                         title="Filtros Avanzados"
                     >
-                        <Filter className={cn("w-5 h-5 sm:w-4 sm:h-4 transition-transform duration-300", showAdvancedFilters && "fill-blue-100")} />
-                        <span className="hidden sm:inline">Filtros</span>
+                        <Filter className={cn("w-4 h-4 transition-transform duration-300", showAdvancedFilters && "fill-blue-100")} />
+                        <span className="hidden sm:inline text-xs font-semibold">Filtros</span>
                         {activeFilterCount > 0 && <span className="-ml-1 rounded-full bg-blue-600 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">{activeFilterCount}</span>}
                     </button>
 
                     {/* Botón selector de columnas */}
-                    <div className="relative">
+                    <div className="relative shrink-0">
                         <button
                             onClick={() => setShowColumnPicker(!showColumnPicker)}
                             className={cn(
-                                "p-3 sm:p-2.5 rounded-xl border transition-all duration-300 flex items-center justify-center shrink-0",
+                                "p-2.5 sm:p-2 rounded-xl border transition-all duration-300 flex items-center justify-center shrink-0 cursor-pointer",
                                 showColumnPicker
                                     ? "bg-indigo-50 border-indigo-200 text-indigo-700 shadow-inner"
                                     : "bg-white border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-800 hover:border-slate-300 shadow-sm"
                             )}
                             title="Columnas visibles"
                         >
-                            <Columns3 className="w-5 h-5 sm:w-4 sm:h-4" />
+                            <Columns3 className="w-4 h-4" />
                         </button>
 
                         {/* Popup selector de columnas */}
@@ -891,9 +1024,9 @@ function OpportunitiesContent() {
                                         <p className="text-xs font-bold text-slate-700 uppercase tracking-wide">Columnas visibles</p>
                                         <button
                                             onClick={() => {
-                                                const allKeys = ['nombre','cuenta','actividades','pais','ciudad','canal','origen','fase','estado','creada','valor','cierre','vendedor'];
+                                                const allKeys = ALL_COLUMNS.map(c => c.key);
                                                 setVisibleColumns(allKeys);
-                                                localStorage.setItem('crm_opp_visible_cols_v3', JSON.stringify(allKeys));
+                                                localStorage.setItem('crm_opp_visible_cols_v4', JSON.stringify(allKeys));
                                             }}
                                             className="text-[10px] text-indigo-600 hover:text-indigo-800 font-semibold transition-colors"
                                         >
@@ -957,16 +1090,21 @@ function OpportunitiesContent() {
             {/* Listado (Tarjetas en Móvil, Tabla en Desktop) */}
             <div className="flex flex-col relative min-h-[450px] transition-all duration-300">
                 {(!loading || opportunities.length > 0) && (
-                    <div className="flex md:hidden items-center justify-end mb-3 px-1 z-10">
+                    <div className="flex flex-wrap items-center justify-between sm:justify-end mb-3 px-1 z-10 gap-2">
+                        {totalAmount > 0 && (
+                            <span className="text-sm font-medium text-slate-500 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm flex items-center gap-2">
+                                Total valor: <strong className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md font-bold">{formatCurrency(totalAmount)}</strong>
+                            </span>
+                        )}
                         <span className="text-sm font-medium text-slate-500 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm flex items-center gap-2">
-                            Total de registros: <strong className="text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md">{count !== undefined && count !== null ? count : opportunities.length}</strong>
+                            Total de registros: <strong className="text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md font-bold">{count !== undefined && count !== null ? count : opportunities.length}</strong>
                         </span>
                     </div>
                 )}
-                {loading && opportunities.length === 0 ? (
-                    <div className="space-y-4 bg-white border border-slate-200 rounded-2xl shadow-sm p-4 sm:p-6">
-                        {[1, 2, 3, 4].map((i) => (
-                            <div key={i} className="h-20 sm:h-16 bg-slate-50 rounded-xl animate-pulse border border-slate-100" />
+                {(loading && opportunities.length === 0) ? (
+                    <div data-testid="opportunities-loading" className="space-y-2">
+                        {[1, 2, 3, 4, 5, 6].map((i) => (
+                            <div key={i} className="h-20 bg-slate-100 rounded-xl animate-pulse border border-slate-200" />
                         ))}
                     </div>
                 ) : opportunities.length === 0 ? (
@@ -988,7 +1126,13 @@ function OpportunitiesContent() {
                                     <div className="p-4 border-b border-slate-100 flex justify-between items-start gap-3">
                                         <div className="flex-1 min-w-0">
                                             <div className="font-bold text-slate-900 text-sm mb-0.5 truncate">
-                                                {opp.account?.nombre || "Sin cuenta"}
+                                                {opp.account_id ? (
+                                                    <Link href={`/cuentas?id=${opp.account_id}`} className="hover:text-blue-600 transition-colors">
+                                                        {opp.account?.nombre || "Sin cuenta"}
+                                                    </Link>
+                                                ) : (
+                                                    opp.account?.nombre || "Sin cuenta"
+                                                )}
                                             </div>
                                             <div className="text-slate-500 text-[11.5px] truncate font-medium flex items-center gap-1 flex-wrap mb-0.5">
                                                 <span>{opp.account?.ciudad || "Sin ciudad"}</span>
@@ -998,7 +1142,9 @@ function OpportunitiesContent() {
                                                 <span className="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded text-[10.5px] font-bold">{opp.account?.canal_id || "-"}</span>
                                             </div>
                                             <div className="text-slate-600 text-xs truncate font-medium">
-                                                {opp.nombre || "Sin nombre"}
+                                                <Link href={`/oportunidades/${opp.id}`} className="hover:text-blue-600 transition-colors">
+                                                    {opp.nombre || "Sin nombre"}
+                                                </Link>
                                             </div>
                                         </div>
                                         <div className="shrink-0 flex items-start">
@@ -1056,17 +1202,17 @@ function OpportunitiesContent() {
                                     </div>
                                     
                                     <div className="flex divide-x divide-slate-100 border-t border-slate-100 bg-white">
-                                        <button 
+                                        <Link 
+                                            href={`/oportunidades/${opp.id}`}
                                             onClick={() => {
                                                 const params = new URLSearchParams(Array.from(searchParams.entries()));
                                                 params.set('id', opp.id);
                                                 sessionStorage.setItem('crm_oportunidades_state', params.toString());
-                                                router.push(`/oportunidades/${opp.id}`);
                                             }}
-                                            className="flex-1 py-3 text-sm font-semibold text-blue-600 flex items-center justify-center gap-2 hover:bg-blue-50 active:bg-blue-100 transition-colors"
+                                            className="flex-1 py-3 text-sm font-semibold text-blue-600 flex items-center justify-center gap-2 hover:bg-blue-50 active:bg-blue-100 transition-colors no-underline"
                                         >
                                             <Search className="w-4 h-4" /> Ver / Editar
-                                        </button>
+                                        </Link>
                                     </div>
                                 </div>
                                 );
@@ -1196,15 +1342,9 @@ function OpportunitiesContent() {
                                     box-shadow: inset 3px 0 0 0 #3b82f6 !important;
                                 }
 
-                                /* ── Selection ── */
-                                .opp-hot-wrap .handsontable .wtBorder.current {
-                                    background: #3b82f6 !important;
-                                }
-                                .opp-hot-wrap .handsontable td.area {
-                                    background: #eff6ff !important;
-                                }
-                                .opp-hot-wrap .handsontable td.current {
-                                    background: #e0edff !important;
+                                /* ── Selection: sin selector tipo Excel (rango azul, borde y fill handle) ── */
+                                .opp-hot-wrap .handsontable .wtBorder {
+                                    display: none !important;
                                 }
 
                                 /* ── Dropdown Filter Popover ── */
@@ -1251,8 +1391,62 @@ function OpportunitiesContent() {
                                     text-overflow: ellipsis !important;
                                 }
                             `}</style>
-                            <div ref={tableContainerRef} className="w-full relative z-0 opp-hot-wrap" style={{ minHeight: '400px' }}>
+                            <div
+                                ref={tableContainerRef}
+                                className="w-full relative z-0 opp-hot-wrap"
+                                style={{ minHeight: '400px' }}
+                                onClickCapture={(e) => {
+                                    const target = e.target as HTMLElement;
+                                    const btn = target.closest('.changeType');
+                                    if (btn) {
+                                        const th = btn.closest('th');
+                                        const colKey = th?.getAttribute('data-col-key');
+                                        if (colKey === 'creada' || colKey === 'cierre') {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            const rect = btn.getBoundingClientRect();
+                                            setHeaderDateFilterAnchor({
+                                                top: rect.bottom + 6,
+                                                left: Math.max(16, Math.min(rect.left - 120, window.innerWidth - 360)),
+                                                title: colKey === 'creada' ? 'Fecha de Creación' : 'Fecha de Cierre',
+                                                colKey: colKey as 'creada' | 'cierre'
+                                            });
+                                        } else if (colKey && ['canal', 'fase', 'vendedor', 'estado', 'origen', 'pais', 'ciudad'].includes(colKey)) {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            const rect = btn.getBoundingClientRect();
+                                            const titleMap: Record<string, string> = {
+                                                canal: 'Canal de Venta',
+                                                fase: 'Fase del Negocio',
+                                                vendedor: 'Asignado a',
+                                                estado: 'Estado',
+                                                origen: 'Origen Oportunidad',
+                                                pais: 'País de la Cuenta',
+                                                ciudad: 'Ciudad de la Cuenta'
+                                            };
+                                            setHeaderColumnFilterAnchor({
+                                                top: rect.bottom + 6,
+                                                left: Math.max(16, Math.min(rect.left - 100, window.innerWidth - 320)),
+                                                title: titleMap[colKey] || colKey,
+                                                colKey
+                                            });
+                                        }
+                                    }
+                                }}
+                                onMouseDownCapture={(e) => {
+                                    const target = e.target as HTMLElement;
+                                    const btn = target.closest('.changeType');
+                                    if (btn) {
+                                        const th = btn.closest('th');
+                                        const colKey = th?.getAttribute('data-col-key');
+                                        if (colKey && ['creada', 'cierre', 'canal', 'fase', 'vendedor', 'estado', 'origen', 'pais', 'ciudad'].includes(colKey)) {
+                                            e.stopPropagation();
+                                        }
+                                    }
+                                }}
+                            >
                                 <HotTable
+                                    ref={hotTableRef}
                                     data={hotData}
                                     columns={hotColumns}
                                     rowHeaders={true}
@@ -1260,8 +1454,65 @@ function OpportunitiesContent() {
                                     filters={true}
                                     dropdownMenu={true}
                                     manualColumnResize={true}
+                                    disableVisualSelection={true}
+                                    fillHandle={false}
                                     afterColumnResize={(width: number, col: number) => handleColumnResize(width, col)}
                                     afterScrollVertically={triggerLoadMore}
+                                    beforeDropdownMenuShow={(instance: any) => {
+                                        const activeRange = instance.hot?.getSelectedRangeActive();
+                                        const col = activeRange ? activeRange.highlight?.col : -1;
+                                        const activeKeys = OPPORTUNITY_TABLE_COLUMN_KEYS.filter(key => visibleColumns.includes(key));
+                                        const colKey = activeKeys[col];
+                                        if (colKey && ['creada', 'cierre', 'canal', 'fase', 'vendedor', 'estado', 'origen', 'pais', 'ciudad'].includes(colKey)) {
+                                            setTimeout(() => {
+                                                instance.close();
+                                            }, 0);
+                                        }
+                                    }}
+                                    afterFilter={(conditionsStack: any[]) => {
+                                        if (!conditionsStack || !Array.isArray(conditionsStack)) return;
+                                        const activeKeys = OPPORTUNITY_TABLE_COLUMN_KEYS.filter(key => visibleColumns.includes(key));
+                                        for (const colFilter of conditionsStack) {
+                                            const colKey = activeKeys[colFilter.column];
+                                            if (colKey === 'creada' && colFilter.conditions && colFilter.conditions.length > 0) {
+                                                const cond = colFilter.conditions[0];
+                                                const condName = (cond.name || '').toLowerCase();
+                                                const args = cond.args || [];
+                                                if (condName.includes('before') || condName.includes('antes') || condName.includes('less')) {
+                                                    const d = parseHandsontableDate(args[0]);
+                                                    if (d) {
+                                                        setEndDateState(d);
+                                                        setEndDate(d);
+                                                        setStartDateState(null);
+                                                        setStartDate(null);
+                                                    }
+                                                } else if (condName.includes('after') || condName.includes('despues') || condName.includes('greater')) {
+                                                    const d = parseHandsontableDate(args[0]);
+                                                    if (d) {
+                                                        setStartDateState(d);
+                                                        setStartDate(d);
+                                                        setEndDateState(null);
+                                                        setEndDate(null);
+                                                    }
+                                                } else if (condName.includes('between') || condName.includes('entre')) {
+                                                    const d1 = parseHandsontableDate(args[0]);
+                                                    const d2 = parseHandsontableDate(args[1]);
+                                                    if (d1 && d2) {
+                                                        setStartDateState(d1);
+                                                        setStartDate(d1);
+                                                        setEndDateState(d2);
+                                                        setEndDate(d2);
+                                                    }
+                                                } else if (condName === 'today' || condName === 'hoy') {
+                                                    const todayStr = new Date().toISOString().split('T')[0];
+                                                    setStartDateState(todayStr);
+                                                    setStartDate(todayStr);
+                                                    setEndDateState(todayStr);
+                                                    setEndDate(todayStr);
+                                                }
+                                            }
+                                        }
+                                    }}
                                     width="100%"
                                     height={showAdvancedFilters ? "calc(100vh - 490px)" : "calc(100vh - 280px)"}
                                     autoColumnSize={false}
@@ -1269,7 +1520,7 @@ function OpportunitiesContent() {
                                     rowHeights={38}
                                     renderAllRows={false}
                                     licenseKey="non-commercial-and-evaluation"
-                                    afterOnCellMouseDown={(event: any, coords: any, td: any) => {
+                                    afterOnCellMouseDown={(event: MouseEvent | TouchEvent, coords: { row: number; col: number }) => {
                                         if (coords.row === -1) {
                                             const target = event?.target as HTMLElement;
                                             const isDropdownBtn = target?.closest('.changeType') || target?.closest('.htDropdownMenu') || target?.classList?.contains('changeType');
@@ -1292,7 +1543,25 @@ function OpportunitiesContent() {
                                             return;
                                         }
                                         if (coords.row >= 0) {
-                                            const opp = hotData[coords.row];
+                                            const mouseEvent = event as MouseEvent;
+                                            const opp = resolveHotRowData(hotTableRef.current?.hotInstance, coords.row, hotData);
+                                            if (mouseEvent?.button === 2) {
+                                                // Clic derecho: permitir menú contextual nativo
+                                                return;
+                                            }
+                                            if (isNewTabClick(mouseEvent)) {
+                                                // Clic central / Ctrl / Cmd / Shift: abrir en pestaña nueva sin mover la actual.
+                                                // Clic central sobre un <a>: lo abre el navegador de forma nativa (en segundo plano).
+                                                // Ctrl/Cmd/Shift + clic: la tabla vuelve a renderizar la celda entre mousedown y
+                                                // mouseup y el <a> se reemplaza, así que el navegador pierde el clic; por eso se abre aquí.
+                                                const onLink = (mouseEvent?.target as HTMLElement | null)?.closest?.('a[href]');
+                                                if (onLink && mouseEvent.button === 1) return;
+                                                if (opp && opp.id) {
+                                                    mouseEvent.preventDefault(); // evita el autoscroll del clic central
+                                                    openLinkInBackgroundTab(`/oportunidades/${opp.id}`);
+                                                }
+                                                return;
+                                            }
                                             if (opp && opp.id) {
                                                 const params = new URLSearchParams(Array.from(searchParams.entries()));
                                                 params.set('id', opp.id);
@@ -1304,6 +1573,8 @@ function OpportunitiesContent() {
                                     afterGetColHeader={(column: number, TH: HTMLTableCellElement) => {
                                         const colDef = hotColumns[column];
                                         if (colDef) {
+                                            TH.setAttribute('data-col-key', colDef.data);
+                                            TH.setAttribute('data-col-index', String(column));
                                             const fieldSortMap: Record<string, string> = {
                                                 'cuenta': 'account_nombre',
                                                 'nombre': 'nombre',
@@ -1312,23 +1583,111 @@ function OpportunitiesContent() {
                                                 'cierre': 'fecha_cierre_estimada'
                                             };
                                             const sortKey = fieldSortMap[colDef.data];
+                                            const isFiltered = isColumnFilterActive(colDef.data, {
+                                                channel: selectedChannel,
+                                                phase: selectedPhase,
+                                                ownerIds: selectedAccountOwnerIds,
+                                                status: statusFilter,
+                                                origin: selectedOrigin,
+                                                country: selectedCountry,
+                                                city: selectedCity,
+                                                startDate,
+                                                endDate,
+                                                startClose: startClosingDate,
+                                                endClose: endClosingDate
+                                            });
+
+                                            const header = TH.querySelector('.colHeader');
                                             if (sortKey) {
                                                 TH.style.cursor = 'pointer';
                                                 TH.title = 'Clic para ordenar ascendente o descendente';
-                                                const header = TH.querySelector('.colHeader');
-                                                if (header) header.textContent = `${colDef.title} ${sortField === sortKey ? (sortAsc ? '↑' : '↓') : '↕'}`;
+                                                const sortIndicator = sortField === sortKey ? (sortAsc ? '↑' : '↓') : '↕';
+                                                if (header) header.textContent = formatColumnHeaderTitle(colDef.title, sortIndicator, isFiltered);
+                                            } else {
+                                                if (header) header.textContent = formatColumnHeaderTitle(colDef.title, '', isFiltered);
                                             }
                                         }
                                     }}
                                     stretchH="all"
                                     className="text-sm font-sans"
                                 />
+
+                                {/* Popover flotante intuitivo anclado a la cabecera de la columna Creada / Cierre */}
+                                <FloatingDateFilterPopover
+                                    anchor={headerDateFilterAnchor}
+                                    startDate={startDate}
+                                    endDate={endDate}
+                                    statusFilter={statusFilter}
+                                    onDateChange={({ startDate: sD, endDate: eD, statusFilter: newStatus }) => {
+                                        setStartDateState(sD);
+                                        setStartDate(sD);
+                                        setEndDateState(eD);
+                                        setEndDate(eD);
+                                        if (newStatus) {
+                                            setStatusFilterState(newStatus);
+                                            setStatusFilter(newStatus);
+                                        }
+                                    }}
+                                    onClose={() => setHeaderDateFilterAnchor(null)}
+                                />
+
+                                {/* Popover flotante intuitivo anclado a las cabeceras de columnas con catálogos maestros */}
+                                <FloatingColumnFilterPopover
+                                    anchor={headerColumnFilterAnchor}
+                                    onClose={() => setHeaderColumnFilterAnchor(null)}
+                                    selectedChannel={selectedChannel}
+                                    onSelectChannel={(ch) => {
+                                        setSelectedChannel(ch);
+                                        setChannelFilter(ch);
+                                    }}
+                                    selectedPhase={selectedPhase}
+                                    onSelectPhase={(ph) => {
+                                        setSelectedPhase(ph);
+                                        setPhaseFilter(ph);
+                                    }}
+                                    selectedAccountOwnerIds={selectedAccountOwnerIds}
+                                    onSelectAccountOwners={(owners) => {
+                                        setSelectedAccountOwnerIds(owners);
+                                        setAccountOwnerIds(owners);
+                                    }}
+                                    statusFilter={statusFilter}
+                                    onSelectStatus={(st) => {
+                                        setStatusFilterState(st);
+                                        setStatusFilter(st);
+                                    }}
+                                    selectedOrigin={selectedOrigin}
+                                    onSelectOrigin={(orig) => {
+                                        setSelectedOrigin(orig);
+                                        setOriginFilter(orig);
+                                    }}
+                                    selectedCountry={selectedCountry}
+                                    onSelectCountry={(cId) => {
+                                        setSelectedCountry(cId);
+                                        setCountryFilter(cId);
+                                    }}
+                                    selectedCity={selectedCity}
+                                    onSelectCity={(city) => {
+                                        setSelectedCity(city);
+                                        setCityFilter(city);
+                                    }}
+                                    displayCountries={displayCountries}
+                                />
                             </div>
 
                             {/* Pie de tabla unificado en desktop: contador y paginación integrados */}
                             <div className="px-4 py-2.5 bg-slate-50 border-t border-slate-200/80 flex justify-between items-center text-xs text-slate-500">
-                                <div>
-                                    Mostrando <strong className="text-slate-800 font-bold">{opportunities.length}</strong> de <strong className="text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md font-bold">{count !== undefined && count !== null ? count : opportunities.length}</strong> oportunidades
+                                <div className="flex items-center gap-3">
+                                    <div>
+                                        Mostrando <strong className="text-slate-800 font-bold">{opportunities.length}</strong> de <strong className="text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md font-bold">{count !== undefined && count !== null ? count : opportunities.length}</strong> oportunidades
+                                    </div>
+                                    {totalAmount > 0 && (
+                                        <div className="hidden sm:flex items-center gap-1.5 pl-3 border-l border-slate-200">
+                                            <span className="text-slate-400">Total valor cargado:</span>
+                                            <strong className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md font-bold">
+                                                {formatCurrency(totalAmount)}
+                                            </strong>
+                                        </div>
+                                    )}
                                 </div>
                                 {hasMore && (
                                     <button
@@ -1337,7 +1696,7 @@ function OpportunitiesContent() {
                                         className="px-3.5 py-1.5 bg-white border border-slate-200 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-100 hover:text-blue-600 transition-all shadow-xs flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
                                     >
                                         {loading && <div className="w-3 h-3 rounded-full border-2 border-slate-300 border-t-blue-600 animate-spin" />}
-                                        {loading ? 'Cargando...' : 'Cargar más resultados'}
+                                        {loading ? 'Cargando...' : 'Cargar más oportunidades'}
                                     </button>
                                 )}
                             </div>
@@ -1347,14 +1706,14 @@ function OpportunitiesContent() {
                 
                 {/* Botón Cargar más exclusivo para móvil */}
                 {hasMore && opportunities.length > 0 && (
-                    <div ref={sentinelRef} className="p-4 flex justify-center mt-4 md:hidden">
+                    <div ref={sentinelRef} className="flex justify-center mt-4 mb-4 px-2 md:hidden">
                         <button
                             onClick={() => loadMore()}
                             disabled={loading}
-                            className="w-full px-6 py-3.5 bg-white border border-slate-200 text-slate-700 rounded-xl text-sm font-bold hover:bg-slate-50 active:scale-[0.98] transition-all disabled:opacity-50 flex justify-center items-center gap-2 shadow-sm"
+                            className="w-full flex items-center justify-center gap-2 px-6 py-3.5 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold hover:bg-slate-50 active:scale-[0.98] transition-all shadow-sm disabled:opacity-50"
                         >
-                            {loading && <div className="w-4 h-4 rounded-full border-2 border-slate-300 border-t-slate-600 animate-spin"></div>}
-                            {loading ? 'Cargando...' : 'Cargar más resultados'}
+                            {loading && <Loader2 size={16} className="animate-spin" />}
+                            {loading ? "Cargando..." : "Cargar más oportunidades"}
                         </button>
                     </div>
                 )}

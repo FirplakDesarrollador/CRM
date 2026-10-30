@@ -15,6 +15,8 @@ import { useConfig } from "@/lib/hooks/useConfig";
 import { SendQuoteModal } from "@/components/quotes/SendQuoteModal";
 import { useCommissionCategories } from "@/lib/hooks/useCommissionCategories";
 import { PedidosList } from "@/components/quotes/PedidosEditor";
+import { isQuoteItemPriceEditable } from "@/lib/quotePricing";
+import { getPriceClarification } from "@/lib/salesChannels";
 
 export default function QuoteEditorPage() {
     const params = useParams();
@@ -266,7 +268,7 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
                 price = Number(product.lista_base_cop) || 0;
                 break;
             case 'PROPIO':
-                price = Number(product.distribuidor_pvp_iva) || 0;
+                price = Number(product.pvp_sin_iva) || 0;
                 break;
             default:
                 price = Number(product.lista_base_cop) || 0;
@@ -407,7 +409,7 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
                                         } else {
                                             switch (channel) {
                                                 case 'OBRAS_NAC': displayPrice = Number(product.lista_base_obras) || 0; break;
-                                                case 'PROPIO': displayPrice = Number(product.distribuidor_pvp_iva) || 0; break;
+                                                case 'PROPIO': displayPrice = Number(product.pvp_sin_iva) || 0; break;
                                                 case 'DIST_NAC': 
                                                 default: displayPrice = Number(product.lista_base_cop) || 0;
                                             }
@@ -466,23 +468,33 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
                                     
                                     <div className="flex items-center gap-1 mt-1">
                                         <span className="text-xs text-slate-500">Precio Unitario: $</span>
-                                        <input 
-                                            type="number"
-                                            className={cn(
-                                                "text-xs font-medium bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 focus:outline-none w-28 px-1 transition-all",
-                                                item.producto_id === null ? "bg-slate-50 border-slate-200" : ""
-                                            )}
-                                            defaultValue={item.precio_unitario}
-                                            key={`${item.id}-price-${item.precio_unitario}`}
-                                            onBlur={(e) => {
-                                                const val = parseFloat(e.target.value) || 0;
-                                                if (val !== item.precio_unitario) {
-                                                    updateItem(item.id, { precio_unitario: val });
-                                                    onItemsChange();
-                                                }
-                                            }}
-                                        />
+                                        {isQuoteItemPriceEditable(item) ? (
+                                            <input 
+                                                type="number"
+                                                className="text-xs font-medium bg-slate-50 border border-slate-200 focus:border-blue-500 focus:outline-none w-28 px-1.5 py-0.5 rounded transition-all"
+                                                defaultValue={item.precio_unitario}
+                                                key={`${item.id}-price-${item.precio_unitario}`}
+                                                onBlur={(e) => {
+                                                    const val = parseFloat(e.target.value) || 0;
+                                                    if (val !== item.precio_unitario) {
+                                                        updateItem(item.id, { precio_unitario: val });
+                                                        onItemsChange();
+                                                    }
+                                                }}
+                                            />
+                                        ) : (
+                                            <span className="text-xs font-semibold text-slate-700 select-all">
+                                                {new Intl.NumberFormat(quote.currency_id === 'USD' ? 'en-US' : 'es-CO', {
+                                                    minimumFractionDigits: Number.isInteger(item.precio_unitario) ? 0 : 2,
+                                                    maximumFractionDigits: 2
+                                                }).format(item.precio_unitario || 0)}
+                                            </span>
+                                        )}
                                     </div>
+                                            <div className="text-[10px] text-slate-400 font-medium mt-0.5">
+                                                {getPriceClarification(context?.channel, quote.currency_id === 'USD', item.producto_id === null)}
+                                            </div>
+                                        </div>
                                 </div>
                                 <div className="flex items-center justify-between md:justify-end gap-6">
                                     <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg">

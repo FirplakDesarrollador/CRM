@@ -1392,5 +1392,653 @@ Prevention Rule:
 Tags:
 [oportunidades] [currency] [es-CO] [formatNumberCO] [formatOpportunityAmount] [ui]
 
+---
+
+## [Bug ID: 20260914-01]
+
+Context:
+`app/oportunidades/page.tsx`, `app/cuentas/page.tsx`, `components/HotTableWrapper.tsx`, `lib/opportunityTableHelpers.ts`. Tablas interactivas con Handsontable y filtros internos por valor (`dropdownMenu: ['filter_by_value', 'filter_action_bar']`).
+
+What I Did:
+Corregí el mapeo de datos para la columna de actividades en la vista tabular de oportunidades (`actividades: actSummary.label`), asegurando que todos los valores pasados a las columnas sean strings o números primitivos. Implementé la resolución de filas físicas (`instance.toPhysicalRow(row)`) en renderers personalizados y en `afterOnCellMouseDown` (tanto en Oportunidades como en Cuentas). Corregí el desfase de columnas en `handleColumnResize` integrando `OPPORTUNITY_TABLE_COLUMN_KEYS`. Registré el diccionario de idioma `es-MX` de `handsontable/i18n` en `HotTableWrapper` para internacionalizar los controles del dropdown de filtros al español. Añadí la prueba permanente `tests/opportunityTableFilters.test.ts`.
+
+Problem:
+1. En el dropdown de la columna "Actividad", todas las opciones de filtro seleccionable mostraban `[object Object]` en lugar de las etiquetas legibles ("Sin actividad", "1 atrasada", etc.) y la barra interna "Search" no encontraba resultados.
+2. Al filtrar u ordenar cualquier columna en Handsontable, hacer clic en una fila o renderizar enlaces de celdas (`cuenta`, `nombre`, `cierre`, `_original`) navegaba u obtenía datos de la fila física original desalineada en vez de la oportunidad/cuenta visible filtrada.
+3. Al redimensionar columnas manualmente, la columna `actividades` no estaba en `activeKeys`, desfasando los anchos guardados en `localStorage`.
+4. Los botones y etiquetas del filtro se mostraban en inglés ("Filter by value:", "Search", "Select all", "Clear", "OK", "Cancel").
+
+Root Cause:
+1. En `hotData`, la propiedad `actividades` recibía el objeto complejo `actSummary` en lugar de una cadena primitiva. El plugin de filtros de Handsontable convierte los valores a string con `String(cellValue)`, resultando en `"[object Object]"`.
+2. En Handsontable, el argumento `row` en renderers y `coords.row` en `afterOnCellMouseDown` representan el índice visual (`visualRow`), el cual difiere del índice físico en los datos cuando hay filtros o reordenamientos activos si no se traduce con `instance.toPhysicalRow(visualRow)`.
+3. Ausencia del registro del diccionario de idioma en `HotTableWrapper`.
+
+Fix Applied:
+1. Creación de `lib/opportunityTableHelpers.ts` con `buildOpportunityHotRow` (que asigna `actividades: actSummary.label || 'Sin actividad'` y `actividades_status: actSummary.status`) y `resolveHotRowData`.
+2. Traducción a fila física mediante `instance.toPhysicalRow(row)` en todos los renderers y clics de fila.
+3. Uso de `OPPORTUNITY_TABLE_COLUMN_KEYS` en `handleColumnResize` y `hotColumns`.
+4. Registro de `esMX` en `HotTableWrapper` con `language: props?.language || esMX.languageCode`.
+5. Creación de `tests/opportunityTableFilters.test.ts`.
+
+Prevention Rule:
+**Handsontable Filterable Data & Physical Row Translation**:
+1. Toda propiedad mapeada en `hotData` para una columna de Handsontable DEBE ser un valor primitivo (`string` o `number`), NUNCA un objeto complejo. Los metadatos secundarios deben guardarse en propiedades auxiliares separadas (ej. `actividades_status`).
+2. En tablas con filtros o plugins de ordenamiento, NUNCA indexar directamente `hotData[coords.row]` ni llamar a `getSourceDataAtRow(row)` con el índice visual. SIEMPRE traducir primero mediante `instance.toPhysicalRow(row)` o usar `resolveHotRowData`.
+
+Tags:
+[handsontable] [HotTable] [filtros] [filter_by_value] [object-object] [toPhysicalRow] [visualRow] [oportunidades] [cuentas]
+
+---
+
+## [Bug ID: 20260915-01]
+
+Context:
+`lib/pdfGenerator.ts`, exportación al PDF formal (formato F-V-29) de cotizaciones y pedidos desde el detalle de oportunidad y submódulo de Pedidos.
+
+What I Did:
+Corregí la lógica de cálculo de precios e IVA en `lib/pdfGenerator.ts`. Eliminé la división forzada `/ 1.19` en los precios unitarios y subtotales de línea. Exporté las funciones puras `calculatePdfItemRow` y `calculatePdfTotals` para garantizar que el precio unitario sea exactamente el de la lista de precios (sin IVA), el subtotal sea el valor neto tras descuento, el IVA (19%) se adicione al final después del descuento, y el Gran Total sea la suma de Subtotal + IVA. Añadí la prueba permanente `tests/pdfGeneratorTotals.test.ts`.
+
+Problem:
+En el PDF formal de cotizaciones/pedidos, los valores unitarios de los productos de la lista de precios se dividían erróneamente por 1.19 (ej. $7.904.580,50 se convertía en $6.642.502,94). El subtotal se dividía también por 1.19 y se calculaba el IVA hacia atrás para que el Gran Total forzara el subtotal de la cotización, recortándole indebidamente el 19% al valor del producto y alterando los precios oficiales de lista.
+
+Root Cause:
+En `lib/pdfGenerator.ts` se introdujo el supuesto erróneo de que todos los precios en la base de datos ya incluían IVA (`unitPriceBase = isExport ? unitPriceWithIva : unitPriceWithIva / 1.19` y `subtotal = isExport ? rawTotal : rawTotal / 1.19`), cuando en Firplak los precios de lista son base sin IVA.
+
+Fix Applied:
+1. Eliminación de `/ 1.19` en `calculatePdfItemRow` y `generateQuotePdf`.
+2. `calculatePdfTotals` suma los subtotales netos de las líneas como `subtotal`, calcula el IVA al 19% al final (`subtotal * 0.19` para COP, 0 para USD), y fija `granTotal = subtotal + iva`.
+3. Creación de la prueba permanente `tests/pdfGeneratorTotals.test.ts`.
+
+Prevention Rule:
+**Cálculo de Precios e IVA en Documentos Formales (PDF/Pedidos)**:
+1. En el CRM Firplak, todos los precios unitarios de las listas de precios (`lista_base_obras`, `lista_base_cop`, `lista_base_exportaciones`, etc.) son base neta SIN IVA.
+2. NUNCA dividir un precio unitario de cotización o ítem por `1.19` para "desglosar" IVA en interfaces o documentos.
+3. El IVA (19%) siempre debe ser adicionado DESPUÉS del descuento sobre el Subtotal neto acumulado de las líneas.
+4. Gran Total = Subtotal + IVA. Para exportaciones en USD, IVA = 0 y Gran Total = Subtotal.
+
+Tags:
+[pdfGenerator] [F-V-29] [cotizaciones] [pedidos] [precios-sin-iva] [iva-19] [subtotal] [gran-total]
+
+---
+
+## [Bug ID: 20260915-02]
+
+Context:
+Edición de cotizaciones en `app/oportunidades/[id]/cotizaciones/[quoteId]/page.tsx`, `lib/hooks/useOpportunities.ts` y control de precios de catálogo.
+
+What I Did:
+Bloqueé la edición manual del precio unitario para productos del catálogo en la interfaz y en la lógica del hook. Creé `lib/quotePricing.ts` con `isQuoteItemPriceEditable` y `sanitizeQuoteItemUpdates`. En la UI, los ítems de catálogo se renderizan como texto estático de solo lectura formateado como moneda, y solo los ítems manuales (`producto_id === null`) tienen input numérico. En `useOpportunities.ts`, `updateItem` descarta cualquier mutación manual de `precio_unitario` para productos de catálogo, preservando el recálculo legítimo por volumen. Añadí la prueba permanente `tests/quotePricingSecurity.test.ts`.
+
+Problem:
+En el editor de cotizaciones, los comerciales podían hacer clic y modificar arbitrariamente el campo `precio_unitario` de cualquier producto del catálogo maestro (`CRM_ListaDePrecios`), alterando el valor unitario, el subtotal y el monto total de la cotización y de la oportunidad en la base de datos, evadiendo las listas oficiales de precios y las políticas comerciales.
+
+Root Cause:
+Al implementar el soporte de "+ Ítem Manual" (`producto_id === null`), el párrafo estático de precio unitario se transformó en un `<input type="number">` genérico sin condicionar su editabilidad (`isQuoteItemPriceEditable`). Además, el hook `useQuoteItems.updateItem` aceptaba mutaciones de `precio_unitario` indiscriminadamente sin verificar si el ítem pertenecía al catálogo.
+
+Fix Applied:
+1. Creación de `lib/quotePricing.ts` con funciones puras `isManualQuoteItem`, `isQuoteItemPriceEditable` y `sanitizeQuoteItemUpdates`.
+2. En `page.tsx` y `page-isazaale.tsx`, renderizado condicional: texto fijo formateado para productos del catálogo vs. `<input type="number">` para ítems manuales.
+3. En `useOpportunities.ts` y `useOpportunities-isazaale.ts`, sanitización en `updateItem` para descartar mutaciones manuales de `precio_unitario` en productos de catálogo.
+4. Creación de prueba permanente `tests/quotePricingSecurity.test.ts` (4/4 tests GREEN).
+
+Prevention Rule:
+**Catalog Items Price Immutability**: Los precios unitarios de productos vinculados al catálogo maestro (`producto_id !== null`) NUNCA deben ser editables en la UI ni aceptados en mutaciones arbitrarias del cliente. Su valor proviene exclusivamente de `CRM_ListaDePrecios` según canal y volumen. Únicamente los ítems manuales (`producto_id === null`) tienen precio unitario editable por el usuario.
+
+Tags:
+[cotizaciones] [quoteItems] [precio_unitario] [seguridad] [catalogo] [precios-inmutables] [items-manuales]
+
+---
+
+## [Bug ID: 20260915-03]
+
+Context:
+Submódulo de Pedidos (`components/quotes/PedidosEditor.tsx`, `lib/hooks/usePedidos.ts`, `lib/sync.ts`, migración `20260904193842_persist_crm_editable_fields.sql`).
+
+What I Did:
+Corregí la persistencia de los formularios de pedidos (tanto en creación como en edición y autoguardado). Apliqué la migración pendiente en Supabase (`CRM_Pedidos` y `CRM_Cotizaciones`), sincronicé bidireccionalmente `fecha_entrega` y `fecha_minima_requerida` hacia `EXTRA_Fecha mínima requerida por comercial/cliente` y columnas nativas, evité la eliminación de las columnas nativas booleanas `cierre_facturacion` y `es_muestra` en el payload, y creé el normalizador `normalizeDateToInput` para adaptar fechas de SAP (`DD/MM/YYYY`) a inputs HTML5 `YYYY-MM-DD`.
+
+Problem:
+Los comerciales reportaron que al modificar campos en el formulario de pedidos, como "Fecha Mínima de Entrega Solicitada", medio de acceso o notas de planos, los cambios no se guardaban o aparecían en blanco al recargar la página.
+
+Root Cause:
+1. Desalineación de nombres: `PedidosEditor.tsx` enviaba `fecha_entrega`, pero el campo histórico en SAP/Supabase es `EXTRA_Fecha mínima requerida por comercial/cliente` (mapeado en `usePedidos.ts` como `fecha_minima_requerida`).
+2. Columnas no aplicadas en Supabase: La migración `20260904193842_persist_crm_editable_fields.sql` que añade `fecha_entrega`, `email_contacto`, `tiene_escaleras` y `planos_hidromasaje` a `CRM_Pedidos` no se había aplicado en Supabase, por lo que el RPC `process_field_updates` las descartaba.
+3. Formato de fecha en HTML5: SAP devuelve fechas en `DD/MM/YYYY`, pero `<input type="date">` exige estrictamente `YYYY-MM-DD`. Al recibir `DD/MM/YYYY`, el input se mostraba en blanco.
+4. Supresión de columnas booleanas: `usePedidos.ts` ejecutaba `delete serverPayload[local]` al mapear `cierre_facturacion` y `es_muestra`, eliminando las columnas nativas de `CRM_Pedidos`.
+
+Fix Applied:
+1. Aplicación de la migración `20260904193842_persist_crm_editable_fields.sql` en la base de datos Supabase con DDL idempotente.
+2. Creación de `lib/pedidoHelpers.ts` con `normalizeDateToInput` y `mapPedidoServerPayload`.
+3. Actualización de `lib/hooks/usePedidos.ts` para sincronizar `fecha_entrega` y `fecha_minima_requerida` y preservar las columnas booleanas nativas.
+4. Actualización de `lib/sync.ts` en el pull de `CRM_Pedidos` para resolver fallback mutuo entre `fecha_entrega` y `EXTRA_Fecha mínima requerida por comercial/cliente`.
+5. Actualización de `components/quotes/PedidosEditor.tsx` con `shouldUnregister: false`, normalización de fechas en defaults/efectos y envío sincronizado de fecha mínima en `pedData`.
+6. Creación de prueba permanente `tests/pedidoPersistence.test.ts` (9/9 tests GREEN).
+
+Prevention Rule:
+**Persistencia de Pedidos y Fechas HTML5**:
+1. Todo input de tipo fecha (`<input type="date">`) debe recibir su valor normalizado en formato `YYYY-MM-DD` mediante `normalizeDateToInput` para soportar tanto strings ISO como formatos SAP `DD/MM/YYYY`.
+2. Los campos de fecha de entrega (`fecha_entrega` y `fecha_minima_requerida` / `EXTRA_Fecha mínima requerida por comercial/cliente`) deben mantenerse siempre sincronizados en Dexie y en Supabase para asegurar compatibilidad total con SAP, informes y CRM.
+3. Al mapear campos locales a campos SAP `EXTRA_`, NUNCA eliminar (`delete`) columnas que existan de forma nativa en las tablas de PostgreSQL (e.g., `cierre_facturacion`, `es_muestra`, `fecha_facturacion`).
+
+Tags:
+[pedidos] [persistencia] [fecha_entrega] [fecha_minima_requerida] [normalizeDateToInput] [cierre_facturacion] [es_muestra] [supabase] [sync]
+
+---
+
+## [Bug ID: 20260922-01]
+
+Context:
+Módulo de Actividades (`app/actividades/page.tsx`, `components/activities/CreateActivityModal.tsx`, `lib/hooks/useActivities.ts`, `lib/db.ts`).
+
+What I Did:
+Auditoría integral y corrección del flujo de edición y visualización de actividades en las vistas Todo, Agenda y Mes.
+
+Problem:
+1. En la vista Mes, hacer clic en una actividad para editarla propagaba el evento al contenedor del día (`<div onClick={() => setView('agenda')}>`), cambiando intempestivamente la vista de Mes a Agenda debajo del modal.
+2. Tooltip hover de la vista Mes no se mostraba porque el día tenía la clase `group` pero el tooltip requería `group/day`.
+3. SchemaError en Dexie: `lib/sync.ts` ejecutaba `db.activities.where('account_id').equals(...)`, pero `account_id` no estaba indexado en el schema de Dexie (v12-14).
+4. El campo `prioridad` se perdía en la sincronización y al crear actividades: no existía columna en `CRM_Actividades` de Supabase, no estaba en `DB_COLUMNS` de `useActivities.ts` y los botones de prioridad no marcaban dirty el formulario.
+5. En `CreateActivityModal.tsx`, un `useEffect` sobreescribía `fecha_fin` sumándole 1 hora a `fecha_inicio` en el montaje, destruyendo la fecha fin original de actividades editadas y disparando el autosave.
+6. `minDate={new Date()}` en `DateTimePicker` impedía editar actividades pasadas o vencidas.
+7. En modo edición, reasignar usuario (`reassignUserId`) o modificar invitados/colaboradores (`attendees`) no persistía porque residían en estado local fuera de react-hook-form y el modo edición no cuenta con botón submit tradicional.
+8. Existían archivos huérfanos/duplicados con sufijo `-isazaale` ocupando más de 110 KB.
+9. Violación de clave foránea `fk_crmact_opp` en `CRM_Actividades (_complete_snapshot_)`: En `lib/sync.ts`, la sección 3.3c de auto-sanación de `opportunity_id` solo evaluaba mutaciones individuales (`u.field === 'opportunity_id'`) y pasaba por alto `_complete_snapshot_` (que es el formato emitido por `useActivities`). Adicionalmente, cadenas vacías `""` o espacios no se saneaban a `null`, y oportunidades huérfanas o eliminadas bloqueaban el Outbox con error `violates foreign key constraint fk_crmact_opp`.
+
+Fix Applied:
+1. Adición de `e.stopPropagation()` en los enlaces y preview de actividades en la vista Mes de `page.tsx`.
+2. Asignación de `group/day` en el contenedor de cada día del calendario mensual.
+3. Migración Supabase para añadir columna `prioridad TEXT DEFAULT 'Media'` a `CRM_Actividades`.
+4. Actualización del schema de Dexie a versión 15 en `lib/db.ts` indexando `account_id`: `'id, opportunity_id, account_id, user_id, fecha_inicio, tipo_actividad'`.
+5. Inclusión de `prioridad` en `DB_COLUMNS` y `createActivity` en `lib/hooks/useActivities.ts`.
+6. Guard en `CreateActivityModal.tsx` para no recalcular `fecha_fin` en edición salvo que el usuario altere activamente `fecha_inicio` o `tipo_actividad`.
+7. Ajuste de `minDate={isEditing ? undefined : new Date()}` en los `DateTimePicker`.
+8. Persistencia inmediata de `reassignUserId` y `attendees` (con `_sync_metadata`) al mutar en modo edición.
+9. Integración del switch de reunión Teams para actividades tipo EVENTO con cuenta Microsoft conectada.
+10. Eliminación de archivos muertos `CreateActivityModal-isazaale.tsx` y `useActivitiesServer-isazaale.ts`.
+11. Auto-sanación proactiva y reactiva de `fk_crmact_opp` y `account_id` en `lib/sync.ts`: extracción y saneamiento en `_complete_snapshot_`, nulificación de referencias huérfanas en Dexie y Outbox, y método de recuperación `healOrphanedActivityOpportunity`.
+
+Prevention Rule:
+**Edición y Modales Autosave en Actividades**:
+1. En modales con autosave (`useFormAutoSave`), ningún `useEffect` debe mutar campos dependientes (como fechas calculadas) en el montaje inicial cuando `isEditing` sea verdadero; solo deben mutarse si el campo origen está marcado como `dirty`.
+2. Los selectores de fecha (`DateTimePicker`) en formularios de edición NUNCA deben restringir `minDate={new Date()}` porque bloquean la visualización y reprogramación de registros históricos o vencidos.
+3. Todo estado interactivo en modales autosave que viva fuera de react-hook-form (como reasignación o listas de asistentes) debe invocar `updateActivity` inmediatamente en su handler de cambio.
+4. Toda consulta indexada de Dexie (e.g., `where('col').equals(...)`) debe contar con su índice declarado en el schema de la base de datos local para evitar `SchemaError`.
+5. Todo filtro de auto-sanación de claves foráneas en `lib/sync.ts` DEBE inspeccionar tanto campos individuales como snapshots completos (`u.field === '_complete_snapshot_'`), sanitizando cadenas vacías `""` a `null` para no romper constraints de PostgreSQL.
+
+---
+
+## [Bug ID: 20261002-01]
+
+Context:
+Módulo de Actividades en vista "Mes" (`app/actividades/page.tsx`, `lib/hooks/useActivities.ts`, `lib/db.ts`, `components/layout/AppLayout.tsx`).
+
+What I Did:
+Diagnóstico y corrección de la pérdida de visualización de actividades en la vista Mes tras recargar la página (F5) en producción.
+
+Problem:
+Al refrescar la página en `/actividades?view=month`, la grilla de días 1 a 31 aparecía completamente en blanco. En la barra superior figuraba "Guardado" y abajo "Sincronizado", pero el calendario no mostraba ninguna actividad. En la navegación interna entre rutas el problema no se reproducía; solo ocurría en recargas en frío (*cold reload*).
+
+Root Cause:
+1. **Condición de carrera al recargar:** En recargas completas, la memoria JS se reinicia de cero; `lib/db.ts` inicia con `activeUserId = null` y `activeDatabase = CRMFirplakDB::anonymous`.
+2. **Montaje prematuro:** `AppLayout.tsx` renderizaba `{children}` inmediatamente sin esperar a que `isLocalDataReady` fuera `true`.
+3. **Suscripción huérfana en `useLiveQuery`:** `useActivities.ts` ejecutaba `useLiveQuery` contra la base anónima vacía y sus dependencias eran estáticas `[filters?.opportunity_id, ...]`. Al resolver la sesión asíncrona, `switchLocalDatabase` abría la base del usuario y cerraba la anónima. Al no cambiar las dependencias de `useLiveQuery` y estar cerrada la base original, el hook nunca re-ejecutaba la consulta y quedaba congelado con `activities = []`.
+4. **Impacto en vista Mes:** La vista calculaba `activitiesByDay` a partir de un arreglo vacío, dibujando 31 celdas desiertas sin error en consola.
+
+Fix Applied:
+1. `lib/db.ts`: Se implementó un bus de eventos reactivo (`onDatabaseChange`, `useActiveLocalUserId`, `useActiveDatabaseVersion`, `activeDatabaseVersion++`) que notifica a React cada vez que la base activa cambia de usuario.
+2. `lib/hooks/useActivities.ts`: Se agregaron `[activeUserId, dbVersion, ...]` a las dependencias de `useLiveQuery` para re-vincular la consulta automáticamente a la nueva base activa.
+3. `components/layout/AppLayout.tsx`: Se condicionó el renderizado de `{children}` en páginas protegidas a que `isLocalDataReady === true`, mostrando un spinner elegante durante los ~100 ms de inicialización de sesión.
+4. `app/actividades/page.tsx`: Se vincularon `activeUserId` y `dbVersion` a los `useLiveQuery` de catálogos secundarios (`classifications`, `subclassifications`, `accounts`, `opportunities`).
+5. `lib/activities-database-reactivity.test.ts`: Se añadió prueba automatizada que verifica la notificación y el cambio efectivo de base en Dexie.
+
+Prevention Rule:
+**Dexie Multi-User / Lifecycle Reactivity**: En aplicaciones Local-First donde la instancia subyacente de la base de datos se cambia dinámicamente según la sesión del usuario (`switchLocalDatabase`), NUNCA asumas que un Proxy `db` re-suscribe automáticamente a `useLiveQuery`. Todo hook que consuma Dexie debe incluir en las dependencias de `useLiveQuery` el usuario activo (`activeUserId`) o la versión de la base (`dbVersion`). Adicionalmente, el layout principal (`AppLayout`) DEBE retrasar el montaje de las rutas protegidas hasta que la base de datos del usuario esté confirmada (`isLocalDataReady === true`).
+
+Tags:
+[actividades] [vista-mes] [dexie] [useLiveQuery] [switchLocalDatabase] [AppLayout] [cold-reload] [reactivity]
+
+---
+
+## [Bug ID: 20261022-01]
+
+Context:
+Listado de Oportunidades (`/oportunidades`, `useOpportunitiesServer.ts`, Supabase PostgreSQL `CRM_Oportunidades` & `CRM_Actividades`).
+
+What I Did:
+Diagnóstico y solución del fallo donde la vista de oportunidades quedaba congelada indefinidamente mostrando 4 barras de carga (skeletons), sin cargar las oportunidades comerciales de hoy ni las anteriores.
+
+Problem:
+Al entrar a `https://crm-64yu.vercel.app/oportunidades` (o en local), la página permanecía en estado de carga con esqueletos grises. En consola se capturó el error:
+`canceling statement due to statement timeout (code: 57014)`
+Y en consecuencia el hook activaba el fallback offline a Dexie (`db.opportunities`), el cual en sesiones nuevas o incógnito está vacío, dejando `loading: true` o en reintentos infinitos sin mostrar las oportunidades recién creadas de hoy.
+
+Root Cause:
+1. **Falta de índice foráneo en `CRM_Actividades(opportunity_id)`:**
+   La consulta principal de `useOpportunitiesServer.ts` realiza un join relacional de actividades:
+   `actividades:CRM_Actividades(id, fecha_inicio, fecha_fin, tipo_actividad, is_completed, is_deleted)`
+   Al no existir índice en `opportunity_id` dentro de `CRM_Actividades` (~75,000 registros), PostgreSQL ejecutaba un Sequential Scan completo de 74,388 filas por CADA una de las 100 oportunidades del lote (`loops=100`), acumulando más de 1.3 a 2 segundos en crudo, y superando el límite de 8000 ms (timeout de PostgREST) al evaluar las políticas RLS.
+2. **Falta de índice compuesto en `CRM_Oportunidades`:**
+   El ordenamiento por defecto es `created_at DESC` con filtro `is_deleted = false`. Al no existir un índice en `(is_deleted, created_at DESC)`, la base realizaba ordenamiento por QuickSort en memoria y Parallel Seq Scan sobre 69,000 filas.
+
+Fix Applied:
+1. Se crearon los índices compuestos en PostgreSQL de Supabase:
+   - `idx_actividades_opportunity_id` en `CRM_Actividades(opportunity_id)`.
+   - `idx_oportunidades_deleted_created` en `CRM_Oportunidades(is_deleted, created_at DESC)`.
+   - `idx_oportunidades_deleted_estado_created` en `CRM_Oportunidades(is_deleted, estado_id, created_at DESC)`.
+2. **Impacto de rendimiento confirmado con `EXPLAIN ANALYZE`:**
+   El tiempo de ejecución de la consulta se redujo de **2027.5 ms (con timeouts de >8000 ms)** a **3.29 ms** (una aceleración de más de 600x).
+3. Se comprobó en navegador (local y producción) la carga instantánea de la tabla, visualizando inmediatamente las oportunidades de hoy (`Alejandro`, `Hugo`, `Diana`, `Marco`, etc.).
+4. Se mejoró el formateo del log de error en `useOpportunitiesServer.ts` para que ante cualquier fallo futuro de PostgREST se impriman `message`, `code`, `details` y `hint`.
+
+Prevention Rule:
+**Relational Joins & Foreign Key Indexing en PostgREST**:
+Toda tabla secundaria que participe en relaciones uno a muchos o joins embebidos en PostgREST (como `CRM_Actividades` asociada a `opportunity_id`) DEBE contar obligatoriamente con un índice B-tree en su clave foránea (`opportunity_id`). Sin este índice, PostgREST ejecuta sequential scans por cada fila del lote, provocando `statement timeout (57014)` en tablas medianas o grandes (>50,000 registros). Igualmente, toda columna sujeta a ordenamiento (`created_at DESC`) y filtros globales (`is_deleted = false`) debe tener un índice compuesto que permita Index Scan directo sin escaneo secuencial.
+
+Tags:
+[oportunidades] [performance] [postgrest] [statement-timeout] [57014] [indices] [crm-actividades] [crm-oportunidades]
+
+---
+
+## [Bug ID: 20261022-02]
+
+Context:
+Módulo de Informes y Exportaciones (`app/informes/page.tsx`, `lib/utils/informes.ts`, Supabase PostgREST exportación de Actividades y Oportunidades).
+
+What I Did:
+Diagnóstico y solución del fallo en la exportación de informes donde la descarga fallaba con el error emergente:
+`Ocurrió un error al exportar: SyntaxError: Unterminated string in JSON at position 16919041`
+
+Problem:
+Al intentar descargar el informe de Actividades (o cualquier informe con filtros amplios o sin filtros), PostgREST intentaba serializar y transmitir más de 74.000 filas con múltiples tablas anidadas en una sola petición HTTP. La respuesta sin comprimir superaba los 67 MB, provocando que los proxies intermedios (Cloudflare / Edge buffer) cortaran el flujo a los ~16 MB exactos (posición 16.919.041), entregando un JSON truncado que hacía fallar `response.json()` con `Unterminated string in JSON`. Además, PostgREST tiene un límite duro de 50.000 filas por petición, omitiendo silenciosamente 24.000 registros si no se paginaba.
+
+Root Cause:
+1. **Falta de paginación/chunking en exportaciones**: `app/informes/page.tsx` realizaba un único `await query` para toda la tabla sin límites ni rangos.
+2. **Proyección pesada innecesaria**: En `CRM_Actividades`, el `selectStr` incluía `*`, arrastrando columnas JSONB pesadas como `_sync_metadata`, `metadata` y campos de Microsoft Teams/Planner que no forman parte de las columnas del reporte.
+3. **Ausencia de índices temporales en actividades**: No existían índices en `CRM_Actividades(created_at DESC)` ni `CRM_Actividades(fecha_fin DESC)`.
+
+Fix Applied:
+1. Se implementó la utilidad `fetchAllInChunks(baseQuery, batchSize, onProgress)` en `lib/utils/informes.ts`:
+   - Descarga los registros en lotes de 2.500 filas mediante `.range(from, to)`.
+   - Ordena explícitamente por `created_at DESC` para paginación consistente.
+   - Cada paquete pesa solo ~1.5 MB, evitando el límite de buffer de 16 MB y garantizando la descarga de 100% de los datos (incluso >50.000 filas).
+2. Se optimizó la consulta de `actividades` para solicitar únicamente las columnas requeridas por el reporte, reduciendo el tamaño de fila en más del 70%.
+3. Se optimizó `downloadExcel` reemplazando inserciones fila por fila por `worksheet.addRows(data)`, acelerando la generación a nivel de memoria.
+4. Se agregó retroalimentación visual en vivo (`exportProgress`) en la UI que informa al usuario la cantidad de registros descargados progresivamente.
+5. Se crearon los índices `idx_actividades_created_at` e `idx_actividades_fecha_fin` en Supabase.
+6. Se crearon pruebas unitarias automatizadas en `pruebas unitarias/informes.test.ts` con cobertura de paginación por lotes, consulta vacía y propagación de errores.
+
+Prevention Rule:
+**Exportación Masiva y Streaming PostgREST**:
+NUNCA realices un `supabase.from(...).select(...)` masivo sin rango en el cliente web si la tabla puede superar los 2.000 - 5.000 registros. PostgREST tiene un límite por petición de 50.000 filas y los proxies HTTP cortan las respuestas de streaming que superen 16 MB. Toda exportación de reportes DEBE utilizar paginación por bloques (`fetchAllInChunks`) con `.range(from, to)`, proyección estricta de columnas (sin `*`), ordenamiento determinista y notificación de progreso al usuario.
+
+Tags:
+[informes] [exportacion] [excel] [csv] [postgrest] [chunking] [unterminated-string-json] [pagination]
+
+---
+
+## [Bug ID: 20261022-03]
+
+Context:
+Barra de herramientas y controles del módulo de Oportunidades (`app/oportunidades/page.tsx`, `components/oportunidades/QuickDateFilter.tsx`, `components/cuentas/UserPickerFilter.tsx`).
+
+What I Did:
+Diagnóstico y solución del fallo de diseño responsivo reportado por el equipo comercial (Juan Esteban Correa), donde el buscador de oportunidades quedaba colapsado a un cuadro diminuto de 42px al visualizarlo en computadores portátiles y pantallas estándar de 1280px a 1536px.
+
+Problem:
+Al agregar nuevos controles de filtrado a la barra superior (`QuickDateFilter`, `UserPickerFilter`, botón de Filtros y selector de Columnas), la barra de búsqueda en `/oportunidades` se comprimía en un cuadro cuadrado inutilizable de 42px x 42px. El usuario no podía ver lo que escribía ni el texto de búsqueda ni el placeholder.
+
+Root Cause:
+1. **Falta de `min-w` en el contenedor del buscador con `flex-1`:**
+   El elemento del buscador `<div className="relative flex-1">` carecía de un ancho mínimo explícito (`min-w-[...]`). En CSS Flexbox, un hijo con `flex-1` sin `min-width` puede encogerse hasta el tamaño de su contenido mínimo o hasta colapsar cuando sus hermanos (`UserPickerFilter`, `QuickDateFilter`, `Filtros`, `ColumnPicker`) ocupan la mayor parte del ancho disponible.
+2. **Breakpoint horizontal prematuro (`xl:flex-row` a 1280px):**
+   El contenedor principal forzaba `flex-row` en el breakpoint `xl` (1280px). En un portátil corporativo típico (1366x768 o 1920x1080 con escala de 125%/150%), el ancho efectivo del viewport es de ~1280px. Con el menú lateral ocupando ~250px, el ancho disponible en la tarjeta es de ~980px. Las 5 pestañas de la izquierda ocupan ~520px y los 4 botones de la derecha ocupan ~477px. La suma (997px) excedía el espacio disponible, exprimiendo el buscador a 42px.
+
+Fix Applied:
+1. **Ancho mínimo garantizado en el buscador:**
+   Se aplicó `min-w-[200px] sm:min-w-[220px]` en el contenedor del buscador:
+   `<div className="relative flex-1 min-w-[200px] sm:min-w-[220px]">`.
+2. **Reorganización responsiva a `2xl:flex-row`:**
+   En el contenedor superior se cambió el breakpoint de alineación horizontal a `flex-col 2xl:flex-row`. De este modo, en portátiles y resoluciones entre 1280px y 1536px, las pestañas ocupan la fila superior con scroll táctil suave, y la fila inferior contiene los controles con el buscador expandido cómodamente a >320px de ancho. En pantallas de escritorio grandes (>= 1536px), ambas secciones conviven perfectamente en una sola línea horizontal.
+3. **Botón de limpieza rápida:**
+   Se agregó un botón `X` dentro del input de búsqueda cuando hay texto ingresado para limpiar rápidamente la consulta con un clic.
+4. **Prueba de regresión permanente:**
+   Se creó `tests/opportunityToolbarResponsive.test.ts` que valida el contrato de estilo y el ancho mínimo del buscador.
+
+Prevention Rule:
+**Flexbox Minimum Width & Viewport Budgeting for Toolbars**:
+NUNCA utilices `flex-1` en inputs de búsqueda dentro de barras de herramientas con múltiples botones sin definir un `min-w-[...]` defensivo (mínimo `min-w-[180px]` o `min-w-[220px]`). Antes de fijar un breakpoint horizontal como `xl:flex-row`, calcula la suma de anchos mínimos de todos los elementos presentes (pestañas + filtros + botones fijos); si la suma supera los 950px considerando el sidebar del CRM, el breakpoint horizontal debe elevarse a `2xl:flex-row` o implementarse un diseño envolvente (`flex-wrap`).
+
+Tags:
+[oportunidades] [ui] [responsive] [flexbox] [search-bar] [min-width] [toolbar] [regression]
+
+---
+
+## [Bug ID: 20261022-04]
+
+Context:
+Migración, homologación y sincronización de oportunidades desde MySQL vTiger hacia Supabase CRM (`CRM_Oportunidades`, `execution/update_cross_opportunities_from_vtiger.mjs`, `execution/purge_all_pot_duplicates.mjs`).
+
+What I Did:
+Diagnóstico profundo y ejecución del plan de restauración completa de oportunidades nativas de 2026 tras el reporte de asesores que vieron oportunidades cerradas como perdidas, prefijadas con consecutivos `POT...` ajenos o desparecidas por deduplicación errónea.
+
+Problem:
+1. El equipo comercial reportó que a sus oportunidades se les agregó un prefijo `POT[número] - ` (ej. `POT49076 - Hidromasaje Galapagos 250, DELTA INGENIERA GROUP`), y que muchas oportunidades cambiaron de fase, se cerraron como perdidas (`estado_id = 3`) y desaparecieron de la vista de abiertas.
+2. En otras, parecía haberse borrado información o asignado a asesores antiguos de vTiger.
+
+Root Cause:
+1. **Cruce difuso por teléfono/email (Fuzzy Cross-Matching Fallacy):**
+   El script `update_cross_opportunities_from_vtiger.mjs` cruzó oportunidades nativas de 2026 contra vTiger buscando coincidencias en los últimos 7 dígitos del teléfono o email del cliente. Un cliente corporativo (como *DELTA INGENIERA GROUP*) tiene múltiples negocios a lo largo de los años. Al encontrar un registro antiguo de 2024/2025 que estaba en *Closed Lost* en vTiger, el script asumió erróneamente que la oportunidad nueva de 2026 era ese mismo registro antiguo:
+   - Le antepuso el consecutivo `POT...` al nombre.
+   - Cambió su estado de Abierta (1) a Cerrada Perdida (3) en 244 oportunidades de 2026.
+   - Inyectó notas de bitácora antiguas con `--- [HISTORIAL VTIGER] ---`.
+2. **Purga destructiva por código POT:**
+   Posteriormente, `purge_all_pot_duplicates.mjs` agrupó por código `POT` y marcó como `is_deleted = true` a 4.153 oportunidades de 2026 que compartieron indebidamente el mismo código POT con registros anteriores con mayor número de actividades.
+
+Fix Applied:
+1. Se creó snapshot previo de seguridad: `CRM_Oportunidades_pre_restore_20261022`.
+2. **Restauración de soft-delete:** Se reactivaron **4.153 oportunidades** de 2026 que habían sido apagadas (`is_deleted = false`).
+3. **Reapertura de estado:** Se restableció el estado `estado_id = 1` (Abierta) a las **244 oportunidades** de 2026 cerradas indebidamente, limpiando motivos de pérdida.
+4. **Limpieza de nombres:** Se eliminó el prefijo `POT[0-9]+ - ` de **4.904 oportunidades** nativas de 2026.
+5. **Limpieza de comentarios:** Se removió el bloque inyectado `--- [HISTORIAL VTIGER] ---` de **4.224 comentarios**.
+6. **Desvinculación de metadatos:** Se limpiaron los metadatos `vtiger_potentialid` y `vtiger_potential_no` de **4.904 oportunidades** de 2026.
+7. Se validó visualmente en el CRM y en la base de datos la recuperación completa de la oportunidad de Edison Porras (*Hidromasaje Galapagos 250, DELTA INGENIERA GROUP* por $18.276.435,98 con cotización e ítems 100% íntegros).
+
+Prevention Rule:
+**Strict Isolation Between Native CRM Entities and Historical Migrations**:
+NUNCA utilices heurísticas difusas (como coincidencias de teléfono o email de cuenta/contacto) para mutar el estado (`estado_id`), nombre o fase de oportunidades nativas ya creadas en el nuevo CRM. Un cliente puede tener decenas de proyectos distintos en diferentes años. Las migraciones deben ser estrictamente aditivas (`INSERT`) o guiadas por claves foráneas explícitas e inequívocas. Toda deduplicación masiva debe validar el año de creación (`created_at`) y NUNCA apagar registros recientes de vendedores activos a favor de registros históricos archivados.
+
+Tags:
+[vtiger] [migration] [cross-matching] [deduplication] [data-recovery] [opportunities] [pot-prefix]
+
+---
+
+## [Bug ID: 20261022-05]
+
+Context:
+Tabla interactiva de oportunidades (`app/oportunidades/page.tsx`, Handsontable `HotTable`, `useOpportunitiesServer.ts`, `components/oportunidades/FloatingColumnFilterPopover.tsx`).
+
+What I Did:
+Diagnóstico y solución del comportamiento de filtrado en cabeceras de columnas (`[▼]`) donde no aparecían todas las opciones de canales, fases, vendedores, países o ciudades debido a la carga progresiva por lotes (100 filas por página).
+
+Problem:
+1. El usuario reportó que al hacer clic en los filtros de los títulos de las columnas (ej. Canal, Ciudad, País, Fase), la lista desplegable de opciones estaba incompleta: solo aparecían los valores que por azar existían en las primeras 100 oportunidades cargadas en memoria. Si un canal (ej. `OBRAS_INT`) o una ciudad (ej. `Cartagena`) aparecía en la fila 150, no figuraba en la lista de opciones.
+2. Además, al seleccionar una de las pocas opciones visibles, el plugin nativo de Handsontable (`filter_by_value`) filtraba de forma local y ciega en JavaScript sobre esas 100 filas, en lugar de solicitar a Supabase los resultados reales en toda la base de datos.
+
+Root Cause:
+El plugin nativo `filters` / `dropdownMenu` de Handsontable es estrictamente cliente (`client-side`). Su función interna `filter_by_value` obtiene las opciones invocando `instance.getDataAtCol(col)` sobre el array cargado en el navegador (`hotData`). En arquitecturas con paginación infinita o carga progresiva (donde se cargan 100 filas a la vez para optimizar rendimiento de red y memoria), Handsontable desconoce por completo la base de datos externa.
+
+Fix Applied:
+1. **Catálogos Maestros Ligeros bajo demanda (Server-side Options):**
+   No es necesario descargar las 60.000 oportunidades para obtener los filtros. Se cargan únicamente los catálogos maestros de Supabase (`CRM_Canales`, `CRM_FasesOportunidad`, `CRM_Usuarios`, `CRM_OrigenesOportunidad`, `CRM_Paises`), cuyo peso total combinado no supera los 15 KB.
+2. **Intercepción de Clics en Cabecera (`beforeDropdownMenuShow` / `onClickCapture`):**
+   Al hacer clic en el botón `[▼]` (`.changeType`) de las columnas filtrables (`canal`, `fase`, `vendedor`, `estado`, `origen`, `pais`, `ciudad`), se cancela la apertura del menú ciego de Handsontable y se abre `FloatingColumnFilterPopover` anclado a la posición de la cabecera.
+3. **Filtros por País y Ciudad en el Servidor (`useOpportunitiesServer.ts`):**
+   Se integraron `countryFilter` y `cityFilter` en `useOpportunitiesServer`, activando `CRM_Cuentas!inner(...)` con `.eq('account.pais_id', countryFilter)` e `.ilike('account.ciudad', '%...%')`.
+4. **Indicador Visual `🔵` y Sincronización:**
+   Se aplicó el helper `formatColumnHeaderTitle` e `isColumnFilterActive` para marcar con un punto azul `🔵` cualquier columna con filtro activo.
+5. **Pruebas Automatizadas:**
+   Prueba unitaria en `tests/opportunityTableFilters.test.ts` (10/10 VERIFIED / GREEN).
+
+Prevention Rule:
+**Never Rely on In-Memory Client-Side Filters with Paginated Datasets**:
+En tablas con carga progresiva o paginada en servidor, NUNCA permitas que el usuario interactúe con plugins de filtrado cliente tipo `filter_by_value` sin interceptarlos. El filtrado debe delegarse siempre al backend mediante consultas SQL parametrizadas, y las opciones desplegables deben poblarse desde tablas maestras/catálogos o consultas agregadas (`SELECT DISTINCT`), garantizando que el usuario elija entre el 100% de las opciones reales sin colapsar el rendimiento.
+
+Tags:
+[handsontable] [server-side-filtering] [catalogs] [progressive-loading] [popover] [opportunities] [active-filters]
+
+---
+
+## [Bug ID: 20261022-06]
+
+Context:
+Filtro de cabecera de la columna "FASE" en la tabla interactiva de oportunidades (`components/oportunidades/FloatingColumnFilterPopover.tsx`, `lib/opportunityColumnFilterHelpers.ts`, `lib/hooks/useOpportunitiesServer.ts`).
+
+What I Did:
+Restricción del embudo de fases en el popover para que dependa estrictamente del canal comercial del usuario (`selectedChannel` o `user.canales`), deduplicación por nombre de etapa, exclusión de estados terminales cerrados ("Cerrada Ganada", "Cerrada Perdida") y adición de la opción "Prospectos (Sin fase)" (`fase_id IS NULL`), resolviendo el problema puramente a nivel de aplicación sin alterar la base de datos de Supabase.
+
+Problem:
+Al abrir el filtro flotante de la columna "FASE", se mostraban indiscriminadamente todas las fases de todos los canales mezcladas (más de 70 filas de `CRM_FasesOportunidad`), ocasionando que aparecieran 5 veces opciones repetidas como "Cerrada Perdida" y "Cerrada ganada" (una por cada canal: FERIA, PROPIO, OBRAS_INT, OBRAS_NAC, DIST_INT, DIST_NAC), además de duplicados de fases activas como "Visita" que en la base de datos tienen dos IDs distintos para el mismo canal. Tampoco existía forma de filtrar por "Prospectos" (las 1.292 oportunidades que tienen `fase_id: null`).
+
+Root Cause:
+1. `CRM_FasesOportunidad` almacena las etapas separadas por `canal_id`. Al consultar la tabla sin restringir por canal, se obtenían las etapas de todos los canales combinadas.
+2. Las fases "Cerrada Perdida" y "Cerrada Ganada" son estados terminales de cierre manejados por el filtro `ESTADO` (`statusFilter: 'won' | 'lost' | 'open'`), por lo que no deben contaminar el embudo comercial activo de fases.
+3. Existían registros históricos duplicados por canal en `CRM_FasesOportunidad` (ej. ID 56 e ID 97 ambos con nombre "Visita" y canal "OBRAS_NAC").
+4. El usuario solicitó explícitamente resolverlo en la aplicación sin tocar ni dañar la base de datos de Supabase.
+
+Fix Applied:
+1. **Filtrado Estricto por Canal y Exclusión de Fases Cerradas (`getAvailablePhasesForChannel`):**
+   Solo se extraen las fases del canal activo (`selectedChannel` o el canal asignado al usuario en `CRM_Usuarios.canales`). Se filtran las que contienen "cerrada" (`!nombre.includes('cerrada')`) y se ordenan por su campo `orden`.
+2. **Deduplicación Limpia en Interfaz:**
+   Se deduplican las etapas por nombre para que cada paso del embudo (ej. "Visita") aparezca una sola vez numerado (Paso 1, 2, ...).
+3. **Mapeo de IDs Equivalentes en Consultas (`getEquivalentPhaseIds`):**
+   Al filtrar una etapa, `useOpportunitiesServer.ts` busca todos los IDs asociados a ese nombre y canal (ej. `[56, 97]`) y realiza la consulta con `.in('fase_id', equivalentIds)`, de modo que captura todas las oportunidades sin importar cuál ID tengan asignado, sin tocar la BD.
+4. **Soporte de "Prospectos (Sin fase)" (`PROSPECTO_PHASE_ID = -1`):**
+   Se agregó una opción explícita y visible para "Prospectos (Sin fase asignada)", que en backend consulta `.is('fase_id', null)` y en local filtra `!o.fase_id`.
+5. **Selector de Canal en el Popover:**
+   Si el usuario no ha seleccionado canal aún (ej. rol ADMIN), el popover le explica que las fases dependen del canal y le permite elegir el canal deseado con un clic para desplegar su embudo específico.
+6. **Validación:**
+   Pruebas unitarias en `tests/opportunityTableFilters.test.ts` (11/11 VERIFIED / GREEN).
+
+Prevention Rule:
+**Channel-Scoped Funnel Hierarchy**:
+Las etapas de un embudo de ventas NUNCA deben mostrarse como una lista plana global si en el modelo de negocio pertenecen a canales comerciales diferenciados. Si la base de datos contiene duplicidades o variaciones por canal, deben aislarse mediante el canal del contexto/usuario, excluir los estados cerrados (que pertenecen al estado del negocio) y deduplicar a nivel de lógica de presentación sin ejecutar mutaciones destructivas en la base de datos en producción.
+
+Tags:
+[sales-funnel] [channels] [phases] [deduplication] [prospectos] [no-db-damage] [opportunities] [handsontable]
+
+---
+
+## [Bug ID: 20261022-07]
+
+Context:
+Carga y rendimiento del listado de oportunidades (`app/oportunidades/page.tsx`, `lib/hooks/useOpportunitiesServer.ts`, `lib/opportunityColumnFilterHelpers.ts`, `tests/opportunityTableFilters.test.ts`).
+
+What I Did:
+Optimización integral del tiempo de carga de oportunidades mediante carga progresiva (lotes de 30 ítems) y desacoplamiento de la consulta de totales (`countQuery` con `head: true` en paralelo), eliminando el escaneo masivo sobre joins de actividades en Supabase y visualizando los totales de registros y valor de pipeline sin comprometer ningún dato.
+
+Problem:
+El usuario reportó lentitud en la carga de oportunidades al entrar a la página o cambiar filtros, solicitando carga progresiva y consultas optimizadas para traer los totales más fácilmente sin comprometer los datos ("dale sin miedo").
+1. En `useOpportunitiesServer.ts`, la consulta principal solicitaba `{ count: 'exact' }` incrustado directamente dentro de un `select(...)` pesado con 5 tablas relacionadas, incluyendo `CRM_Actividades` (con más de 72.000 filas). En PostgREST, esto obligaba a PostgreSQL a materializar el grafo completo de joins solo para calcular el conteo total.
+2. Cada scroll de paginación (`loadMore`) volvía a ejecutar la consulta con `{ count: 'exact' }`, provocando recálculos redundantes e innecesarios de más de 67.000 oportunidades en cada página.
+3. El tamaño de página estaba configurado en 100 oportunidades completas (`pageSize: 100`), lo que demoraba la descarga inicial por red y congelaba temporalmente el hilo de Handsontable al montar 100 filas a la vez.
+
+Root Cause:
+Acoplamiento de la operación de conteo agregada (`COUNT(*)`) dentro de la consulta de datos paginados con joins laterales/relacionales de uno a muchos (`CRM_Actividades`), sumado a un tamaño de lote excesivo para el primer render.
+
+Fix Applied:
+1. **Desacoplamiento de la Consulta de Totales (`countQuery` con `head: true`):**
+   Se separó la obtención de totales en una consulta dedicada ultra-ligera:
+   `supabase.from('CRM_Oportunidades').select(relation, { count: 'exact', head: true })`.
+   - Utiliza exclusivamente los índices existentes (`idx_oportunidades_deleted_estado_created`).
+   - Envía una petición HTTP `HEAD`, por lo que transmite 0 bytes de datos de filas (solo lee el header `Content-Range`).
+   - Ejecuta en **11-13 ms** en PostgreSQL.
+   - Solo se ejecuta en la carga inicial y al cambiar filtros. En la paginación (`loadMore`), no se repite el conteo.
+2. **Carga Progresiva de Alto Rendimiento (`pageSize = 30`):**
+   - El lote inicial se redujo de 100 a 30 registros, logrando que el primer render ocurra en menos de 200 ms.
+   - Handsontable e interfaz móvil montan instantáneamente.
+   - Conforme el usuario se desplaza, `useInfiniteScroll` solicita los siguientes lotes de 30 sin bloquear la interfaz.
+3. **Consulta de Datos Limpia (Sin Conteo Embebido):**
+   `dataQuery` ya no solicita conteo en su cabecera, liberando a PostgreSQL de contar la tabla entera mientras pagina.
+4. **Cálculo y Exposición de Totales (`calculateTotalAmount`):**
+   Se integró el helper `calculateTotalAmount` en `lib/opportunityColumnFilterHelpers.ts` y se expone `totalAmount` en `useOpportunitiesServer`, mostrándolo en el pie de tabla de escritorio y en la cabecera de tarjetas móvil.
+5. **Validación:**
+   - 13/13 pruebas unitarias aprobadas en `tests/opportunityTableFilters.test.ts`.
+   - Pruebas de scroll infinito aprobadas en `pruebas unitarias/infiniteScroll.test.ts`.
+   - Verificación visual y de red en navegador confirmando carga inmediata ("Mostrando 30 de 701 oportunidades", valor total cargado formateado).
+
+Prevention Rule:
+**Decouple Aggregate Counting from Relational Pagination Queries**:
+En vistas de alto volumen con joins relacionales (especialmente tablas uno-a-muchos como actividades), NUNCA combines `{ count: 'exact' }` con el `select` de los datos de la página. Separa el conteo en una petición `HEAD` paralela indexada (`head: true`) y mantén los lotes de renderizado inicial pequeños (25-30 ítems) para garantizar First Contentful Paint < 250 ms.
+
+Tags:
+[performance] [progressive-loading] [supabase] [postgrest] [decoupled-count] [head-request] [handsontable] [totals]
+
+---
+
+## [Bug ID: 20261022-08]
+
+Context:
+Filtro de fechas (creación y fecha de cierre estimada) en el módulo de Oportunidades (`useOpportunitiesServer.ts`, `lib/dateFilterHelpers.ts`, `app/oportunidades/page.tsx`).
+
+Problem:
+Al seleccionar como fecha de fin el día de hoy (o rangos como "Hoy" o "Creadas hoy"), no aparecía ninguna de las oportunidades creadas durante el día de hoy, arrojando 0 resultados o excluyendo los negocios más recientes.
+
+Root Cause:
+En JavaScript, `new Date("YYYY-MM-DD")` se analiza según la especificación ECMAScript como medianoche UTC (`YYYY-MM-DDT00:00:00.000Z`).
+En Colombia (UTC-5), esa medianoche UTC corresponde a las 19:00 (7:00 PM) del día **anterior**.
+Al invocar `end.setHours(23, 59, 59, 999)`, JavaScript modificaba las horas del día local anterior (ej: 21 de octubre a las 23:59:59.999-05:00), cuya conversión con `end.toISOString()` resultaba en `2026-10-22T04:59:59.999Z` (11:59:59 PM de **ayer** en hora local de Colombia).
+Por consiguiente, la cláusula enviada a Supabase PostgreSQL:
+`q.lte('created_at', '2026-10-22T04:59:59.999Z')`
+excluía sistemáticamente cualquier oportunidad creada hoy después de las 00:00 AM hora Colombia (05:00:00Z en adelante).
+
+Fix Applied:
+1. Se crearon los helpers `toStartOfDayISO(dateStr)` y `toEndOfDayISO(dateStr)` en `lib/dateFilterHelpers.ts`.
+   - Descomponen la cadena en `[year, month, day]` numéricos para instanciar el objeto `Date` en la zona horaria local exacta (`new Date(year, month - 1, day, 23, 59, 59, 999)`).
+   - Para hoy `2026-10-22`, genera `2026-10-23T04:59:59.999Z` (23:59:59.999 hora Colombia), cubriendo el día entero.
+2. Se reemplazó el cálculo erróneo en `useOpportunitiesServer.ts` tanto para la consulta online de Supabase (`startDate`, `endDate`, `startClosingDate`, `endClosingDate`) como para el fallback offline de Dexie.
+3. Se actualizó `formatLocalDateToYMD` en `DATE_FILTER_PRESETS` para evitar que `toISOString().split('T')[0]` devuelva el día de mañana después de las 7:00 PM hora Colombia.
+4. Se incorporó prueba permanente en `tests/opportunityTableFilters.test.ts` que valida que las oportunidades creadas en el transcurso del día de hoy (ej: 08:11 AM y 01:25 PM) queden estrictamente dentro del rango de `toStartOfDayISO` y `toEndOfDayISO`.
+
+Prevention Rule:
+**Timezone-Aware Date Boundary Helpers**:
+NUNCA uses `new Date("YYYY-MM-DD").setHours(23, 59, 59, 999)` para calcular límites de fecha finales en clientes que operan en husos horarios negativos respecto a UTC (como UTC-5 Colombia). Siempre descompón la fecha en componentes numéricos `(year, month - 1, day, 23, 59, 59, 999)` o usa `toEndOfDayISO` / `toStartOfDayISO` para que el límite superior represente el final del día local real y no el final del día anterior.
+
+Tags:
+[date-filter] [timezone] [utc-offset] [opportunities] [today-filter]
+
+---
+
+## [Bug ID: 20261022-09]
+
+Context:
+Búsqueda y visualización de contactos en `/contactos` para usuarios con rol `VENDEDOR` (`lib/hooks/useContactsServer.ts`, `lib/contactVisibility.ts`, `tests/contactVisibility.test.ts`).
+
+Problem:
+Los usuarios comerciales con rol `VENDEDOR` (por ejemplo `comercialbogota@firplak.com`) no obtenían resultados al buscar contactos por número de celular (p. ej. `3007367088`) u otros campos cuando la cuenta asociada al contacto pertenecía a otro asesor (ej. cuenta asignada a `claudia.granada@firplak.com`). La interfaz indicaba "No se encontraron coincidencias" a pesar de que el contacto existía en la base de datos.
+
+Root Cause:
+En `useContactsServer.ts`, la variable `needsAccountFilter` se definía como `isVendedor || userRole === 'COORDINADOR'`.
+Al ser `true`, la consulta a Supabase forzaba una cláusula `.not('account_id', 'is', null)` y un inner join `.select('*, CRM_Cuentas!inner(...)')` filtrando exclusivamente por cuentas donde `owner_user_id` coincidiera con el usuario autenticado (`account_id IN (myAccountIds)`).
+De igual manera, el fallback de Dexie aplicaba `c.account_id && myAccountIds.includes(c.account_id)`.
+Esto contradecía la regla de negocio del directorio de contactos (`wiki/pages/contactos.md`), según la cual todos los roles comerciales tienen visibilidad de los contactos para facilitar la prospección, validación de clientes y evitar duplicados entre canales y ferias.
+
+Fix Applied:
+1. Se creó el helper desacoplado `lib/contactVisibility.ts` con la función `shouldRestrictContactsByAccountOwner`, configurada para devolver `false` (visibilidad global de directorio de contactos) y `filterContactsForUser` para escenarios donde se requiera filtrado en memoria.
+2. Se actualizó `useContactsServer.ts` para condicionar `needsAccountFilter` a `shouldRestrictContactsByAccountOwner(userRole)`.
+3. Se garantizó que tanto la consulta online a Supabase como el fallback local de Dexie muestren y permitan buscar en la totalidad de contactos para el rol `VENDEDOR`.
+4. Se incorporó suite de pruebas permanente `tests/contactVisibility.test.ts` con 5 casos que validan que el rol `VENDEDOR` no restrinja contactos por dueño de cuenta y mantenga accesibles todos los registros en búsquedas.
+
+Prevention Rule:
+**Separate Entity Directory Lookup from Account-Ownership Restrictions**:
+No restrinjas la búsqueda de personas de contacto (`CRM_Contactos`) por el propietario de la cuenta mercantil (`CRM_Cuentas.owner_user_id`) a menos que exista un requerimiento de privacidad explícito. Los asesores comerciales necesitan poder consultar teléfonos o correos de personas para saber si ya han sido atendidos o si están vinculados a ferias/canales corporativos, evitando crear prospectos duplicados.
+
+Tags:
+[contactos] [vendedor] [roles-y-permisos] [account-owner] [search-filter] [directory-visibility]
+
+---
+
+## [Bug ID: 20261023-01]
+
+Context:
+Ingreso y captura de oportunidades desde la web de Firplak (WordPress) vía Edge Function (`supabase/functions/wordpress-lead-intake/index.ts`, `lib/leadDeduplication.ts`, `tests/leadDeduplication.test.ts`).
+
+Problem:
+Oportunidades entrantes de la web se duplicaban en intervalos de pocos segundos (15 a 35 s por doble clic/re-envío) o pocos minutos (1 a 4 min por combinaciones de formulario OptIn y botón de WhatsApp). Los asesores comerciales se veían forzados a cerrar manualmente la oportunidad repetida con el pareto/motivo "Duplicado" (5 oportunidades cerradas por esta razón el 22-oct y 2 el 23-oct).
+
+Root Cause:
+1. `wordpress-lead-intake` deduplicaba cuentas por teléfono/correo y contactos dentro de la cuenta, pero en el paso de oportunidad ejecutaba siempre un `.insert()` ciego e incondicional en `CRM_Oportunidades`.
+2. El trigger de Postgres `prevent_duplicate_oportunidades` solo comprobaba una ventana de 10 segundos (`NOW() - INTERVAL '10 seconds'`), por lo que cualquier re-envío tras 15 segundos o cambio de formulario evitaba la detección.
+3. Además, el trigger generaba un `RAISE EXCEPTION` que rompía la respuesta HTTP a WordPress, pudiendo generar errores visibles al usuario final en la web.
+
+Fix Applied:
+1. Se implementó deduplicación inteligente en `wordpress-lead-intake` activa para todas las oportunidades entrantes de aquí en adelante.
+2. Antes de crear una oportunidad nueva, la función consulta si la cuenta (`cuentaId`) ya tiene una oportunidad abierta (`estado_id IN (1, 8)`: Abierta o Contacto Inicial) creada en las últimas 24 horas.
+3. Si existe una oportunidad abierta reciente:
+   - No se inserta una segunda fila duplicada en `CRM_Oportunidades`.
+   - Se anexa la nueva interacción (fuente de conversión, URL de producto, asesor solicitado y comentarios adicionales) al campo `comentarios` de la oportunidad abierta existente y se actualiza `updated_at`.
+   - Se devuelve respuesta HTTP 200 con `success: true` y `duplicado_prevenido: true` a WordPress.
+4. Las oportunidades históricas previas se preservaron intactas sin alteraciones.
+5. Se creó la suite de pruebas unitarias permanente `tests/leadDeduplication.test.ts` (5/5 pruebas GREEN) y el módulo helper `lib/leadDeduplication.ts`.
+6. Se desplegó la versión 19 de la Edge Function en Supabase en producción.
+
+Prevention Rule:
+**Debounce and Consolidate Multi-Touch Inbound Web Leads**:
+Cuando recibas leads desde formularios web de marketing (OptIns, landing pages, botones WhatsApp), nunca insertes incondicionalmente una entidad comercial padre (Oportunidad) sin verificar antes si el cliente ya cuenta con una negociación en etapa inicial abierta en una ventana de 24 horas. Consolida la nueva interacción como nota o actividad en la oportunidad activa para evitar dispersión del embudo y cargas operativas innecesarias en el equipo de ventas.
+
+Tags:
+[wordpress] [lead-intake] [edge-function] [deduplication] [oportunidades] [pareto-duplicado]
+## [Bug ID: 20261027-01]
+
+Context:
+Resolución de identidad y roles de usuario para el Servidor MCP de CRM Firplak (`app/api/mcp/route.ts`, `bin/crm-mcp.ts`, `components/config/McpIntegrationCard.tsx`).
+
+Problem:
+Usuarios con rol administrativo en el CRM (como `ismael.correa@firplak.com` y `alejandro.isaza@firplak.com`) se resolvían erróneamente con permisos de `VENDEDOR` en el endpoint `/api/mcp` al autenticarse con token Bearer, impidiendo el uso de herramientas de reasignación y configuración.
+
+Root Cause:
+1. `app/api/mcp/route.ts` ejecutaba `select('id, email, rol')` contra la tabla `CRM_Usuarios`. En la base de datos Postgres de Supabase, la columna se llama `role` (en inglés), no `rol`. La consulta fallaba silenciosamente y caía en el fallback por defecto (`VENDEDOR`).
+2. En `bin/crm-mcp.ts`, si no se pasaba `CRM_USER_ROLE` explícito en las variables de entorno, no se consultaba la base de datos para resolver el rol real del usuario autenticado.
+
+Fix Applied:
+1. Se corrigió la consulta en `app/api/mcp/route.ts` para seleccionar `role` y resolver tanto por `user.id` como por `user.email`.
+2. Se actualizó `bin/crm-mcp.ts` para que consulte `CRM_Usuarios` por email y garantice el rol `ADMIN` a usuarios como `ismael.correa@firplak.com`.
+3. Se añadió prueba unitaria permanente en `tests/crm-mcp.test.ts`.
+
+Prevention Rule:
+**Verify Postgres Database Column Names in Supabase Queries**:
+Al consultar esquemas de usuario (`CRM_Usuarios`), no asumas nombres en español (`rol`) cuando la definición de la tabla use inglés (`role`). Verifica siempre el catálogo de columnas con `information_schema.columns` antes de escribir selectores SQL / PostgREST.
+
+Tags:
+[mcp] [roles] [permissions] [crm-usuarios] [admin-access]
 
 
+---
+
+## [Bug ID: 20261030-01]
+
+Context:
+Cálculo de precios de catálogo para el canal Propio / B2C (`PROPIO`) en cotizaciones, pedidos y formalización de documentos PDF (`lib/salesChannels.ts`, `lib/hooks/useOpportunities.ts`, `app/oportunidades/nueva/CreateOpportunityWizard.tsx`, `app/oportunidades/[id]/cotizaciones/[quoteId]/page.tsx`, migración `20261030122500_map_propio_to_pvp_sin_iva.sql`).
+
+Problem:
+Para productos del canal B2C (`PROPIO`), el sistema cotizaba mapeando a la columna `distribuidor_pvp_iva`, la cual en las listas de precios oficiales ya contiene el IVA del 19% incluido (PVP con IVA). Al generar el pedido formal o cotización en PDF (formato F-V-29), el generador asumía que el precio unitario era base neta y le adicionaba nuevamente el 19% de IVA sobre el subtotal, incurriendo en un doble cobro de IVA indebido para el cliente final B2C.
+
+Root Cause:
+En `CRM_Canales` y en las funciones de resolución de precios (`getProductPrice` y `useQuoteItems`), el canal `PROPIO` estaba asignado a la columna `distribuidor_pvp_iva` en lugar de la columna base neta `pvp_sin_iva`.
+
+Fix Applied:
+1. Se actualizó el mapeo del canal `PROPIO` en `lib/salesChannels.ts` a `pvp_sin_iva`.
+2. Se sincronizó la resolución de precios unitarios en `lib/hooks/useOpportunities.ts`, `CreateOpportunityWizard.tsx` y `page.tsx` de cotizaciones.
+3. Se generó la migración append-only `supabase/migrations/20261030122500_map_propio_to_pvp_sin_iva.sql` para actualizar `CRM_Canales.columna_precio = 'pvp_sin_iva'` para el canal `PROPIO`.
+4. Se actualizó la prueba permanente `tests/salesChannels.test.ts` validando que `PROPIO` resuelva `pvp_sin_iva`.
+
+Prevention Rule:
+**Mapeo de Listas de Precios por Canal**:
+Todos los canales de venta en Firplak deben mapearse exclusivamente a columnas de base neta sin IVA (`lista_base_obras`, `lista_base_cop`, `lista_base_exportaciones`, `pvp_sin_iva`), dado que el motor de documentos formales y pedidos (F-V-29) aplica el IVA del 19% al final sobre el subtotal neto. Nunca mapear un canal a columnas que ya incluyan IVA como precio unitario base.
+
+Tags:
+[canales-de-venta] [propio] [b2c] [pvp_sin_iva] [distribuidor_pvp_iva] [iva-19] [cotizaciones] [pedidos]
+
+---
+
+## [Bug ID: 20261030-02]
+
+Context:
+Visualización de aclaración de precios por canal en el asistente de creación de oportunidades / cotizaciones / pedidos (`app/oportunidades/nueva/CreateOpportunityWizard.tsx`) y en la pestaña de Productos del detalle de oportunidad (`app/oportunidades/[id]/page.tsx`).
+
+Problem:
+Al seleccionar productos para ingresar una cotización o pedido en el asistente de creación de oportunidad, o al consultar la oportunidad, la aplicación se bloqueaba completamente con la pantalla de error inesperado de Next.js (`app/error.tsx`) mostrando el mensaje: `channel is not defined`. El usuario interpretaba que el canal del cliente faltaba en la base de datos, aunque estaba correctamente configurado en la cuenta.
+
+Root Cause:
+En `CreateOpportunityWizard.tsx`, dentro del `items.map(...)` que renderiza la lista de productos seleccionados, se invocaba `getPriceClarification(channel, ...)` utilizando una variable libre `channel` no declarada en ese ámbito de bloque (en lugar de `selectedAccount?.canal_id || 'DIST_NAC'`), disparando un `ReferenceError: channel is not defined` en tiempo de ejecución. Adicionalmente, en `app/oportunidades/[id]/page.tsx`, `ProductsTab` invocaba `getPriceClarification(account?.canal_id, ...)` sin importar la función ni declarar la suscripción a `account`.
+
+Fix Applied:
+1. En `app/oportunidades/nueva/CreateOpportunityWizard.tsx`, se declaró `const channel = selectedAccount?.canal_id || 'DIST_NAC';` dentro del mapeo de items.
+2. En `app/oportunidades/[id]/page.tsx`, se importó `getPriceClarification` desde `@/lib/salesChannels` y se obtuvo `account` con `useLiveQuery` en `ProductsTab`.
+3. Se añadió prueba unitaria en `tests/salesChannels.test.ts` para verificar robustez y fallbacks ante canales nulos o indefinidos.
+
+Prevention Rule:
+**Evitar variables libres no verificadas en JSX**:
+Al añadir helpers visuales en bucles o funciones de renderizado JSX (como `.map`), asegurarse siempre de que las variables pasadas como argumento estén declaradas en el scope local del componente o del callback y ejecutar `npx tsc --noEmit` para atrapar variables libres antes de finalizar.
+
+Tags:
+[channel] [reference-error] [wizard] [oportunidades] [cotizaciones] [pedidos] [sales-channels]

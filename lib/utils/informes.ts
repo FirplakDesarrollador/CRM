@@ -34,9 +34,7 @@ export const downloadExcel = async <T extends object>(
   worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF254153' } };
 
   // Add Data
-  data.forEach((item) => {
-    worksheet.addRow(item);
-  });
+  worksheet.addRows(data);
 
   // Generate buffer and save
   const buffer = await workbook.xlsx.writeBuffer();
@@ -391,12 +389,78 @@ export const downloadSopExcel = async (
 
 export interface OpportunityFlattenLookups {
   userMap: Map<string, string>;
-  segmentMap: Map<number, string>;
+  segmentMap: Map<number | string, string>;
   lossReasonMap: Map<number, string>;
   deptMap: Map<number, string>;
   cityMap: Map<number, string>;
   canalMap: Map<string, string>;
   countryMap: Map<number | string, string>;
+}
+
+export function formatActivityDate(rawDate: unknown): string {
+  if (!rawDate) return '-';
+  const d = new Date(String(rawDate));
+  if (isNaN(d.getTime())) return '-';
+
+  return new Intl.DateTimeFormat('es-CO', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'America/Bogota'
+  }).format(d).replace(',', '');
+}
+
+export function resolveOpportunityActivityInfo(actividades: any[] | any) {
+  if (!actividades) {
+    return {
+      fecha_actividad: '-',
+      estado_actividad: '-'
+    };
+  }
+
+  const actList = (Array.isArray(actividades) ? actividades : [actividades])
+    .filter(a => a && !a.is_deleted);
+
+  if (actList.length === 0) {
+    return {
+      fecha_actividad: '-',
+      estado_actividad: '-'
+    };
+  }
+
+  // 1. Prioridad: actividades pendientes
+  const pending = actList.filter(a => !a.is_completed);
+  let target: any;
+
+  if (pending.length > 0) {
+    // Ordenar ascendente por vencimiento (la fecha pendiente más próxima primero)
+    pending.sort((a, b) => {
+      const dateA = new Date(a.fecha_fin || a.fecha_inicio || 0).getTime();
+      const dateB = new Date(b.fecha_fin || b.fecha_inicio || 0).getTime();
+      return dateA - dateB;
+    });
+    target = pending[0];
+  } else {
+    // Si no hay pendientes, la completada más reciente
+    actList.sort((a, b) => {
+      const dateA = new Date(a.fecha_fin || a.fecha_inicio || 0).getTime();
+      const dateB = new Date(b.fecha_fin || b.fecha_inicio || 0).getTime();
+      return dateB - dateA;
+    });
+    target = actList[0];
+  }
+
+  const rawDate = target.fecha_fin || target.fecha_inicio;
+  const fechaStr = formatActivityDate(rawDate);
+  const estadoStr = target.is_completed ? 'Completada' : 'Pendiente';
+
+  return {
+    fecha_actividad: fechaStr,
+    estado_actividad: estadoStr
+  };
 }
 
 export function mapOpportunityReportRow(
@@ -409,6 +473,14 @@ export function mapOpportunityReportRow(
   const estadoObj = getJoinedSingle(item.estado_info);
   const paisId = cuentaObj?.pais_id ?? item.pais_id;
   
+  const segObj = getJoinedSingle(item.segmento);
+  const segId = item.segmento_id;
+  const segmentoNombre = segObj?.nombre
+    || (segId ? (lookups.segmentMap.get(segId) || lookups.segmentMap.get(Number(segId)) || lookups.segmentMap.get(String(segId))) : null)
+    || '-';
+
+  const activityInfo = resolveOpportunityActivityInfo(item.actividades || item.actividad);
+
   return {
     ...item,
     cuenta_nombre: cuentaObj?.nombre || '-',
@@ -417,14 +489,18 @@ export function mapOpportunityReportRow(
     estado_nombre: estadoObj?.nombre || '-',
     vendedor_nombre: lookups.userMap.get(item.owner_user_id) || '-',
     creador_nombre: lookups.userMap.get(item.created_by) || '-',
-    segmento_nombre: lookups.segmentMap.get(item.segmento_id) || '-',
-    canal_nombre: lookups.canalMap.get(faseObj?.canal_id || cuentaObj?.canal_id) || '-',
+    segmento_nombre: segmentoNombre,
+    // Canal: primero el de la cuenta (como en la app); la fase solo como respaldo.
+    canal_nombre: lookups.canalMap.get(cuentaObj?.canal_id || faseObj?.canal_id) || '-',
     departamento_nombre: lookups.deptMap.get(item.departamento_id) || '-',
     ciudad_nombre: lookups.cityMap.get(item.ciudad_id) || '-',
     probabilidad: item.probabilidad ?? item.probability ?? 0,
     probability: item.probabilidad ?? item.probability ?? 0,
     razon_perdida_label: item.razon_perdida_id ? (lookups.lossReasonMap.get(item.razon_perdida_id) || item.razon_perdida) : (item.razon_perdida || '-'),
-    categorias_interes: formatOpportunityCategories(item.categoria_oportunidad) || '-'
+    categorias_interes: formatOpportunityCategories(item.categoria_oportunidad) || '-',
+    setter: item.setter || '-',
+    fecha_actividad: activityInfo.fecha_actividad,
+    estado_actividad: activityInfo.estado_actividad
   };
 }
 
@@ -433,6 +509,7 @@ export interface ActivityFlattenLookups {
   clasificacionMap: Map<number, string>;
   subclasificacionMap: Map<number, string>;
   tipoActividadMap: Map<number, string>;
+  canalMap?: Map<string, string>;
 }
 
 export function mapActivityReportRow(
@@ -450,10 +527,14 @@ export function mapActivityReportRow(
 
   const cuentaNombre = cuentaObj?.nombre || oppCuentaObj?.nombre || '-';
   const oppNombre = oppObj?.nombre || '-';
+  const oppFaseObj = oppObj ? getJoinedSingle(oppObj.fase) : null;
+  const canalId = cuentaObj?.canal_id || oppCuentaObj?.canal_id || oppFaseObj?.canal_id || null;
+  const canalNombre = canalId ? (lookups.canalMap?.get(canalId) || canalId) : '-';
 
   return {
     ...item,
     asunto: item.asunto || '-',
+    canal_nombre: canalNombre,
     clasificacion_nombre: clasifObj?.nombre || lookups.clasificacionMap.get(item.clasificacion_id) || '-',
     subclasificacion_nombre: subclasifObj?.nombre || lookups.subclasificacionMap.get(item.subclasificacion_id) || '-',
     cuenta_nombre: cuentaNombre,
@@ -466,5 +547,42 @@ export function mapActivityReportRow(
   };
 }
 
+/**
+ * Ejecuta una consulta PostgREST de Supabase por bloques (chunking) consecutivos.
+ * Previene que respuestas gigantes (e.g. 75.000 actividades o 68.000 oportunidades)
+ * excedan los buffers de Cloudflare o PostgREST (50k filas), evitando el fallo
+ * 'SyntaxError: Unterminated string in JSON'.
+ */
+export async function fetchAllInChunks(
+  baseQuery: any,
+  batchSize: number = 2500,
+  onProgress?: (totalFetched: number) => void
+): Promise<any[]> {
+  const allData: any[] = [];
+  let from = 0;
+  let hasMore = true;
 
+  while (hasMore) {
+    const to = from + batchSize - 1;
+    const { data: chunk, error } = await baseQuery.range(from, to);
+    if (error) throw error;
 
+    if (!chunk || chunk.length === 0) {
+      break;
+    }
+
+    allData.push(...chunk);
+
+    if (onProgress) {
+      onProgress(allData.length);
+    }
+
+    if (chunk.length < batchSize) {
+      hasMore = false;
+    } else {
+      from += batchSize;
+    }
+  }
+
+  return allData;
+}

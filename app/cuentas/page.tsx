@@ -10,12 +10,15 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, LocalPais } from "@/lib/db";
 import { Plus, Search, Building, User, Pencil, Medal, Trash2, ArrowUpDown, ChevronUp, ChevronDown, MapPin, Briefcase, DollarSign, Globe } from "lucide-react";
 import { UserPickerFilter } from "@/components/cuentas/UserPickerFilter";
+import { sellerCanSeeAccount } from "@/lib/sellerVisibility";
 import { AccountFilters } from "@/components/cuentas/AccountFilters";
 import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { cn } from "@/components/ui/utils";
 import { AccountDeleteModal } from "@/components/cuentas/AccountDeleteModal";
 import { DataListToolbar } from "@/components/ui/DataListToolbar";
+import { handleEntityLinkClick } from "@/lib/utils/navigation";
+import { formatColombiaDateTime } from "@/lib/date-utils";
 import dynamic from 'next/dynamic';
 
 const HotTable = dynamic(() => import('@/components/HotTableWrapper'), { ssr: false });
@@ -31,7 +34,7 @@ const formatCurrency = (value: number) => {
 function AccountsContent() {
     const searchParams = useSearchParams();
     const router = useRouter();
-    const { isAdmin, hasCoordinatorAccess } = useCurrentUser();
+    const { isAdmin, hasCoordinatorAccess, isVendedor, user: currentUser } = useCurrentUser();
     const { deleteAccount } = useAccounts();
 
     const {
@@ -244,6 +247,21 @@ function AccountsContent() {
                     .single();
 
                 if (account && !error) {
+                    // Asesor (VENDEDOR): solo abre cuentas propias o donde colabora en alguna oportunidad.
+                    if (isVendedor && currentUser?.id && !sellerCanSeeAccount(account, currentUser.id, new Set())) {
+                        const { data: collabRows } = await supabase
+                            .from('CRM_Oportunidades_Colaboradores')
+                            .select('oportunidad_id, CRM_Oportunidades!inner(account_id)')
+                            .eq('usuario_id', currentUser.id)
+                            .eq('is_deleted', false)
+                            .eq('CRM_Oportunidades.account_id', id)
+                            .limit(1);
+                        if (!collabRows || collabRows.length === 0) {
+                            alert('No tienes permisos para ver esta cuenta.');
+                            router.replace('/cuentas');
+                            return;
+                        }
+                    }
                     setEditingAccount(account);
                     setShowCreate(false);
                 }
@@ -371,6 +389,8 @@ function AccountsContent() {
         }
     }, [colStorageKey]);
 
+    const hotTableRef = useRef<{ hotInstance?: { toPhysicalRow?: (r: number) => number; getSourceDataAtRow?: (r: number) => { _original?: AccountServer } } } | null>(null);
+
     // Preparar datos para Handsontable
     const hotData = accounts.map(acc => {
         const countryName = acc.pais_id ? (countryMap[acc.pais_id] || "Colombia") : ((acc as any).pais || "Colombia");
@@ -384,7 +404,7 @@ function AccountsContent() {
             potencial_venta: acc.potencial_venta || 0,
             vendedor: acc.owner_name || "Sin asignar",
             nivel: acc.nivel_premium || "-",
-            creacion: acc.created_at ? new Date(acc.created_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) : "-",
+            creacion: formatColombiaDateTime(acc.created_at),
             actualizado: acc.updated_at ? new Date(acc.updated_at).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) : "-",
             _original: acc
         };
@@ -392,35 +412,47 @@ function AccountsContent() {
 
     const hotColumns = [
         { data: 'nombre', title: 'Cuenta', readOnly: true, width: colWidths['nombre'] || 240, wordWrap: false,
-            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+            renderer(instance: any, td: HTMLTableCellElement, row: number, col: number, prop: string, value: any) {
                 const v = value || '';
                 const safe = v.replace(/"/g, '&quot;');
-                td.innerHTML = `<div style="font-weight:600;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</div>`;
+                const physicalRow = instance.toPhysicalRow ? instance.toPhysicalRow(row) : row;
+                const acc = instance.getSourceDataAtRow(physicalRow)?._original;
+                const url = acc?.id ? `/cuentas?id=${acc.id}` : '#';
+                td.innerHTML = `<a href="${url}" onclick="if (!event.ctrlKey && !event.metaKey && event.button === 0) { event.preventDefault(); }" style="font-weight:600;color:#0f172a;text-decoration:none;display:block;width:100%;height:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</a>`;
                 td.style.overflow = 'hidden';
                 return td;
             }
         },
         { data: 'pais', title: 'País', readOnly: true, width: colWidths['pais'] || 120, wordWrap: false,
-            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+            renderer(instance: any, td: HTMLTableCellElement, row: number, col: number, prop: string, value: any) {
                 const v = value || 'Colombia';
                 const safe = v.replace(/"/g, '&quot;');
-                td.innerHTML = `<div style="color:#334155;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</div>`;
+                const physicalRow = instance.toPhysicalRow ? instance.toPhysicalRow(row) : row;
+                const acc = instance.getSourceDataAtRow(physicalRow)?._original;
+                const url = acc?.id ? `/cuentas?id=${acc.id}` : '#';
+                td.innerHTML = `<a href="${url}" onclick="if (!event.ctrlKey && !event.metaKey && event.button === 0) { event.preventDefault(); }" style="color:#334155;text-decoration:none;display:block;width:100%;height:100%;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</a>`;
                 td.style.overflow = 'hidden';
                 return td;
             }
         },
         { data: 'ciudad', title: 'Ciudad', readOnly: true, width: colWidths['ciudad'] || 150, wordWrap: false,
-            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+            renderer(instance: any, td: HTMLTableCellElement, row: number, col: number, prop: string, value: any) {
                 const v = value || '';
                 const safe = v.replace(/"/g, '&quot;');
-                td.innerHTML = `<div style="color:#334155;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</div>`;
+                const physicalRow = instance.toPhysicalRow ? instance.toPhysicalRow(row) : row;
+                const acc = instance.getSourceDataAtRow(physicalRow)?._original;
+                const url = acc?.id ? `/cuentas?id=${acc.id}` : '#';
+                td.innerHTML = `<a href="${url}" onclick="if (!event.ctrlKey && !event.metaKey && event.button === 0) { event.preventDefault(); }" style="color:#334155;text-decoration:none;display:block;width:100%;height:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;" title="${safe}">${v}</a>`;
                 td.style.overflow = 'hidden';
                 return td;
             }
         },
         { data: 'canal_id', title: 'Canal', readOnly: true, width: colWidths['canal_id'] || 130, wordWrap: false,
-            renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
-                td.innerHTML = `<div style="color:#475569;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;">${value || '-'}</div>`;
+            renderer(instance: any, td: HTMLTableCellElement, row: number, col: number, prop: string, value: any) {
+                const physicalRow = instance.toPhysicalRow ? instance.toPhysicalRow(row) : row;
+                const acc = instance.getSourceDataAtRow(physicalRow)?._original;
+                const url = acc?.id ? `/cuentas?id=${acc.id}` : '#';
+                td.innerHTML = `<a href="${url}" onclick="if (!event.ctrlKey && !event.metaKey && event.button === 0) { event.preventDefault(); }" style="color:#475569;text-decoration:none;display:block;width:100%;height:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;">${value || '-'}</a>`;
                 td.style.overflow = 'hidden';
                 return td;
             }
@@ -467,7 +499,7 @@ function AccountsContent() {
                 return td;
             }
         },
-        { data: 'creacion', title: 'Creación', readOnly: true, width: colWidths['creacion'] || 90, wordWrap: false,
+        { data: 'creacion', title: 'Creación', readOnly: true, width: Math.max(colWidths['creacion'] || 150, 150), wordWrap: false,
             renderer(_: any, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
                 td.innerHTML = `<span style="font-size:12.5px;color:#64748b;font-weight:500;font-variant-numeric:tabular-nums;">${value || '-'}</span>`;
                 return td;
@@ -507,7 +539,7 @@ function AccountsContent() {
             <DataListToolbar
                 searchValue={inputValue}
                 onSearchChange={setInputValue}
-                searchPlaceholder="Buscar por nombre o NIT…"
+                searchPlaceholder="Buscar por nombre, NIT o celular…"
                 searchTestId="accounts-search"
                 filtersOpen={showFilters}
                 onFiltersOpenChange={setShowFilters}
@@ -592,10 +624,11 @@ function AccountsContent() {
                     {/* VISTA MÓVIL: Tarjetas */}
                     <div className="grid grid-cols-1 gap-3 md:hidden">
                         {accounts.map((acc) => (
-                            <div 
+                            <a 
                                 key={acc.id} 
-                                onClick={() => handleEdit(acc)}
-                                className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col hover:border-blue-300 active:scale-[0.99] transition-all relative cursor-pointer"
+                                href={`/cuentas?id=${acc.id}`}
+                                onClick={(e) => handleEntityLinkClick(e, `/cuentas?id=${acc.id}`, () => handleEdit(acc))}
+                                className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col hover:border-blue-300 active:scale-[0.99] transition-all relative cursor-pointer no-underline text-inherit block"
                             >
                                 <div className="p-4 border-b border-slate-100 flex justify-between items-start gap-3">
                                     <div className="flex-1 min-w-0">
@@ -638,7 +671,7 @@ function AccountsContent() {
                                         </div>
                                     </div>
                                 </div>
-                            </div>
+                            </a>
                         ))}
                     </div>
 
@@ -794,6 +827,7 @@ function AccountsContent() {
                         `}</style>
                         <div className="w-full relative z-0 opp-hot-wrap" style={{ minHeight: '400px' }}>
                             <HotTable
+                            ref={hotTableRef}
                             data={hotData}
                             columns={hotColumns}
                             rowHeaders={true}
@@ -810,7 +844,7 @@ function AccountsContent() {
                             rowHeights={38}
                             renderAllRows={false}
                             licenseKey="non-commercial-and-evaluation"
-                            afterOnCellMouseDown={(event: any, coords: any, td: any) => {
+                            afterOnCellMouseDown={(event: MouseEvent | TouchEvent, coords: { row: number; col: number }) => {
                                 if (coords.row === -1) {
                                     const target = event?.target as HTMLElement;
                                     const isDropdownBtn = target?.closest('.changeType') || target?.closest('.htDropdownMenu') || target?.classList?.contains('changeType');
@@ -823,7 +857,23 @@ function AccountsContent() {
                                     return;
                                 }
                                 if (coords.row >= 0) {
-                                    const acc = hotData[coords.row]?._original;
+                                    const mouseEvent = event as MouseEvent;
+                                    const hotInstance = hotTableRef.current?.hotInstance;
+                                    const physicalRow = (hotInstance && typeof hotInstance.toPhysicalRow === 'function')
+                                        ? hotInstance.toPhysicalRow(coords.row)
+                                        : coords.row;
+                                    const rowData = (physicalRow >= 0 && hotInstance && typeof hotInstance.getSourceDataAtRow === 'function')
+                                        ? hotInstance.getSourceDataAtRow(physicalRow)
+                                        : hotData[coords.row];
+                                    const acc = rowData?._original;
+                                    if (mouseEvent?.button === 2) {
+                                        // Clic derecho: permitir menú contextual nativo del enlace
+                                        return;
+                                    }
+                                    if (mouseEvent?.button === 1 || mouseEvent?.ctrlKey || mouseEvent?.metaKey) {
+                                        if (acc?.id) window.open(`/cuentas?id=${acc.id}`, '_blank');
+                                        return;
+                                    }
                                     if (acc) {
                                         handleEdit(acc);
                                     }
