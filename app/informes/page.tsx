@@ -872,6 +872,12 @@ export default function InformesPage() {
                 });
             }
 
+            // Filtro de canal en oportunidades: por el canal de la CUENTA (igual que la app).
+            // Se usa join !inner para poder filtrar por cuenta.canal_id en el servidor.
+            if (selectedCanal && selectedEntidad === 'oportunidades') {
+                selectStr = selectStr.replace('cuenta:CRM_Cuentas(', 'cuenta:CRM_Cuentas!inner(');
+            }
+
             let query = supabase.from(entidadDef.table).select(selectStr);
 
             if (dateFrom) query = query.gte('created_at', `${dateFrom}T00:00:00Z`);
@@ -894,9 +900,7 @@ export default function InformesPage() {
                 if (selectedEntidad === 'cuentas') {
                     query = query.eq('canal_id', selectedCanal);
                 } else if (selectedEntidad === 'oportunidades') {
-                    const { data: faseData } = await supabase.from('CRM_FasesOportunidad').select('id').eq('canal_id', selectedCanal);
-                    const faseIds = faseData?.map(f => f.id) || [];
-                    query = query.in('fase_id', faseIds);
+                    query = query.eq('cuenta.canal_id', selectedCanal);
                 }
             }
 
