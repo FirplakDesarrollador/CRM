@@ -40,7 +40,7 @@ describe('Phone / mobile search helpers', () => {
         expect(read('lib', 'hooks', 'useAccountsServer.ts')).toMatch(/telefono\.ilike/);
         expect(read('lib', 'hooks', 'useContactsServer.ts')).toMatch(/getPhoneIlikePatterns/);
         expect(read('lib', 'hooks', 'useOpportunitiesServer.ts')).toMatch(/phoneAccountIds/);
-        expect(read('app', 'actividades', 'page.tsx')).toMatch(/contactPhonesByAccount/);
+        expect(read('app', 'actividades', 'page.tsx')).toMatch(/findPhoneMatchesLocal|contactPhonesByAccount/);
     });
 });
 

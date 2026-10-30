@@ -106,3 +106,31 @@ export function mapPedidoServerPayload(merged: Partial<LocalPedido>): {
 
     return { localMerged, serverPayload };
 }
+
+
+/**
+ * Calcula la cantidad disponible para pedir de un ítem de cotización,
+ * descontando lo consumido en otros pedidos y acotando a mínimo 0.
+ */
+export function calculateItemAvailableQty(
+    pactada: number,
+    consumida: number = 0
+): number {
+    return Math.max(0, pactada - consumida);
+}
+
+/**
+ * Genera el mapa de cantidades máximas disponibles para todos los ítems de cotización.
+ */
+export function buildMaxSelectedQuantities(
+    quoteItems: Array<{ producto_id?: string | null; cantidad: number }>,
+    consumosGlobales: Record<string, number> = {}
+): Record<string, number> {
+    const result: Record<string, number> = {};
+    for (const qi of quoteItems) {
+        if (!qi.producto_id) continue;
+        const consumido = consumosGlobales[qi.producto_id] || 0;
+        result[qi.producto_id] = calculateItemAvailableQty(qi.cantidad, consumido);
+    }
+    return result;
+}

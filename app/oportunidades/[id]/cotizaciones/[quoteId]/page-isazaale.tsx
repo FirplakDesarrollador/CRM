@@ -16,6 +16,7 @@ import { SendQuoteModal } from "@/components/quotes/SendQuoteModal";
 import { useCommissionCategories } from "@/lib/hooks/useCommissionCategories";
 import { PedidosList } from "@/components/quotes/PedidosEditor";
 import { isQuoteItemPriceEditable } from "@/lib/quotePricing";
+import { getPriceClarification } from "@/lib/salesChannels";
 
 export default function QuoteEditorPage() {
     const params = useParams();
@@ -267,7 +268,7 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
                 price = Number(product.lista_base_cop) || 0;
                 break;
             case 'PROPIO':
-                price = Number(product.distribuidor_pvp_iva) || 0;
+                price = Number(product.pvp_sin_iva) || 0;
                 break;
             default:
                 price = Number(product.lista_base_cop) || 0;
@@ -408,7 +409,7 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
                                         } else {
                                             switch (channel) {
                                                 case 'OBRAS_NAC': displayPrice = Number(product.lista_base_obras) || 0; break;
-                                                case 'PROPIO': displayPrice = Number(product.distribuidor_pvp_iva) || 0; break;
+                                                case 'PROPIO': displayPrice = Number(product.pvp_sin_iva) || 0; break;
                                                 case 'DIST_NAC': 
                                                 default: displayPrice = Number(product.lista_base_cop) || 0;
                                             }
@@ -490,6 +491,10 @@ function QuoteItemsEditor({ quote, onItemsChange }: { quote: LocalQuote, onItems
                                             </span>
                                         )}
                                     </div>
+                                            <div className="text-[10px] text-slate-400 font-medium mt-0.5">
+                                                {getPriceClarification(context?.channel, quote.currency_id === 'USD', item.producto_id === null)}
+                                            </div>
+                                        </div>
                                 </div>
                                 <div className="flex items-center justify-between md:justify-end gap-6">
                                     <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg">

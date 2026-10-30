@@ -1990,3 +1990,55 @@ Al consultar esquemas de usuario (`CRM_Usuarios`), no asumas nombres en español
 
 Tags:
 [mcp] [roles] [permissions] [crm-usuarios] [admin-access]
+
+
+---
+
+## [Bug ID: 20261030-01]
+
+Context:
+Cálculo de precios de catálogo para el canal Propio / B2C (`PROPIO`) en cotizaciones, pedidos y formalización de documentos PDF (`lib/salesChannels.ts`, `lib/hooks/useOpportunities.ts`, `app/oportunidades/nueva/CreateOpportunityWizard.tsx`, `app/oportunidades/[id]/cotizaciones/[quoteId]/page.tsx`, migración `20261030122500_map_propio_to_pvp_sin_iva.sql`).
+
+Problem:
+Para productos del canal B2C (`PROPIO`), el sistema cotizaba mapeando a la columna `distribuidor_pvp_iva`, la cual en las listas de precios oficiales ya contiene el IVA del 19% incluido (PVP con IVA). Al generar el pedido formal o cotización en PDF (formato F-V-29), el generador asumía que el precio unitario era base neta y le adicionaba nuevamente el 19% de IVA sobre el subtotal, incurriendo en un doble cobro de IVA indebido para el cliente final B2C.
+
+Root Cause:
+En `CRM_Canales` y en las funciones de resolución de precios (`getProductPrice` y `useQuoteItems`), el canal `PROPIO` estaba asignado a la columna `distribuidor_pvp_iva` en lugar de la columna base neta `pvp_sin_iva`.
+
+Fix Applied:
+1. Se actualizó el mapeo del canal `PROPIO` en `lib/salesChannels.ts` a `pvp_sin_iva`.
+2. Se sincronizó la resolución de precios unitarios en `lib/hooks/useOpportunities.ts`, `CreateOpportunityWizard.tsx` y `page.tsx` de cotizaciones.
+3. Se generó la migración append-only `supabase/migrations/20261030122500_map_propio_to_pvp_sin_iva.sql` para actualizar `CRM_Canales.columna_precio = 'pvp_sin_iva'` para el canal `PROPIO`.
+4. Se actualizó la prueba permanente `tests/salesChannels.test.ts` validando que `PROPIO` resuelva `pvp_sin_iva`.
+
+Prevention Rule:
+**Mapeo de Listas de Precios por Canal**:
+Todos los canales de venta en Firplak deben mapearse exclusivamente a columnas de base neta sin IVA (`lista_base_obras`, `lista_base_cop`, `lista_base_exportaciones`, `pvp_sin_iva`), dado que el motor de documentos formales y pedidos (F-V-29) aplica el IVA del 19% al final sobre el subtotal neto. Nunca mapear un canal a columnas que ya incluyan IVA como precio unitario base.
+
+Tags:
+[canales-de-venta] [propio] [b2c] [pvp_sin_iva] [distribuidor_pvp_iva] [iva-19] [cotizaciones] [pedidos]
+
+---
+
+## [Bug ID: 20261030-02]
+
+Context:
+Visualización de aclaración de precios por canal en el asistente de creación de oportunidades / cotizaciones / pedidos (`app/oportunidades/nueva/CreateOpportunityWizard.tsx`) y en la pestaña de Productos del detalle de oportunidad (`app/oportunidades/[id]/page.tsx`).
+
+Problem:
+Al seleccionar productos para ingresar una cotización o pedido en el asistente de creación de oportunidad, o al consultar la oportunidad, la aplicación se bloqueaba completamente con la pantalla de error inesperado de Next.js (`app/error.tsx`) mostrando el mensaje: `channel is not defined`. El usuario interpretaba que el canal del cliente faltaba en la base de datos, aunque estaba correctamente configurado en la cuenta.
+
+Root Cause:
+En `CreateOpportunityWizard.tsx`, dentro del `items.map(...)` que renderiza la lista de productos seleccionados, se invocaba `getPriceClarification(channel, ...)` utilizando una variable libre `channel` no declarada en ese ámbito de bloque (en lugar de `selectedAccount?.canal_id || 'DIST_NAC'`), disparando un `ReferenceError: channel is not defined` en tiempo de ejecución. Adicionalmente, en `app/oportunidades/[id]/page.tsx`, `ProductsTab` invocaba `getPriceClarification(account?.canal_id, ...)` sin importar la función ni declarar la suscripción a `account`.
+
+Fix Applied:
+1. En `app/oportunidades/nueva/CreateOpportunityWizard.tsx`, se declaró `const channel = selectedAccount?.canal_id || 'DIST_NAC';` dentro del mapeo de items.
+2. En `app/oportunidades/[id]/page.tsx`, se importó `getPriceClarification` desde `@/lib/salesChannels` y se obtuvo `account` con `useLiveQuery` en `ProductsTab`.
+3. Se añadió prueba unitaria en `tests/salesChannels.test.ts` para verificar robustez y fallbacks ante canales nulos o indefinidos.
+
+Prevention Rule:
+**Evitar variables libres no verificadas en JSX**:
+Al añadir helpers visuales en bucles o funciones de renderizado JSX (como `.map`), asegurarse siempre de que las variables pasadas como argumento estén declaradas en el scope local del componente o del callback y ejecutar `npx tsc --noEmit` para atrapar variables libres antes de finalizar.
+
+Tags:
+[channel] [reference-error] [wizard] [oportunidades] [cotizaciones] [pedidos] [sales-channels]

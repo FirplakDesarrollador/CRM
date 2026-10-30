@@ -631,7 +631,7 @@ export function useQuoteItems(quoteId?: string) {
                                     unitPrice = Number(prodData.lista_base_exportaciones) || 0;
                                     break;
                                 case 'PROPIO':
-                                    unitPrice = Number(prodData.distribuidor_pvp_iva) || 0;
+                                    unitPrice = Number(prodData.pvp_sin_iva) || 0;
                                     break;
                                 case 'DIST_NAC':
                                 default:

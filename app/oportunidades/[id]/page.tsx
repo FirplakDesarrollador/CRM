@@ -26,6 +26,7 @@ import { useActivityFollowUp } from "@/components/activities/ActivityFollowUp";
 import { supabase } from "@/lib/supabase";
 import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
 import { resolveActiveQuote } from "@/lib/opportunityQuoteSync";
+import { getPriceClarification } from "@/lib/salesChannels";
 import { handleEntityLinkClick } from "@/lib/utils/navigation";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { LossReasonModal } from "@/components/oportunidades/LossReasonModal";
@@ -1546,6 +1547,7 @@ function ProductsTab({ opportunityId }: { opportunityId: string }) {
     const { opportunities, updateOpportunity } = useOpportunities();
     const opportunity = opportunities?.find(o => o.id === opportunityId);
     const { quotes, updateQuote } = useQuotes(opportunityId);
+    const account = useLiveQuery(async () => opportunity?.account_id ? db.accounts.get(opportunity.account_id) : undefined, [opportunity?.account_id]);
 
     // 1. State for User Selection
     const [selectedQuoteId, setSelectedQuoteId] = useState<string | null>(null);
@@ -1657,7 +1659,10 @@ function ProductsTab({ opportunityId }: { opportunityId: string }) {
                                     </td>
                                     <td className="px-4 py-3 text-center text-slate-600">{item.cantidad}</td>
                                     <td className="px-4 py-3 text-right text-slate-600">
-                                        ${formatNumberCO(unitPrice)}
+                                        <div>${formatNumberCO(unitPrice)}</div>
+                                        <div className="text-[10px] text-slate-400 font-medium">
+                                            {getPriceClarification(account?.canal_id, effectiveQuote?.currency_id === 'USD', item.producto_id === null)}
+                                        </div>
                                     </td>
                                     <td className="px-4 py-3 text-center text-slate-600 font-medium">
                                         {discount > 0 ? (
@@ -1675,7 +1680,10 @@ function ProductsTab({ opportunityId }: { opportunityId: string }) {
                     </tbody>
                     <tfoot className="bg-slate-50 font-bold border-t border-slate-200">
                         <tr>
-                            <td colSpan={4} className="px-4 py-3 text-right text-slate-500">Total</td>
+                            <td colSpan={4} className="px-4 py-3 text-right text-slate-500">
+                                <div>Total</div>
+                                <div className="text-[10px] text-slate-400 font-normal">Subtotal neto (sin IVA)</div>
+                            </td>
                             <td className="px-4 py-3 text-right text-blue-600 text-lg">
                                 ${formatNumberCO(
                                     itemsToShow.reduce((acc: number, item: any) =>

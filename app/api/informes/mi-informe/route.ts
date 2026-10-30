@@ -14,8 +14,11 @@ const PAGE_SIZE = 1000;
 const IN_CHUNK = 100;
 type Row = Record<string, unknown>;
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-async function fetchAll(build: (from: number, to: number) => any): Promise<Row[]> {
+type QueryBuilder = ReturnType<ReturnType<SupabaseClient['from']>['select']>;
+
+async function fetchAll(
+    build: (from: number, to: number) => PromiseLike<{ data: unknown[] | null; error: { message: string } | null }>
+): Promise<Row[]> {
     const out: Row[] = [];
     for (let from = 0; ; from += PAGE_SIZE) {
         const { data, error } = await build(from, from + PAGE_SIZE - 1);
@@ -26,20 +29,26 @@ async function fetchAll(build: (from: number, to: number) => any): Promise<Row[]
     return out;
 }
 
-async function fetchByIds(supabase: SupabaseClient, table: string, select: string, column: string, ids: string[], extra?: (q: any) => any): Promise<Row[]> {
+async function fetchByIds(
+    supabase: SupabaseClient,
+    table: string,
+    select: string,
+    column: string,
+    ids: string[],
+    extra?: (q: QueryBuilder) => QueryBuilder
+): Promise<Row[]> {
     const out: Row[] = [];
     for (let i = 0; i < ids.length; i += IN_CHUNK) {
         const chunk = ids.slice(i, i + IN_CHUNK);
         const rows = await fetchAll((from, to) => {
-            let q: any = supabase.from(table).select(select).in(column, chunk);
-            if (extra) q = extra(q);
+            let q = supabase.from(table).select(select).in(column, chunk);
+            if (extra) q = extra(q as unknown as QueryBuilder) as typeof q;
             return q.range(from, to);
         });
         out.push(...rows);
     }
     return out;
 }
-/* eslint-enable @typescript-eslint/no-explicit-any */
 
 const toMap = (rows: Row[] | null | undefined, label = 'nombre') =>
     new Map<string | number, string>((rows || []).map((r) => [r.id as string | number, String(r[label] ?? '')]));

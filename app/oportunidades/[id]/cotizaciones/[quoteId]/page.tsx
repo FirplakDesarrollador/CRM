@@ -17,6 +17,7 @@ import { SendQuoteModal } from "@/components/quotes/SendQuoteModal";
 import { useCommissionCategories } from "@/lib/hooks/useCommissionCategories";
 import { PedidosList } from "@/components/quotes/PedidosEditor";
 import { isQuoteItemPriceEditable } from "@/lib/quotePricing";
+import { getPriceClarification } from "@/lib/salesChannels";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import {
     appendNote,
@@ -286,7 +287,7 @@ function QuoteItemsEditor({ quote, onItemsChange, onSaveQuote }: {
                 price = Number(product.lista_base_cop) || 0;
                 break;
             case 'PROPIO':
-                price = Number(product.distribuidor_pvp_iva) || 0;
+                price = Number(product.pvp_sin_iva) || 0;
                 break;
             default:
                 price = Number(product.lista_base_cop) || 0;
@@ -480,7 +481,7 @@ function QuoteItemsEditor({ quote, onItemsChange, onSaveQuote }: {
                                         } else {
                                             switch (channel) {
                                                 case 'OBRAS_NAC': displayPrice = Number(product.lista_base_obras) || 0; break;
-                                                case 'PROPIO': displayPrice = Number(product.distribuidor_pvp_iva) || 0; break;
+                                                case 'PROPIO': displayPrice = Number(product.pvp_sin_iva) || 0; break;
                                                 case 'DIST_NAC': 
                                                 default: displayPrice = Number(product.lista_base_cop) || 0;
                                             }
@@ -502,9 +503,14 @@ function QuoteItemsEditor({ quote, onItemsChange, onSaveQuote }: {
                                                     <div className="text-xs sm:text-[11px] text-slate-500 sm:text-slate-400 mt-0.5">{product.numero_articulo}</div>
                                                 </div>
                                                 <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-                                                    <span className="text-[11px] sm:text-xs font-semibold text-slate-800 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 whitespace-nowrap">
-                                                        {quote.currency_id || 'COP'} {formattedPrice}
-                                                    </span>
+                                                    <div className="text-right">
+                                                        <span className="text-[11px] sm:text-xs font-semibold text-slate-800 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 whitespace-nowrap block">
+                                                            {quote.currency_id || 'COP'} {formattedPrice}
+                                                        </span>
+                                                        <span className="text-[9px] text-slate-400 block mt-0.5">
+                                                            {getPriceClarification(channel, quote.currency_id === 'USD', false)}
+                                                        </span>
+                                                    </div>
                                                     <div className="p-1.5 sm:p-2 bg-blue-100 text-blue-700 rounded-full group-hover:bg-blue-600 group-hover:text-white transition-colors">
                                                         <Plus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                                                     </div>
@@ -541,7 +547,8 @@ function QuoteItemsEditor({ quote, onItemsChange, onSaveQuote }: {
                                             <h4 className="font-semibold text-[15px] sm:text-sm text-slate-800 leading-snug break-words sm:line-clamp-2" title={item.descripcion_linea}>{item.descripcion_linea}</h4>
                                         )}
                                         
-                                        <div className="flex flex-wrap items-center gap-1.5 mt-1 text-[13px] sm:text-xs text-slate-500">
+                                        <div className="mt-1">
+                                            <div className="flex flex-wrap items-center gap-1.5 text-[13px] sm:text-xs text-slate-500">
                                             <span>Unitario: $</span>
                                             {isQuoteItemPriceEditable(item) ? (
                                                 <input 
@@ -565,6 +572,10 @@ function QuoteItemsEditor({ quote, onItemsChange, onSaveQuote }: {
                                                     }).format(item.precio_unitario || 0)}
                                                 </span>
                                             )}
+                                        </div>
+                                            <div className="text-[10px] text-slate-400 font-medium mt-0.5">
+                                                {getPriceClarification(context?.channel, quote.currency_id === 'USD', item.producto_id === null)}
+                                            </div>
                                         </div>
                                     </div>
 
@@ -647,7 +658,7 @@ function QuoteItemsEditor({ quote, onItemsChange, onSaveQuote }: {
                                     {/* Right cluster: Subtotal and Desktop Delete */}
                                     <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-4 ml-auto">
                                         <div className="text-right">
-                                            <div className="text-[9px] text-slate-400 uppercase font-bold tracking-wider">Subtotal</div>
+                                            <div className="text-[9px] text-slate-400 uppercase font-bold tracking-wider">Subtotal (sin IVA)</div>
                                             <div className="font-bold text-xs sm:text-base text-slate-900 whitespace-nowrap">
                                                 ${new Intl.NumberFormat().format(item.subtotal)}
                                             </div>
