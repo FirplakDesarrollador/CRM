@@ -19,7 +19,7 @@ import {
     PedidoWithItems,
 } from "@/lib/pedidoFormalization";
 import { isValidRealNit, isProvisionalNit } from "@/lib/nitUtils";
-import { normalizeDateToInput } from "@/lib/pedidoHelpers";
+import { normalizeDateToInput, calculateItemAvailableQty, buildMaxSelectedQuantities } from "@/lib/pedidoHelpers";
 
 const PEDIDO_WIZARD_LAST_STEP = 2;
 
@@ -689,6 +689,14 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
         }
     };
 
+        const handleSetAllMaxQuantities = () => {
+        if (!quoteItems || !consumosGlobales) return;
+        const maxQuantities = buildMaxSelectedQuantities(quoteItems, consumosGlobales);
+        Object.entries(maxQuantities).forEach(([prodId, qty]) => {
+            setValue(`selected_quantities.${prodId}`, qty, { shouldDirty: true, shouldValidate: true });
+        });
+    };
+
     return (
         <form
             onSubmit={handleSubmit(onSubmit)}
@@ -733,8 +741,18 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
 
             {(!!pedidoUuid || wizardStep === 0) && (
                 <div className="bg-white p-5 rounded-xl border border-blue-200">
-                <h4 className="font-bold mb-4 text-blue-900 border-b pb-2 cursor-pointer flex justify-between">
-                    <span>1. Cantidades a Pedir</span>
+                <h4 className="font-bold mb-4 text-blue-900 border-b pb-2 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        <span>1. Cantidades a Pedir</span>
+                        <button
+                            type="button"
+                            onClick={handleSetAllMaxQuantities}
+                            className="text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-bold px-2.5 py-1 rounded-md transition-colors shadow-sm"
+                            title="Asignar el máximo disponible a todos los ítems"
+                        >
+                            Todo
+                        </button>
+                    </div>
                     <button type="button" onClick={onClose} className="text-sm text-slate-500 hover:text-slate-800">Cancelar</button>
                 </h4>
                 
@@ -743,7 +761,7 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
                         if (!qi.producto_id) return null;
                         const prodId = qi.producto_id;
                         const consumido = consumosGlobales[prodId] || 0;
-                        const disponible = qi.cantidad - consumido;
+                        const disponible = calculateItemAvailableQty(qi.cantidad, consumido);
                         
                         return (
                             <div key={qi.id} className="flex justify-between items-center bg-slate-50 p-3 rounded-lg border">
@@ -752,6 +770,20 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
                                     <p className="text-xs text-slate-500">Pactados en coti: {qi.cantidad} uds | Disponibles: <strong className="text-green-600">{disponible} uds</strong></p>
                                 </div>
                                 <div className="flex items-center gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setValue(`selected_quantities.${prodId}`, disponible, { shouldDirty: true, shouldValidate: true })}
+                                        disabled={disponible <= 0}
+                                        className={cn(
+                                            "text-xs font-bold px-2.5 py-1.5 rounded-md border transition-all shadow-sm",
+                                            disponible > 0
+                                                ? "bg-white text-blue-600 border-blue-200 hover:bg-blue-50 hover:border-blue-300"
+                                                : "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60"
+                                        )}
+                                        title={disponible > 0 ? `Asignar ${disponible} uds` : "Sin unidades disponibles"}
+                                    >
+                                        Todo
+                                    </button>
                                     <input 
                                         type="number"
                                         className="w-20 p-2 border rounded-md text-sm text-center"

@@ -3,6 +3,26 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-10-30 - Feature: Botones «Todo» para cantidades máximas disponibles en Pedido
+
+- **Requerimiento:** Facilitar la asignación de cantidades al formalizar o editar pedidos incorporando un botón «Todo» por cada línea de producto y un botón «Todo» global en el encabezado de Cantidades a Pedir.
+- **Cambios Realizados:**
+  - `lib/pedidoHelpers.ts`: Implementadas las funciones puras `calculateItemAvailableQty` y `buildMaxSelectedQuantities`.
+  - `components/quotes/PedidosEditor.tsx`: Añadido botón «Todo» por fila y botón «Todo» en la cabecera de «1. Cantidades a Pedir» de `PedidoEditorForm`.
+  - `tests/pedidoQuantities.test.ts`: Suite permanente de pruebas unitarias verificada en GREEN (3/3).
+- **Páginas actualizadas:** `wiki/pages/cotizaciones-y-pedidos.md`, `wiki/LOG.md`.
+
+## 2026-10-30 - Fix: Corrección de Mapeo de Lista de Precios B2C (`PROPIO` a `pvp_sin_iva`)
+
+- **Hallazgo:** Para productos B2C (`PROPIO`), el sistema cotizaba mapeando a la columna `distribuidor_pvp_iva`, la cual ya contiene el 19% de IVA en la lista de precios. Dado que el generador de documentos formales y pedidos (F-V-29) aplica el IVA al final sobre el subtotal neto, en B2C se duplicaba el IVA en el documento PDF.
+- **Cambios Realizados:**
+  - `lib/salesChannels.ts`: Se actualizó el mapeo del canal `PROPIO` a `pvp_sin_iva` en `getProductPrice`.
+  - `lib/hooks/useOpportunities.ts`: La selección de tarifa unitaria toma `prodData.pvp_sin_iva` para `PROPIO`.
+  - `app/oportunidades/[id]/cotizaciones/[quoteId]/page.tsx` y `app/oportunidades/nueva/CreateOpportunityWizard.tsx`: Mapeados a `pvp_sin_iva`.
+  - `supabase/migrations/20261030122500_map_propio_to_pvp_sin_iva.sql`: Migración append-only para actualizar `CRM_Canales.columna_precio = 'pvp_sin_iva'` para el canal `PROPIO`.
+  - `tests/salesChannels.test.ts`: Pruebas permanentes actualizadas y verificadas (7/7 GREEN).
+- **Páginas actualizadas:** `wiki/pages/canales-de-venta.md`, `wiki/LOG.md`.
+
 ## 2026-10-29 - Informes: Columnas de Actividad en Reporte de Oportunidades
 
 - **Operación:** Ingest en `pages/dashboard-e-indicadores.md`.

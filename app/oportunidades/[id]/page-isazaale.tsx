@@ -1336,7 +1336,10 @@ function ProductsTab({ opportunityId }: { opportunityId: string }) {
                     </tbody>
                     <tfoot className="bg-slate-50 font-bold border-t border-slate-200">
                         <tr>
-                            <td colSpan={4} className="px-4 py-3 text-right text-slate-500">Total</td>
+                            <td colSpan={4} className="px-4 py-3 text-right text-slate-500">
+                                <div>Total</div>
+                                <div className="text-[10px] text-slate-400 font-normal">Subtotal neto (sin IVA)</div>
+                            </td>
                             <td className="px-4 py-3 text-right text-blue-600 text-lg">
                                 ${new Intl.NumberFormat().format(
                                     itemsToShow.reduce((acc: number, item: any) =>

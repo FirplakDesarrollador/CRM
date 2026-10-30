@@ -18,6 +18,7 @@ import { db } from "@/lib/db";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { useConfig } from "@/lib/hooks/useConfig";
+import { getPriceClarification } from "@/lib/salesChannels";
 import { CollaboratorSelector, CollaboratorEntry } from "@/components/oportunidades/CollaboratorSelector";
 import { useUsers } from "@/lib/hooks/useUsers";
 import { useFormDraft } from "@/lib/hooks/useFormDraft";
@@ -477,7 +478,7 @@ export default function CreateOpportunityWizard() {
                 price = Number(product.lista_base_exportaciones) || 0;
                 break;
             case 'PROPIO':
-                price = Number(product.distribuidor_pvp_iva) || 0;
+                price = Number(product.pvp_sin_iva) || 0;
                 break;
             case 'DIST_NAC':
             default:
@@ -985,7 +986,7 @@ export default function CreateOpportunityWizard() {
                                                 case 'OBRAS_NAC': displayPrice = Number(product.lista_base_obras) || 0; break;
                                                 case 'OBRAS_INT':
                                                 case 'DIST_INT': displayPrice = Number(product.lista_base_exportaciones) || 0; break;
-                                                case 'PROPIO': displayPrice = Number(product.distribuidor_pvp_iva) || 0; break;
+                                                case 'PROPIO': displayPrice = Number(product.pvp_sin_iva) || 0; break;
                                                 default: displayPrice = Number(product.lista_base_cop) || 0;
                                             }
                                             if (Number(displayPrice) === 0) displayPrice = Number(product.lista_base_cop) || Number(product.pvp_sin_iva) || 0;
@@ -1031,7 +1032,8 @@ export default function CreateOpportunityWizard() {
                                     <div className="text-xs text-slate-400">Usa la búsqueda para agregar productos desde la primera fase.</div>
                                 </div>
                             ) : (
-                                items.map((item: any, idx: number) => {
+                                items.map((item: any) => {
+                                    const channel = selectedAccount?.canal_id || 'DIST_NAC';
                                     const basePriceFormatted = new Intl.NumberFormat('es-CO', { maximumFractionDigits: 0 }).format(Math.round(item.precio || 0));
                                     const discountedPrice = (item.precio || 0) * (1 - (Number(item.descuento_porcentaje) || 0) / 100);
                                     const discountedPriceFormatted = new Intl.NumberFormat('es-CO', { maximumFractionDigits: 0 }).format(Math.round(discountedPrice));
@@ -1041,6 +1043,7 @@ export default function CreateOpportunityWizard() {
                                             <div className="flex-1 min-w-0">
                                                 <div className="font-medium text-[15px] sm:text-sm text-slate-800 leading-snug break-words sm:line-clamp-2" title={item.nombre}>{item.nombre}</div>
                                                 <div className="text-[11px] sm:text-xs text-slate-500 mt-0.5">{currencyId} {basePriceFormatted} c/u base</div>
+                                                <div className="text-[10px] text-slate-400">{getPriceClarification(channel, currencyId === 'USD', false)}</div>
                                                 {(Number(item.descuento_porcentaje) || 0) > 0 && (
                                                     <div className="text-[11px] sm:text-xs text-emerald-600 font-medium mt-0.5">
                                                         Precio con desc: {currencyId} {discountedPriceFormatted} c/u
