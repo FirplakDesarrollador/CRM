@@ -21,6 +21,7 @@ import {
     ListTodo,
 } from "lucide-react";
 import { useActivities, LocalActivity } from "@/lib/hooks/useActivities";
+import { hydrateOpportunityActivities } from "@/lib/serverHydration";
 import { CreateActivityModal } from "@/components/activities/CreateActivityModal";
 import { useActivityFollowUp } from "@/components/activities/ActivityFollowUp";
 import { supabase } from "@/lib/supabase";
@@ -1854,7 +1855,17 @@ function QuotesTab({ opportunityId, currency }: { opportunityId: string, currenc
 
 function ActivitiesTab({ opportunityId, accountId }: { opportunityId: string, accountId?: string }) {
     const { activities, createActivity, updateActivity, toggleComplete } = useActivities({ opportunity_id: opportunityId });
+    const { user: viewerUser, role: viewerRole } = useCurrentUser();
+    const viewerId = viewerUser?.id || null;
     const [isModalOpen, setIsModalOpen] = useState(false);
+
+    // En línea: traer del servidor TODAS las actividades de esta oportunidad (la copia local solo
+    // tiene las 3.000 más recientes). Sin conexión se muestra lo que haya en la copia local.
+    useEffect(() => {
+        if (!opportunityId || !viewerRole || typeof navigator === 'undefined' || !navigator.onLine) return;
+        hydrateOpportunityActivities(opportunityId, { viewerId, viewerRole })
+            .catch(err => console.warn('[ActivitiesTab] No se pudieron traer las actividades del servidor:', err));
+    }, [opportunityId, viewerId, viewerRole]);
     const [selectedActivity, setSelectedActivity] = useState<LocalActivity | null>(null);
     const { opportunities } = useOpportunities();
 
