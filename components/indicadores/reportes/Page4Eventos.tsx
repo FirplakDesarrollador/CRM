@@ -38,6 +38,7 @@ interface Filters {
     clasificacionIds: string[];
     subclasificacionId: string;
     zonaId: string;
+    faseIds: string[];
     desde: string; // "" = sin límite, formato "YYYY-MM-DD"
     hasta: string;
 }
@@ -53,6 +54,7 @@ const EMPTY_FILTERS: Filters = {
     clasificacionIds: [],
     subclasificacionId: "",
     zonaId: "",
+    faseIds: [],
     desde: "",
     hasta: "",
 };
@@ -68,7 +70,7 @@ const DETAIL_KIND_LABELS: Record<DetailKind, string> = {
 };
 
 export function Page4Eventos() {
-    const { users, channels, accountsMap, subclasificaciones, activityClassifications } = useIndicadoresLookups();
+    const { users, channels, accountsMap, subclasificaciones, activityClassifications, phases } = useIndicadoresLookups();
     const { tipoByVendedor } = useCanalPropioVendedores();
     // Live from Supabase, same rationale as Page 3: the offline cache can be
     // stale for this data even right after a manual sync.
@@ -100,6 +102,7 @@ export function Page4Eventos() {
             tiposCanal: canalId === CANAL_PROPIO_ID ? prev.tiposCanal : [],
             subclasificacionId: "",
             zonaId: "",
+            faseIds: [],
         }));
     };
 
@@ -130,6 +133,25 @@ export function Page4Eventos() {
                 .map(s => ({ value: String(s.id), label: s.nombre })),
         [subclasificaciones, filters.canalId]
     );
+
+    // Fases, igual que en Cohort (Page1): dependen del canal elegido.
+    const faseOptions: Option[] = useMemo(() => {
+        if (!filters.canalId) return [];
+        return phases
+            .filter(p => p.canal_id === filters.canalId)
+            .sort((a, b) => a.orden - b.orden)
+            .map(p => ({ value: String(p.id), label: p.nombre }));
+    }, [phases, filters.canalId]);
+
+    // La fase es una propiedad de la oportunidad, no de la actividad — solo
+    // se puede resolver cuando la actividad está ligada a una oportunidad.
+    const oppFaseMap = useMemo(() => {
+        const map = new Map<string, number>();
+        (opportunities || []).forEach(o => {
+            if (o.fase_id != null) map.set(o.id, o.fase_id);
+        });
+        return map;
+    }, [opportunities]);
 
     // Activities only link to an opportunity sometimes; when account_id is
     // empty, resolve the account through the linked opportunity (same
@@ -210,11 +232,16 @@ export function Page4Eventos() {
         const asesorSet = filters.asesorIds.length > 0 ? new Set(filters.asesorIds) : null;
         const clasifSet = filters.clasificacionIds.length > 0 ? new Set(filters.clasificacionIds.map(Number)) : null;
         const subclasId = filters.subclasificacionId ? Number(filters.subclasificacionId) : null;
+        const faseIdSet = filters.faseIds.length > 0 ? new Set(filters.faseIds.map(Number)) : null;
         return (activities || []).filter(a => {
             if (a.is_deleted) return false;
             const assignedId = resolveAssignedAdvisor(a);
             if (asesorSet && (!assignedId || !asesorSet.has(assignedId))) return false;
             if (clasifSet && (a.clasificacion_id == null || !clasifSet.has(a.clasificacion_id))) return false;
+            if (faseIdSet) {
+                const faseId = a.opportunity_id ? oppFaseMap.get(a.opportunity_id) : undefined;
+                if (faseId == null || !faseIdSet.has(faseId)) return false;
+            }
             const acc = filters.canalId || subclasId || filters.zonaId ? resolveAccount(a) : undefined;
             if (filters.canalId && acc?.canal_id !== filters.canalId) return false;
             if (subclasId && acc?.subclasificacion_id !== subclasId) return false;
@@ -235,7 +262,7 @@ export function Page4Eventos() {
             }
             return true;
         });
-    }, [activities, filters, isCanalPropio, resolveAccount, resolveAssignedAdvisor, tipoByVendedor]);
+    }, [activities, filters, isCanalPropio, resolveAccount, resolveAssignedAdvisor, oppFaseMap, tipoByVendedor]);
 
     const completados = useMemo(() => eventos.filter(a => a.is_completed), [eventos]);
 
@@ -385,7 +412,7 @@ export function Page4Eventos() {
         [advisorRows]
     );
 
-    // Exporta la tabla "Eventos por asesor" tal como está filtrada en pantalla.
+    // Exporta el resumen agregado de la tabla "Eventos por asesor".
     const handleExportAsesores = () => {
         downloadCSV(
             advisorRowsAlpha,
@@ -396,7 +423,39 @@ export function Page4Eventos() {
                 { header: "Atrasados", key: "atrasados" },
                 { header: "Sin actividad", key: "sinActividad" },
             ],
-            "eventos_por_asesor"
+            "eventos_por_asesor_resumen"
+        );
+    };
+
+    // Exporta el listado de eventos individuales (no el resumen por asesor),
+    // tal como quedaron filtrados en pantalla.
+    const handleExportEventos = () => {
+        const rows = [...eventos]
+            .sort((a, b) => new Date(b.fecha_inicio || 0).getTime() - new Date(a.fecha_inicio || 0).getTime())
+            .map(a => {
+                const assignedId = resolveAssignedAdvisor(a);
+                return {
+                    asesor: assignedId ? userNameMap.get(assignedId) || "Sin asesor" : "Sin asesor",
+                    asunto: a.asunto?.trim() || "Sin asunto",
+                    cuenta: resolveAccount(a)?.nombre || "Sin cuenta",
+                    tipo: a.tipo_actividad === "EVENTO" ? "Evento" : "Tarea",
+                    clasificacion: a.clasificacion_id != null ? clasificacionMap.get(a.clasificacion_id) || "-" : "-",
+                    estado: a.is_completed ? "Completado" : isOverdueEvent(a) ? "Atrasado" : "Programado",
+                    fecha: a.fecha_inicio ? new Date(a.fecha_inicio).toLocaleDateString("es-CO", { day: "2-digit", month: "short", year: "numeric" }) : "-",
+                };
+            });
+        downloadCSV(
+            rows,
+            [
+                { header: "Asesor", key: "asesor" },
+                { header: "Asunto", key: "asunto" },
+                { header: "Cuenta", key: "cuenta" },
+                { header: "Tipo", key: "tipo" },
+                { header: "Clasificación", key: "clasificacion" },
+                { header: "Estado", key: "estado" },
+                { header: "Fecha", key: "fecha" },
+            ],
+            "lista_de_eventos"
         );
     };
 
@@ -509,7 +568,7 @@ export function Page4Eventos() {
     const hasActiveFilters =
         filters.canalId || filters.tiposCanal.length > 0 || filters.year || filters.month || filters.day || filters.week ||
         filters.asesorIds.length > 0 || filters.clasificacionIds.length > 0 || filters.subclasificacionId || filters.zonaId ||
-        filters.desde || filters.hasta;
+        filters.faseIds.length > 0 || filters.desde || filters.hasta;
 
     return (
         <div className="flex flex-col gap-6">
@@ -553,6 +612,12 @@ export function Page4Eventos() {
                         <div>
                             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Zona</label>
                             <SearchableSelect options={ZONA_OPTIONS} value={filters.zonaId} onChange={v => setFilter("zonaId", v)} placeholder="Todas" />
+                        </div>
+                    )}
+                    {filters.canalId && (
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Fase</label>
+                            <MultiSelect options={faseOptions} selected={filters.faseIds} onChange={v => setFilter("faseIds", v)} placeholder="Todas" />
                         </div>
                     )}
                     <div>
@@ -600,11 +665,22 @@ export function Page4Eventos() {
                         />
                     </div>
                 </div>
-                {hasActiveFilters && (
-                    <button onClick={() => setFilters(EMPTY_FILTERS)} className="mt-3 text-xs font-bold text-slate-400 hover:text-[#254153] transition-colors underline">
-                        Limpiar filtros
+                <div className="mt-3 flex items-center justify-between">
+                    {hasActiveFilters ? (
+                        <button onClick={() => setFilters(EMPTY_FILTERS)} className="text-xs font-bold text-slate-400 hover:text-[#254153] transition-colors underline">
+                            Limpiar filtros
+                        </button>
+                    ) : <span />}
+                    <button
+                        onClick={handleExportEventos}
+                        disabled={eventos.length === 0}
+                        title="Exporta el listado de eventos individuales (no el resumen) según los filtros activos"
+                        className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-[#254153] disabled:text-slate-300 disabled:cursor-not-allowed transition-colors"
+                    >
+                        <Download className="w-3.5 h-3.5" />
+                        Exportar lista de eventos ({eventos.length})
                     </button>
-                )}
+                </div>
             </div>
 
             {/* KPI cards */}
@@ -655,11 +731,11 @@ export function Page4Eventos() {
                         <button
                             onClick={handleExportAsesores}
                             disabled={advisorRowsAlpha.length === 0}
-                            title="Exportar esta tabla a CSV según los filtros activos"
+                            title="Exportar este resumen por asesor a CSV según los filtros activos"
                             className="flex items-center gap-1.5 text-[11px] font-bold text-slate-500 hover:text-[#254153] disabled:text-slate-300 disabled:cursor-not-allowed transition-colors"
                         >
                             <Download className="w-3.5 h-3.5" />
-                            Exportar
+                            Exportar resumen
                         </button>
                     </div>
                     <p className="text-[11px] text-slate-400 mb-2">Clic en un número para ver el detalle de esos eventos.</p>
