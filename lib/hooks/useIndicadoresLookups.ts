@@ -15,6 +15,7 @@ export interface IndicadoresAccountInfo {
     canal_id?: string | null;
     subclasificacion_id?: number | null;
     departamento_id?: number | null;
+    owner_user_id?: string | null;
     nombre?: string | null;
 }
 
@@ -53,6 +54,7 @@ export function useIndicadoresLookups() {
                 canal_id: a.canal_id,
                 subclasificacion_id: a.subclasificacion_id,
                 departamento_id: a.departamento_id,
+                owner_user_id: a.owner_user_id,
                 nombre: a.nombre,
             });
         });
