@@ -3,6 +3,17 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-11-03 - Feature: Filtros activables de Planta y Familia en Oportunidades
+
+- **Requerimiento:** Incorporar en la barra desplegable de filtros de `/oportunidades` la capacidad de filtrar por Planta y Familia, cruzando con los productos de las cotizaciones vinculadas a cada oportunidad.
+- **Cambios Realizados:**
+  - `lib/opportunityProductFilterHelpers.ts`: Helper de filtrado puro (`filterOpportunitiesByProduct`, `getOpportunityIdsByProductFilters`) para cruce en memoria y extracción de IDs.
+  - `components/oportunidades/OpportunityFilters.tsx`: Añadidos selectores desplegables de **Planta** y **Familia**, alimentados dinámicamente desde el catálogo de productos con filtrado dependiente opcional y soporte de limpieza.
+  - `lib/hooks/useOpportunitiesServer.ts`: Soporte para `plantaFilter` y `familiaFilter` en consultas online de Supabase (subconsulta de ítems <200ms) y offline (Dexie `quotes` + `quoteItems` + catálogo en IndexedDB).
+  - `app/oportunidades/page.tsx`: Sincronización bidireccional de parámetros en URL (`planta`, `familia`), sessionStorage y actualización de métricas en tiempo real.
+  - `tests/opportunityPlantFamilyFilters.test.ts`: Suite de pruebas unitarias permanente verificada en GREEN (6/6).
+- **Páginas actualizadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+
 ## 2026-10-30 - Feature: Botones «Todo» para cantidades máximas disponibles en Pedido
 
 - **Requerimiento:** Facilitar la asignación de cantidades al formalizar o editar pedidos incorporando un botón «Todo» por cada línea de producto y un botón «Todo» global en el encabezado de Cantidades a Pedir.

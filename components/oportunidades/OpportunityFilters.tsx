@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
-import { Filter, X, ChevronDown, Check, CircleDot, Trophy, XCircle } from "lucide-react";
+import { Filter, X, CircleDot, Trophy, XCircle } from "lucide-react";
 import { cn } from "@/components/ui/utils";
+import { useFullCatalog } from "@/lib/hooks/useProducts";
 
 type Channel = {
     id: string;
@@ -50,6 +51,8 @@ interface OpportunityFiltersProps {
         startClosingDate: string | null;
         endClosingDate: string | null;
         origin: string | null;
+        planta?: string | null;
+        familia?: string | null;
     }) => void;
     initialChannelId?: string | null;
     initialSubclassId?: number | null;
@@ -57,6 +60,8 @@ interface OpportunityFiltersProps {
     initialPhaseId?: number | null;
     initialStatusFilter?: StatusFilter;
     initialOrigin?: string | null;
+    initialPlanta?: string | null;
+    initialFamilia?: string | null;
     initialDates?: {
         startDate: string | null;
         endDate: string | null;
@@ -73,6 +78,8 @@ export function OpportunityFilters({
     initialPhaseId,
     initialStatusFilter,
     initialOrigin,
+    initialPlanta,
+    initialFamilia,
     initialDates
 }: OpportunityFiltersProps) {
     const [channels, setChannels] = useState<Channel[]>([]);
@@ -88,6 +95,9 @@ export function OpportunityFilters({
     const [selectedPhase, setSelectedPhase] = useState<number | null>(initialPhaseId || null);
     const [statusFilter, setStatusFilter] = useState<StatusFilter>(initialStatusFilter || 'open');
     const [selectedOrigin, setSelectedOrigin] = useState<string | null>(initialOrigin || null);
+    const [selectedPlanta, setSelectedPlanta] = useState<string | null>(initialPlanta || null);
+    const [selectedFamilia, setSelectedFamilia] = useState<string | null>(initialFamilia || null);
+    const { products } = useFullCatalog();
 
     const [startDate, setStartDate] = useState<string | null>(initialDates?.startDate || null);
     const [endDate, setEndDate] = useState<string | null>(initialDates?.endDate || null);
@@ -101,6 +111,18 @@ export function OpportunityFilters({
             setSelectedOrigin(initialOrigin || null);
         }
     }, [initialOrigin]);
+
+    useEffect(() => {
+        if (initialPlanta !== undefined) {
+            setSelectedPlanta(initialPlanta || null);
+        }
+    }, [initialPlanta]);
+
+    useEffect(() => {
+        if (initialFamilia !== undefined) {
+            setSelectedFamilia(initialFamilia || null);
+        }
+    }, [initialFamilia]);
 
     useEffect(() => {
         setSelectedChannel(initialChannelId || null);
@@ -165,7 +187,7 @@ export function OpportunityFilters({
 
                 // If initial filters were set (e.g., from URL on back navigation),
                 // notify the parent so the hook fetches with correct filters
-                if (initialChannelId || initialSubclassId || initialSegmentId || initialPhaseId || initialOrigin || (initialStatusFilter && initialStatusFilter !== 'open') || initialDates) {
+                if (initialChannelId || initialSubclassId || initialSegmentId || initialPhaseId || initialOrigin || initialPlanta || initialFamilia || (initialStatusFilter && initialStatusFilter !== 'open') || initialDates) {
                     onFilterChange({
                         channelId: initialChannelId || null,
                         subclassificationId: initialSubclassId || null,
@@ -176,7 +198,9 @@ export function OpportunityFilters({
                         endDate: initialDates?.endDate || null,
                         startClosingDate: initialDates?.startClosingDate || null,
                         endClosingDate: initialDates?.endClosingDate || null,
-                        origin: initialOrigin || null
+                        origin: initialOrigin || null,
+                        planta: initialPlanta || null,
+                        familia: initialFamilia || null
                     });
                 }
 
@@ -214,6 +238,18 @@ export function OpportunityFilters({
             });
     }, [selectedChannel, phases]);
 
+    const availablePlants = useMemo(() => {
+        const list = Array.from(new Set(products.map(p => p.planta).filter(Boolean))).sort() as string[];
+        return list.length > 0 ? list : ['FVHMP', 'MBL', 'PC'];
+    }, [products]);
+
+    const availableFamilies = useMemo(() => {
+        const filtered = selectedPlanta
+            ? products.filter(p => p.planta?.toLowerCase() === selectedPlanta.toLowerCase())
+            : products;
+        return Array.from(new Set(filtered.map(p => p.familia).filter(Boolean))).sort() as string[];
+    }, [products, selectedPlanta]);
+
     // Handle Status Filter Change
     const handleStatusChange = (status: StatusFilter) => {
         setStatusFilter(status);
@@ -231,7 +267,9 @@ export function OpportunityFilters({
             endDate,
             startClosingDate,
             endClosingDate,
-            origin: selectedOrigin
+            origin: selectedOrigin,
+            planta: selectedPlanta,
+            familia: selectedFamilia
         });
     };
 
@@ -253,7 +291,9 @@ export function OpportunityFilters({
             endDate,
             startClosingDate,
             endClosingDate,
-            origin: selectedOrigin
+            origin: selectedOrigin,
+            planta: selectedPlanta,
+            familia: selectedFamilia
         });
     };
 
@@ -272,7 +312,9 @@ export function OpportunityFilters({
             endDate,
             startClosingDate,
             endClosingDate,
-            origin: selectedOrigin
+            origin: selectedOrigin,
+            planta: selectedPlanta,
+            familia: selectedFamilia
         });
     };
 
@@ -289,7 +331,9 @@ export function OpportunityFilters({
             endDate,
             startClosingDate,
             endClosingDate,
-            origin: selectedOrigin
+            origin: selectedOrigin,
+            planta: selectedPlanta,
+            familia: selectedFamilia
         });
     };
 
@@ -310,7 +354,9 @@ export function OpportunityFilters({
             endDate,
             startClosingDate,
             endClosingDate,
-            origin: selectedOrigin
+            origin: selectedOrigin,
+            planta: selectedPlanta,
+            familia: selectedFamilia
         });
     };
 
@@ -327,7 +373,55 @@ export function OpportunityFilters({
             endDate,
             startClosingDate,
             endClosingDate,
-            origin: val
+            origin: val,
+            planta: selectedPlanta,
+            familia: selectedFamilia
+        });
+    };
+
+    const handlePlantaChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+        const val = e.target.value || null;
+        setSelectedPlanta(val);
+        let nextFamilia = selectedFamilia;
+        if (val && selectedFamilia) {
+            const familyBelongs = products.some(p => p.planta?.toLowerCase() === val.toLowerCase() && p.familia?.toLowerCase() === selectedFamilia.toLowerCase());
+            if (!familyBelongs) {
+                nextFamilia = null;
+                setSelectedFamilia(null);
+            }
+        }
+        onFilterChange({
+            channelId: selectedChannel,
+            subclassificationId: selectedSubclass,
+            segmentId: selectedSegment,
+            phaseId: selectedPhase,
+            statusFilter,
+            startDate,
+            endDate,
+            startClosingDate,
+            endClosingDate,
+            origin: selectedOrigin,
+            planta: val,
+            familia: nextFamilia
+        });
+    };
+
+    const handleFamiliaChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+        const val = e.target.value || null;
+        setSelectedFamilia(val);
+        onFilterChange({
+            channelId: selectedChannel,
+            subclassificationId: selectedSubclass,
+            segmentId: selectedSegment,
+            phaseId: selectedPhase,
+            statusFilter,
+            startDate,
+            endDate,
+            startClosingDate,
+            endClosingDate,
+            origin: selectedOrigin,
+            planta: selectedPlanta,
+            familia: val
         });
     };
 
@@ -338,293 +432,337 @@ export function OpportunityFilters({
         setSelectedPhase(null);
         setStatusFilter('open');
         setSelectedOrigin(null);
+        setSelectedPlanta(null);
+        setSelectedFamilia(null);
         setStartDate(null);
         setEndDate(null);
         setStartClosingDate(null);
         setEndClosingDate(null);
-        onFilterChange({ 
-            channelId: null, 
-            subclassificationId: null, 
-            segmentId: null, 
-            phaseId: null, 
+        onFilterChange({
+            channelId: null,
+            subclassificationId: null,
+            segmentId: null,
+            phaseId: null,
             statusFilter: 'open',
             startDate: null,
             endDate: null,
             startClosingDate: null,
             endClosingDate: null,
-            origin: null
+            origin: null,
+            planta: null,
+            familia: null
         });
     };
 
-    const hasActiveFilters = selectedChannel || selectedSubclass || selectedSegment || selectedPhase || selectedOrigin || statusFilter !== 'open' || startDate || endDate || startClosingDate || endClosingDate;
+    const hasActiveFilters = selectedChannel || selectedSubclass || selectedSegment || selectedPhase || selectedOrigin || selectedPlanta || selectedFamilia || statusFilter !== 'open' || startDate || endDate || startClosingDate || endClosingDate;
 
     if (loadingMetadata) return <div className="text-xs text-slate-400">Cargando filtros...</div>;
 
     return (
         <div data-testid="opportunities-filters" className="space-y-3">
             <div className="flex flex-wrap items-center gap-3">
-            {/* Status Filter Pills - Quick access to closed states */}
-            <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
-                <button
-                    data-testid="opportunities-filter-status-all"
-                    onClick={() => handleStatusChange('all')}
-                    className={cn(
-                        "px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5",
-                        statusFilter === 'all'
-                            ? "bg-white text-slate-800 shadow-sm"
-                            : "text-slate-500 hover:text-slate-700"
-                    )}
-                >
-                    <CircleDot className="w-3 h-3" />
-                    Todas
-                </button>
-                <button
-                    data-testid="opportunities-filter-status-open"
-                    onClick={() => handleStatusChange('open')}
-                    className={cn(
-                        "px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5",
-                        statusFilter === 'open'
-                            ? "bg-white text-blue-600 shadow-sm"
-                            : "text-slate-500 hover:text-slate-700"
-                    )}
-                >
-                    <CircleDot className="w-3 h-3" />
-                    Abiertas
-                </button>
-                <button
-                    data-testid="opportunities-filter-status-won"
-                    onClick={() => handleStatusChange('won')}
-                    className={cn(
-                        "px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5",
-                        statusFilter === 'won'
-                            ? "bg-emerald-500 text-white shadow-sm"
-                            : "text-slate-500 hover:text-emerald-600"
-                    )}
-                >
-                    <Trophy className="w-3 h-3" />
-                    Ganadas
-                </button>
-                <button
-                    data-testid="opportunities-filter-status-lost"
-                    onClick={() => handleStatusChange('lost')}
-                    className={cn(
-                        "px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5",
-                        statusFilter === 'lost'
-                            ? "bg-red-500 text-white shadow-sm"
-                            : "text-slate-500 hover:text-red-600"
-                    )}
-                >
-                    <XCircle className="w-3 h-3" />
-                    Perdidas
-                </button>
-            </div>
-
-            {/* Date Filters */}
-            <div className="flex flex-wrap items-center gap-2 border border-slate-200 rounded-lg px-3 py-1.5 bg-white shadow-sm overflow-x-auto whitespace-nowrap">
-                <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-slate-500 uppercase tracking-tight">Creación:</span>
-                    <input 
-                        type="date"
-                        className="text-xs bg-slate-50 border border-slate-200 rounded px-2 py-1 focus:ring-1 focus:ring-blue-500 outline-none"
-                        value={startDate || ""}
-                        onChange={(e) => {
-                            const val = e.target.value || null;
-                            setStartDate(val);
-                            onFilterChange({
-                                channelId: selectedChannel,
-                                subclassificationId: selectedSubclass,
-                                segmentId: selectedSegment,
-                                phaseId: selectedPhase,
-                                statusFilter,
-                                startDate: val,
-                                endDate,
-                                startClosingDate,
-                                endClosingDate,
-                                origin: selectedOrigin
-                            });
-                        }}
-                    />
-                    <span className="text-slate-300 text-xs text-center min-w-[12px]">-</span>
-                    <input 
-                        type="date"
-                        className="text-xs bg-slate-50 border border-slate-200 rounded px-2 py-1 focus:ring-1 focus:ring-blue-500 outline-none"
-                        value={endDate || ""}
-                        onChange={(e) => {
-                            const val = e.target.value || null;
-                            setEndDate(val);
-                            onFilterChange({
-                                channelId: selectedChannel,
-                                subclassificationId: selectedSubclass,
-                                segmentId: selectedSegment,
-                                phaseId: selectedPhase,
-                                statusFilter,
-                                startDate,
-                                endDate: val,
-                                startClosingDate,
-                                endClosingDate,
-                                origin: selectedOrigin
-                            });
-                        }}
-                    />
+                {/* Status Filter Pills - Quick access to closed states */}
+                <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
+                    <button
+                        data-testid="opportunities-filter-status-all"
+                        onClick={() => handleStatusChange('all')}
+                        className={cn(
+                            "px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5",
+                            statusFilter === 'all'
+                                ? "bg-white text-slate-800 shadow-sm"
+                                : "text-slate-500 hover:text-slate-700"
+                        )}
+                    >
+                        <CircleDot className="w-3 h-3" />
+                        Todas
+                    </button>
+                    <button
+                        data-testid="opportunities-filter-status-open"
+                        onClick={() => handleStatusChange('open')}
+                        className={cn(
+                            "px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5",
+                            statusFilter === 'open'
+                                ? "bg-white text-blue-600 shadow-sm"
+                                : "text-slate-500 hover:text-slate-700"
+                        )}
+                    >
+                        <CircleDot className="w-3 h-3" />
+                        Abiertas
+                    </button>
+                    <button
+                        data-testid="opportunities-filter-status-won"
+                        onClick={() => handleStatusChange('won')}
+                        className={cn(
+                            "px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5",
+                            statusFilter === 'won'
+                                ? "bg-emerald-500 text-white shadow-sm"
+                                : "text-slate-500 hover:text-emerald-600"
+                        )}
+                    >
+                        <Trophy className="w-3 h-3" />
+                        Ganadas
+                    </button>
+                    <button
+                        data-testid="opportunities-filter-status-lost"
+                        onClick={() => handleStatusChange('lost')}
+                        className={cn(
+                            "px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5",
+                            statusFilter === 'lost'
+                                ? "bg-red-500 text-white shadow-sm"
+                                : "text-slate-500 hover:text-red-600"
+                        )}
+                    >
+                        <XCircle className="w-3 h-3" />
+                        Perdidas
+                    </button>
                 </div>
 
-                <div className="w-px h-6 bg-slate-200 mx-1"></div>
+                {/* Date Filters */}
+                <div className="flex flex-wrap items-center gap-2 border border-slate-200 rounded-lg px-3 py-1.5 bg-white shadow-sm overflow-x-auto whitespace-nowrap">
+                    <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-500 uppercase tracking-tight">Creación:</span>
+                        <input
+                            type="date"
+                            className="text-xs bg-slate-50 border border-slate-200 rounded px-2 py-1 focus:ring-1 focus:ring-blue-500 outline-none"
+                            value={startDate || ""}
+                            onChange={(e) => {
+                                const val = e.target.value || null;
+                                setStartDate(val);
+                                onFilterChange({
+                                    channelId: selectedChannel,
+                                    subclassificationId: selectedSubclass,
+                                    segmentId: selectedSegment,
+                                    phaseId: selectedPhase,
+                                    statusFilter,
+                                    startDate: val,
+                                    endDate,
+                                    startClosingDate,
+                                    endClosingDate,
+                                    origin: selectedOrigin,
+                                    planta: selectedPlanta,
+                                    familia: selectedFamilia
+                                });
+                            }}
+                        />
+                        <span className="text-slate-300 text-xs text-center min-w-[12px]">-</span>
+                        <input
+                            type="date"
+                            className="text-xs bg-slate-50 border border-slate-200 rounded px-2 py-1 focus:ring-1 focus:ring-blue-500 outline-none"
+                            value={endDate || ""}
+                            onChange={(e) => {
+                                const val = e.target.value || null;
+                                setEndDate(val);
+                                onFilterChange({
+                                    channelId: selectedChannel,
+                                    subclassificationId: selectedSubclass,
+                                    segmentId: selectedSegment,
+                                    phaseId: selectedPhase,
+                                    statusFilter,
+                                    startDate,
+                                    endDate: val,
+                                    startClosingDate,
+                                    endClosingDate,
+                                    origin: selectedOrigin,
+                                    planta: selectedPlanta,
+                                    familia: selectedFamilia
+                                });
+                            }}
+                        />
+                    </div>
 
-                <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-slate-500 uppercase tracking-tight">Cierre:</span>
-                    <input 
-                        type="date"
-                        className="text-xs bg-slate-50 border border-slate-200 rounded px-2 py-1 focus:ring-1 focus:ring-blue-500 outline-none"
-                        value={startClosingDate || ""}
-                        onChange={(e) => {
-                            const val = e.target.value || null;
-                            setStartClosingDate(val);
-                            onFilterChange({
-                                channelId: selectedChannel,
-                                subclassificationId: selectedSubclass,
-                                segmentId: selectedSegment,
-                                phaseId: selectedPhase,
-                                statusFilter,
-                                startDate,
-                                endDate,
-                                startClosingDate: val,
-                                endClosingDate,
-                                origin: selectedOrigin
-                            });
-                        }}
-                    />
-                    <span className="text-slate-300 text-xs text-center min-w-[12px]">-</span>
-                    <input 
-                        type="date"
-                        className="text-xs bg-slate-50 border border-slate-200 rounded px-2 py-1 focus:ring-1 focus:ring-blue-500 outline-none"
-                        value={endClosingDate || ""}
-                        onChange={(e) => {
-                            const val = e.target.value || null;
-                            setEndClosingDate(val);
-                            onFilterChange({
-                                channelId: selectedChannel,
-                                subclassificationId: selectedSubclass,
-                                segmentId: selectedSegment,
-                                phaseId: selectedPhase,
-                                statusFilter,
-                                startDate,
-                                endDate,
-                                startClosingDate,
-                                endClosingDate: val,
-                                origin: selectedOrigin
-                            });
-                        }}
-                    />
+                    <div className="w-px h-6 bg-slate-200 mx-1"></div>
+
+                    <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-500 uppercase tracking-tight">Cierre:</span>
+                        <input
+                            type="date"
+                            className="text-xs bg-slate-50 border border-slate-200 rounded px-2 py-1 focus:ring-1 focus:ring-blue-500 outline-none"
+                            value={startClosingDate || ""}
+                            onChange={(e) => {
+                                const val = e.target.value || null;
+                                setStartClosingDate(val);
+                                onFilterChange({
+                                    channelId: selectedChannel,
+                                    subclassificationId: selectedSubclass,
+                                    segmentId: selectedSegment,
+                                    phaseId: selectedPhase,
+                                    statusFilter,
+                                    startDate,
+                                    endDate,
+                                    startClosingDate: val,
+                                    endClosingDate,
+                                    origin: selectedOrigin,
+                                    planta: selectedPlanta,
+                                    familia: selectedFamilia
+                                });
+                            }}
+                        />
+                        <span className="text-slate-300 text-xs text-center min-w-[12px]">-</span>
+                        <input
+                            type="date"
+                            className="text-xs bg-slate-50 border border-slate-200 rounded px-2 py-1 focus:ring-1 focus:ring-blue-500 outline-none"
+                            value={endClosingDate || ""}
+                            onChange={(e) => {
+                                const val = e.target.value || null;
+                                setEndClosingDate(val);
+                                onFilterChange({
+                                    channelId: selectedChannel,
+                                    subclassificationId: selectedSubclass,
+                                    segmentId: selectedSegment,
+                                    phaseId: selectedPhase,
+                                    statusFilter,
+                                    startDate,
+                                    endDate,
+                                    startClosingDate,
+                                    endClosingDate: val,
+                                    origin: selectedOrigin,
+                                    planta: selectedPlanta,
+                                    familia: selectedFamilia
+                                });
+                            }}
+                        />
+                    </div>
                 </div>
-            </div>
 
-            {/* Hierarchical Filters */}
-            <div className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 bg-white shadow-sm">
-                <Filter className="w-4 h-4 text-slate-400" />
+                {/* Hierarchical Filters */}
+                <div className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 bg-white shadow-sm">
+                    <Filter className="w-4 h-4 text-slate-400" />
 
-                {/* Channel Select */}
-                <select
-                    data-testid="opportunities-filter-channel"
-                    className="text-sm bg-transparent border-none focus:ring-0 cursor-pointer text-slate-700 font-medium max-w-[180px]"
-                    value={selectedChannel || ""}
-                    onChange={handleChannelChange}
-                >
-                    <option value="">Todos los Canales</option>
-                    {channels.map(c => (
-                        <option key={c.id} value={c.id}>{c.nombre}</option>
-                    ))}
-                </select>
+                    {/* Channel Select */}
+                    <select
+                        data-testid="opportunities-filter-channel"
+                        className="text-sm bg-transparent border-none focus:ring-0 cursor-pointer text-slate-700 font-medium max-w-[180px]"
+                        value={selectedChannel || ""}
+                        onChange={handleChannelChange}
+                    >
+                        <option value="">Todos los Canales</option>
+                        {channels.map(c => (
+                            <option key={c.id} value={c.id}>{c.nombre}</option>
+                        ))}
+                    </select>
 
-                {/* Separator if Channel Selected */}
-                {selectedChannel && (
-                    <>
-                        <span className="text-slate-300">|</span>
+                    {/* Separator if Channel Selected */}
+                    {selectedChannel && (
+                        <>
+                            <span className="text-slate-300">|</span>
 
-                        {/* Subclassification Select */}
-                        <select
-                            data-testid="opportunities-filter-subclass"
-                            className="text-sm bg-transparent border-none focus:ring-0 cursor-pointer text-slate-700 max-w-[160px]"
-                            value={selectedSubclass || ""}
-                            onChange={handleSubclassChange}
-                        >
-                            <option value="">Todos los Tipos</option>
-                            {availableSubclasses.map(s => (
-                                <option key={s.id} value={s.id}>{s.nombre}</option>
-                            ))}
-                        </select>
-
-                        <span className="text-slate-300">|</span>
-
-                        {/* Segment Select */}
-                        <select
-                            data-testid="opportunities-filter-segment"
-                            className="text-sm bg-transparent border-none focus:ring-0 cursor-pointer text-slate-700 max-w-[160px]"
-                            value={selectedSegment || ""}
-                            onChange={handleSegmentChange}
-                        >
-                            <option value="">Todos los Segmentos</option>
-                            {availableSegments.map(s => (
-                                <option key={s.id} value={s.id}>{s.nombre}</option>
-                            ))}
-                        </select>
-
-                        <span className="text-slate-300">|</span>
-
-                        {/* Phase Select - Only show when status is 'all' or 'open' */}
-                        {(statusFilter === 'all' || statusFilter === 'open') && (
+                            {/* Subclassification Select */}
                             <select
-                                data-testid="opportunities-filter-phase"
+                                data-testid="opportunities-filter-subclass"
                                 className="text-sm bg-transparent border-none focus:ring-0 cursor-pointer text-slate-700 max-w-[160px]"
-                                value={selectedPhase || ""}
-                                onChange={handlePhaseChange}
+                                value={selectedSubclass || ""}
+                                onChange={handleSubclassChange}
                             >
-                                <option value="">Todas las Etapas</option>
-                                {availablePhases.map(p => (
-                                    <option key={p.id} value={p.id}>{p.nombre}</option>
+                                <option value="">Todos los Tipos</option>
+                                {availableSubclasses.map(s => (
+                                    <option key={s.id} value={s.id}>{s.nombre}</option>
                                 ))}
                             </select>
-                        )}
 
-                        {/* Show closed status badge when won/lost selected */}
-                        {(statusFilter === 'won' || statusFilter === 'lost') && (
-                            <span className={cn(
-                                "px-2 py-0.5 rounded text-xs font-medium",
-                                statusFilter === 'won' ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"
-                            )}>
-                                {statusFilter === 'won' ? 'Cerrada Ganada' : 'Cerrada Perdida'}
-                            </span>
-                        )}
-                    </>
+                            <span className="text-slate-300">|</span>
+
+                            {/* Segment Select */}
+                            <select
+                                data-testid="opportunities-filter-segment"
+                                className="text-sm bg-transparent border-none focus:ring-0 cursor-pointer text-slate-700 max-w-[160px]"
+                                value={selectedSegment || ""}
+                                onChange={handleSegmentChange}
+                            >
+                                <option value="">Todos los Segmentos</option>
+                                {availableSegments.map(s => (
+                                    <option key={s.id} value={s.id}>{s.nombre}</option>
+                                ))}
+                            </select>
+
+                            <span className="text-slate-300">|</span>
+
+                            {/* Phase Select - Only show when status is 'all' or 'open' */}
+                            {(statusFilter === 'all' || statusFilter === 'open') && (
+                                <select
+                                    data-testid="opportunities-filter-phase"
+                                    className="text-sm bg-transparent border-none focus:ring-0 cursor-pointer text-slate-700 max-w-[160px]"
+                                    value={selectedPhase || ""}
+                                    onChange={handlePhaseChange}
+                                >
+                                    <option value="">Todas las Etapas</option>
+                                    {availablePhases.map(p => (
+                                        <option key={p.id} value={p.id}>{p.nombre}</option>
+                                    ))}
+                                </select>
+                            )}
+
+                            {/* Show closed status badge when won/lost selected */}
+                            {(statusFilter === 'won' || statusFilter === 'lost') && (
+                                <span className={cn(
+                                    "px-2 py-0.5 rounded text-xs font-medium",
+                                    statusFilter === 'won' ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"
+                                )}>
+                                    {statusFilter === 'won' ? 'Cerrada Ganada' : 'Cerrada Perdida'}
+                                </span>
+                            )}
+                        </>
+                    )}
+                </div>
+
+                {/* Origin Filter */}
+                <div className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 bg-white shadow-sm">
+                    <span className="text-xs font-bold text-slate-500 uppercase tracking-tight">Origen:</span>
+                    <select
+                        data-testid="opportunities-filter-origin"
+                        className="text-sm bg-transparent border-none focus:ring-0 cursor-pointer text-slate-700 font-medium max-w-[170px]"
+                        value={selectedOrigin || ""}
+                        onChange={handleOriginChange}
+                    >
+                        <option value="">Todos los Orígenes</option>
+                        {origins.map(o => (
+                            <option key={o.id} value={o.codigo}>{o.nombre}</option>
+                        ))}
+                    </select>
+                </div>
+
+                {/* Planta Filter */}
+                <div className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 bg-white shadow-sm">
+                    <span className="text-xs font-bold text-slate-500 uppercase tracking-tight">Planta:</span>
+                    <select
+                        data-testid="opportunities-filter-planta"
+                        className="text-sm bg-transparent border-none focus:ring-0 cursor-pointer text-slate-700 font-medium max-w-[160px]"
+                        value={selectedPlanta || ""}
+                        onChange={handlePlantaChange}
+                    >
+                        <option value="">Todas las Plantas</option>
+                        {availablePlants.map(p => (
+                            <option key={p} value={p}>{p}</option>
+                        ))}
+                    </select>
+                </div>
+
+                {/* Familia Filter */}
+                <div className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 bg-white shadow-sm">
+                    <span className="text-xs font-bold text-slate-500 uppercase tracking-tight">Familia:</span>
+                    <select
+                        data-testid="opportunities-filter-familia"
+                        className="text-sm bg-transparent border-none focus:ring-0 cursor-pointer text-slate-700 font-medium max-w-[200px]"
+                        value={selectedFamilia || ""}
+                        onChange={handleFamiliaChange}
+                    >
+                        <option value="">Todas las Familias</option>
+                        {availableFamilies.map(f => (
+                            <option key={f} value={f}>{f}</option>
+                        ))}
+                    </select>
+                </div>
+
+                {/* Clear Button */}
+                {hasActiveFilters && (
+                    <button
+                        data-testid="opportunities-filter-clear"
+                        onClick={clearFilters}
+                        className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1 px-2 py-1 rounded hover:bg-red-50 transition-colors"
+                    >
+                        <X className="w-3 h-3" />
+                        Limpiar filtros
+                    </button>
                 )}
-            </div>
-
-            {/* Origin Filter */}
-            <div className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 bg-white shadow-sm">
-                <span className="text-xs font-bold text-slate-500 uppercase tracking-tight">Origen:</span>
-                <select
-                    data-testid="opportunities-filter-origin"
-                    className="text-sm bg-transparent border-none focus:ring-0 cursor-pointer text-slate-700 font-medium max-w-[170px]"
-                    value={selectedOrigin || ""}
-                    onChange={handleOriginChange}
-                >
-                    <option value="">Todos los Orígenes</option>
-                    {origins.map(o => (
-                        <option key={o.id} value={o.codigo}>{o.nombre}</option>
-                    ))}
-                </select>
-            </div>
-
-            {/* Clear Button */}
-            {hasActiveFilters && (
-                <button
-                    data-testid="opportunities-filter-clear"
-                    onClick={clearFilters}
-                    className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1 px-2 py-1 rounded hover:bg-red-50 transition-colors"
-                >
-                    <X className="w-3 h-3" />
-                    Limpiar filtros
-                </button>
-            )}
             </div>
         </div>
     );

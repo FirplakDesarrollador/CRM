@@ -320,12 +320,12 @@ describe('Filtros internos de tabla de oportunidades', () => {
             { amount: null },
             { amount: undefined },
             { amount: 0 },
-            { amount: '3000000' as any }
+            { amount: '3000000' as unknown as number }
         ];
 
         expect(calculateTotalAmount(opps)).toBe(7000000);
         expect(calculateTotalAmount([])).toBe(0);
-        expect(calculateTotalAmount(null as any)).toBe(0);
+        expect(calculateTotalAmount(null as unknown as Parameters<typeof calculateTotalAmount>[0])).toBe(0);
     });
 
     it('computeProgressiveBatch debe calcular correctamente rangos from/to y hasMore para carga progresiva', async () => {
