@@ -13,6 +13,7 @@ import { OpportunityFilters } from "@/components/oportunidades/OpportunityFilter
 import { QuickDateFilter, FloatingDateFilterPopover } from "@/components/oportunidades/QuickDateFilter";
 import { FloatingColumnFilterPopover, FloatingColumnFilterAnchor } from "@/components/oportunidades/FloatingColumnFilterPopover";
 import { isColumnFilterActive, formatColumnHeaderTitle } from "@/lib/opportunityColumnFilterHelpers";
+import { isToolbarOwnedTableColumn } from "@/lib/tableFilterPolicy";
 import { parseHandsontableDate } from "@/lib/dateFilterHelpers";
 import { computeOpportunityActivitySummary } from "@/lib/opportunityActivities";
 import { isNewTabClick, openLinkInBackgroundTab, wrapCellInRowLink } from "@/lib/rowLinks";
@@ -1411,7 +1412,7 @@ function OpportunitiesContent() {
                                                 title: colKey === 'creada' ? 'Fecha de Creación' : 'Fecha de Cierre',
                                                 colKey: colKey as 'creada' | 'cierre'
                                             });
-                                        } else if (colKey && ['canal', 'fase', 'vendedor', 'estado', 'origen', 'pais', 'ciudad'].includes(colKey)) {
+                                        } else if (isToolbarOwnedTableColumn('oportunidades', colKey) && colKey !== 'creada' && colKey !== 'cierre') {
                                             e.preventDefault();
                                             e.stopPropagation();
                                             const rect = btn.getBoundingClientRect();
@@ -1439,7 +1440,7 @@ function OpportunitiesContent() {
                                     if (btn) {
                                         const th = btn.closest('th');
                                         const colKey = th?.getAttribute('data-col-key');
-                                        if (colKey && ['creada', 'cierre', 'canal', 'fase', 'vendedor', 'estado', 'origen', 'pais', 'ciudad'].includes(colKey)) {
+                                        if (isToolbarOwnedTableColumn('oportunidades', colKey)) {
                                             e.stopPropagation();
                                         }
                                     }
@@ -1463,7 +1464,7 @@ function OpportunitiesContent() {
                                         const col = activeRange ? activeRange.highlight?.col : -1;
                                         const activeKeys = OPPORTUNITY_TABLE_COLUMN_KEYS.filter(key => visibleColumns.includes(key));
                                         const colKey = activeKeys[col];
-                                        if (colKey && ['creada', 'cierre', 'canal', 'fase', 'vendedor', 'estado', 'origen', 'pais', 'ciudad'].includes(colKey)) {
+                                        if (isToolbarOwnedTableColumn('oportunidades', colKey)) {
                                             setTimeout(() => {
                                                 instance.close();
                                             }, 0);

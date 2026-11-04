@@ -19,6 +19,7 @@ import { AccountDeleteModal } from "@/components/cuentas/AccountDeleteModal";
 import { DataListToolbar } from "@/components/ui/DataListToolbar";
 import { handleEntityLinkClick } from "@/lib/utils/navigation";
 import { formatColombiaDateTime } from "@/lib/date-utils";
+import { isToolbarOwnedTableColumn } from "@/lib/tableFilterPolicy";
 import dynamic from 'next/dynamic';
 
 const HotTable = dynamic(() => import('@/components/HotTableWrapper'), { ssr: false });
@@ -834,6 +835,15 @@ function AccountsContent() {
                             colHeaders={true}
                             filters={true}
                             dropdownMenu={true}
+                            beforeDropdownMenuShow={(instance: any) => {
+                                const activeRange = instance.hot?.getSelectedRangeActive();
+                                const col = activeRange ? activeRange.highlight?.col : -1;
+                                const colKey = hotColumns[col]?.data;
+                                if (isToolbarOwnedTableColumn('cuentas', colKey)) {
+                                    setShowFilters(true);
+                                    setTimeout(() => instance.close(), 0);
+                                }
+                            }}
                             manualColumnResize={true}
                             afterColumnResize={(width: number, col: number) => handleColumnResize(width, col)}
                             afterScrollVertically={triggerLoadMore}
@@ -880,11 +890,15 @@ function AccountsContent() {
                                 }
                             }}
                             afterGetColHeader={(column: number, TH: HTMLTableCellElement) => {
+                                const colDef = hotColumns[column];
+                                if (colDef?.data) TH.setAttribute('data-col-key', colDef.data);
                                 const fields: Record<number, string> = { 0: 'nombre', 1: 'pais', 2: 'ciudad', 3: 'canal_id', 5: 'potencial_venta', 8: 'created_at', 9: 'updated_at' };
                                 const labels: Record<number, string> = { 0: 'Cuenta', 1: 'País', 2: 'Ciudad', 3: 'Canal', 5: 'Potencial Venta', 8: 'Creación', 9: 'Actualizado' };
                                 if (fields[column]) {
                                     TH.style.cursor = 'pointer';
-                                    TH.title = 'Clic para ordenar ascendente o descendente';
+                                    TH.title = isToolbarOwnedTableColumn('cuentas', colDef?.data)
+                                        ? 'Use la barra de filtros para este criterio. Clic en el título para ordenar.'
+                                        : 'Clic para ordenar ascendente o descendente';
                                     const header = TH.querySelector('.colHeader');
                                     if (header) header.textContent = `${labels[column]} ${sortField === fields[column] ? (sortAsc ? '↑' : '↓') : '↕'}`;
                                 }

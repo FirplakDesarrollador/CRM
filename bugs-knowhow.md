@@ -2042,3 +2042,28 @@ Al añadir helpers visuales en bucles o funciones de renderizado JSX (como `.map
 
 Tags:
 [channel] [reference-error] [wizard] [oportunidades] [cotizaciones] [pedidos] [sales-channels]
+
+---
+
+## [Bug ID: 20261103-01]
+
+Context:
+Ingreso de leads desde la web Firplak (`supabase/functions/wordpress-lead-intake/index.ts`, `leadNaming.ts`, `lib/leadDeduplication.ts`). Caso Caralina / `3162572644`.
+
+Problem:
+La cuenta, el contacto y la oportunidad se creaban como **Consumidor Final**. En MySQL/vTiger el contacto era **Caralina** y la oportunidad **Por definir**.
+
+Root Cause:
+La Edge Function solo leía `contacto.nombre`. WordPress/vTiger suelen mandar el nombre en `lastname`/`apellido` y la oportunidad como `Por definir`. El fallback `Consumidor Final` tapaba el nombre real.
+
+Fix Applied:
+1. Helper `resolveLeadPersonName` / `resolveLeadOpportunityName` que ignora placeholders y usa firstname+lastname.
+2. La Edge Function crea y, si hace falta, corrige cuenta/contacto/oportunidad placeholder cuando llega un nombre real.
+3. Pruebas permanentes en `tests/leadDeduplication.test.ts` (10/10).
+4. Registro `INC-2026-013` (R7).
+
+Prevention Rule:
+**No persistir Consumidor Final si hay cualquier campo de nombre real**: al ingerir leads web, resolver el nombre de persona concatenando `nombre`/`firstname` y `apellido`/`lastname`, tratar `Por definir`, `-` y `Consumidor Final` como vacíos, y usar ese valor para cuenta, contacto y oportunidad.
+
+Tags:
+[wordpress] [lead-intake] [consumidor-final] [vtiger] [nombres] [r7]

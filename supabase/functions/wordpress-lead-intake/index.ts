@@ -1,5 +1,10 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import {
+  isPlaceholderLeadName,
+  resolveLeadOpportunityName,
+  resolveLeadPersonName,
+} from "./leadNaming.ts";
 
 // ─── CONFIGURACIÓN Y CONSTANTES ──────────────────────────────────────────────
 const FALLBACK_OWNER_ID = "f361d4e5-d937-4668-913a-a4359658d6f4"; // Canal Propio
@@ -67,6 +72,8 @@ Deno.serve(async (req: Request) => {
   let cuentaId = "";
   let existingCuenta: any = null;
   let nombreDeLaCuenta = "";
+  const personName = resolveLeadPersonName(body.contacto);
+  const hasRealPersonName = !isPlaceholderLeadName(personName);
 
   const telefonoContacto = (body.contacto?.telefono ?? "").trim();
   const emailContacto = (body.contacto?.email ?? "").trim();
@@ -97,17 +104,24 @@ Deno.serve(async (req: Request) => {
     nombreDeLaCuenta = existingCuenta.nombre;
     // IMPORTANTE: Ya no cambiamos el dueño de la cuenta existente, 
     // evitamos el problema de estar saltando la propiedad a cada asesor nuevo.
-  } else {
-    // NUEVA LÓGICA: Crear cuenta con datos del contacto
-    // Si no manda nombre, por lo menos ponemos "Consumidor Final" en lugar de "-"
-    let nombreContacto = (body.contacto?.nombre ?? "").trim();
-    if (!nombreContacto || nombreContacto === "-") {
-      nombreContacto = "Consumidor Final";
+    if (hasRealPersonName && isPlaceholderLeadName(existingCuenta.nombre)) {
+      nombreDeLaCuenta = personName;
+      const nowIso = new Date().toISOString();
+      await supabase.from("CRM_Cuentas").update({
+        nombre: personName,
+        updated_at: nowIso
+      }).eq("id", cuentaId);
+      await supabase.from("CRM_Contactos").update({
+        nombre: personName,
+        updated_at: nowIso
+      }).eq("account_id", cuentaId).in("nombre", ["Consumidor Final", "Por definir", "-", ""]);
     }
-    nombreDeLaCuenta = nombreContacto;
+  } else {
+    // Crear cuenta con nombre real del contacto (firstname+lastname de WP/vTiger).
+    nombreDeLaCuenta = personName;
 
     const { data: newC, error: errC } = await supabase.from("CRM_Cuentas").insert({
-      nombre: nombreContacto,
+      nombre: personName,
       nit_base: telefonoContacto && telefonoContacto !== "-" ? telefonoContacto : null,
       email: emailContacto && emailContacto !== "-" ? emailContacto : null,
       telefono: telefonoContacto && telefonoContacto !== "-" ? telefonoContacto : null,
@@ -137,10 +151,15 @@ Deno.serve(async (req: Request) => {
   if (!contactExists) {
     await supabase.from("CRM_Contactos").insert({
       account_id: cuentaId,
-      nombre: body.contacto?.nombre?.trim(),
+      nombre: personName,
       email: body.contacto?.email,
       telefono: body.contacto?.telefono
     });
+  } else if (hasRealPersonName) {
+    await supabase.from("CRM_Contactos").update({
+      nombre: personName,
+      updated_at: new Date().toISOString()
+    }).eq("account_id", cuentaId).in("nombre", ["Consumidor Final", "Por definir", "-", ""]);
   }
 
   // ────────────────────────────────────────────────────────────────────────────
@@ -174,17 +193,22 @@ Deno.serve(async (req: Request) => {
       nombreAsesor ? `Asesor solicitado: ${nombreAsesor}` : null
     ].filter(Boolean);
 
-    if (parts.length > 0) {
+    const shouldFixPlaceholderName = hasRealPersonName && isPlaceholderLeadName(existingOp.nombre);
+    if (parts.length > 0 || shouldFixPlaceholderName) {
       const fechaColombia = new Date().toLocaleString("es-CO", { timeZone: "America/Bogota" });
-      const nuevoBloque = `--- [INTERACCIÓN WEB ADICIONAL ${fechaColombia}] ---\n${parts.join(" | ")}`;
-      const comentariosActualizados = existingOp.comentarios
-        ? `${existingOp.comentarios}\n\n${nuevoBloque}`
-        : nuevoBloque;
-
-      await supabase.from("CRM_Oportunidades").update({
-        comentarios: comentariosActualizados,
+      const oppPatch: Record<string, string> = {
         updated_at: new Date().toISOString()
-      }).eq("id", existingOp.id);
+      };
+      if (parts.length > 0) {
+        const nuevoBloque = `--- [INTERACCIÓN WEB ADICIONAL ${fechaColombia}] ---\n${parts.join(" | ")}`;
+        oppPatch.comentarios = existingOp.comentarios
+          ? `${existingOp.comentarios}\n\n${nuevoBloque}`
+          : nuevoBloque;
+      }
+      if (shouldFixPlaceholderName) {
+        oppPatch.nombre = personName;
+      }
+      await supabase.from("CRM_Oportunidades").update(oppPatch).eq("id", existingOp.id);
     }
 
     return new Response(JSON.stringify({
@@ -200,10 +224,7 @@ Deno.serve(async (req: Request) => {
   }
 
   // Si no existe oportunidad abierta reciente, crear la oportunidad normalmente
-  let oportunidadNombre = body.oportunidad?.nombre?.trim();
-  if (!oportunidadNombre || oportunidadNombre === "Por definir" || oportunidadNombre === "-") {
-    oportunidadNombre = nombreDeLaCuenta;
-  }
+  const oportunidadNombre = resolveLeadOpportunityName(body.oportunidad?.nombre, nombreDeLaCuenta);
 
   const { data: op, error: errOp } = await supabase.from("CRM_Oportunidades").insert({
     account_id: cuentaId,

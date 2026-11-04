@@ -16,6 +16,14 @@ export interface NewLeadInfo {
 
 export const DEDUPLICATION_WINDOW_HOURS = 24;
 
+export {
+  isPlaceholderLeadName,
+  resolveLeadOpportunityName,
+  resolveLeadPersonName,
+  LEAD_NAME_FALLBACK,
+} from '../supabase/functions/wordpress-lead-intake/leadNaming';
+export type { LeadContactNameInput } from '../supabase/functions/wordpress-lead-intake/leadNaming';
+
 /**
  * Evalúa si un lead entrante de la web debe ser considerado duplicado
  * de una oportunidad abierta existente creada dentro de la ventana de deduplicación.
