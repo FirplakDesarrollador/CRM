@@ -6,6 +6,7 @@ import { useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { v4 as uuidv4 } from 'uuid';
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { registrarEliminacionFallida } from "@/lib/eliminaciones";
 import { sendOpportunityDeletionEmail } from "@/lib/services/notifications";
 import { shouldUpdateOpportunityAmount, getOpportunityAmountFromQuote, resolveActiveQuote } from "@/lib/opportunityQuoteSync";
 import { sanitizeQuoteItemUpdates } from "@/lib/quotePricing";
@@ -249,6 +250,8 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
         const current = await db.opportunities.get(id);
         if (!current) return;
 
+        try {
+
         // 1. Permission Check
         const isOwner = current.owner_user_id === userId || current.created_by === userId;
         console.log('[deleteOpportunity] isAdmin:', isAdmin, 'isCoordinador:', isCoordinador, 'isOwner:', isOwner, 'userId:', userId);
@@ -317,6 +320,10 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
                 ...pedidoItemsAll.map(pItem => ({ entityTable: 'CRM_PedidoItems', entityId: pItem.id, changes: { ...pItem, is_deleted: true }, options: { isSnapshot: true } }))
             ];
         });
+        } catch (err) {
+            await registrarEliminacionFallida('CRM_Oportunidades', id, err);
+            throw err;
+        }
 
         // 5. Send deletion notification (Fire and forget)
         sendOpportunityDeletionEmail(current).catch(err => {

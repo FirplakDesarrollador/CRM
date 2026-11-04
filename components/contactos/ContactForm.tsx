@@ -14,6 +14,7 @@ import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
 import { EntityAuditHistoryTab } from "@/components/shared/EntityAuditHistoryTab";
 
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { useLiveQuery } from "dexie-react-hooks";
 
 interface ContactFormProps {
     accountId: string;
@@ -25,7 +26,17 @@ interface ContactFormProps {
 
 export function ContactForm({ accountId, existingContact, onSuccess, onCancel, onDelete }: ContactFormProps) {
     const { createContact, updateContact, deleteContact, contacts } = useContacts(accountId);
-    const { isAdmin } = useCurrentUser();
+    const { isAdmin, isCoordinador, user: currentUser } = useCurrentUser();
+    const contactAccount = useLiveQuery(
+        () => existingContact?.account_id ? db.accounts.get(existingContact.account_id) : undefined,
+        [existingContact?.account_id]
+    );
+    // Eliminar: admin, coordinador, creador del contacto o dueño/creador de la cuenta
+    const canDeleteContact = isAdmin || isCoordinador || (!!currentUser?.id && (
+        (existingContact as { created_by?: string } | undefined)?.created_by === currentUser.id ||
+        contactAccount?.owner_user_id === currentUser.id ||
+        (contactAccount as { created_by?: string } | undefined)?.created_by === currentUser.id
+    ));
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [activeTab, setActiveTab] = useState<'info' | 'history'>('info');
@@ -355,7 +366,7 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel, o
                     <div className="flex justify-between items-center gap-3 pt-6 border-t border-slate-100">
                         {existingContact ? (
                             <>
-                                {isAdmin ? (
+                                {canDeleteContact ? (
                                     <button
                                         type="button"
                                         onClick={() => setIsDeleteModalOpen(true)}

@@ -570,7 +570,7 @@ function AccountsContent() {
                             {editingAccount ? `Editando: ${editingAccount.nombre}` : 'Crear Nueva Cuenta'}
                         </h3>
                         <div className="flex items-center gap-2">
-                            {isAdmin && editingAccount && (
+                            {editingAccount && (isAdmin || hasCoordinatorAccess || (!!currentUser?.id && (editingAccount.owner_user_id === currentUser.id || editingAccount.created_by === currentUser.id))) && (
                                 <button
                                     onClick={() => setAccountToDelete(editingAccount)}
                                     className="px-2.5 py-1 text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg transition-colors flex items-center gap-1 text-xs font-semibold"
