@@ -4,11 +4,12 @@ import React, { useState, useMemo } from 'react';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useUsers } from '@/lib/hooks/useUsers';
 import { supabase } from '@/lib/supabase';
-import { downloadExcel, downloadCSV, downloadSopExcel, ExportColumn, SopRow, mapOpportunityReportRow, mapActivityReportRow } from '@/lib/utils/informes';
+import { downloadExcel, downloadCSV, downloadSopExcel, ExportColumn, SopRow, mapOpportunityReportRow, mapActivityReportRow, fetchAllInChunks, resolveExportScope } from '@/lib/utils/informes';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { FileSpreadsheet, Loader2, Download, TableProperties, Users, Briefcase, Building2, Calendar as CalendarIcon, Filter, RotateCcw, DollarSign, MapPin, Tag } from 'lucide-react';
 import { cn } from '@/components/ui/utils';
+import { MiInformeCard } from '@/components/informes/MiInformeCard';
 
 // Constantes para filtros
 const ENTIDADES = [
@@ -35,11 +36,13 @@ const ESTADO_IDS_BY_NAME: Record<string, number[]> = {
 const SELECT_TRIGGER_CLASS = "w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-left text-slate-800 text-sm font-normal hover:bg-white focus:bg-white transition-all justify-between flex items-center";
 
 export default function InformesPage() {
-    const { role, isLoading: isLoadingUser } = useCurrentUser();
+    const { role, user, isLoading: isLoadingUser } = useCurrentUser();
+    const isAdmin = role === 'ADMIN';
     const { users } = useUsers();
 
     const [selectedEntidad, setSelectedEntidad] = useState<EntidadType>('oportunidades');
     const [isExporting, setIsExporting] = useState(false);
+    const [exportProgress, setExportProgress] = useState<string>('');
 
     // Filtros Generales
     const [dateFrom, setDateFrom] = useState('');
@@ -308,24 +311,20 @@ export default function InformesPage() {
         );
     }
 
-    if (role !== 'ADMIN') {
-        return (
-            <div className="flex h-screen flex-col items-center justify-center bg-slate-50 space-y-4">
-                <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center text-red-600">
-                    <FileSpreadsheet className="w-8 h-8" />
-                </div>
-                <h1 className="text-2xl font-bold text-slate-800">Acceso Restringido</h1>
-                <p className="text-slate-500">Solo los administradores pueden acceder a este módulo de exportaciones.</p>
-            </div>
-        );
-    }
-
     // Handlers
     const handleExport = async (format: 'excel' | 'csv') => {
         setIsExporting(true);
         try {
             const entidadDef = ENTIDADES.find(e => e.id === selectedEntidad);
             if (!entidadDef) throw new Error("Entidad no válida");
+
+            // El administrador puede elegir un asesor. El resto siempre descarga solo lo suyo.
+            const scopeUserId = resolveExportScope(isAdmin, selectedUser, user?.id);
+            if (!isAdmin && !scopeUserId) {
+                alert('No se pudo identificar tu usuario. Vuelve a iniciar sesión.');
+                setIsExporting(false);
+                return;
+            }
 
             // 1. Cargar Catálogos para Mapeo (Lookups)
             const [
@@ -429,10 +428,14 @@ export default function InformesPage() {
                     `)
                     .eq('is_deleted', false);
 
-                if (selectedUser) oppQuery = oppQuery.eq('owner_user_id', selectedUser);
+                if (scopeUserId) oppQuery = oppQuery.eq('owner_user_id', scopeUserId);
 
-                const { data: opps, error: oppsError } = await oppQuery;
-                if (oppsError) throw oppsError;
+                oppQuery = oppQuery.order('created_at', { ascending: false }).order('id', { ascending: false });
+                const opps = await fetchAllInChunks(oppQuery, 2500, (total) => {
+                    setExportProgress(`Cargando oportunidades (${total.toLocaleString()})...`);
+                });
+
+
 
                 if (!opps || opps.length === 0) {
                     alert("No se encontraron oportunidades con los filtros seleccionados.");
@@ -692,7 +695,9 @@ export default function InformesPage() {
                     *,
                     cuenta:CRM_Cuentas(nombre, canal_id, pais_id),
                     fase:CRM_FasesOportunidad(nombre, canal_id),
-                    estado_info:CRM_EstadosOportunidad(nombre)
+                    estado_info:CRM_EstadosOportunidad(nombre),
+                    segmento:CRM_Segmentos(nombre),
+                    actividades:CRM_Actividades(id, fecha_inicio, fecha_fin, is_completed, created_at, is_deleted)
                 `;
                 columns = [
                     { header: 'ID', key: 'id' },
@@ -702,6 +707,7 @@ export default function InformesPage() {
                     { header: 'CATEGORÍAS DE INTERÉS', key: 'categorias_interes', width: 30 },
                     { header: 'PAÍS', key: 'pais_nombre', width: 20 },
                     { header: 'CANAL', key: 'canal_nombre' },
+                    { header: 'SEGMENTO', key: 'segmento_nombre', width: 25 },
                     { header: 'VENDEDOR', key: 'vendedor_nombre', width: 25 },
                     { header: 'ESTADO', key: 'estado_nombre', width: 15 },
                     { header: 'FASE ACTUAL', key: 'fase_nombre', width: 20 },
@@ -709,7 +715,10 @@ export default function InformesPage() {
                     { header: 'MONEDA', key: 'currency_id', width: 10 },
                     { header: 'PROBABILIDAD (%)', key: 'probabilidad', width: 15 },
                     { header: 'FECHA CIERRE EST.', key: 'fecha_cierre_estimada', width: 18 },
-                    { header: 'SEGMENTO', key: 'segmento_nombre', width: 25 },
+                    { header: 'FECHA ENTREGA', key: 'fecha_entrega', width: 18 },
+                    { header: 'FECHA ACTIVIDAD', key: 'fecha_actividad', width: 20 },
+                    { header: 'ESTADO ACTIVIDAD', key: 'estado_actividad', width: 18 },
+                    { header: 'SETTER', key: 'setter', width: 15 },
                     { header: 'ORIGEN', key: 'origen_oportunidad', width: 20 },
                     { header: 'DEPARTAMENTO', key: 'departamento_nombre', width: 20 },
                     { header: 'CIUDAD', key: 'ciudad_nombre', width: 20 },
@@ -804,9 +813,22 @@ export default function InformesPage() {
                 };
             } else if (selectedEntidad === 'actividades') {
                 selectStr = `
-                    *,
-                    cuenta:CRM_Cuentas(nombre),
-                    oportunidad:CRM_Oportunidades(nombre, amount, cuenta:CRM_Cuentas(nombre)),
+                    id,
+                    asunto,
+                    fecha_inicio,
+                    fecha_fin,
+                    created_at,
+                    is_completed,
+                    descripcion,
+                    user_id,
+                    tipo_actividad,
+                    tipo_actividad_id,
+                    clasificacion_id,
+                    subclasificacion_id,
+                    account_id,
+                    opportunity_id,
+                    cuenta:CRM_Cuentas(nombre, canal_id),
+                    oportunidad:CRM_Oportunidades(nombre, amount, cuenta:CRM_Cuentas(nombre, canal_id), fase:CRM_FasesOportunidad(canal_id)),
                     usuario:CRM_Usuarios(full_name),
                     clasificacion:CRM_Activity_Clasificacion(nombre),
                     subclasificacion:CRM_Activity_Subclasificacion(nombre),
@@ -814,6 +836,7 @@ export default function InformesPage() {
                 `;
                 columns = [
                     { header: 'ASUNTO', key: 'asunto', width: 35 },
+                    { header: 'CANAL DE VENTA', key: 'canal_nombre', width: 25 },
                     { header: 'CLASIFICACIÓN', key: 'clasificacion_nombre', width: 25 },
                     { header: 'SUBCLASIFICACIÓN', key: 'subclasificacion_nombre', width: 25 },
                     { header: 'CUENTA', key: 'cuenta_nombre', width: 35 },
@@ -830,8 +853,21 @@ export default function InformesPage() {
                     userMap,
                     clasificacionMap,
                     subclasificacionMap,
-                    tipoActividadMap
+                    tipoActividadMap,
+                    canalMap
                 });
+            }
+
+            // Filtro de canal en oportunidades: por el canal de la CUENTA (igual que la app).
+            // Se usa join !inner para poder filtrar por cuenta.canal_id en el servidor.
+            if (selectedCanal && selectedEntidad === 'oportunidades') {
+                selectStr = selectStr.replace('cuenta:CRM_Cuentas(', 'cuenta:CRM_Cuentas!inner(');
+            }
+            if (scopeUserId && selectedEntidad === 'contactos') {
+                selectStr = selectStr.replace('cuenta:CRM_Cuentas(', 'cuenta:CRM_Cuentas!inner(');
+            }
+            if (scopeUserId && selectedEntidad === 'cotizaciones') {
+                selectStr = selectStr.replace('oportunidad:CRM_Oportunidades(', 'oportunidad:CRM_Oportunidades!inner(');
             }
 
             let query = supabase.from(entidadDef.table).select(selectStr);
@@ -844,11 +880,15 @@ export default function InformesPage() {
                 if (dueDateTo) query = query.lte('fecha_fin', `${dueDateTo}T23:59:59Z`);
             }
 
-            if (selectedUser) {
+            if (scopeUserId) {
                 if (selectedEntidad === 'oportunidades' || selectedEntidad === 'cuentas') {
-                    query = query.eq('owner_user_id', selectedUser);
-                } else {
-                    query = query.eq('user_id', selectedUser);
+                    query = query.eq('owner_user_id', scopeUserId);
+                } else if (selectedEntidad === 'actividades') {
+                    query = query.or(`user_id.eq.${scopeUserId},created_by.eq.${scopeUserId}`);
+                } else if (selectedEntidad === 'contactos') {
+                    query = query.eq('cuenta.owner_user_id', scopeUserId);
+                } else if (selectedEntidad === 'cotizaciones') {
+                    query = query.eq('oportunidad.owner_user_id', scopeUserId);
                 }
             }
 
@@ -856,9 +896,7 @@ export default function InformesPage() {
                 if (selectedEntidad === 'cuentas') {
                     query = query.eq('canal_id', selectedCanal);
                 } else if (selectedEntidad === 'oportunidades') {
-                    const { data: faseData } = await supabase.from('CRM_FasesOportunidad').select('id').eq('canal_id', selectedCanal);
-                    const faseIds = faseData?.map(f => f.id) || [];
-                    query = query.in('fase_id', faseIds);
+                    query = query.eq('cuenta.canal_id', selectedCanal);
                 }
             }
 
@@ -920,8 +958,12 @@ export default function InformesPage() {
                 if (selectedEstadoCumplimiento === 'pendientes') query = query.eq('is_completed', false);
             }
 
-            const { data, error } = await query;
-            if (error) throw error;
+            query = query.order('created_at', { ascending: false }).order('id', { ascending: false });
+            const data = await fetchAllInChunks(query, 2500, (total) => {
+                setExportProgress(`Descargando registros (${total.toLocaleString()})...`);
+            });
+
+
 
             if (!data || data.length === 0) {
                 alert("No se encontraron registros con los filtros seleccionados.");
@@ -955,6 +997,7 @@ export default function InformesPage() {
             alert(`Ocurrió un error al exportar: ${detailMsg || 'Desconocido'}`);
         } finally {
             setIsExporting(false);
+            setExportProgress('');
         }
     };
 
@@ -968,13 +1011,18 @@ export default function InformesPage() {
                         </div>
                         <div>
                             <h1 className="text-2xl font-bold text-slate-800 tracking-tight leading-tight">Informes y Exportaciones</h1>
-                            <p className="text-sm text-slate-500 font-medium mt-0.5">Módulo exclusivo para Administradores</p>
+                            <p className="text-sm text-slate-500 font-medium mt-0.5">
+                                {isAdmin
+                                    ? 'Exportaciones generales (administradores) y tu informe personal'
+                                    : 'Cada informe incluye únicamente tu información'}
+                            </p>
                         </div>
                     </div>
                 </div>
             </header>
 
             <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+                <MiInformeCard compact />
 
                 {/* Entidad Selection Grid */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -1084,17 +1132,27 @@ export default function InformesPage() {
                             </div>
                         )}
 
-                        {/* Asesor Comercial */}
-                        <div className="space-y-3">
-                            <label className="text-sm font-semibold text-slate-700">Asesor Comercial</label>
-                            <SearchableSelect
-                                options={asesorOptions}
-                                value={selectedUser}
-                                onChange={setSelectedUser}
-                                placeholder="Todos los asesores"
-                                triggerClassName={SELECT_TRIGGER_CLASS}
-                            />
-                        </div>
+                        {/* Asesor Comercial: el administrador elige; el asesor queda fijo en su propia información */}
+                        {isAdmin ? (
+                            <div className="space-y-3">
+                                <label className="text-sm font-semibold text-slate-700">Asesor Comercial</label>
+                                <SearchableSelect
+                                    options={asesorOptions}
+                                    value={selectedUser}
+                                    onChange={setSelectedUser}
+                                    placeholder="Todos los asesores"
+                                    triggerClassName={SELECT_TRIGGER_CLASS}
+                                />
+                            </div>
+                        ) : (
+                            <div className="space-y-3">
+                                <label className="text-sm font-semibold text-slate-700">Asesor Comercial</label>
+                                <div className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 flex items-center justify-between">
+                                    <span className="font-medium truncate">{user?.full_name || user?.email || 'Mi usuario'}</span>
+                                    <span className="text-xs bg-blue-100 text-blue-700 font-semibold px-2 py-0.5 rounded-full shrink-0 ml-2">Solo tu información</span>
+                                </div>
+                            </div>
+                        )}
 
                         {/* Canal */}
                         {(selectedEntidad === 'oportunidades' || selectedEntidad === 'cuentas' || selectedEntidad === 'sop') && (
@@ -1398,7 +1456,16 @@ export default function InformesPage() {
                     </CardContent>
 
                     {/* Botones de acción inferior */}
-                    <div className="bg-slate-50/80 px-6 py-5 border-t border-slate-100 flex flex-col sm:flex-row justify-end gap-3">
+                    <div className="bg-slate-50/80 px-6 py-5 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3">
+                        <div className="text-sm font-medium text-slate-600">
+                            {isExporting && exportProgress && (
+                                <span className="flex items-center gap-2 text-blue-600 font-semibold animate-pulse">
+                                    <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+                                    {exportProgress}
+                                </span>
+                            )}
+                        </div>
+                        <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
                         <button
                             onClick={() => handleExport('csv')}
                             disabled={isExporting}
@@ -1412,8 +1479,9 @@ export default function InformesPage() {
                             className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold bg-[#254153] text-white hover:bg-[#1a2f3d] transition-all shadow-md focus:outline-none focus:ring-2 focus:ring-[#254153] focus:ring-offset-2 disabled:opacity-50"
                         >
                             {isExporting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Download className="w-5 h-5" />}
-                            Descargar Excel
+                            {isExporting ? 'Generando...' : 'Descargar Excel'}
                         </button>
+                        </div>
                     </div>
                 </Card>
 

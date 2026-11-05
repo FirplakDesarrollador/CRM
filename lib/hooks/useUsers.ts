@@ -219,6 +219,24 @@ export function useUsers() {
         return updateUser(userId, { role: newRole });
     };
 
+    // Update user password via RPC (requires Admin)
+    const updateUserPassword = async (userId: string, newPassword: string): Promise<{ success: boolean; error?: string }> => {
+        try {
+            const { error } = await supabase.rpc('admin_change_password', {
+                target_user_id: userId,
+                new_password: newPassword
+            });
+
+            if (error) {
+                throw new Error(error.message || 'Error al cambiar contraseña');
+            }
+            return { success: true };
+        } catch (err: any) {
+            console.error('[useUsers] Error updating password:', err);
+            return { success: false, error: err.message || 'Error al cambiar contraseña' };
+        }
+    };
+
     // Toggle user active status
     const toggleUserStatus = async (userId: string, isActive: boolean): Promise<{ success: boolean; error?: string }> => {
         return updateUser(userId, { is_active: isActive });
@@ -242,6 +260,7 @@ export function useUsers() {
         createUser,
         updateUser,
         updateUserRole,
+        updateUserPassword,
         toggleUserStatus,
         deleteUser,
     };

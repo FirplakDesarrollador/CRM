@@ -3,8 +3,12 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, LocalContact } from "@/lib/db";
 import { syncEngine } from "@/lib/sync";
 import { v4 as uuidv4 } from 'uuid';
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { registrarEliminacionFallida } from "@/lib/eliminaciones";
 
 export function useContacts(accountId?: string) {
+    const { user, isAdmin, isCoordinador } = useCurrentUser();
+    const userId = user?.id;
     const contacts = useLiveQuery(
         () => accountId
             ? db.contacts.where('account_id').equals(accountId).toArray()
@@ -102,13 +106,27 @@ export function useContacts(accountId?: string) {
     const deleteContact = async (id: string) => {
         const current = await db.contacts.get(id);
         if (!current) return;
-        await syncEngine.commitLocalChanges([db.contacts], async () => {
-            await db.contacts.delete(id);
-            return [{
-                entityTable: 'CRM_Contactos', entityId: id,
-                changes: { ...current, is_deleted: true }, options: { isSnapshot: true }
-            }];
-        });
+        try {
+            // Permission Check: admin, coordinador, creador del contacto o dueño/creador de la cuenta
+            let isOwner = !!userId && (current as { owner_user_id?: string; created_by?: string }).created_by === userId;
+            if (!isOwner && userId && current.account_id) {
+                const acc = await db.accounts.get(current.account_id);
+                isOwner = !!acc && ((acc as { owner_user_id?: string; created_by?: string }).owner_user_id === userId || (acc as { owner_user_id?: string; created_by?: string }).created_by === userId);
+            }
+            if (!isAdmin && !isCoordinador && !isOwner) {
+                throw new Error("No tienes permiso para eliminar este contacto");
+            }
+            await syncEngine.commitLocalChanges([db.contacts], async () => {
+                await db.contacts.delete(id);
+                return [{
+                    entityTable: 'CRM_Contactos', entityId: id,
+                    changes: { ...current, is_deleted: true }, options: { isSnapshot: true }
+                }];
+            });
+        } catch (err) {
+            await registrarEliminacionFallida('CRM_Contactos', id, err);
+            throw err;
+        }
     };
 
     return { contacts, createContact, updateContact, deleteContact };

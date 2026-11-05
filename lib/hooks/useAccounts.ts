@@ -6,29 +6,32 @@ import { supabase } from "@/lib/supabase";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { generateProvisionalNit, isProvisionalNit } from "@/lib/nitUtils";
 import { sanitizeOpportunityForSync } from "@/lib/hooks/useOpportunities";
+import { sellerCanSeeAccount } from "@/lib/sellerVisibility";
+import { registrarEliminacionFallida } from "@/lib/eliminaciones";
 
 export function useAccounts(filters?: { advisor_id?: string | null, showAll?: boolean }) {
-    const { user, isVendedor } = useCurrentUser();
+    const { user, isVendedor, isAdmin, isCoordinador } = useCurrentUser();
     const userId = user?.id;
 
     // Live Query from Local DB (Dexie)
     const accounts = useLiveQuery(async () => {
-        // Priority 1: Specific advisor filter from Dashboard
+        // Priority 1: Vendedor role restriction (siempre gana: dashboard, asistente de oportunidad, etc.)
+        if (isVendedor && userId) {
+            const collaborators = await db.opportunityCollaborators.where('usuario_id').equals(userId).toArray();
+            const collabOppIds = collaborators.filter(c => !c.is_deleted).map(c => c.oportunidad_id);
+            const collabOpps = collabOppIds.length > 0 ? await db.opportunities.where('id').anyOf(collabOppIds).toArray() : [];
+            const collabAccountIds = new Set(collabOpps.filter(o => !o.is_deleted && o.account_id).map(o => o.account_id as string));
+            return db.accounts.filter(a => sellerCanSeeAccount(a, userId, collabAccountIds)).toArray();
+        }
+
+        // Priority 2: Specific advisor filter from Dashboard
         if (filters?.advisor_id) {
             return db.accounts.where('owner_user_id').equals(filters.advisor_id).toArray();
         }
 
-        // Priority 2: Global visibility (for Opportunity Wizard)
+        // Priority 3: Global visibility (for Opportunity Wizard)
         if (filters?.showAll) {
             return db.accounts.toArray();
-        }
-
-        // Priority 3: Vendedor role restriction
-        if (isVendedor && userId) {
-            return db.accounts.filter(a => 
-                a.owner_user_id === userId || 
-                a.created_by === userId
-            ).toArray();
         }
 
         return db.accounts.toArray();
@@ -258,6 +261,13 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
         const currentAccount = await db.accounts.get(id);
         if (!currentAccount) return;
 
+        try {
+        // 0. Permission Check (misma regla que oportunidades: admin, coordinador o dueño/creador)
+        const isOwner = !!userId && ((currentAccount as { owner_user_id?: string; created_by?: string }).owner_user_id === userId || (currentAccount as { owner_user_id?: string; created_by?: string }).created_by === userId);
+        if (!isAdmin && !isCoordinador && !isOwner) {
+            throw new Error("No tienes permiso para eliminar esta cuenta");
+        }
+
         // 1. Gather all local child entities from Dexie
         const contacts = await db.contacts.where('account_id').equals(id).toArray();
         const opportunities = await db.opportunities.where('account_id').equals(id).toArray();
@@ -281,6 +291,10 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
             if (pedidoUuids.length > 0) {
                 pedidoItems = await db.pedidoItems.where('pedido_uuid').anyOf(pedidoUuids).toArray();
             }
+        }
+
+        if (!isAdmin && !isCoordinador && pedidos.some(p => !p.is_deleted)) {
+            throw new Error("Esta cuenta tiene oportunidades con pedidos. Solo un administrador o coordinador puede eliminarla.");
         }
 
         // 2. Delete local records and queue every server tombstone atomically.
@@ -321,6 +335,10 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
                 ...pedidoItems.map(pItem => ({ entityTable: 'CRM_PedidoItems', entityId: pItem.id, changes: { ...pItem, is_deleted: true }, options: { isSnapshot: true } }))
             ];
         });
+        } catch (err) {
+            await registrarEliminacionFallida('CRM_Cuentas', id, err);
+            throw err;
+        }
 
         console.log('[useAccounts] All server mutations queued successfully for offline delete.');
     };

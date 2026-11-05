@@ -103,6 +103,42 @@ export function useFormAutoSave<T extends FieldValues, TContext = unknown, TTran
         };
     }, [form, debounceMs, isEnabled]);
 
+    // Móvil: al recibir una llamada o cambiar de app la página pasa a segundo plano y el
+    // sistema puede congelarla o descartarla antes de que venza el debounce. Se guarda ya.
+    useEffect(() => {
+        if (!isEnabled || typeof document === 'undefined') return;
+
+        const flushPendingSave = (event: Event) => {
+            if (event.type === 'visibilitychange' && document.visibilityState !== 'hidden') return;
+            if (!timerRef.current) return;
+            clearTimeout(timerRef.current);
+            timerRef.current = null;
+
+            const currentValues = formRef.current.getValues();
+            const valueStr = JSON.stringify(currentValues);
+            if (valueStr === lastSavedData.current) return;
+
+            onSaveRef.current(currentValues)
+                .then(() => {
+                    lastSavedData.current = valueStr;
+                    setStatus("saved");
+                    setErrorMessage(null);
+                })
+                .catch(err => {
+                    console.error("[AutoSave] Error guardando al pasar a segundo plano:", err);
+                    setStatus("error");
+                    setErrorMessage(err instanceof Error ? err.message : String(err));
+                });
+        };
+
+        document.addEventListener('visibilitychange', flushPendingSave);
+        window.addEventListener('pagehide', flushPendingSave);
+        return () => {
+            document.removeEventListener('visibilitychange', flushPendingSave);
+            window.removeEventListener('pagehide', flushPendingSave);
+        };
+    }, [isEnabled]);
+
     return { status, errorMessage };
 }
 

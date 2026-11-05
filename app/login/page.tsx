@@ -7,7 +7,6 @@ import { useRouter } from "next/navigation";
 import { Lock, Mail, Loader2, ShieldAlert, RefreshCw, Eye, EyeOff } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
-import { recoverPasswordAction } from "./actions";
 import { FirplakIsotipo } from "@/components/layout/FirplakLogo";
 import packageJson from "../../package.json";
 
@@ -171,16 +170,29 @@ export default function LoginPage() {
                 throw new Error("El email contiene caracteres no permitidos");
             }
 
-            const result = await recoverPasswordAction(cleanEmail, window.location.origin);
+            const cleanOrigin = (window.location.origin || "https://crm-64yu.vercel.app").replace(/\/+$/, "");
+            const redirectUrl = `${cleanOrigin}/auth/callback?next=/update-password`;
 
-            if (!result.success) {
-                throw new Error(result.error);
+            const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+                redirectTo: redirectUrl,
+            });
+
+            if (error) {
+                if (error.status === 504 || error.message?.includes("504") || error.name === "AuthRetryableFetchError") {
+                    throw new Error("El servidor de correo de Supabase no respondió a tiempo (Error 504 / SMTP Timeout). Por favor verifica la configuración SMTP.");
+                }
+                throw error;
             }
 
             setRecoverySent(true);
         } catch (err: any) {
             console.error("Recovery error:", err);
-            setError(err.message || "Error al enviar correo de recuperación");
+            const msg = typeof err === "string" ? err : err?.message;
+            if (!msg || msg === "{}" || msg === "[object Object]") {
+                setError("El servidor de correo no respondió a tiempo (Timeout 504). Por favor verifica la configuración SMTP en Supabase.");
+            } else {
+                setError(msg);
+            }
         } finally {
             setIsLoading(false);
         }

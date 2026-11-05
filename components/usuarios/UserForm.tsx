@@ -48,7 +48,7 @@ const AVAILABLE_MODULES = [
 ];
 
 export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
-    const { createUser, updateUser, users } = useUsers();
+    const { createUser, updateUser, updateUserPassword, users } = useUsers();
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -132,6 +132,15 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
                     setError(result.error || 'Error al actualizar usuario');
                     return;
                 }
+
+                // If password was provided, update it via API
+                if (data.password && data.password.trim() !== '') {
+                    const pwdResult = await updateUserPassword(user.id, data.password);
+                    if (!pwdResult.success) {
+                        setError(pwdResult.error || 'Error al actualizar la contraseña');
+                        return;
+                    }
+                }
             } else {
                 // Create new user
                 if (!data.password) {
@@ -210,23 +219,21 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
                         )}
                     </div>
 
-                    {/* Password (only for new users) */}
-                    {!user && (
-                        <div>
-                            <label className="block text-sm font-semibold text-slate-700 mb-2">
-                                Contraseña
-                            </label>
-                            <input
-                                type="password"
-                                {...register('password')}
-                                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#254153] focus:border-transparent"
-                                placeholder="Mínimo 6 caracteres"
-                            />
-                            {errors.password && (
-                                <p className="mt-1 text-sm text-red-600">{errors.password.message}</p>
-                            )}
-                        </div>
-                    )}
+                    {/* Password (for new users, or to update existing) */}
+                    <div>
+                        <label className="block text-sm font-semibold text-slate-700 mb-2">
+                            {user ? 'Nueva Contraseña (Opcional)' : 'Contraseña'}
+                        </label>
+                        <input
+                            type="password"
+                            {...register('password')}
+                            className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#254153] focus:border-transparent"
+                            placeholder={user ? "Dejar en blanco para no cambiar" : "Mínimo 6 caracteres"}
+                        />
+                        {errors.password && (
+                            <p className="mt-1 text-sm text-red-600">{errors.password.message}</p>
+                        )}
+                    </div>
 
                     {/* Full Name */}
                     <div>

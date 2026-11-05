@@ -1,14 +1,13 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import {
+  isPlaceholderLeadName,
+  resolveLeadOpportunityName,
+  resolveLeadPersonName,
+} from "./leadNaming.ts";
+import { normalizeAdvisorEmail, resolveLeadOwnerId } from "./ownerResolution.ts";
 
 // ─── CONFIGURACIÓN Y CONSTANTES ──────────────────────────────────────────────
-const FALLBACK_OWNER_ID = "f361d4e5-d937-4668-913a-a4359658d6f4"; // Canal Propio
-const ASESORES_POR_CORREO: Record<string, string> = {
-  "comercial@firplak.com": "31472414-6416-4c11-baa7-11448c44074b", // Juan Fernando Ospina
-  "claudia.granada@firplak.com": "9bca54d7-45d6-4e79-8dba-be6983a78556", // Claudia Granada
-  "comercial2@firplak.com": "ef4e2895-cc89-461b-96ca-cc677247f247", // Comercial 2
-  "brian.rua@firplak.com": "e42aa99a-f359-4cae-b7c7-4a48267bbdb6"  // Brian Rua
-};
 const CANAL_ID          = "PROPIO";
 const ESTADO_ID         = 8; // Contacto Inicial
 
@@ -54,11 +53,19 @@ Deno.serve(async (req: Request) => {
   // ────────────────────────────────────────────────────────────────────────────
   // PASO 1: RESOLVER EL ASESOR (OWNER) - BASADO EN CORREO DE WORDPRESS
   // ────────────────────────────────────────────────────────────────────────────
-  const nombreAsesor = (body.oportunidad?.asignado_a ?? "").trim();
-  const correoBuscado = nombreAsesor.toLowerCase();
-  
-  // Asignar al asesor correspondiente o usar el de respaldo (Canal Propio)
-  const ownerFinal = ASESORES_POR_CORREO[correoBuscado] || FALLBACK_OWNER_ID;
+  // Se busca el correo en CRM_Usuarios (activo). Antes era un mapa fijo de 5 correos y
+  // cualquier otro asesor (p. ej. Hernando Tovar, Gabriel Molina) caía en Canal Propio.
+  const nombreAsesor = (body.oportunidad?.asignado_a ?? "").trim(); // se conserva en comentarios
+  const correoAsesorWeb = normalizeAdvisorEmail(nombreAsesor);
+  let usuariosAsesor: { id: string; email: string | null; is_active: boolean | null; is_deleted: boolean | null }[] = [];
+  if (correoAsesorWeb) {
+    const { data: usuarios } = await supabase.from("CRM_Usuarios")
+      .select("id, email, is_active, is_deleted")
+      .ilike("email", correoAsesorWeb)
+      .limit(5);
+    usuariosAsesor = usuarios ?? [];
+  }
+  const ownerFinal = resolveLeadOwnerId(nombreAsesor, usuariosAsesor);
 
   // ────────────────────────────────────────────────────────────────────────────
   // PASO 2: CUENTA (BUSCAR O CREAR)
@@ -66,6 +73,8 @@ Deno.serve(async (req: Request) => {
   let cuentaId = "";
   let existingCuenta: any = null;
   let nombreDeLaCuenta = "";
+  const personName = resolveLeadPersonName(body.contacto);
+  const hasRealPersonName = !isPlaceholderLeadName(personName);
 
   const telefonoContacto = (body.contacto?.telefono ?? "").trim();
   const emailContacto = (body.contacto?.email ?? "").trim();
@@ -96,17 +105,24 @@ Deno.serve(async (req: Request) => {
     nombreDeLaCuenta = existingCuenta.nombre;
     // IMPORTANTE: Ya no cambiamos el dueño de la cuenta existente, 
     // evitamos el problema de estar saltando la propiedad a cada asesor nuevo.
-  } else {
-    // NUEVA LÓGICA: Crear cuenta con datos del contacto
-    // Si no manda nombre, por lo menos ponemos "Consumidor Final" en lugar de "-"
-    let nombreContacto = (body.contacto?.nombre ?? "").trim();
-    if (!nombreContacto || nombreContacto === "-") {
-      nombreContacto = "Consumidor Final";
+    if (hasRealPersonName && isPlaceholderLeadName(existingCuenta.nombre)) {
+      nombreDeLaCuenta = personName;
+      const nowIso = new Date().toISOString();
+      await supabase.from("CRM_Cuentas").update({
+        nombre: personName,
+        updated_at: nowIso
+      }).eq("id", cuentaId);
+      await supabase.from("CRM_Contactos").update({
+        nombre: personName,
+        updated_at: nowIso
+      }).eq("account_id", cuentaId).in("nombre", ["Consumidor Final", "Por definir", "-", ""]);
     }
-    nombreDeLaCuenta = nombreContacto;
+  } else {
+    // Crear cuenta con nombre real del contacto (firstname+lastname de WP/vTiger).
+    nombreDeLaCuenta = personName;
 
     const { data: newC, error: errC } = await supabase.from("CRM_Cuentas").insert({
-      nombre: nombreContacto,
+      nombre: personName,
       nit_base: telefonoContacto && telefonoContacto !== "-" ? telefonoContacto : null,
       email: emailContacto && emailContacto !== "-" ? emailContacto : null,
       telefono: telefonoContacto && telefonoContacto !== "-" ? telefonoContacto : null,
@@ -136,19 +152,80 @@ Deno.serve(async (req: Request) => {
   if (!contactExists) {
     await supabase.from("CRM_Contactos").insert({
       account_id: cuentaId,
-      nombre: body.contacto?.nombre?.trim(),
+      nombre: personName,
       email: body.contacto?.email,
       telefono: body.contacto?.telefono
     });
+  } else if (hasRealPersonName) {
+    await supabase.from("CRM_Contactos").update({
+      nombre: personName,
+      updated_at: new Date().toISOString()
+    }).eq("account_id", cuentaId).in("nombre", ["Consumidor Final", "Por definir", "-", ""]);
   }
 
   // ────────────────────────────────────────────────────────────────────────────
-  // PASO 4: OPORTUNIDAD
+  // PASO 4: OPORTUNIDAD (DEDUPLICACIÓN INTELIGENTE)
   // ────────────────────────────────────────────────────────────────────────────
-  let oportunidadNombre = body.oportunidad?.nombre?.trim();
-  if (!oportunidadNombre || oportunidadNombre === "Por definir" || oportunidadNombre === "-") {
-    oportunidadNombre = nombreDeLaCuenta;
+  // Si la cuenta ya tiene una oportunidad abierta reciente (últimas 24 horas),
+  // evitamos crear una duplicada y anexamos la interacción web en comentarios.
+  const window24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  let existingOp: any = null;
+
+  if (cuentaId) {
+    const { data: openOp } = await supabase.from("CRM_Oportunidades")
+      .select("id, nombre, comentarios, owner_user_id, created_at")
+      .eq("account_id", cuentaId)
+      .in("estado_id", [1, 8]) // 1: Abierta, 8: Contacto Inicial
+      .eq("is_deleted", false)
+      .gte("created_at", window24h)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    existingOp = openOp;
   }
+
+  if (existingOp) {
+    // Lead duplicado detectado: anexar comentarios e interacción a la oportunidad abierta
+    const parts = [
+      body.oportunidad?.fuente_conversion ? `[Re-contacto web: ${body.oportunidad.fuente_conversion}]` : null,
+      body.oportunidad?.comentarios ? body.oportunidad.comentarios : null,
+      body.oportunidad?.url_origen ? `URL: ${body.oportunidad.url_origen}` : null,
+      nombreAsesor ? `Asesor solicitado: ${nombreAsesor}` : null
+    ].filter(Boolean);
+
+    const shouldFixPlaceholderName = hasRealPersonName && isPlaceholderLeadName(existingOp.nombre);
+    if (parts.length > 0 || shouldFixPlaceholderName) {
+      const fechaColombia = new Date().toLocaleString("es-CO", { timeZone: "America/Bogota" });
+      const oppPatch: Record<string, string> = {
+        updated_at: new Date().toISOString()
+      };
+      if (parts.length > 0) {
+        const nuevoBloque = `--- [INTERACCIÓN WEB ADICIONAL ${fechaColombia}] ---\n${parts.join(" | ")}`;
+        oppPatch.comentarios = existingOp.comentarios
+          ? `${existingOp.comentarios}\n\n${nuevoBloque}`
+          : nuevoBloque;
+      }
+      if (shouldFixPlaceholderName) {
+        oppPatch.nombre = personName;
+      }
+      await supabase.from("CRM_Oportunidades").update(oppPatch).eq("id", existingOp.id);
+    }
+
+    return new Response(JSON.stringify({
+      success: true,
+      cuenta_id: cuentaId,
+      oportunidad_id: existingOp.id,
+      asesor_asignado_id: existingOp.owner_user_id,
+      confirmacion_db: existingOp.owner_user_id,
+      duplicado_prevenido: true
+    }), { 
+      headers: { ...corsHeaders, "Content-Type": "application/json" } 
+    });
+  }
+
+  // Si no existe oportunidad abierta reciente, crear la oportunidad normalmente
+  const oportunidadNombre = resolveLeadOpportunityName(body.oportunidad?.nombre, nombreDeLaCuenta);
 
   const { data: op, error: errOp } = await supabase.from("CRM_Oportunidades").insert({
     account_id: cuentaId,

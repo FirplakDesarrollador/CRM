@@ -21,6 +21,7 @@ import { matchesSearchTokens } from "@/lib/utils";
 export interface SearchableSelectOption {
     label: string;
     value: string;
+    searchValue?: string;
 }
 
 interface SearchableSelectProps {
@@ -109,7 +110,7 @@ export function SearchableSelect({
                             {options.map((option) => (
                                 <CommandItem
                                     key={option.value}
-                                    value={option.label}
+                                    value={option.searchValue ? `${option.label} ${option.searchValue}` : option.label}
                                     onSelect={() => {
                                         onChange(allowClear && value === option.value ? "" : option.value);
                                         setOpen(false);

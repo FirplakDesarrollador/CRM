@@ -4,6 +4,54 @@ import autoTable from 'jspdf-autotable';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 
+export interface PdfItemRowData {
+    referencia: string;
+    cantidad: string;
+    descripcion: string;
+    unitPrice: number;
+    discountPct: number;
+    lineTotal: number;
+}
+
+export interface PdfTotalsData {
+    subtotal: number;
+    iva: number;
+    granTotal: number;
+}
+
+export function calculatePdfItemRow(item: any): PdfItemRowData {
+    const qty = Number(item?.cantidad) || 1;
+    const discountPct = Number(item?.discount_pct) || 0;
+    const unitPrice = Number(item?.precio_unitario) || 0;
+    const lineTotal = item?.subtotal !== undefined && item?.subtotal !== null
+        ? Number(item.subtotal)
+        : unitPrice * qty * (1 - discountPct / 100);
+
+    return {
+        referencia: item?.numero_articulo || item?.producto_id || 'N/A',
+        cantidad: qty.toString(),
+        descripcion: item?.descripcion_linea || 'Artículo',
+        unitPrice,
+        discountPct,
+        lineTotal,
+    };
+}
+
+export function calculatePdfTotals(items: any[], quote: any): PdfTotalsData {
+    const isExport = quote?.currency_id === 'USD';
+    const subtotal = items && items.length > 0
+        ? items.reduce((sum, item) => {
+            const row = calculatePdfItemRow(item);
+            return sum + row.lineTotal;
+        }, 0)
+        : Number(quote?.total_amount) || 0;
+
+    const iva = isExport ? 0 : subtotal * 0.19;
+    const granTotal = subtotal + iva;
+
+    return { subtotal, iva, granTotal };
+}
+
 export async function generateQuotePdf(quote: any, items: any[], account: any, opportunity: any, save = true, advisorName?: string): Promise<string | void> {
     const doc = new jsPDF('p', 'pt', 'a4');
     
@@ -150,28 +198,17 @@ export async function generateQuotePdf(quote: any, items: any[], account: any, o
     y += 20;
 
     // TABLE
-    const tableData = items.map((item, index) => {
-        const qty = item.cantidad || 1;
-        const discountPct = item.discount_pct || 0;
-        const isExport = quote.currency_id === 'USD';
-        
-        // En FIRPLAK, el precio en la BD incluye IVA. 
-        // El usuario requiere mostrar precios SIN IVA en las columnas de la tabla.
-        const unitPriceWithIva = item.precio_unitario || 0;
-        const unitPriceBase = isExport ? unitPriceWithIva : unitPriceWithIva / 1.19;
-        
-        const lineTotalWithIva = item.subtotal || (unitPriceWithIva * qty * (1 - discountPct / 100));
-        const lineTotalBase = isExport ? lineTotalWithIva : lineTotalWithIva / 1.19;
-        
+    const tableData = items.map((item) => {
+        const row = calculatePdfItemRow(item);
         const formatter = new Intl.NumberFormat(quote.currency_id === 'USD' ? 'en-US' : 'es-CO');
         
         return [
-            item.numero_articulo || item.producto_id || 'N/A', 
-            qty.toString(), 
-            item.descripcion_linea || 'Artículo', 
-            formatter.format(unitPriceBase), 
-            discountPct > 0 ? `${discountPct}%` : '0%', 
-            formatter.format(lineTotalBase)
+            row.referencia, 
+            row.cantidad, 
+            row.descripcion, 
+            formatter.format(row.unitPrice), 
+            row.discountPct > 0 ? `${row.discountPct}%` : '0%', 
+            formatter.format(row.lineTotal)
         ];
     });
 
@@ -196,12 +233,8 @@ export async function generateQuotePdf(quote: any, items: any[], account: any, o
     let finalY = (doc as any).lastAutoTable.finalY || y;
     
     // TOTALS SECTION
-    // Cálculos de IVA aproximados si se asume que todo es Base (esto es heurístico)
-    const rawTotal = quote.total_amount || 0;
-    const isExport = quote.currency_id === 'USD';
-    const subtotal = isExport ? rawTotal : rawTotal / 1.19; // Si ya estaba con IVA, extraemos la base. Ajustar según lógica de negocio.
-    const iva = isExport ? 0 : rawTotal - subtotal;
-    const granTotal = rawTotal;
+    // Todos los precios de lista son sin IVA. El IVA (19%) se adiciona al final sobre el subtotal.
+    const { subtotal, iva, granTotal } = calculatePdfTotals(items, quote);
 
     const tFmt = new Intl.NumberFormat(quote.currency_id === 'USD' ? 'en-US' : 'es-CO');
     
