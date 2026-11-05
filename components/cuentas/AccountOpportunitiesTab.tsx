@@ -17,7 +17,8 @@ type StatusFilter = 'all' | 'open' | 'won' | 'lost';
 export default function AccountOpportunitiesTab({ accountId }: { accountId: string }) {
     const [currentStatus, setCurrentStatus] = useState<StatusFilter>('all');
     const { deleteOpportunity } = useOpportunities();
-    const { isAdmin } = useCurrentUser();
+    const { isAdmin, isCoordinador, user: currentUser } = useCurrentUser();
+    const canDeleteOpp = (opp: { owner_user_id?: string | null; created_by?: string | null }) => isAdmin || isCoordinador || (!!currentUser?.id && (opp?.owner_user_id === currentUser.id || opp?.created_by === currentUser.id));
     const [oppToDelete, setOppToDelete] = useState<any | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
     
@@ -76,7 +77,7 @@ export default function AccountOpportunitiesTab({ accountId }: { accountId: stri
             refresh();
         } catch (error) {
             console.error("Error al eliminar oportunidad:", error);
-            alert("No se pudo eliminar la oportunidad.");
+            alert(error instanceof Error ? error.message : "No se pudo eliminar la oportunidad.");
         } finally {
             setIsDeleting(false);
         }
@@ -150,7 +151,7 @@ export default function AccountOpportunitiesTab({ accountId }: { accountId: stri
                             </Link>
 
                             <div className="flex items-center gap-1 shrink-0">
-                                {isAdmin && (
+                                {canDeleteOpp(opp) && (
                                     <button
                                         type="button"
                                         onClick={(e) => {

@@ -3,13 +3,15 @@
 import React, { useCallback, useMemo, useState } from "react";
 import ReactECharts from "echarts-for-react";
 import Link from "next/link";
-import { CalendarCheck2, CheckCircle2, BarChart3, CalendarClock, AlertTriangle, FileWarning, ExternalLink } from "lucide-react";
+import { CalendarCheck2, CheckCircle2, BarChart3, CalendarClock, AlertTriangle, FileWarning, ExternalLink, Download } from "lucide-react";
 import { useIndicadoresLookups } from "@/lib/hooks/useIndicadoresLookups";
 import { useCanalPropioVendedores, TipoCanalVendedor } from "@/lib/hooks/useCanalPropioVendedores";
 import { useLiveActivities } from "@/lib/hooks/useLiveActivities";
 import { useLiveOpportunities } from "@/lib/hooks/useLiveOpportunities";
 import { SearchableSelect, SearchableSelectOption } from "@/components/ui/SearchableSelect";
 import { MultiSelect, Option } from "@/components/ui/MultiSelect";
+import { formatCurrency } from "@/lib/utils";
+import { downloadCSV } from "@/lib/utils/informes";
 import { currentWeekMarkLine, getISOWeek, getWeekKey, withCurrentWeekMarker } from "./weekUtils";
 import { EChartsCallbackParams } from "./echartsTypes";
 import { isPlausibleYear } from "./dateUtils";
@@ -36,6 +38,9 @@ interface Filters {
     clasificacionIds: string[];
     subclasificacionId: string;
     zonaId: string;
+    faseIds: string[];
+    desde: string; // "" = sin límite, formato "YYYY-MM-DD"
+    hasta: string;
 }
 
 const EMPTY_FILTERS: Filters = {
@@ -49,19 +54,30 @@ const EMPTY_FILTERS: Filters = {
     clasificacionIds: [],
     subclasificacionId: "",
     zonaId: "",
+    faseIds: [],
+    desde: "",
+    hasta: "",
 };
 const CANAL_PROPIO_ID = "PROPIO";
 const WEEK_OPTIONS = Array.from({ length: 53 }, (_, i) => ({ value: String(i + 1), label: String(i + 1) }));
 
+type DetailKind = "completados" | "programados" | "atrasados" | "sinActividad";
+const DETAIL_KIND_LABELS: Record<DetailKind, string> = {
+    completados: "Completadas",
+    programados: "Programadas",
+    atrasados: "Atrasadas",
+    sinActividad: "Oportunidades sin actividad",
+};
+
 export function Page4Eventos() {
-    const { users, channels, accountsMap, subclasificaciones, activityClassifications } = useIndicadoresLookups();
+    const { users, channels, accountsMap, subclasificaciones, activityClassifications, phases } = useIndicadoresLookups();
     const { tipoByVendedor } = useCanalPropioVendedores();
     // Live from Supabase, same rationale as Page 3: the offline cache can be
     // stale for this data even right after a manual sync.
     const { activities } = useLiveActivities();
     const { opportunities } = useLiveOpportunities();
     const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
-    const [overdueDetailAsesorId, setOverdueDetailAsesorId] = useState<string | null>(null);
+    const [detailView, setDetailView] = useState<{ asesorId: string; kind: DetailKind } | null>(null);
 
     const setFilter = <K extends keyof Filters>(key: K, value: Filters[K]) => {
         setFilters(prev => ({ ...prev, [key]: value }));
@@ -86,6 +102,7 @@ export function Page4Eventos() {
             tiposCanal: canalId === CANAL_PROPIO_ID ? prev.tiposCanal : [],
             subclasificacionId: "",
             zonaId: "",
+            faseIds: [],
         }));
     };
 
@@ -117,6 +134,40 @@ export function Page4Eventos() {
         [subclasificaciones, filters.canalId]
     );
 
+    // Fases, igual que en Cohort (Page1): dependen del canal elegido.
+    const faseOptions: Option[] = useMemo(() => {
+        if (!filters.canalId) return [];
+        return phases
+            .filter(p => p.canal_id === filters.canalId)
+            .sort((a, b) => a.orden - b.orden)
+            .map(p => ({ value: String(p.id), label: p.nombre }));
+    }, [phases, filters.canalId]);
+
+    // La fase es una propiedad de la oportunidad, no de la actividad — solo
+    // se puede resolver cuando la actividad está ligada a una oportunidad.
+    const oppFaseMap = useMemo(() => {
+        const map = new Map<string, number>();
+        (opportunities || []).forEach(o => {
+            if (o.fase_id != null) map.set(o.id, o.fase_id);
+        });
+        return map;
+    }, [opportunities]);
+
+    const faseNameMap = useMemo(() => {
+        const map = new Map<number, string>();
+        phases.forEach(p => map.set(p.id, p.nombre));
+        return map;
+    }, [phases]);
+
+    const resolveFaseNombre = useCallback(
+        (activity: { opportunity_id?: string | null }) => {
+            if (!activity.opportunity_id) return "Sin fase";
+            const faseId = oppFaseMap.get(activity.opportunity_id);
+            return faseId != null ? faseNameMap.get(faseId) || "Sin fase" : "Sin fase";
+        },
+        [oppFaseMap, faseNameMap]
+    );
+
     // Activities only link to an opportunity sometimes; when account_id is
     // empty, resolve the account through the linked opportunity (same
     // pattern as app/actividades/page.tsx and Page2Clasificaciones).
@@ -134,6 +185,33 @@ export function Page4Eventos() {
             return accountId ? accountsMap.get(accountId) : undefined;
         },
         [accountsMap, oppAccountMap]
+    );
+
+    const oppOwnerMap = useMemo(() => {
+        const map = new Map<string, string>();
+        (opportunities || []).forEach(o => {
+            if (o.owner_user_id) map.set(o.id, o.owner_user_id);
+        });
+        return map;
+    }, [opportunities]);
+
+    // El "asesor" de un evento es a quien está asignada la cuenta/oportunidad
+    // vinculada (owner_user_id), no quien registró la actividad (user_id) —
+    // un coordinador o asistente a veces registra la actividad por otro
+    // asesor, y lo que importa aquí es a quién le corresponde el seguimiento.
+    const resolveAssignedAdvisor = useCallback(
+        (activity: { account_id?: string | null; opportunity_id?: string | null; user_id?: string | null }) => {
+            if (activity.opportunity_id) {
+                const ownerId = oppOwnerMap.get(activity.opportunity_id);
+                if (ownerId) return ownerId;
+            }
+            if (activity.account_id) {
+                const ownerId = accountsMap.get(activity.account_id)?.owner_user_id;
+                if (ownerId) return ownerId;
+            }
+            return activity.user_id || null;
+        },
+        [oppOwnerMap, accountsMap]
     );
 
     const yearOptions: SearchableSelectOption[] = useMemo(() => {
@@ -163,33 +241,43 @@ export function Page4Eventos() {
         const monthNum = filters.month !== "" ? Number(filters.month) : null;
         const dayNum = filters.day ? Number(filters.day) : null;
         const weekNum = filters.week ? Number(filters.week) : null;
+        const desdeDate = filters.desde ? new Date(`${filters.desde}T00:00:00`) : null;
+        const hastaDate = filters.hasta ? new Date(`${filters.hasta}T23:59:59.999`) : null;
         const tipoSet = isCanalPropio && filters.tiposCanal.length > 0 ? new Set(filters.tiposCanal) : null;
         const asesorSet = filters.asesorIds.length > 0 ? new Set(filters.asesorIds) : null;
         const clasifSet = filters.clasificacionIds.length > 0 ? new Set(filters.clasificacionIds.map(Number)) : null;
         const subclasId = filters.subclasificacionId ? Number(filters.subclasificacionId) : null;
+        const faseIdSet = filters.faseIds.length > 0 ? new Set(filters.faseIds.map(Number)) : null;
         return (activities || []).filter(a => {
             if (a.is_deleted) return false;
-            if (asesorSet && (!a.user_id || !asesorSet.has(a.user_id))) return false;
+            const assignedId = resolveAssignedAdvisor(a);
+            if (asesorSet && (!assignedId || !asesorSet.has(assignedId))) return false;
             if (clasifSet && (a.clasificacion_id == null || !clasifSet.has(a.clasificacion_id))) return false;
+            if (faseIdSet) {
+                const faseId = a.opportunity_id ? oppFaseMap.get(a.opportunity_id) : undefined;
+                if (faseId == null || !faseIdSet.has(faseId)) return false;
+            }
             const acc = filters.canalId || subclasId || filters.zonaId ? resolveAccount(a) : undefined;
             if (filters.canalId && acc?.canal_id !== filters.canalId) return false;
             if (subclasId && acc?.subclasificacion_id !== subclasId) return false;
             if (filters.zonaId && getZonaByDepartamentoId(acc?.departamento_id) !== filters.zonaId) return false;
             if (tipoSet) {
-                const tipo = a.user_id ? tipoByVendedor.get(a.user_id) : undefined;
+                const tipo = assignedId ? tipoByVendedor.get(assignedId) : undefined;
                 if (!tipo || !tipoSet.has(tipo)) return false;
             }
-            if (yearNum != null || monthNum != null || dayNum != null || weekNum != null) {
+            if (yearNum != null || monthNum != null || dayNum != null || weekNum != null || desdeDate || hastaDate) {
                 if (!a.fecha_inicio) return false;
                 const d = new Date(a.fecha_inicio);
                 if (yearNum != null && d.getFullYear() !== yearNum) return false;
                 if (monthNum != null && d.getMonth() !== monthNum) return false;
                 if (dayNum != null && d.getDate() !== dayNum) return false;
                 if (weekNum != null && getISOWeek(d) !== weekNum) return false;
+                if (desdeDate && d < desdeDate) return false;
+                if (hastaDate && d > hastaDate) return false;
             }
             return true;
         });
-    }, [activities, filters, isCanalPropio, resolveAccount, tipoByVendedor]);
+    }, [activities, filters, isCanalPropio, resolveAccount, resolveAssignedAdvisor, oppFaseMap, tipoByVendedor]);
 
     const completados = useMemo(() => eventos.filter(a => a.is_completed), [eventos]);
 
@@ -201,15 +289,24 @@ export function Page4Eventos() {
     };
     const atrasados = useMemo(() => eventos.filter(isOverdueEvent), [eventos]);
 
-    const overdueDetailRows = useMemo(() => {
-        if (!overdueDetailAsesorId) return [];
+    // Detalle de actividades (Completadas/Programadas/Atrasadas) del asesor
+    // seleccionado en la tabla "Eventos por asesor".
+    const activityDetailRows = useMemo(() => {
+        if (!detailView || detailView.kind === "sinActividad") return [];
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        return atrasados
-            .filter(a => a.user_id === overdueDetailAsesorId)
+        return eventos
+            .filter(a => resolveAssignedAdvisor(a) === detailView.asesorId)
+            .filter(a => {
+                if (detailView.kind === "completados") return a.is_completed;
+                if (detailView.kind === "programados") return !a.is_completed;
+                return isOverdueEvent(a);
+            })
             .map(a => {
                 const fecha = a.fecha_inicio ? new Date(a.fecha_inicio) : null;
-                const diasAtraso = fecha ? Math.round((today.getTime() - new Date(fecha).setHours(0, 0, 0, 0)) / 86400000) : null;
+                const diasAtraso = !a.is_completed && fecha
+                    ? Math.round((today.getTime() - new Date(fecha).setHours(0, 0, 0, 0)) / 86400000)
+                    : null;
                 return {
                     id: a.id,
                     asunto: a.asunto?.trim() || "Sin asunto",
@@ -217,13 +314,13 @@ export function Page4Eventos() {
                     clasificacion: a.clasificacion_id != null ? clasificacionMap.get(a.clasificacion_id) || "-" : "-",
                     cuenta: resolveAccount(a)?.nombre || "Sin cuenta",
                     fechaLabel: fecha ? fecha.toLocaleDateString("es-CO", { day: "2-digit", month: "short", year: "numeric" }) : "-",
-                    diasAtraso,
+                    diasAtraso: diasAtraso != null && diasAtraso > 0 ? diasAtraso : null,
                 };
             })
             .sort((a, b) => (b.diasAtraso ?? 0) - (a.diasAtraso ?? 0));
-    }, [atrasados, overdueDetailAsesorId, clasificacionMap, resolveAccount]);
+    }, [eventos, detailView, clasificacionMap, resolveAccount, resolveAssignedAdvisor]);
 
-    const overdueDetailAsesorName = overdueDetailAsesorId ? userNameMap.get(overdueDetailAsesorId) || "Sin asesor" : null;
+    const detailAsesorName = detailView ? userNameMap.get(detailView.asesorId) || "Sin asesor" : null;
 
     // "Programados" = pendientes por hacer (atrasadas + futuras), no el total
     // historico de todo lo que se ha programado alguna vez. Mismo criterio
@@ -269,6 +366,24 @@ export function Page4Eventos() {
         [scopedOpportunitiesForActivity, activityCountByOpportunity]
     );
 
+    // Detalle de oportunidades sin actividad del asesor seleccionado.
+    const sinActividadDetailRows = useMemo(() => {
+        if (!detailView || detailView.kind !== "sinActividad") return [];
+        return scopedOpportunitiesForActivity
+            .filter(o => o.owner_user_id === detailView.asesorId && !activityCountByOpportunity.has(o.id))
+            .map(o => {
+                const acc = o.account_id ? accountsMap.get(o.account_id) : undefined;
+                return {
+                    id: o.id,
+                    nombre: o.nombre?.trim() || "Sin nombre",
+                    cuenta: acc?.nombre || "Sin cuenta",
+                    amount: Number(o.amount ?? 0),
+                    fechaLabel: o.created_at ? new Date(o.created_at).toLocaleDateString("es-CO", { day: "2-digit", month: "short", year: "numeric" }) : "-",
+                };
+            })
+            .sort((a, b) => a.cuenta.localeCompare(b.cuenta));
+    }, [scopedOpportunitiesForActivity, activityCountByOpportunity, detailView, accountsMap]);
+
     const toggleAsesorFilter = (asesorId: string) => {
         setFilters(prev => {
             const isOnlySelected = prev.asesorIds.length === 1 && prev.asesorIds[0] === asesorId;
@@ -288,7 +403,9 @@ export function Page4Eventos() {
             return entry;
         };
         eventos.forEach(a => {
-            const entry = getOrCreate(a.user_id!);
+            const assignedId = resolveAssignedAdvisor(a);
+            if (!assignedId) return;
+            const entry = getOrCreate(assignedId);
             if (a.is_completed) {
                 entry.completados += 1;
             } else {
@@ -303,12 +420,61 @@ export function Page4Eventos() {
             getOrCreate(o.owner_user_id).sinActividad += 1;
         });
         return Array.from(map.entries()).map(([id, v]) => ({ id, ...v }));
-    }, [eventos, userNameMap, scopedOpportunitiesForActivity, activityCountByOpportunity]);
+    }, [eventos, userNameMap, scopedOpportunitiesForActivity, activityCountByOpportunity, resolveAssignedAdvisor]);
 
     const advisorRowsAlpha = useMemo(
         () => [...advisorRows].sort((a, b) => a.asesor.localeCompare(b.asesor)),
         [advisorRows]
     );
+
+    // Exporta el resumen agregado de la tabla "Eventos por asesor".
+    const handleExportAsesores = () => {
+        downloadCSV(
+            advisorRowsAlpha,
+            [
+                { header: "Asesor", key: "asesor" },
+                { header: "Completados", key: "completados" },
+                { header: "Programados", key: "programados" },
+                { header: "Atrasados", key: "atrasados" },
+                { header: "Sin actividad", key: "sinActividad" },
+            ],
+            "eventos_por_asesor_resumen"
+        );
+    };
+
+    // Exporta el listado de eventos individuales (no el resumen por asesor),
+    // tal como quedaron filtrados en pantalla.
+    const handleExportEventos = () => {
+        const rows = [...eventos]
+            .sort((a, b) => new Date(b.fecha_inicio || 0).getTime() - new Date(a.fecha_inicio || 0).getTime())
+            .map(a => {
+                const assignedId = resolveAssignedAdvisor(a);
+                return {
+                    asesor: assignedId ? userNameMap.get(assignedId) || "Sin asesor" : "Sin asesor",
+                    asunto: a.asunto?.trim() || "Sin asunto",
+                    cuenta: resolveAccount(a)?.nombre || "Sin cuenta",
+                    fase: resolveFaseNombre(a),
+                    tipo: a.tipo_actividad === "EVENTO" ? "Evento" : "Tarea",
+                    clasificacion: a.clasificacion_id != null ? clasificacionMap.get(a.clasificacion_id) || "-" : "-",
+                    estado: a.is_completed ? "Completado" : isOverdueEvent(a) ? "Atrasado" : "Programado",
+                    fecha: a.fecha_inicio ? new Date(a.fecha_inicio).toLocaleDateString("es-CO", { day: "2-digit", month: "short", year: "numeric" }) : "-",
+                };
+            });
+        downloadCSV(
+            rows,
+            [
+                { header: "Asesor", key: "asesor" },
+                { header: "Asunto", key: "asunto" },
+                { header: "Cuenta", key: "cuenta" },
+                { header: "Fase", key: "fase" },
+                { header: "Tipo", key: "tipo" },
+                { header: "Clasificación", key: "clasificacion" },
+                { header: "Estado", key: "estado" },
+                { header: "Fecha", key: "fecha" },
+            ],
+            "lista_de_eventos"
+        );
+    };
 
     // --- Bar chart: eventos programados por asesor ---------------------------
     const byAdvisorOption = useMemo(() => {
@@ -418,7 +584,8 @@ export function Page4Eventos() {
 
     const hasActiveFilters =
         filters.canalId || filters.tiposCanal.length > 0 || filters.year || filters.month || filters.day || filters.week ||
-        filters.asesorIds.length > 0 || filters.clasificacionIds.length > 0 || filters.subclasificacionId || filters.zonaId;
+        filters.asesorIds.length > 0 || filters.clasificacionIds.length > 0 || filters.subclasificacionId || filters.zonaId ||
+        filters.faseIds.length > 0 || filters.desde || filters.hasta;
 
     return (
         <div className="flex flex-col gap-6">
@@ -464,6 +631,12 @@ export function Page4Eventos() {
                             <SearchableSelect options={ZONA_OPTIONS} value={filters.zonaId} onChange={v => setFilter("zonaId", v)} placeholder="Todas" />
                         </div>
                     )}
+                    {filters.canalId && (
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Fase</label>
+                            <MultiSelect options={faseOptions} selected={filters.faseIds} onChange={v => setFilter("faseIds", v)} placeholder="Todas" />
+                        </div>
+                    )}
                     <div>
                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Clasificación</label>
                         <MultiSelect options={clasificacionOptions} selected={filters.clasificacionIds} onChange={v => setFilter("clasificacionIds", v)} placeholder="Todas" />
@@ -488,12 +661,43 @@ export function Page4Eventos() {
                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Semana</label>
                         <SearchableSelect options={WEEK_OPTIONS} value={filters.week} onChange={v => setFilter("week", v)} placeholder="Todas" />
                     </div>
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Desde</label>
+                        <input
+                            type="date"
+                            value={filters.desde}
+                            onChange={e => setFilter("desde", e.target.value)}
+                            max={filters.hasta || undefined}
+                            className="min-h-[42px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
+                        />
+                    </div>
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Hasta</label>
+                        <input
+                            type="date"
+                            value={filters.hasta}
+                            onChange={e => setFilter("hasta", e.target.value)}
+                            min={filters.desde || undefined}
+                            className="min-h-[42px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
+                        />
+                    </div>
                 </div>
-                {hasActiveFilters && (
-                    <button onClick={() => setFilters(EMPTY_FILTERS)} className="mt-3 text-xs font-bold text-slate-400 hover:text-[#254153] transition-colors underline">
-                        Limpiar filtros
+                <div className="mt-3 flex items-center justify-between">
+                    {hasActiveFilters ? (
+                        <button onClick={() => setFilters(EMPTY_FILTERS)} className="text-xs font-bold text-slate-400 hover:text-[#254153] transition-colors underline">
+                            Limpiar filtros
+                        </button>
+                    ) : <span />}
+                    <button
+                        onClick={handleExportEventos}
+                        disabled={eventos.length === 0}
+                        title="Exporta el listado de eventos individuales (no el resumen) según los filtros activos"
+                        className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-[#254153] disabled:text-slate-300 disabled:cursor-not-allowed transition-colors"
+                    >
+                        <Download className="w-3.5 h-3.5" />
+                        Exportar lista de eventos ({eventos.length})
                     </button>
-                )}
+                </div>
             </div>
 
             {/* KPI cards */}
@@ -539,7 +743,19 @@ export function Page4Eventos() {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Table */}
                 <div className="lg:col-span-1 bg-white rounded-2xl border border-slate-200/60 shadow-sm p-5 flex flex-col">
-                    <h3 className="font-bold text-slate-800 text-sm mb-3">Eventos por asesor</h3>
+                    <div className="flex items-center justify-between mb-3">
+                        <h3 className="font-bold text-slate-800 text-sm">Eventos por asesor</h3>
+                        <button
+                            onClick={handleExportAsesores}
+                            disabled={advisorRowsAlpha.length === 0}
+                            title="Exportar este resumen por asesor a CSV según los filtros activos"
+                            className="flex items-center gap-1.5 text-[11px] font-bold text-slate-500 hover:text-[#254153] disabled:text-slate-300 disabled:cursor-not-allowed transition-colors"
+                        >
+                            <Download className="w-3.5 h-3.5" />
+                            Exportar resumen
+                        </button>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mb-2">Clic en un número para ver el detalle de esos eventos.</p>
                     <div className="max-h-[340px] overflow-y-auto border border-slate-100 rounded-xl">
                         <table className="w-full text-sm">
                             <thead className="sticky top-0 bg-slate-50 z-10">
@@ -559,20 +775,50 @@ export function Page4Eventos() {
                                         className={`cursor-pointer hover:bg-slate-50/60 transition-colors ${filters.asesorIds.includes(row.id) ? "bg-blue-50/60" : ""}`}
                                     >
                                         <td className="px-3 py-2 text-blue-700 font-medium">{row.asesor}</td>
-                                        <td className="px-3 py-2 text-right text-slate-700 tabular-nums">{row.completados}</td>
-                                        <td className="px-3 py-2 text-right text-slate-800 font-semibold tabular-nums">{row.programados}</td>
+                                        <td
+                                            className={`px-3 py-2 text-right tabular-nums ${row.completados > 0 ? "text-slate-700 underline decoration-dotted cursor-pointer hover:text-[#254153]" : "text-slate-400"}`}
+                                            onClick={e => {
+                                                if (row.completados === 0) return;
+                                                e.stopPropagation();
+                                                setDetailView({ asesorId: row.id, kind: "completados" });
+                                            }}
+                                            title={row.completados > 0 ? "Ver eventos completados" : undefined}
+                                        >
+                                            {row.completados}
+                                        </td>
+                                        <td
+                                            className={`px-3 py-2 text-right font-semibold tabular-nums ${row.programados > 0 ? "text-slate-800 underline decoration-dotted cursor-pointer hover:text-[#254153]" : "text-slate-400"}`}
+                                            onClick={e => {
+                                                if (row.programados === 0) return;
+                                                e.stopPropagation();
+                                                setDetailView({ asesorId: row.id, kind: "programados" });
+                                            }}
+                                            title={row.programados > 0 ? "Ver eventos programados" : undefined}
+                                        >
+                                            {row.programados}
+                                        </td>
                                         <td
                                             className={`px-3 py-2 text-right tabular-nums ${row.atrasados > 0 ? "text-red-600 font-semibold underline decoration-dotted cursor-pointer hover:text-red-800" : "text-slate-400"}`}
                                             onClick={e => {
                                                 if (row.atrasados === 0) return;
                                                 e.stopPropagation();
-                                                setOverdueDetailAsesorId(row.id);
+                                                setDetailView({ asesorId: row.id, kind: "atrasados" });
                                             }}
                                             title={row.atrasados > 0 ? "Ver actividades atrasadas" : undefined}
                                         >
                                             {row.atrasados}
                                         </td>
-                                        <td className={`px-3 py-2 text-right tabular-nums ${row.sinActividad > 0 ? "text-amber-600 font-semibold" : "text-slate-400"}`}>{row.sinActividad}</td>
+                                        <td
+                                            className={`px-3 py-2 text-right tabular-nums ${row.sinActividad > 0 ? "text-amber-600 font-semibold underline decoration-dotted cursor-pointer hover:text-amber-800" : "text-slate-400"}`}
+                                            onClick={e => {
+                                                if (row.sinActividad === 0) return;
+                                                e.stopPropagation();
+                                                setDetailView({ asesorId: row.id, kind: "sinActividad" });
+                                            }}
+                                            title={row.sinActividad > 0 ? "Ver oportunidades sin actividad" : undefined}
+                                        >
+                                            {row.sinActividad}
+                                        </td>
                                     </tr>
                                 ))}
                                 {advisorRowsAlpha.length === 0 && (
@@ -634,11 +880,11 @@ export function Page4Eventos() {
                 </div>
             </div>
 
-            {/* Overdue detail modal */}
-            {overdueDetailAsesorId && (
+            {/* Detail modal: Completados / Programados / Atrasados / Sin actividad */}
+            {detailView && (
                 <div
                     className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
-                    onClick={() => setOverdueDetailAsesorId(null)}
+                    onClick={() => setDetailView(null)}
                 >
                     <div
                         className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[80vh] flex flex-col overflow-hidden"
@@ -646,11 +892,15 @@ export function Page4Eventos() {
                     >
                         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
                             <div>
-                                <h3 className="font-bold text-slate-900">Atrasadas de {overdueDetailAsesorName}</h3>
-                                <p className="text-xs text-slate-400">{overdueDetailRows.length} actividad{overdueDetailRows.length === 1 ? "" : "es"} atrasada{overdueDetailRows.length === 1 ? "" : "s"}</p>
+                                <h3 className="font-bold text-slate-900">{DETAIL_KIND_LABELS[detailView.kind]} de {detailAsesorName}</h3>
+                                <p className="text-xs text-slate-400">
+                                    {detailView.kind === "sinActividad"
+                                        ? `${sinActividadDetailRows.length} oportunidad${sinActividadDetailRows.length === 1 ? "" : "es"}`
+                                        : `${activityDetailRows.length} actividad${activityDetailRows.length === 1 ? "" : "es"}`}
+                                </p>
                             </div>
                             <button
-                                onClick={() => setOverdueDetailAsesorId(null)}
+                                onClick={() => setDetailView(null)}
                                 className="text-slate-400 hover:text-slate-700 text-xl leading-none px-2"
                                 aria-label="Cerrar"
                             >
@@ -658,45 +908,87 @@ export function Page4Eventos() {
                             </button>
                         </div>
                         <div className="overflow-y-auto">
-                            <table className="w-full text-sm">
-                                <thead className="sticky top-0 bg-slate-50 z-10">
-                                    <tr className="text-left text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                                        <th className="px-4 py-2">Asunto</th>
-                                        <th className="px-4 py-2">Cuenta</th>
-                                        <th className="px-4 py-2">Clasificación</th>
-                                        <th className="px-4 py-2">Fecha</th>
-                                        <th className="px-4 py-2 text-right">Días atraso</th>
-                                        <th className="px-4 py-2"></th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-50">
-                                    {overdueDetailRows.map(row => (
-                                        <tr key={row.id} className="hover:bg-slate-50/60">
-                                            <td className="px-4 py-2 text-slate-800 font-medium">{row.asunto}</td>
-                                            <td className="px-4 py-2 text-slate-600">{row.cuenta}</td>
-                                            <td className="px-4 py-2 text-slate-600">{row.clasificacion}</td>
-                                            <td className="px-4 py-2 text-slate-600">{row.fechaLabel}</td>
-                                            <td className="px-4 py-2 text-right text-red-600 font-semibold tabular-nums">{row.diasAtraso ?? "-"}</td>
-                                            <td className="px-4 py-2 text-right">
-                                                <Link
-                                                    href={`/actividades?id=${row.id}`}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    title="Abrir esta actividad"
-                                                    className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-slate-400 hover:text-[#254153] hover:bg-slate-100 transition-colors"
-                                                >
-                                                    <ExternalLink className="w-4 h-4" />
-                                                </Link>
-                                            </td>
+                            {detailView.kind === "sinActividad" ? (
+                                <table className="w-full text-sm">
+                                    <thead className="sticky top-0 bg-slate-50 z-10">
+                                        <tr className="text-left text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                                            <th className="px-4 py-2">Oportunidad</th>
+                                            <th className="px-4 py-2">Cuenta</th>
+                                            <th className="px-4 py-2 text-right">Monto</th>
+                                            <th className="px-4 py-2">Creada</th>
+                                            <th className="px-4 py-2"></th>
                                         </tr>
-                                    ))}
-                                    {overdueDetailRows.length === 0 && (
-                                        <tr>
-                                            <td colSpan={6} className="px-4 py-8 text-center text-slate-400">Sin actividades atrasadas.</td>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-50">
+                                        {sinActividadDetailRows.map(row => (
+                                            <tr key={row.id} className="hover:bg-slate-50/60">
+                                                <td className="px-4 py-2 text-slate-800 font-medium">{row.nombre}</td>
+                                                <td className="px-4 py-2 text-slate-600">{row.cuenta}</td>
+                                                <td className="px-4 py-2 text-right text-slate-700 tabular-nums">{formatCurrency(row.amount)}</td>
+                                                <td className="px-4 py-2 text-slate-600">{row.fechaLabel}</td>
+                                                <td className="px-4 py-2 text-right">
+                                                    <Link
+                                                        href={`/oportunidades/${row.id}`}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        title="Abrir esta oportunidad"
+                                                        className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-slate-400 hover:text-[#254153] hover:bg-slate-100 transition-colors"
+                                                    >
+                                                        <ExternalLink className="w-4 h-4" />
+                                                    </Link>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                        {sinActividadDetailRows.length === 0 && (
+                                            <tr>
+                                                <td colSpan={5} className="px-4 py-8 text-center text-slate-400">Sin oportunidades para mostrar.</td>
+                                            </tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            ) : (
+                                <table className="w-full text-sm">
+                                    <thead className="sticky top-0 bg-slate-50 z-10">
+                                        <tr className="text-left text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                                            <th className="px-4 py-2">Asunto</th>
+                                            <th className="px-4 py-2">Cuenta</th>
+                                            <th className="px-4 py-2">Clasificación</th>
+                                            <th className="px-4 py-2">Fecha</th>
+                                            {detailView.kind === "atrasados" && <th className="px-4 py-2 text-right">Días atraso</th>}
+                                            <th className="px-4 py-2"></th>
                                         </tr>
-                                    )}
-                                </tbody>
-                            </table>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-50">
+                                        {activityDetailRows.map(row => (
+                                            <tr key={row.id} className="hover:bg-slate-50/60">
+                                                <td className="px-4 py-2 text-slate-800 font-medium">{row.asunto}</td>
+                                                <td className="px-4 py-2 text-slate-600">{row.cuenta}</td>
+                                                <td className="px-4 py-2 text-slate-600">{row.clasificacion}</td>
+                                                <td className="px-4 py-2 text-slate-600">{row.fechaLabel}</td>
+                                                {detailView.kind === "atrasados" && (
+                                                    <td className="px-4 py-2 text-right text-red-600 font-semibold tabular-nums">{row.diasAtraso ?? "-"}</td>
+                                                )}
+                                                <td className="px-4 py-2 text-right">
+                                                    <Link
+                                                        href={`/actividades?id=${row.id}`}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        title="Abrir esta actividad"
+                                                        className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-slate-400 hover:text-[#254153] hover:bg-slate-100 transition-colors"
+                                                    >
+                                                        <ExternalLink className="w-4 h-4" />
+                                                    </Link>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                        {activityDetailRows.length === 0 && (
+                                            <tr>
+                                                <td colSpan={detailView.kind === "atrasados" ? 6 : 5} className="px-4 py-8 text-center text-slate-400">Sin actividades para mostrar.</td>
+                                            </tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            )}
                         </div>
                     </div>
                 </div>

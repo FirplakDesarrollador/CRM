@@ -7,9 +7,10 @@ import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { generateProvisionalNit, isProvisionalNit } from "@/lib/nitUtils";
 import { sanitizeOpportunityForSync } from "@/lib/hooks/useOpportunities";
 import { sellerCanSeeAccount } from "@/lib/sellerVisibility";
+import { registrarEliminacionFallida } from "@/lib/eliminaciones";
 
 export function useAccounts(filters?: { advisor_id?: string | null, showAll?: boolean }) {
-    const { user, isVendedor } = useCurrentUser();
+    const { user, isVendedor, isAdmin, isCoordinador } = useCurrentUser();
     const userId = user?.id;
 
     // Live Query from Local DB (Dexie)
@@ -260,6 +261,13 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
         const currentAccount = await db.accounts.get(id);
         if (!currentAccount) return;
 
+        try {
+        // 0. Permission Check (misma regla que oportunidades: admin, coordinador o dueño/creador)
+        const isOwner = !!userId && ((currentAccount as { owner_user_id?: string; created_by?: string }).owner_user_id === userId || (currentAccount as { owner_user_id?: string; created_by?: string }).created_by === userId);
+        if (!isAdmin && !isCoordinador && !isOwner) {
+            throw new Error("No tienes permiso para eliminar esta cuenta");
+        }
+
         // 1. Gather all local child entities from Dexie
         const contacts = await db.contacts.where('account_id').equals(id).toArray();
         const opportunities = await db.opportunities.where('account_id').equals(id).toArray();
@@ -283,6 +291,10 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
             if (pedidoUuids.length > 0) {
                 pedidoItems = await db.pedidoItems.where('pedido_uuid').anyOf(pedidoUuids).toArray();
             }
+        }
+
+        if (!isAdmin && !isCoordinador && pedidos.some(p => !p.is_deleted)) {
+            throw new Error("Esta cuenta tiene oportunidades con pedidos. Solo un administrador o coordinador puede eliminarla.");
         }
 
         // 2. Delete local records and queue every server tombstone atomically.
@@ -323,6 +335,10 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
                 ...pedidoItems.map(pItem => ({ entityTable: 'CRM_PedidoItems', entityId: pItem.id, changes: { ...pItem, is_deleted: true }, options: { isSnapshot: true } }))
             ];
         });
+        } catch (err) {
+            await registrarEliminacionFallida('CRM_Cuentas', id, err);
+            throw err;
+        }
 
         console.log('[useAccounts] All server mutations queued successfully for offline delete.');
     };

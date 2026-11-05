@@ -480,39 +480,6 @@ function OpportunitiesContent() {
         setOriginFilter(oG);
     }, [setChannelFilter, setSubclassificationFilter, setSegmentFilter, setPhaseFilter, setStatusFilter, setStartDate, setEndDate, setStartClosingDate, setEndClosingDate, setOriginFilter]);
 
-    const handleDeleteOpportunity = async (oppId: string) => {
-        try {
-            // Eliminar registros relacionados manualmente para evitar errores de llave foránea (FK constraint)
-            await supabase.from('CRM_Actividades').delete().eq('oportunidad_id', oppId);
-            await supabase.from('CRM_Pagos').delete().eq('oportunidad_id', oppId);
-            await supabase.from('CRM_Comisiones_Movimientos').delete().eq('oportunidad_id', oppId);
-            // CRM_Oportunidades_Colaboradores tiene ON DELETE CASCADE pero lo aseguramos
-            await supabase.from('CRM_Oportunidades_Colaboradores').delete().eq('oportunidad_id', oppId);
-            
-            // También eliminamos las cotizaciones y sus items vinculados
-            const { data: quotes } = await supabase.from('CRM_Cotizaciones').select('id').eq('opportunity_id', oppId);
-            if (quotes && quotes.length > 0) {
-                const quoteIds = quotes.map(q => q.id);
-                await supabase.from('CRM_CotizacionItems').delete().in('cotizacion_id', quoteIds);
-            }
-            
-            const { error: quoteError } = await supabase.from('CRM_Cotizaciones').delete().eq('opportunity_id', oppId);
-            if (quoteError) throw quoteError;
-            
-            const { error } = await supabase.from('CRM_Oportunidades').delete().eq('id', oppId);
-            if (error) throw error;
-            
-            refresh();
-        } catch (error: any) {
-            console.error("Error eliminando la oportunidad:", error);
-            if (error.message?.includes('CRM_ComisionLedger is immutable')) {
-                alert("No se puede eliminar la oportunidad porque ya tiene comisiones generadas en el Ledger Financiero. Por políticas de auditoría, estos registros son inmutables. \n\nPara solucionarlo, debes cambiar el estado de la oportunidad a 'Perdida' o 'Anulada' en lugar de eliminarla de la base de datos.");
-            } else {
-                alert("Error eliminando la oportunidad: " + error.message);
-            }
-        }
-    };
-
     // PERF FIX: Stable callback references
     const handleTabChange = useCallback((newTab: 'mine' | 'collab' | 'all' | 'team' | 'web') => {
         setTab(newTab);

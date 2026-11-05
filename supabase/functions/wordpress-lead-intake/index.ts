@@ -5,16 +5,9 @@ import {
   resolveLeadOpportunityName,
   resolveLeadPersonName,
 } from "./leadNaming.ts";
+import { normalizeAdvisorEmail, resolveLeadOwnerId } from "./ownerResolution.ts";
 
 // ─── CONFIGURACIÓN Y CONSTANTES ──────────────────────────────────────────────
-const FALLBACK_OWNER_ID = "f361d4e5-d937-4668-913a-a4359658d6f4"; // Canal Propio
-const ASESORES_POR_CORREO: Record<string, string> = {
-  "comercial@firplak.com": "31472414-6416-4c11-baa7-11448c44074b", // Juan Fernando Ospina
-  "claudia.granada@firplak.com": "9bca54d7-45d6-4e79-8dba-be6983a78556", // Claudia Granada
-  "comercial2@firplak.com": "ef4e2895-cc89-461b-96ca-cc677247f247", // Comercial 2
-  "brian.rua@firplak.com": "e42aa99a-f359-4cae-b7c7-4a48267bbdb6", // Brian Rua
-  "juan.giraldo@firplak.com": "565833bd-ba1d-4819-967f-cc87fa60d13f" // Juan Diego Giraldo
-};
 const CANAL_ID          = "PROPIO";
 const ESTADO_ID         = 8; // Contacto Inicial
 
@@ -60,11 +53,19 @@ Deno.serve(async (req: Request) => {
   // ────────────────────────────────────────────────────────────────────────────
   // PASO 1: RESOLVER EL ASESOR (OWNER) - BASADO EN CORREO DE WORDPRESS
   // ────────────────────────────────────────────────────────────────────────────
-  const nombreAsesor = (body.oportunidad?.asignado_a ?? "").trim();
-  const correoBuscado = nombreAsesor.toLowerCase();
-  
-  // Asignar al asesor correspondiente o usar el de respaldo (Canal Propio)
-  const ownerFinal = ASESORES_POR_CORREO[correoBuscado] || FALLBACK_OWNER_ID;
+  // Se busca el correo en CRM_Usuarios (activo). Antes era un mapa fijo de 5 correos y
+  // cualquier otro asesor (p. ej. Hernando Tovar, Gabriel Molina) caía en Canal Propio.
+  const nombreAsesor = (body.oportunidad?.asignado_a ?? "").trim(); // se conserva en comentarios
+  const correoAsesorWeb = normalizeAdvisorEmail(nombreAsesor);
+  let usuariosAsesor: { id: string; email: string | null; is_active: boolean | null; is_deleted: boolean | null }[] = [];
+  if (correoAsesorWeb) {
+    const { data: usuarios } = await supabase.from("CRM_Usuarios")
+      .select("id, email, is_active, is_deleted")
+      .ilike("email", correoAsesorWeb)
+      .limit(5);
+    usuariosAsesor = usuarios ?? [];
+  }
+  const ownerFinal = resolveLeadOwnerId(nombreAsesor, usuariosAsesor);
 
   // ────────────────────────────────────────────────────────────────────────────
   // PASO 2: CUENTA (BUSCAR O CREAR)
