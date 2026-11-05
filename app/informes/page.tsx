@@ -4,7 +4,7 @@ import React, { useState, useMemo } from 'react';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useUsers } from '@/lib/hooks/useUsers';
 import { supabase } from '@/lib/supabase';
-import { downloadExcel, downloadCSV, downloadSopExcel, ExportColumn, SopRow, mapOpportunityReportRow, mapActivityReportRow, fetchAllInChunks } from '@/lib/utils/informes';
+import { downloadExcel, downloadCSV, downloadSopExcel, ExportColumn, SopRow, mapOpportunityReportRow, mapActivityReportRow, fetchAllInChunks, resolveExportScope } from '@/lib/utils/informes';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { FileSpreadsheet, Loader2, Download, TableProperties, Users, Briefcase, Building2, Calendar as CalendarIcon, Filter, RotateCcw, DollarSign, MapPin, Tag } from 'lucide-react';
@@ -36,7 +36,8 @@ const ESTADO_IDS_BY_NAME: Record<string, number[]> = {
 const SELECT_TRIGGER_CLASS = "w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-left text-slate-800 text-sm font-normal hover:bg-white focus:bg-white transition-all justify-between flex items-center";
 
 export default function InformesPage() {
-    const { role, isLoading: isLoadingUser } = useCurrentUser();
+    const { role, user, isLoading: isLoadingUser } = useCurrentUser();
+    const isAdmin = role === 'ADMIN';
     const { users } = useUsers();
 
     const [selectedEntidad, setSelectedEntidad] = useState<EntidadType>('oportunidades');
@@ -310,35 +311,20 @@ export default function InformesPage() {
         );
     }
 
-    if (role !== 'ADMIN') {
-        // Asesores y coordinadores: solo su informe personal (filtrado en el servidor).
-        return (
-            <div className="flex-1 w-full bg-slate-50 min-h-screen pb-safe">
-                <header className="bg-white border-b border-slate-200/60">
-                    <div className="max-w-3xl mx-auto px-4 sm:px-6 py-5 flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center">
-                            <FileSpreadsheet className="w-5 h-5 text-blue-600" />
-                        </div>
-                        <div>
-                            <h1 className="text-2xl font-bold text-slate-800 tracking-tight leading-tight">Informes</h1>
-                            <p className="text-sm text-slate-500 font-medium mt-0.5">Tu información en Excel</p>
-                        </div>
-                    </div>
-                </header>
-                <main className="max-w-3xl mx-auto px-4 sm:px-6 py-6 space-y-4">
-                    <MiInformeCard />
-                    <p className="text-xs text-slate-400">Los informes generales (todos los asesores, S&amp;OP) siguen siendo solo para administradores.</p>
-                </main>
-            </div>
-        );
-    }
-
     // Handlers
     const handleExport = async (format: 'excel' | 'csv') => {
         setIsExporting(true);
         try {
             const entidadDef = ENTIDADES.find(e => e.id === selectedEntidad);
             if (!entidadDef) throw new Error("Entidad no válida");
+
+            // El administrador puede elegir un asesor. El resto siempre descarga solo lo suyo.
+            const scopeUserId = resolveExportScope(isAdmin, selectedUser, user?.id);
+            if (!isAdmin && !scopeUserId) {
+                alert('No se pudo identificar tu usuario. Vuelve a iniciar sesión.');
+                setIsExporting(false);
+                return;
+            }
 
             // 1. Cargar Catálogos para Mapeo (Lookups)
             const [
@@ -442,7 +428,7 @@ export default function InformesPage() {
                     `)
                     .eq('is_deleted', false);
 
-                if (selectedUser) oppQuery = oppQuery.eq('owner_user_id', selectedUser);
+                if (scopeUserId) oppQuery = oppQuery.eq('owner_user_id', scopeUserId);
 
                 oppQuery = oppQuery.order('created_at', { ascending: false }).order('id', { ascending: false });
                 const opps = await fetchAllInChunks(oppQuery, 2500, (total) => {
@@ -877,6 +863,12 @@ export default function InformesPage() {
             if (selectedCanal && selectedEntidad === 'oportunidades') {
                 selectStr = selectStr.replace('cuenta:CRM_Cuentas(', 'cuenta:CRM_Cuentas!inner(');
             }
+            if (scopeUserId && selectedEntidad === 'contactos') {
+                selectStr = selectStr.replace('cuenta:CRM_Cuentas(', 'cuenta:CRM_Cuentas!inner(');
+            }
+            if (scopeUserId && selectedEntidad === 'cotizaciones') {
+                selectStr = selectStr.replace('oportunidad:CRM_Oportunidades(', 'oportunidad:CRM_Oportunidades!inner(');
+            }
 
             let query = supabase.from(entidadDef.table).select(selectStr);
 
@@ -888,11 +880,15 @@ export default function InformesPage() {
                 if (dueDateTo) query = query.lte('fecha_fin', `${dueDateTo}T23:59:59Z`);
             }
 
-            if (selectedUser) {
+            if (scopeUserId) {
                 if (selectedEntidad === 'oportunidades' || selectedEntidad === 'cuentas') {
-                    query = query.eq('owner_user_id', selectedUser);
-                } else {
-                    query = query.eq('user_id', selectedUser);
+                    query = query.eq('owner_user_id', scopeUserId);
+                } else if (selectedEntidad === 'actividades') {
+                    query = query.or(`user_id.eq.${scopeUserId},created_by.eq.${scopeUserId}`);
+                } else if (selectedEntidad === 'contactos') {
+                    query = query.eq('cuenta.owner_user_id', scopeUserId);
+                } else if (selectedEntidad === 'cotizaciones') {
+                    query = query.eq('oportunidad.owner_user_id', scopeUserId);
                 }
             }
 
@@ -1015,7 +1011,11 @@ export default function InformesPage() {
                         </div>
                         <div>
                             <h1 className="text-2xl font-bold text-slate-800 tracking-tight leading-tight">Informes y Exportaciones</h1>
-                            <p className="text-sm text-slate-500 font-medium mt-0.5">Exportaciones generales (administradores) y tu informe personal</p>
+                            <p className="text-sm text-slate-500 font-medium mt-0.5">
+                                {isAdmin
+                                    ? 'Exportaciones generales (administradores) y tu informe personal'
+                                    : 'Cada informe incluye únicamente tu información'}
+                            </p>
                         </div>
                     </div>
                 </div>
@@ -1132,17 +1132,27 @@ export default function InformesPage() {
                             </div>
                         )}
 
-                        {/* Asesor Comercial */}
-                        <div className="space-y-3">
-                            <label className="text-sm font-semibold text-slate-700">Asesor Comercial</label>
-                            <SearchableSelect
-                                options={asesorOptions}
-                                value={selectedUser}
-                                onChange={setSelectedUser}
-                                placeholder="Todos los asesores"
-                                triggerClassName={SELECT_TRIGGER_CLASS}
-                            />
-                        </div>
+                        {/* Asesor Comercial: el administrador elige; el asesor queda fijo en su propia información */}
+                        {isAdmin ? (
+                            <div className="space-y-3">
+                                <label className="text-sm font-semibold text-slate-700">Asesor Comercial</label>
+                                <SearchableSelect
+                                    options={asesorOptions}
+                                    value={selectedUser}
+                                    onChange={setSelectedUser}
+                                    placeholder="Todos los asesores"
+                                    triggerClassName={SELECT_TRIGGER_CLASS}
+                                />
+                            </div>
+                        ) : (
+                            <div className="space-y-3">
+                                <label className="text-sm font-semibold text-slate-700">Asesor Comercial</label>
+                                <div className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 flex items-center justify-between">
+                                    <span className="font-medium truncate">{user?.full_name || user?.email || 'Mi usuario'}</span>
+                                    <span className="text-xs bg-blue-100 text-blue-700 font-semibold px-2 py-0.5 rounded-full shrink-0 ml-2">Solo tu información</span>
+                                </div>
+                            </div>
+                        )}
 
                         {/* Canal */}
                         {(selectedEntidad === 'oportunidades' || selectedEntidad === 'cuentas' || selectedEntidad === 'sop') && (

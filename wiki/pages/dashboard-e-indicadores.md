@@ -19,10 +19,14 @@ Grilla de tiles (`DashboardGrid`) con filtros globales (`DashboardFilters`,
 
 Tiles de KPI como ventas ganadas (`VentasGanadasTile`).
 
-## Informes (`/informes`, solo ADMIN)
+## Informes (`/informes`)
 
-Reportes exportables a Excel (`exceljs`/`xlsx`, utilidades en `lib/utils/informes.ts`).
+Reportes exportables a Excel y CSV (`exceljs`/`xlsx`, utilidades en `lib/utils/informes.ts`).
 Permisos `view_reports` / `view_team_reports` / `export_reports` (ver [[roles-y-permisos]]).
+- **Acceso por Rol:**
+  - **ADMIN:** Puede exportar reportes generales consolidados o filtrar por cualquier asesor comercial (`selectedUser`).
+  - **VENDEDOR (Asesores):** Acceden a todas las entidades y filtros avanzados para exportar reportes específicos (Oportunidades, Cuentas, Contactos, Cotizaciones, Actividades, S&OP), pero su alcance está estrictamente bloqueado a su propia cartera (`scopeUserId = user.id`), garantizando que solo descarguen y visualicen sus propios registros. El selector de asesor muestra fijamente su nombre con la etiqueta *Solo tu información*.
+  - **Mi informe:** Tarjeta superior presente en la vista para descargar en un solo clic el libro consolidado multi-hoja personal.
 
 - **Filtros Avanzados y Exportación por Entidad:**
   - **Oportunidades:** Rango fechas creación, asesor, canal, estado, fase, segmento, origen, rango de valor ($ min/max) y departamento/ciudad. La exportación incluye la columna **Categorías de Interés** (`categorias_interes` / `categoria_oportunidad`), país de la cuenta, fase, canal, vendedor, montos, y las columnas de actividad vinculada: **FECHA ACTIVIDAD** (vencimiento/cierre formateado `DD/MM/YYYY HH:mm`, priorizando la actividad pendiente más próxima o la última completada) y **ESTADO ACTIVIDAD** (`Pendiente`, `Completada` o `-`).

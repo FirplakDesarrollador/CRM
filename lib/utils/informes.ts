@@ -463,6 +463,15 @@ export function resolveOpportunityActivityInfo(actividades: any[] | any) {
   };
 }
 
+/**
+ * Determina el ID de usuario a utilizar para filtrar los datos a exportar.
+ * Si el usuario es ADMIN, puede filtrar por cualquier asesor (o ver todos si está vacío).
+ * Si no es ADMIN (es asesor/vendedor), el alcance está estrictamente bloqueado a su propio ID.
+ */
+export function resolveExportScope(isAdmin: boolean, selectedUser: string, currentUserId?: string | null): string {
+  return isAdmin ? selectedUser : (currentUserId || '');
+}
+
 export function mapOpportunityReportRow(
   item: any,
   lookups: OpportunityFlattenLookups

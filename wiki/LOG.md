@@ -3,6 +3,20 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-11-05 - Informes: Habilitación de Reportes Específicos para Asesores con Alcance Propio
+
+- **Requerimiento:** Permitir a los asesores acceder a la interfaz completa de informes específicos (Oportunidades, Cuentas, Contactos, Cotizaciones, Actividades, S&OP) para que puedan filtrar y descargar el reporte que necesiten, garantizando que los asesores únicamente descarguen su propia información.
+- **Cambios Realizados:**
+  - `app/informes/page.tsx`:
+    - Eliminado el bloqueo que confinaba a roles no-admin a ver únicamente la tarjeta *Mi informe*.
+    - Los asesores ven ahora la cuadrícula de entidades con todos los filtros avanzados y opciones de exportación (Excel / CSV).
+    - En el selector de *Asesor Comercial*, para no-admin se muestra su nombre bloqueado con la etiqueta *Solo tu información*.
+    - `resolveExportScope`: cuando el usuario no es admin, el alcance se ancla estrictamente a su `user.id`.
+    - Las consultas en Supabase filtran por `owner_user_id = scopeUserId` (oportunidades, cuentas, cotizaciones mediante join `!inner`, S&OP), `user_id/created_by` (actividades) y `cuenta.owner_user_id` (contactos mediante join `!inner`).
+  - `lib/navigationRules.ts` y `lib/permissions.ts`: Módulo `/informes` y permiso `export_reports` habilitados para `VENDEDOR`.
+  - `pruebas unitarias/informes.test.ts` y `tests/moduleNavigation.test.ts`: 29 pruebas en GREEN verificando el bloqueo de alcance y la visibilidad de navegación.
+- **Páginas actualizadas:** `wiki/pages/dashboard-e-indicadores.md`, `wiki/LOG.md`.
+
 ## 2026-10-30 - Feature: Botones «Todo» para cantidades máximas disponibles en Pedido
 
 - **Requerimiento:** Facilitar la asignación de cantidades al formalizar o editar pedidos incorporando un botón «Todo» por cada línea de producto y un botón «Todo» global en el encabezado de Cantidades a Pedir.

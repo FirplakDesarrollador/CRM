@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mapOpportunityReportRow, OpportunityFlattenLookups, mapActivityReportRow, ActivityFlattenLookups, fetchAllInChunks } from '@/lib/utils/informes';
+import { mapOpportunityReportRow, OpportunityFlattenLookups, mapActivityReportRow, ActivityFlattenLookups, fetchAllInChunks, resolveExportScope } from '@/lib/utils/informes';
 
 describe('Exportación de Oportunidades a Excel', () => {
     const mockLookups: OpportunityFlattenLookups = {
@@ -281,5 +281,26 @@ describe('Descarga por lotes con fetchAllInChunks', () => {
             range: async () => ({ data: null, error: new Error('PostgREST error 57014') })
         };
         await expect(fetchAllInChunks(mockQuery, 2500)).rejects.toThrow('PostgREST error 57014');
+    });
+});
+
+describe('Alcance de Exportación por Rol (resolveExportScope)', () => {
+    it('para administradores permite filtrar por un asesor específico o dejar vacío para todos', () => {
+        // ADMIN con asesor seleccionado
+        expect(resolveExportScope(true, 'user-selected-id', 'admin-id')).toBe('user-selected-id');
+        // ADMIN sin asesor seleccionado (todos los asesores)
+        expect(resolveExportScope(true, '', 'admin-id')).toBe('');
+    });
+
+    it('para asesores (no admin) siempre bloquea el alcance a su propio ID', () => {
+        // Asesor no puede ver datos de otro asesor aunque alguien pase un selectedUser
+        expect(resolveExportScope(false, 'other-user-id', 'advisor-own-id')).toBe('advisor-own-id');
+        // Asesor con selectedUser vacío
+        expect(resolveExportScope(false, '', 'advisor-own-id')).toBe('advisor-own-id');
+    });
+
+    it('si no es admin y no hay ID de usuario autenticado devuelve cadena vacía', () => {
+        expect(resolveExportScope(false, 'any-id', null)).toBe('');
+        expect(resolveExportScope(false, '', undefined)).toBe('');
     });
 });
