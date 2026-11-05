@@ -153,6 +153,21 @@ export function Page4Eventos() {
         return map;
     }, [opportunities]);
 
+    const faseNameMap = useMemo(() => {
+        const map = new Map<number, string>();
+        phases.forEach(p => map.set(p.id, p.nombre));
+        return map;
+    }, [phases]);
+
+    const resolveFaseNombre = useCallback(
+        (activity: { opportunity_id?: string | null }) => {
+            if (!activity.opportunity_id) return "Sin fase";
+            const faseId = oppFaseMap.get(activity.opportunity_id);
+            return faseId != null ? faseNameMap.get(faseId) || "Sin fase" : "Sin fase";
+        },
+        [oppFaseMap, faseNameMap]
+    );
+
     // Activities only link to an opportunity sometimes; when account_id is
     // empty, resolve the account through the linked opportunity (same
     // pattern as app/actividades/page.tsx and Page2Clasificaciones).
@@ -438,6 +453,7 @@ export function Page4Eventos() {
                     asesor: assignedId ? userNameMap.get(assignedId) || "Sin asesor" : "Sin asesor",
                     asunto: a.asunto?.trim() || "Sin asunto",
                     cuenta: resolveAccount(a)?.nombre || "Sin cuenta",
+                    fase: resolveFaseNombre(a),
                     tipo: a.tipo_actividad === "EVENTO" ? "Evento" : "Tarea",
                     clasificacion: a.clasificacion_id != null ? clasificacionMap.get(a.clasificacion_id) || "-" : "-",
                     estado: a.is_completed ? "Completado" : isOverdueEvent(a) ? "Atrasado" : "Programado",
@@ -450,6 +466,7 @@ export function Page4Eventos() {
                 { header: "Asesor", key: "asesor" },
                 { header: "Asunto", key: "asunto" },
                 { header: "Cuenta", key: "cuenta" },
+                { header: "Fase", key: "fase" },
                 { header: "Tipo", key: "tipo" },
                 { header: "Clasificación", key: "clasificacion" },
                 { header: "Estado", key: "estado" },
