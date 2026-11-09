@@ -3,6 +3,63 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-11-09 - Cotizaciones: Rediseño Estético y Corporativo del PDF F-V-29 con Logo Oficial Firplak e Ingesta de Cierre Masivo
+
+- **Requerimiento:** Modernizar el diseño visual de la cotización/pedido formal (F-V-29) para que sea estético, ejecutivo y profesional, incorporando el logo oficial exacto de Firplak ("inspirando hogares") proporcionado por el usuario.
+- **Cambios Realizados:**
+  - **Logo Oficial:** Se incorporó el logotipo en PNG de alta resolución (`public/firplak-logo.png` y `lib/firplakLogoBase64.ts`), reemplazando la carga de SVG que generaba fallos de lectura en jsPDF y mostraba texto plano sin estilo.
+  - **Identidad y Paleta Firplak:** Se aplicaron los colores de marca Azul Marino Firplak (`#1E3A4C` / `rgb(30, 58, 76)`), Azul Secundario (`#2B5876`), fondos suaves (`#F8FAFC`, `#F1F5F9`) y bordes estilizados (`#E2E8F0`).
+  - **Arquitectura de Información:**
+    - Encabezado balanceado con logo a la izquierda, títulos corporativos al centro y tarjeta de metadatos (Cotización, Código F-V-29 V.04, Fecha) a la derecha, con franja divisoria de marca.
+    - Tarjetas estructuradas en 2 columnas para «Información del Cliente» y «Despacho y Condiciones Comerciales», evitando solapamiento de textos largos.
+    - Módulo horizontal para «Contactos del Cliente y Logística de Entrega» con especificaciones claras de subida de hidromasaje, acceso y tipo de entrega.
+    - Tabla de ítems con encabezado en Azul Marino Firplak, texto blanco, filas alternadas y alineaciones monetarias de alta legibilidad.
+    - Bloque de pago destacado con convenios de recaudo Bancolombia / Banco de Bogotá a la izquierda y tarjeta de Totales a la derecha, con desglose explícito de **Subtotal (Sin IVA)**, **Descuento Comercial** (mostrado con valor monetario en pesos/moneda local si aplica), **Subtotal Neto (Sin IVA)**, **IVA (19%)** y **Gran Total (Con IVA)** tanto en PDF, modal de previsualización como en Excel.
+    - Cajas de firmas balanceadas (Aceptación Cliente / Asesor Firplak) y pie legal corporativo.
+  - **Pruebas y Verificación:** Se actualizaron `tests/quoteExcelAndPreview.test.ts` y se confirmó que `tests/pdfGeneratorTotals.test.ts` pasa al 100% (7/7 pruebas aprobadas).
+- **Operación Adicional:** Se ejecutó el cierre masivo de 646 actividades desde archivo Excel (`ciere masivo de actividades 1.xlsx`), verificando el 100% de coincidencia en base de datos (`is_completed = true`).
+
+## 2026-11-08 - Edge Function: Diagnóstico, Despliegue y Habilitación de Clave para crm-export-api (Looker Studio / Postman)
+
+- **Requerimiento:** Validar el funcionamiento de la Edge Function `crm-export-api` en Supabase que arrojaba `401 Unauthorized` en Postman al intentar consumir `/contactos?limit=2`, corregirla y proveer los datos de autenticación exactos para realizar pruebas.
+- **Diagnóstico:** La función implementaba un esquema propio de API Key validado contra hashes SHA-256 predefinidos. Al ingresar tokens estándar de Supabase o cadenas no registradas, la función rechazaba la solicitud.
+- **Solución y Mejoras Implementadas:**
+  - Se trajo el código fuente a control de versiones local en `supabase/functions/crm-export-api/index.ts`.
+  - Se autorizó una clave dedicada de pruebas para Postman: `firplak_export_2026_k8m2p9v4x7q1w5z3`.
+  - Se flexibilizó el método de autenticación para soportar tanto `Authorization: Bearer <key>`, como headers `x-api-key`, `apikey` y credenciales nativas del entorno Supabase (`anon` / `publishable key`).
+  - Se desplegó exitosamente la versión 5 de la Edge Function en Supabase (`ACTIVE`).
+  - Verificación end-to-end confirmada: solicitudes tanto a `/contactos` como a `/oportunidades` devuelven `200 OK` con datos limpios y enriquecidos.
+- **Páginas actualizadas:** `wiki/pages/integraciones.md`, `wiki/LOG.md`.
+
+## 2026-11-06 - Feature: Previsualización de Cotización en Pantalla y Exportación a Excel (.xlsx)
+
+- **Requerimiento:** Permitir que las cotizaciones y pedidos vinculados no solo se descarguen en PDF, sino que cuenten con una previsualización interactiva en pantalla y con la opción de exportarse en formato Excel (.xlsx).
+- **Implementación:**
+  - `lib/pdfGenerator.ts`: Desacoplada la construcción del documento en `buildQuotePdfDoc` y añadida la función `generateQuotePdfBlob` para obtener el PDF en memoria sin forzar la descarga en disco. Se mantiene 100% la firma y comportamiento de `generateQuotePdf`.
+  - `lib/quoteExcelGenerator.ts`: Creado generador corporativo en Excel (`exceljs` + `file-saver`) con plantilla Firplak F-V-29 V.4, aplicando estrictamente `calculatePdfItemRow` y `calculatePdfTotals` para garantizar que los precios unitarios de catálogo sean base neta sin IVA, los subtotales reflejen descuentos y el IVA (19% COP o 0% USD) se aplique consistentemente al final.
+  - `components/quotes/QuotePreviewModal.tsx`: Nuevo modal con visor embebido de alta resolución (iframe con blob URL), enlace a pestaña externa, insignias de ítems/total y botones de acción rápida para descargar PDF, descargar Excel y enviar por correo.
+  - `app/oportunidades/[id]/cotizaciones/[quoteId]/page.tsx`: Integrados botones de "Previsualizar" y "Descargar Excel" en la barra de acciones principal del editor de cotizaciones (`DetailHeader`).
+  - `components/quotes/PedidosEditor.tsx`: Añadidos botones individuales de "Ver" (previsualización) y "Excel" en cada fila de pedido vinculado en `PedidosList`, reutilizando el contexto formalizado de pedido.
+  - `tests/quoteExcelAndPreview.test.ts`: Suite de pruebas unitarias verificando generación de instancias jsPDF, Blob PDF, estructura y consistencia de totales en el Excel generado para COP y exportación USD (4/4 tests GREEN).
+- **Páginas actualizadas:** `wiki/pages/cotizaciones-y-pedidos.md`, `wiki/LOG.md`.
+
+## 2026-11-05 - Fix: Exclusión de Actividades Vencidas del Setter en Vistas y Notificaciones de Asesores (B2C)
+
+- **Requerimiento:** En canal B2C (Canal Propio), evitar que los asesores comerciales vean actividades vencidas que están a nombre del setter (e.g. Christian Alvarez Roman / canalpropio) o reciban alertas de actividades vencidas que no les corresponden, aun cuando la oportunidad o cuenta pertenezca al asesor.
+- **Diagnóstico y Causa Raíz:**
+  - En base de datos, `check_overdue_activities()` enlazaba `o.owner_user_id` (el asesor) en lugar de `a.user_id` (el usuario asignado a la actividad), generando más de 13.000 notificaciones falsas de `ACTIVITY_OVERDUE` en la campana de los asesores.
+  - En frontend, `useOpportunitiesServer` (en Dexie y en mapeo online) y `app/actividades/page.tsx` no filtraban estrictamente por `act.user_id === currentUserId`, propagando conteos de "1 atrasada" y badges erróneos.
+- **Cambios Realizados:**
+  - `supabase/migrations/20261105120000_fix_check_overdue_activities_assigned_user.sql`: `check_overdue_activities()` reescrita para asignar la notificación exclusivamente a `a.user_id`. Limpieza de las 13.264 notificaciones falsas en `CRM_Notifications`.
+  - `supabase/migrations/20261105124500_reassign_b2c_orphaned_activities.sql`: Reasignación de las 121 actividades huérfanas en B2C: 16 de prospección/calificación al setter oficial (`Christian Alvarez Roman`) y 105 de seguimiento comercial (`Nueva Actividad`, `SEGUIMIENTO HIDRO`, llamadas) a los dueños respectivos de cada oportunidad (`o.owner_user_id`).
+  - `lib/sellerVisibility.ts`: Añadido helper `shouldShowActivityNotification()`.
+  - `lib/hooks/useNotifications.ts`: Salvaguarda en cliente con `shouldShowActivityNotification()` para no renderizar notificaciones vencidas de otros usuarios en la campana del asesor.
+  - `lib/hooks/useOpportunitiesServer.ts`: `actividades` y `activity_summary` filtradas con `activitiesVisibleToViewer` tanto en offline (Dexie) como en el fetch online.
+  - `app/actividades/page.tsx`: Filtrado y conteo `overdueCount` restringidos para que roles `VENDEDOR` solo contabilicen y visualicen actividades propias (`act.user_id === effectiveUserId`).
+  - `app/oportunidades/[id]/page.tsx`: `ActivitiesTab` aplica `activitiesVisibleToViewer` antes del ordenamiento de la lista.
+  - `tests/sellerVisibility.test.ts`: Suite ampliada con pruebas de notificaciones y visibilidad (8/8 GREEN).
+- **Páginas actualizadas:** `wiki/pages/actividades.md`, `wiki/pages/notificaciones.md`, `wiki/LOG.md`.
+
 ## 2026-11-05 - Informes: Habilitación de Reportes Específicos para Asesores con Alcance Propio
 
 - **Requerimiento:** Permitir a los asesores acceder a la interfaz completa de informes específicos (Oportunidades, Cuentas, Contactos, Cotizaciones, Actividades, S&OP) para que puedan filtrar y descargar el reporte que necesiten, garantizando que los asesores únicamente descarguen su propia información.

@@ -5,10 +5,12 @@ import { useQuotes, useQuoteItems } from "@/lib/hooks/useOpportunities";
 import { useProductSearch, PriceListProduct } from "@/lib/hooks/useProducts";
 import { DetailHeader } from "@/components/ui/DetailHeader";
 import { generateQuotePdf } from "@/lib/pdfGenerator";
+import { generateQuoteExcel } from "@/lib/quoteExcelGenerator";
+import { QuotePreviewModal } from "@/components/quotes/QuotePreviewModal";
 import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { db, LocalQuote } from "@/lib/db";
-import { Save, AlertTriangle, Truck, Receipt, Calendar, Search, Plus, Trash2, Loader2, Package, Download, Send } from "lucide-react";
+import { Save, AlertTriangle, Truck, Receipt, Calendar, Search, Plus, Trash2, Loader2, Package, Download, Send, Eye, FileSpreadsheet } from "lucide-react";
 import { ExpandableTextarea } from "@/components/ui/ExpandableTextarea";
 import { cn } from "@/components/ui/utils";
 import { useLiveQuery } from "dexie-react-hooks";
@@ -38,6 +40,7 @@ export default function QuoteEditorPage() {
 
     const [activeSection, setActiveSection] = useState<'items' | 'sap'>('items');
     const [isSendModalOpen, setIsSendModalOpen] = useState(false);
+    const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
 
     const sendContext = useLiveQuery(async () => {
         if (!quote) return null;
@@ -76,6 +79,11 @@ export default function QuoteEditorPage() {
         generateQuotePdf(quote, sendContext.qItems, sendContext.acc, sendContext.opp, true, sendContext.advisorName);
     };
 
+    const handleDownloadExcel = () => {
+        if (!quote || !sendContext) return;
+        generateQuoteExcel(quote, sendContext.qItems, sendContext.acc, sendContext.opp, sendContext.advisorName);
+    };
+
     if (!quote) return <div className="p-8">Cargando cotización...</div>;
 
     return (
@@ -92,8 +100,10 @@ export default function QuoteEditorPage() {
                     }
                 }}
                 actions={[
-                    { label: "Enviar Cotización", icon: Send, onClick: () => setIsSendModalOpen(true) },
-                    { label: "Descargar PDF", icon: Download, onClick: handleDownloadPdf }
+                    { label: "Previsualizar", icon: Eye, onClick: () => setIsPreviewModalOpen(true) },
+                    { label: "Descargar Excel", icon: FileSpreadsheet, onClick: handleDownloadExcel },
+                    { label: "Descargar PDF", icon: Download, onClick: handleDownloadPdf },
+                    { label: "Enviar Cotización", icon: Send, onClick: () => setIsSendModalOpen(true) }
                 ]}
             />
 
@@ -147,6 +157,19 @@ export default function QuoteEditorPage() {
                         opportunity={sendContext.opp} 
                         quoteItems={sendContext.qItems}
                         advisorName={sendContext.advisorName}
+                    />
+                )}
+
+                {isPreviewModalOpen && sendContext && (
+                    <QuotePreviewModal
+                        isOpen={isPreviewModalOpen}
+                        onClose={() => setIsPreviewModalOpen(false)}
+                        quote={quote}
+                        account={sendContext.acc || undefined}
+                        opportunity={sendContext.opp}
+                        quoteItems={sendContext.qItems}
+                        advisorName={sendContext.advisorName}
+                        onSendEmail={() => setIsSendModalOpen(true)}
                     />
                 )}
             </div>

@@ -43,6 +43,24 @@ export function sellerCanSeeActivity(activity: AssignedActivity, userId: string)
 }
 
 /**
+ * Determina si una notificación de actividad vencida debe mostrarse al usuario.
+ * Para un asesor (VENDEDOR), solo se muestra si la actividad está asignada a él.
+ * Las actividades del setter u otros usuarios nunca deben alarmar al asesor.
+ */
+export function shouldShowActivityNotification(
+    notificationType: string,
+    activityUserId: string | null | undefined,
+    userRole: string | null | undefined,
+    currentUserId: string | null | undefined
+): boolean {
+    if (notificationType !== 'ACTIVITY_OVERDUE') return true;
+    if (isSellerRole(userRole) && currentUserId) {
+        return activityUserId === currentUserId;
+    }
+    return true;
+}
+
+/**
  * Para un asesor, deja solo las actividades asignadas a él (para contadores como
  * "1 programada" / "1 atrasada"). Para otros roles devuelve la lista tal cual.
  */

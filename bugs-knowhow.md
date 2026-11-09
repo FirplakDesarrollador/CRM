@@ -2067,3 +2067,36 @@ Prevention Rule:
 
 Tags:
 [wordpress] [lead-intake] [consumidor-final] [vtiger] [nombres] [r7]
+
+---
+
+## [Bug ID: 20261105-01]
+
+Context:
+Actividades vencidas y notificaciones para asesores (rol `VENDEDOR`) en canal B2C (`PROPIO`) donde el setter crea actividades en oportunidades asignadas al asesor (`supabase/migrations/20261105120000_fix_check_overdue_activities_assigned_user.sql`, `lib/sellerVisibility.ts`, `lib/hooks/useNotifications.ts`, `lib/hooks/useOpportunitiesServer.ts`, `lib/hooks/useActivitiesServer.ts`, `app/actividades/page.tsx`, `app/oportunidades/[id]/page.tsx`).
+
+Problem:
+Los asesores comerciales veían actividades vencidas que no eran suyas, generando alarma. Al ingresar, encontraban que la actividad estaba a nombre del setter (e.g. Christian Alvarez Roman / canalpropio). La campana in-app (`CRM_Notifications`) les generaba notificaciones de tipo `ACTIVITY_OVERDUE` ("La actividad '2. Seguimiento Setter' está vencida..."), el badge de oportunidades marcaba "1 atrasada", la pestaña de actividades de la oportunidad mostraba la tarea del setter y el contador de vencidas en `/actividades` subía.
+
+Root Cause:
+1. En la base de datos, la función periódica `check_overdue_activities()` enlazaba `CRM_Oportunidades o` y usaba `o.owner_user_id` (el asesor dueño de la oportunidad) como destinatario de la notificación de actividad vencida en lugar del usuario asignado a la actividad (`a.user_id`). Esto causó 13,264 falsas notificaciones a asesores por tareas del setter.
+2. En `lib/hooks/useOpportunitiesServer.ts`, en modo offline `itemActs` no se filtraba con `activitiesVisibleToViewer`, y en modo online `o.actividades` no se filtraba por visor, permitiendo que las actividades del setter contaminaran los conteos y badges del asesor.
+3. En `app/actividades/page.tsx`, la condición `isCollaborator` permitía a los asesores ver actividades de terceros en oportunidades colaborativas, y el contador `overdueCount` no exigía estrictamente `act.user_id === effectiveUserId`.
+4. En `app/oportunidades/[id]/page.tsx`, `ActivitiesTab` dependía únicamente de la carga asíncrona de `viewerRole`, pudiendo exponer temporalmente actividades del setter.
+5. En `useNotifications.ts`, no existía filtro de defensa en profundidad para omitir notificaciones de actividades asignadas a otros usuarios si llegaban a la campana.
+
+Fix Applied:
+1. Migración `20261105120000_fix_check_overdue_activities_assigned_user.sql`: `check_overdue_activities()` ahora asigna la notificación al usuario de la actividad (`a.user_id`), no al dueño de la oportunidad. Se eliminaron las 13,264 notificaciones erróneas acumuladas en `CRM_Notifications`.
+2. En `lib/sellerVisibility.ts`, se añadió y exportó `shouldShowActivityNotification()`.
+3. En `lib/hooks/useNotifications.ts`, se aplicó `shouldShowActivityNotification()` para filtrar en cliente cualquier notificación `ACTIVITY_OVERDUE` no asignada al asesor.
+4. En `lib/hooks/useOpportunitiesServer.ts`, se filtran `actividades` y `activity_summary` con `activitiesVisibleToViewer` tanto online como offline, y se previene ejecución con rol no resuelto.
+5. En `app/actividades/page.tsx`, se restringió la visibilidad y el contador `overdueCount` para que `VENDEDOR` solo compute actividades con `act.user_id === effectiveUserId`.
+6. En `app/oportunidades/[id]/page.tsx`, `ActivitiesTab` aplica `activitiesVisibleToViewer` explícitamente en `sortedActivities`.
+7. En `tests/sellerVisibility.test.ts`, se agregaron pruebas unitarias (8/8 GREEN).
+
+Prevention Rule:
+**Las actividades de un setter nunca deben atribuirse al asesor**:
+Toda consulta, contador (`overdueCount`, `activity_summary`), pestaña de detalle y notificación relacionada con actividades para el rol `VENDEDOR` debe evaluar estrictamente `activity.user_id === currentUserId`. Una actividad pertenece a quien la ejecuta, nunca al dueño de la oportunidad ni de la cuenta si son personas distintas.
+
+Tags:
+[setter] [b2c] [actividades-vencidas] [notificaciones] [seller-visibility] [oportunidades] [cuentas]

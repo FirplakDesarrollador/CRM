@@ -44,9 +44,24 @@ Edge Function `wordpress-lead-intake`: recibe leads del formulario web de firpla
 importar/consultar datos del CRM anterior. Credenciales en `.env`
 (`NEXT_PUBLIC_FORCEMANAGER_PUBLIC_KEY`, `FORCEMANAGER_PRIVATE_KEY`).
 
+## API de Exportación BI (Looker Studio / Dimarka)
+
+Edge Function `crm-export-api` (`supabase/functions/crm-export-api/`): API de **solo lectura** para exportar Contactos y Oportunidades del CRM hacia plataformas de analítica y tableros en Looker Studio.
+
+- **Endpoints:**
+  - `GET /crm-export-api/contactos`: Contactos enriquecidos con nombre y NIT de la cuenta.
+  - `GET /crm-export-api/oportunidades`: Oportunidades enriquecidas con cuenta, asesor, fase, estado, segmento, ciudad, departamento y razón de pérdida.
+- **Autenticación:**
+  - `Authorization: Bearer <clave>` o header `x-api-key: <clave>` o `apikey: <clave>`.
+  - Valida claves autorizadas por hash SHA-256 (incluye claves dedicadas y publishable key de Supabase).
+- **Parámetros:** `limit`, `offset`, `updated_since`, `created_since`, `include_deleted`, `order` (`created_at`/`updated_at`), `format` (`json`/`csv`).
+- **Control de tráfico:** Límite de 60 peticiones/minuto por combinación de clave e IP.
+
 ## Fuentes
 
 - `app/api/microsoft/`, `lib/microsoft.ts`
 - `lib/sync.ts` (SAP_MAPPING), `supabase/schema.sql` (`CRM_SapIntegrationQueue`)
+- `supabase/functions/wordpress-lead-intake/`
+- `supabase/functions/crm-export-api/`
 - `supabase/functions/wordpress-lead-intake/index.ts`
 - `lib/forcemanager.ts`

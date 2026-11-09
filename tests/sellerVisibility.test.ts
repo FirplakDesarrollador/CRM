@@ -3,8 +3,10 @@ import {
     activitiesVisibleToViewer,
     sellerCanSeeAccount,
     sellerCanSeeOpportunity,
+    sellerCanSeeActivity,
     sellerOpportunityOrFilter,
     sellerAccountOrFilter,
+    shouldShowActivityNotification,
 } from '@/lib/sellerVisibility';
 import { computeOpportunityActivitySummary } from '@/lib/opportunityActivities';
 import { filterOpportunities } from '@/lib/filterUtils';
@@ -68,5 +70,22 @@ describe('sellerVisibility', () => {
         }
         const admin = filterOpportunities(opps, { userFilter: 'web' }, { currentUserId: 'adm', userRole: 'ADMIN' });
         expect(admin).toHaveLength(3);
+    });
+
+    it('notificaciones de actividad vencida: un asesor NO ve las del setter ni de otros usuarios', () => {
+        expect(shouldShowActivityNotification('ACTIVITY_OVERDUE', SETTER, 'VENDEDOR', ME)).toBe(false);
+        expect(shouldShowActivityNotification('ACTIVITY_OVERDUE', ME, 'VENDEDOR', ME)).toBe(true);
+        expect(shouldShowActivityNotification('ACTIVITY_OVERDUE', SETTER, 'ADMIN', ME)).toBe(true);
+        expect(shouldShowActivityNotification('NEW_OPPORTUNITY', SETTER, 'VENDEDOR', ME)).toBe(true);
+    });
+
+    it('actividades asignadas a un setter no son visibles para el asesor aunque la oportunidad sea de él', () => {
+        const setterAct = { id: 'act-setter-1', user_id: SETTER, is_completed: false };
+        const myAct = { id: 'act-me-1', user_id: ME, is_completed: false };
+        expect(sellerCanSeeActivity(setterAct, ME)).toBe(false);
+        expect(sellerCanSeeActivity(myAct, ME)).toBe(true);
+
+        const list = activitiesVisibleToViewer([setterAct, myAct], 'VENDEDOR', ME);
+        expect(list).toEqual([myAct]);
     });
 });

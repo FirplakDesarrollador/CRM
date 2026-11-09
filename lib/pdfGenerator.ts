@@ -2,7 +2,7 @@ import { saveAs } from 'file-saver';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { format } from 'date-fns';
-import { es } from 'date-fns/locale';
+import { FIRPLAK_LOGO_BASE64 } from './firplakLogoBase64';
 
 export interface PdfItemRowData {
     referencia: string;
@@ -14,6 +14,8 @@ export interface PdfItemRowData {
 }
 
 export interface PdfTotalsData {
+    subtotalBruto: number;
+    descuentoTotal: number;
     subtotal: number;
     iva: number;
     granTotal: number;
@@ -39,296 +41,560 @@ export function calculatePdfItemRow(item: any): PdfItemRowData {
 
 export function calculatePdfTotals(items: any[], quote: any): PdfTotalsData {
     const isExport = quote?.currency_id === 'USD';
-    const subtotal = items && items.length > 0
-        ? items.reduce((sum, item) => {
-            const row = calculatePdfItemRow(item);
-            return sum + row.lineTotal;
-        }, 0)
-        : Number(quote?.total_amount) || 0;
 
+    let subtotalBruto = 0;
+    let subtotal = 0;
+
+    if (items && items.length > 0) {
+        for (const item of items) {
+            const row = calculatePdfItemRow(item);
+            const qty = Number(item?.cantidad) || 1;
+            const unitPrice = Number(item?.precio_unitario) || 0;
+            subtotalBruto += unitPrice * qty;
+            subtotal += row.lineTotal;
+        }
+    } else {
+        subtotal = Number(quote?.total_amount) || 0;
+        subtotalBruto = subtotal;
+    }
+
+    const descuentoTotal = Math.max(0, subtotalBruto - subtotal);
     const iva = isExport ? 0 : subtotal * 0.19;
     const granTotal = subtotal + iva;
 
-    return { subtotal, iva, granTotal };
+    return { subtotalBruto, descuentoTotal, subtotal, iva, granTotal };
 }
 
-export async function generateQuotePdf(quote: any, items: any[], account: any, opportunity: any, save = true, advisorName?: string): Promise<string | void> {
+export async function buildQuotePdfDoc(
+    quote: any,
+    items: any[],
+    account: any,
+    opportunity: any,
+    advisorName?: string
+): Promise<jsPDF> {
     const doc = new jsPDF('p', 'pt', 'a4');
-    
-    // Configuración de fuentes y colores
-    const darkGray: [number, number, number] = [30, 30, 30];
-    const borderGray: [number, number, number] = [200, 200, 200];
-    const margin = 30;
+
+    // Paleta de Colores Corporativa Firplak
+    const primaryNavy: [number, number, number] = [30, 58, 76];    // #1E3A4C
+    const secondaryBlue: [number, number, number] = [43, 88, 118]; // #2B5876
+    const textDark: [number, number, number] = [15, 23, 42];       // #0F172A
+    const textMuted: [number, number, number] = [100, 116, 139];   // #64748B
+    const borderLight: [number, number, number] = [226, 232, 240]; // #E2E8F0
+    const bgLight: [number, number, number] = [248, 250, 252];     // #F8FAFC
+    const bgHeader: [number, number, number] = [241, 245, 249];    // #F1F5F9
+
+    const margin = 28;
     const pageWidth = doc.internal.pageSize.getWidth();
+    const contentWidth = pageWidth - margin * 2;
     let y = margin;
 
-    // Helper to draw bordered text box
-    const drawBox = (x: number, yPos: number, w: number, h: number, text: string, align: 'left' | 'center' | 'right' = 'left', title?: string) => {
-        doc.setDrawColor(borderGray[0], borderGray[1], borderGray[2]);
-        doc.rect(x, yPos, w, h);
-        if (title) {
-            doc.setFontSize(6);
-            doc.setFont('helvetica', 'normal');
-            doc.text(title, x + 3, yPos + 8);
-        }
-        doc.setFontSize(9);
-        doc.setFont('helvetica', 'bold');
-        let textX = x + 3;
-        if (align === 'center') textX = x + w / 2;
-        if (align === 'right') textX = x + w - 3;
-        doc.text(text, textX, yPos + 18, { align: align as any, maxWidth: w - 6 });
-    };
-
-    // HEADER CON LOGO
-    const logoBase64 = 'PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiIHN0YW5kYWxvbmU9Im5vIj8+CjwhRE9DVFlQRSBzdmcgUFVCTElDICItLy9XM0MvL0RURCBTVkcgMS4xLy9FTiIgImh0dHA6Ly93d3cudzMub3JnL0dyYXBoaWNzL1NWRy8xLjEvRFREL3N2ZzExLmR0ZCI+Cjxzdmcgd2lkdGg9IjEwMCUiIGhlaWdodD0iMTAwJSIgdmlld0JveD0iMCAwIDE3MzIgMjYyIiB2ZXJzaW9uPSIxLjEiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgeG1sbnM6eGxpbms9Imh0dHA6Ly93d3cudzMub3JnLzE5OTkveGxpbmsiIHhtbDpzcGFjZT0icHJlc2VydmUiIHhtbG5zOnNlcmlmPSJodHRwOi8vd3d3LnNlcmlmLmNvbS8iIHN0eWxlPSJmaWxsLXJ1bGU6ZXZlbm9kZDtjbGlwLXJ1bGU6ZXZlbm9kZDtzdHJva2UtbGluZWpvaW46cm91bmQ7c3Ryb2tlLW1pdGVybGltaXQ6MjsiPgogICAgPGcgdHJhbnNmb3JtPSJtYXRyaXgoMSwwLDAsMSwtMzczLjc0NTgzMywtMTUyOC4wODMzMzMpIj4KICAgICAgICA8ZyB0cmFuc2Zvcm09Im1hdHJpeCg0LjE2NjY2NywwLDAsNC4xNjY2NjcsMCwwKSI+CiAgICAgICAgICAgIDxnIHRyYW5zZm9ybT0ibWF0cml4KDEsMCwwLDEsODkuNjk5LDQyOS40NjQ4KSI+CiAgICAgICAgICAgICAgICA8cGF0aCBkPSJNMCwtNjIuNzI0TDQ1Ljc2NywtNjIuNzI0TDQ1Ljc2NywtNTQuMTU0TDExLjY3LC01NC4xNTRMMTEuNjcsLTMyLjI3M0w0NC42NzIsLTMyLjI3M0w0NC42NzIsLTIzLjcwNEwxMS42NywtMjMuNzA0TDExLjY3LDBMMCwwTDAsLTYyLjcyNFoiIHN0eWxlPSJmaWxsOnJnYig1MCw2Nyw4NCk7ZmlsbC1ydWxlOm5vbnplcm87Ii8+CiAgICAgICAgICAgIDwvZz4KICAgICAgICA8L2c+CiAgICAgICAgPGcgdHJhbnNmb3JtPSJtYXRyaXgoNC4xNjY2NjcsMCwwLDQuMTY2NjY3LDAsMCkiPgogICAgICAgICAgICA8ZyB0cmFuc2Zvcm09Im1hdHJpeCgxLDAsMCwxLDAsLTQ1LjY4NCkiPgogICAgICAgICAgICAgICAgPHJlY3QgeD0iMTQ5LjU5NyIgeT0iNDEyLjQyNSIgd2lkdGg9IjExLjc2MSIgaGVpZ2h0PSI2Mi43MjQiIHN0eWxlPSJmaWxsOnJnYig1MCw2Nyw4NCk7Ii8+CiAgICAgICAgICAgIDwvZz4KICAgICAgICA8L2c+CiAgICAgICAgPGcgdHJhbnNmb3JtPSJtYXRyaXgoNC4xNjY2NjcsMCwwLDQuMTY2NjY3LDAsMCkiPgogICAgICAgIC2ZyB0cmFuc2Zvcm09Im1hdHJpeCgxLDAsMCwxLDIwNS43NTg3LDM5OS45MjU2KSI+CiAgICAgICAgICAgICAgICA8cGF0aCBkPSJNMCwtMy42NDZDNy44NDEsLTMuNjQ2IDEyLjQ5LC03LjQ3NSAxMi40OSwtMTQuMzEzQzEyLjQ5LC0yMS4wNTkgOC4xMTQsLTI0LjUyNCAtMC4yNzQsLTI0LjUyNEwtMTguNTk5LC0yNC41MjRMLTE4LjU5OSwtMy42NDZMMCwtMy42NDZaTS0zMC4yNjksLTMzLjE4NUwtMC4yNzQsLTMzLjE4NUMxNS42ODEsLTMzLjE4NSAyNC4yNSwtMjYuODAzIDI0LjI1LC0xNC44NkMyNC4yNSwtNS44MzQgMTguNDE1LDEuMDAzIDkuMzksMi43MzZMMjYuNzExLDI5LjUzOUwxMy43NjYsMjkuNTM5TC0xLjI3Nyw1LjAxNUwtMTguNTk5LDUuMDE1TC0xOC41OTksMjkuNTM5TC0zMC4yNjksMjkuNTM5TC0zMC4yNjksLTMzLjE4NVoiIHN0eWxlPSJmaWxsOnJnYig1MCw2Nyw4NCk7ZmlsbC1ydWxlOm5vbnplcm87Ii8+CiAgICAgICAgICAgIDwvZz4KICAgICAgICA8L2c+CiAgICAgICAgPGcgdHJhbnNmb3JtPSJtYXRyaXgoNC4xNjY2NjcsMCwwLDQuMTY2NjY3LDAsMCkiPgogICAgICAgICAgICA8ZyB0cmFuc2Zvcm09Im1hdHJpeCgxLDAsMCwxLDI3My42Nzk2LDM5OC4xMDI5KSI+CiAgICAgICAgICAgICAgICA8cGF0aCBkPSJNMCwwQzguMTE0LDAgMTIuNTgxLC00LjEwMiAxMi41ODEsLTExLjY3QzEyLjVODEsLTE4Ljk2MyA4LjExNCwtMjIuNzAxIC0wLjQ1NywtMjIuNzAxTC0xNS4zMTYsLTIyLjcwMUwtMTUuMzE2LDBMMCwwWk0tMjcuMDc3LC0zMS4zNjMkTC0wLjQ1NywtMzEuMzYyQzE1LjQ5OSwtMzEuMzYyIDI0LjI1LC0yNC41MjQgMjQuMjUsLTExLjg1MkMyNC4yNSwwLjQ1NiAxNS40OTksOC42NjEgIDAsOC42NjFMLTE1LjMxNiw4LjY2MUwtMTUuMzE2LDMxLjM2MkwtMjcuMDc3LDMxLjM2MkwtMjcuMDc3LC0zMS4zNjJaIiBzdHlsZT0iZmlsbDpyZ2IoNTAsNjcsODQpO2ZpbGwtcnVsZTpub256ZXJvOyIvPgogICAgICAgICAgICA8L2c+CiAgICAgICAgPC9nPgogICAgICAgIDxnIHRyYW5zZm9ybT0ibWF0cml4KDQuMTY2NjY3LDAsMCw0LjE2NjY2NywwLDApIj4KICAgICAgICAgICAgPGcgdHJhbnNmb3JtPSJtYXRyaXgoMSwwLDAsMSwzMTIuMDYwNiw0MjkuNDY0OCkiPgogICAgICAgICAgICAgICAgPHBhdGggZD0iTTAsLTYyLjcyNEwxMS43NjEsLTYyLjcyNEwxMS43NjEsLTguNjYxTDQ2LjMxMywtOC42NjFMNDYuMzEzLDBMMCwwTDAsLTYyLjcyNFoiIHN0eWxlPSJmaWxsOnJnYig1MCw2Nyw4NCk7ZmlsbC1ydWxlOm5vbnplcm87Ii8+CiAgICAgICAgICAgIDwvZz4KICAgICAgICA8L2c+CiAgICAgICAgPGcgdHJhbnNmb3JtPSJtYXRyaXgoNC4xNjY2NjcsMCwwLDQuMTY2NjY3LDAsMCkiPgogICAgICAgICAgICA8ZyB0cmFuc2Zvcm09Im1hdHJpeCgxLDAsMCwxLDQ0Ny40MDg4LDQyOS40NjQ4KSI+CiAgICAgICAgICAgICAgICA8cGF0aCBkPSJNMCwtNjIuNzI0TDExLjc2MSwtNjIuNzI0TDExLjc2MSwtMzQuNzM1TDQxLjI5OSwtNjIuNzI0TDU1LjI0OSwtNjIuNzI0TDI4LjcxOCwtMzYuMzc2TDU3Ljg5MiwwTDQ0LjMwOCwwTDIwLjYwNSwtMjguNjI2TDExLjc2MSwtMjAuMzNMMTEuNzYxLDBMMCwwTDAsLTYyLjcyNFoiIHN0eWxlPSJmaWxsOnJnYig1MCw2Nyw4NCk7ZmlsbC1ydWxlOm5vbnplcm87Ii8+CiAgICAgICAgICAgIDwvZz4KICAgICAgICA8L2c+CiAgICAgICAgPGcgdHJhbnNmb3JtPSJtYXRyaXgoNC4xNjY2NjcsMCwwLDQuMTY2NjY3LDAsMCkiPgogICAgICAgICAgICA8ZyB0cmFuc2Zvcm09Im1hdHJpeCgxLDAsMCwxLDQzMy4yNzgsMzY2Ljc0KSI+CiAgICAgICAgICAgICAgICA8cGF0aCBkPSJNMCw2Mi43MjVMLTIzLjIwOSwwTC0zNy41NjQsMEwtNjAuNzczLDYyLjcyNUwtNDguOTE3LDYyLjcyNUwtMzAuMzg3LDEyLjY0NUwtMTEuODU2LDYyLjcyNUwwLDYyLjcyNVoiIHN0eWxlPSJmaWxsOnJnYig1MCw2Nyw4NCk7ZmlsbC1ydWxlOm5vbnplcm87Ii8+CiAgICAgICAgICAgIDwvZz4KICAgICAgICA8L2c+CiAgICAgICAgPGcgdHJhbnNmb3JtPSJtYXRyaXgoNC4xNjY2NjcsMCwwLDQuMTY2NjY3LDAsMCkiPgogICAgICAgICAgICA8ZyB0cmFuc2Zvcm09Im1hdHJpeCgxLDAsMCwxLDQwOS42OTYxLDQxMS4wNzUpIj4KICAgIC2cHRyYW5zZm9ybT0ibWF0cml4KDEsMCwwLDEsNDA5LjY5NjEsNDExLjA3NSkiPgogICAgICAgICAgICAgICAgPHBhdGggZD0iTTAsMTguMzlMLTYuODA1LDBMLTEzLjYwOSwxOC4zOUwwLDE4LjM5WiIgc3R5bGU9ImZpbGw6cmdiKDUwLDY3LDg0KTtmaWxsLXJ1bGU6bm9uemVybzsiLz4KICAgICAgICAgICAgPC9nPgogICAgICAgIDwvZz4KICAgIDwvZz4KPC9zdmc+Cg==';
-    
+    // ─────────────────────────────────────────────────────────────
+    // 1. ENCABEZADO CON LOGO OFICIAL
+    // ─────────────────────────────────────────────────────────────
     try {
-        doc.addImage('data:image/svg+xml;base64,' + logoBase64, 'SVG', margin, y - 10, 100, 25);
+        // Logo oficial Firplak (PNG alta resolución aspect ratio ~2.745)
+        doc.addImage('data:image/png;base64,' + FIRPLAK_LOGO_BASE64, 'PNG', margin, y, 115, 42);
     } catch (e) {
-        console.warn('No se pudo cargar el logo SVG:', e);
-        doc.setFontSize(14);
+        console.warn('No se pudo cargar el logo PNG:', e);
+        doc.setFontSize(16);
         doc.setFont('helvetica', 'bold');
-        doc.text('FIRPLAK', margin, y + 10);
+        doc.setTextColor(...primaryNavy);
+        doc.text('FIRPLAK', margin, y + 20);
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(...textMuted);
+        doc.text('inspirando hogares', margin, y + 32);
     }
 
-    doc.setFontSize(10);
+    // Título Central
+    const centerX = pageWidth / 2 + 5;
     doc.setFont('helvetica', 'bold');
-    doc.text('F-V-29', pageWidth - 70, y);
-    y += 15;
-    
-    doc.setFontSize(12);
-    doc.text('FORMATO DE COTIZACIÓN Y/O PEDIDO BAÑOS, COCINAS Y ROPAS', margin + 110, y - 5);
-    doc.setFontSize(10);
-    doc.text('V. 4', pageWidth - 70, y);
-    y += 15;
-    
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.text('NIT 890.927.404-0', margin + 110, y - 10);
-    doc.text(`Año: ${new Date().getFullYear()}`, pageWidth - 70, y);
-    y += 10;
-    
-    doc.setDrawColor(0,0,0);
-    doc.line(margin, y, pageWidth - margin, y);
-    y += 15;
-
-    // ROW 1: FECHA, RAZON SOCIAL
-    const col1 = margin;
-    const col2 = 180;
-    const col3 = 350;
+    doc.setFontSize(11);
+    doc.setTextColor(...primaryNavy);
+    doc.text('FORMATO DE COTIZACIÓN Y/O PEDIDO', centerX, y + 14, { align: 'center' });
     
     doc.setFontSize(9);
     doc.setFont('helvetica', 'bold');
-    doc.text(`FECHA : ${format(new Date(), "dd/MM/yyyy")}`, col1, y);
-    doc.text(`RAZON SOCIAL: ${account?.nombre || ''}`, col2, y);
-    y += 15;
+    doc.setTextColor(...secondaryBlue);
+    doc.text('BAÑOS, COCINAS Y ROPAS', centerX, y + 27, { align: 'center' });
     
-    // ROW 2: NIT
-    doc.text(`NIT/C.C. ${account?.nit_base || account?.nit || ''}`, col1, y);
-    doc.text(`CLIENTE FINAL: ${quote.cliente_final || ''}`, col3, y);
-    if (quote.nit_cliente_final) {
-        doc.text(`NIT C.F.: ${quote.nit_cliente_final}`, col3 + 180, y);
-    }
-    y += 15;
-    
-    // ROW 3: DIREC. PRODUCTO
-    doc.text(`DIREC. PRODUCTO: ${account?.direccion || ''}`, col1, y);
-    doc.text(`CIUDAD PROD.: ${account?.ciudad || ''}`, col3 - 60, y);
-    doc.text(`TEL: ${account?.telefono || ''}`, pageWidth - 140, y);
-    y += 15;
-
-    // ROW 4: DIREC. FACTURA
-    doc.text(`DIREC. FACTURA: ${quote.direccion_envio_factura || account?.direccion || ''}`, col1, y);
-    doc.text(`CIUDAD FACT.: ${account?.ciudad || ''}`, col3 - 60, y);
-    doc.text(`TEL: ${account?.telefono || ''}`, pageWidth - 140, y);
-    y += 20;
-
-    // CONTACTS SECTION
-    doc.setFillColor(230, 230, 230);
-    doc.rect(margin, y - 10, pageWidth - margin * 2, 14, 'F');
-    doc.text('CONTACTOS DEL CLIENTE (POR FAVOR INGRESAR EL NOMBRE Y CELULAR DE CADA CARGO)', margin + 2, y);
-    y += 15;
-
+    doc.setFontSize(8);
     doc.setFont('helvetica', 'normal');
-    doc.text(`VENTAS/COMPRAS: ${quote.contacto_ventas || account?.nombre || ''}`, col1, y);
-    doc.text(`TEL \/ CEL: ${account?.telefono || ''}`, col3, y);
-    y += 15;
-    
-    doc.text(`LOGISTICO: ${quote.contacto_logistico || ''}`, col1, y);
-    doc.text(`TEL \/ CEL: `, col3, y);
-    y += 15;
-    
-    doc.text(`TESORERIA: ${quote.contacto_tesoreria || ''}`, col1, y);
-    doc.text(`TEL \/ CEL: `, col3, y);
-    y += 15;
-    
-    doc.text(`FACTURA ELECTR.: ${account?.email || ''}`, col1, y);
-    y += 15;
-    
-    doc.text(`EMAIL CONTACTO OC/COT: ${quote.email_contacto || account?.email || ''}`, col1, y);
-    y += 20;
+    doc.setTextColor(...textMuted);
+    doc.text('NIT 890.927.404-0', centerX, y + 39, { align: 'center' });
 
-    // INVOICE SECTION
+    // Tarjeta Derecha de Metadatos del Documento
+    const metaCardW = 120;
+    const metaCardH = 46;
+    const metaCardX = pageWidth - margin - metaCardW;
+    
+    doc.setFillColor(...bgLight);
+    doc.setDrawColor(...borderLight);
+    doc.setLineWidth(0.75);
+    doc.roundedRect(metaCardX, y - 2, metaCardW, metaCardH, 3, 3, 'FD');
+
+    doc.setFontSize(7);
     doc.setFont('helvetica', 'bold');
-    doc.text(`CIERRE FACTURACION? ${quote.cierre_facturacion ? 'SI' : 'NO'}`, col1, y);
-    doc.text(`FECHA FACTURACION: ${quote.fecha_facturacion || ''}`, col1 + 150, y);
-    doc.text(`SUBGRUPO CLIENT: ${account?.canal_id || ''}`, col3, y);
-    y += 15;
+    doc.setTextColor(...textMuted);
+    doc.text('NÚMERO DE COTIZACIÓN', metaCardX + 8, y + 9);
 
-    doc.text(`LISTA DE PRECIOS: PVP Sin. IVA`, col1, y);
-    y += 15;
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...primaryNavy);
+    const quoteNum = quote?.numero_cotizacion || 'COT-BORRADOR';
+    doc.text(quoteNum, metaCardX + 8, y + 22);
+
+    doc.setFontSize(7.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...textDark);
+    doc.text(`Fecha: ${format(new Date(), "dd/MM/yyyy")}`, metaCardX + 8, y + 33);
+    doc.setTextColor(...textMuted);
+    doc.text(`Doc: F-V-29  |  V. 04`, metaCardX + 8, y + 42);
+
+    y += 50;
+
+    // Línea divisoria decorativa de marca
+    doc.setDrawColor(...primaryNavy);
+    doc.setLineWidth(1.5);
+    doc.line(margin, y, pageWidth - margin, y);
+    y += 8;
+
+    // ─────────────────────────────────────────────────────────────
+    // 2. INFORMACIÓN DEL CLIENTE Y DESPACHO (TARJETAS EN 2 COLUMNAS)
+    // ─────────────────────────────────────────────────────────────
+    const cardGap = 10;
+    const cardW = (contentWidth - cardGap) / 2;
+    const cardH = 78;
+    const cardLeftX = margin;
+    const cardRightX = margin + cardW + cardGap;
+
+    // --- Tarjeta Izquierda: Datos del Cliente ---
+    doc.setFillColor(...bgLight);
+    doc.setDrawColor(...borderLight);
+    doc.setLineWidth(0.75);
+    doc.roundedRect(cardLeftX, y, cardW, cardH, 3, 3, 'FD');
+
+    // Franja de título
+    doc.setFillColor(...bgHeader);
+    doc.rect(cardLeftX, y, cardW, 14, 'F');
+    doc.setFontSize(7.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...primaryNavy);
+    doc.text('INFORMACIÓN DEL CLIENTE', cardLeftX + 6, y + 10);
+
+    // Contenido Cliente
+    const cPad = cardLeftX + 6;
+    let cy = y + 24;
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...textMuted);
+    doc.text('RAZÓN SOCIAL:', cPad, cy);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(...textDark);
+    const clientName = (account?.nombre || 'Sin cliente asignado').substring(0, 38);
+    doc.text(clientName, cPad + 60, cy);
+
+    cy += 12;
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...textMuted);
+    doc.text('NIT / C.C.:', cPad, cy);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...textDark);
+    doc.text(account?.nit_base || account?.nit || 'N/A', cPad + 60, cy);
+
+    cy += 12;
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...textMuted);
+    doc.text('CLIENTE FINAL:', cPad, cy);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...textDark);
+    const finalClient = quote?.cliente_final 
+        ? `${quote.cliente_final}${quote.nit_cliente_final ? ` (NIT: ${quote.nit_cliente_final})` : ''}`
+        : 'Mismo cliente';
+    doc.text(finalClient.substring(0, 36), cPad + 60, cy);
+
+    cy += 12;
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...textMuted);
+    doc.text('TEL / CONTACTO:', cPad, cy);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...textDark);
+    doc.text(account?.telefono || 'N/A', cPad + 60, cy);
+
+    cy += 12;
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...textMuted);
+    doc.text('EMAIL / FACT.:', cPad, cy);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...textDark);
+    doc.text((account?.email || quote?.email_contacto || 'N/A').substring(0, 36), cPad + 60, cy);
+
+    // --- Tarjeta Derecha: Despacho y Condiciones ---
+    doc.setFillColor(...bgLight);
+    doc.setDrawColor(...borderLight);
+    doc.setLineWidth(0.75);
+    doc.roundedRect(cardRightX, y, cardW, cardH, 3, 3, 'FD');
+
+    // Franja de título
+    doc.setFillColor(...bgHeader);
+    doc.rect(cardRightX, y, cardW, 14, 'F');
+    doc.setFontSize(7.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...primaryNavy);
+    doc.text('DESPACHO Y CONDICIONES COMERCIALES', cardRightX + 6, y + 10);
+
+    const rPad = cardRightX + 6;
+    let ry = y + 24;
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...textMuted);
+    doc.text('DIR. ENTREGA:', rPad, ry);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...textDark);
+    doc.text((account?.direccion || 'N/A').substring(0, 38), rPad + 62, ry);
+
+    ry += 12;
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...textMuted);
+    doc.text('CIUDAD PROD.:', rPad, ry);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...textDark);
+    doc.text(account?.ciudad || 'N/A', rPad + 62, ry);
+
+    ry += 12;
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...textMuted);
+    doc.text('DIR. FACTURA:', rPad, ry);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...textDark);
+    const invoiceDir = quote?.direccion_envio_factura || account?.direccion || 'Misma dirección';
+    const invoiceType = quote?.dir_envio_factura_tipo ? ` (${quote.dir_envio_factura_tipo})` : '';
+    doc.text(`${invoiceDir.substring(0, 30)}${invoiceType}`, rPad + 62, ry);
+
+    ry += 12;
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...textMuted);
+    doc.text('CANAL / LISTA:', rPad, ry);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...textDark);
+    doc.text(`${account?.canal_id || 'PROPIO'} • PVP Sin IVA`, rPad + 62, ry);
+
+    ry += 12;
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...textMuted);
+    doc.text('CIERRE FACT.:', rPad, ry);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...textDark);
+    doc.text(`${quote?.cierre_facturacion ? 'SÍ' : 'NO'}${quote?.fecha_facturacion ? ` (${quote.fecha_facturacion})` : ''}`, rPad + 62, ry);
+
+    y += cardH + 8;
+
+    // ─────────────────────────────────────────────────────────────
+    // 3. CONTACTOS Y LOGÍSTICA DE ENTREGA (TARJETA HORIZONTAL)
+    // ─────────────────────────────────────────────────────────────
+    const specH = 46;
+    doc.setFillColor(...bgLight);
+    doc.setDrawColor(...borderLight);
+    doc.setLineWidth(0.75);
+    doc.roundedRect(margin, y, contentWidth, specH, 3, 3, 'FD');
+
+    // Franja de título
+    doc.setFillColor(...bgHeader);
+    doc.rect(margin, y, contentWidth, 13, 'F');
+    doc.setFontSize(7.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...primaryNavy);
+    doc.text('CONTACTOS DEL CLIENTE Y LOGÍSTICA DE ENTREGA', margin + 6, y + 9.5);
+
+    // 4 Columnas internas
+    const colW = contentWidth / 4;
+    const sy = y + 21;
     
-    doc.text(`ES UNA MUESTRA? ${quote.es_muestra ? 'SI' : 'NO'}`, col1, y);
-    y += 15;
-    
-    doc.text(`DIRECCION PARA ENVIO DE FACTURA (marque con una X): OFICINA ( ${quote.dir_envio_factura_tipo === 'OFICINA' ? 'X' : ' '} )  TIENDA ( ${quote.dir_envio_factura_tipo === 'TIENDA' ? 'X' : ' '} )`, col1, y);
-    y += 15;
+    // Col 1: Contacto Compras
+    doc.setFontSize(6.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...textMuted);
+    doc.text('VENTAS / COMPRAS', margin + 6, sy);
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...textDark);
+    doc.text((quote?.contacto_ventas || account?.nombre || '-').substring(0, 22), margin + 6, sy + 10);
+    doc.setTextColor(...textMuted);
+    doc.text(`Tel: ${account?.telefono || '-'}`, margin + 6, sy + 19);
 
-    doc.text(`SERVICIO DE SUBIDA DE HIDROMASAJE (marque con una X): SI ( ${quote.servicio_subida_hidromasaje ? 'X' : ' '} ) NO ( ${!quote.servicio_subida_hidromasaje ? 'X' : ' '} )`, col1, y);
-    y += 15;
+    // Col 2: Logística / Tesorería
+    const col2X = margin + colW;
+    doc.setFontSize(6.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...textMuted);
+    doc.text('LOGÍSTICA / TESORERÍA', col2X, sy);
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...textDark);
+    doc.text(`Log: ${(quote?.contacto_logistico || '-').substring(0, 18)}`, col2X, sy + 10);
+    doc.text(`Tes: ${(quote?.contacto_tesoreria || '-').substring(0, 18)}`, col2X, sy + 19);
 
-    const tieneAscensor = quote.tiene_escaleras === false;
-    doc.text(`PISO ( ${quote.piso_entrega || '  '} ) MEDIO (marque con una X) ASCENSOR ( ${tieneAscensor ? 'X' : ' '} ) ESCALERAS ( ${quote.tiene_escaleras ? 'X' : ' '} )`, col1, y);
-    y += 15;
+    // Col 3: Especificación Hidromasaje & Acceso
+    const col3X = margin + colW * 2;
+    doc.setFontSize(6.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...textMuted);
+    doc.text('SUBIDA HIDROMASAJE & ACCESO', col3X, sy);
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...textDark);
+    const subidaTxt = quote?.servicio_subida_hidromasaje ? 'Servicio Subida: SÍ' : 'Servicio Subida: NO';
+    const accesoTxt = `Piso: ${quote?.piso_entrega || '-'} • ${quote?.tiene_escaleras ? 'Escaleras' : 'Ascensor'}`;
+    doc.text(subidaTxt, col3X, sy + 10);
+    doc.text(accesoTxt, col3X, sy + 19);
 
-    doc.text(`ENTREGA EN OBRA ( ${quote.entrega_en_obra ? 'X' : ' '} )  BODEGA EXTERNA ( ${quote.bodega_externa ? 'X' : ' '} )  BODEGA FIRPLAK ( ${quote.bodega_firplak ? 'X' : ' '} )`, col1, y);
-    y += 15;
+    // Col 4: Tipo de Entrega
+    const col4X = margin + colW * 3;
+    doc.setFontSize(6.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...textMuted);
+    doc.text('TIPO DE ENTREGA', col4X, sy);
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...textDark);
+    const entregaTxt = quote?.entrega_en_obra 
+        ? 'Entrega en Obra' 
+        : quote?.bodega_externa 
+            ? 'Bodega Externa' 
+            : 'Bodega Firplak';
+    const muestraTxt = `Muestra: ${quote?.es_muestra ? 'SÍ' : 'NO'}`;
+    doc.text(entregaTxt, col4X, sy + 10);
+    doc.text(muestraTxt, col4X, sy + 19);
 
-    doc.text(`VERIFICACIÓN PREVIA POR PARTE DE PERSONAL FIRPLAK (marque con una X) SI ( ${quote.verificacion_previa_firplak ? 'X' : ' '} ) NO ( ${quote.verificacion_previa_firplak ? ' ' : 'X'} )`, col1, y);
-    y += 20;
+    y += specH + 8;
 
-    // TABLE
-    const tableData = items.map((item) => {
+    // ─────────────────────────────────────────────────────────────
+    // 4. TABLA DE ÍTEMS / PRODUCTOS
+    // ─────────────────────────────────────────────────────────────
+    const isUSD = quote?.currency_id === 'USD';
+    const currencyFormatter = new Intl.NumberFormat(isUSD ? 'en-US' : 'es-CO', {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0,
+    });
+
+    const tableData = items.map((item, idx) => {
         const row = calculatePdfItemRow(item);
-        const formatter = new Intl.NumberFormat(quote.currency_id === 'USD' ? 'en-US' : 'es-CO');
-        
         return [
-            row.referencia, 
-            row.cantidad, 
-            row.descripcion, 
-            formatter.format(row.unitPrice), 
-            row.discountPct > 0 ? `${row.discountPct}%` : '0%', 
-            formatter.format(row.lineTotal)
+            (idx + 1).toString(),
+            row.referencia,
+            row.cantidad,
+            row.descripcion,
+            currencyFormatter.format(row.unitPrice),
+            row.discountPct > 0 ? `${row.discountPct}%` : '0%',
+            currencyFormatter.format(row.lineTotal),
         ];
     });
 
     autoTable(doc, {
         startY: y,
-        head: [['REFERENCIA SAP', 'CANT.', 'DESCRIPCION', 'VALOR UNITARIO', 'DTO', 'VALOR TOTAL']],
+        head: [['#', 'REFERENCIA SAP', 'CANT.', 'DESCRIPCIÓN DEL PRODUCTO', 'PRECIO UNIT.', 'DTO', 'VALOR TOTAL']],
         body: tableData,
-        theme: 'plain',
-        headStyles: { fillColor: [240, 240, 240], textColor: 0, fontStyle: 'bold', lineWidth: 0.5, lineColor: 0 },
-        bodyStyles: { lineWidth: 0.5, lineColor: 200 },
-        styles: { fontSize: 8, cellPadding: 3 },
+        theme: 'striped',
+        headStyles: {
+            fillColor: primaryNavy,
+            textColor: [255, 255, 255],
+            fontStyle: 'bold',
+            fontSize: 7.5,
+            cellPadding: 4,
+            halign: 'left',
+        },
+        bodyStyles: {
+            fontSize: 7.5,
+            cellPadding: 3.5,
+            textColor: textDark,
+            lineColor: borderLight,
+            lineWidth: 0.5,
+        },
+        alternateRowStyles: {
+            fillColor: [250, 252, 255],
+        },
         columnStyles: {
-            0: { cellWidth: 90 },
-            1: { cellWidth: 35, halign: 'center' },
-            2: { cellWidth: 'auto' },
-            3: { cellWidth: 70, halign: 'right' },
-            4: { cellWidth: 30, halign: 'center' },
-            5: { cellWidth: 70, halign: 'right' },
-        }
+            0: { cellWidth: 20, halign: 'center', textColor: textMuted },
+            1: { cellWidth: 95, fontStyle: 'bold', textColor: primaryNavy },
+            2: { cellWidth: 32, halign: 'center', fontStyle: 'bold' },
+            3: { cellWidth: 'auto' },
+            4: { cellWidth: 72, halign: 'right' },
+            5: { cellWidth: 30, halign: 'center' },
+            6: { cellWidth: 75, halign: 'right', fontStyle: 'bold', textColor: primaryNavy },
+        },
+        styles: {
+            overflow: 'linebreak',
+        },
     });
 
-    let finalY = (doc as any).lastAutoTable.finalY || y;
-    
-    // TOTALS SECTION
-    // Todos los precios de lista son sin IVA. El IVA (19%) se adiciona al final sobre el subtotal.
-    const { subtotal, iva, granTotal } = calculatePdfTotals(items, quote);
+    let finalY = (doc as any).lastAutoTable?.finalY || y;
+    finalY += 8;
 
-    const tFmt = new Intl.NumberFormat(quote.currency_id === 'USD' ? 'en-US' : 'es-CO');
-    
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'bold');
-    
-    // Cuadros de totales
-    const tw = 170;
-    const tx = pageWidth - margin - tw;
-    
-    doc.setDrawColor(0);
-    doc.rect(tx, finalY, tw, 15);
-    doc.text('SUBTOTAL', tx + 5, finalY + 11);
-    doc.text(tFmt.format(subtotal), tx + tw - 5, finalY + 11, { align: 'right' });
-    
-    doc.rect(tx, finalY + 15, tw, 15);
-    doc.text('IVA 19%', tx + 5, finalY + 26);
-    doc.text(tFmt.format(iva), tx + tw - 5, finalY + 26, { align: 'right' });
-    
-    doc.rect(tx, finalY + 30, tw, 15);
-    doc.text('GRAN TOTAL', tx + 5, finalY + 41);
-    doc.text(tFmt.format(granTotal), tx + tw - 5, finalY + 41, { align: 'right' });
+    // ─────────────────────────────────────────────────────────────
+    // 5. SECCIÓN DE TOTALES Y PAGO
+    // ─────────────────────────────────────────────────────────────
+    const { subtotalBruto, descuentoTotal, subtotal, iva, granTotal } = calculatePdfTotals(items, quote);
+    const hasDiscount = descuentoTotal > 0;
+    const boxH = hasDiscount ? 74 : 58;
 
-    // BANCOLOMBIA text
+    // Caja Bancaria (Izquierda)
+    const bankBoxW = 310;
+    const bankBoxH = boxH;
+    doc.setFillColor(...bgLight);
+    doc.setDrawColor(...borderLight);
+    doc.setLineWidth(0.75);
+    doc.roundedRect(margin, finalY, bankBoxW, bankBoxH, 3, 3, 'FD');
+
     doc.setFontSize(7);
-    doc.setFont('helvetica', 'normal');
-    const paymentText = "Favor consignar en BANCOLOMBIA (Corriente) 008927404-01 Recaudo 34368 ó Banco Bogotá (Corriente) 406-007-252 cod. Recaudo 008617 y dar aviso al fax (4)2817607 o al email cartera@firplak.com con copia a su asesor.";
-    doc.text(doc.splitTextToSize(paymentText, 300), margin, finalY + 15);
-    
-    finalY += 60;
-    doc.setFontSize(9);
     doc.setFont('helvetica', 'bold');
-    doc.text('VALIDEZ DE LA OFERTA 15 DÍAS HABILES', margin, finalY);
-    finalY += 20;
+    doc.setTextColor(...primaryNavy);
+    doc.text('FORMA DE PAGO & CONSIGNACIÓN', margin + 6, finalY + 11);
 
-    // PLANOS PARA HIDROMASAJES
-    doc.setFillColor(230, 230, 230);
-    doc.rect(margin, finalY - 10, pageWidth - margin * 2, 14, 'F');
-    doc.text('PLANOS PARA HIDROMASAJES', margin + 2, finalY);
-    finalY += 15;
-    
-    doc.setFontSize(8);
-    if (quote.planos_hidromasaje) {
-        doc.setFont('helvetica', 'normal');
-        const splitPlanos = doc.splitTextToSize(quote.planos_hidromasaje, pageWidth - margin * 2);
-        doc.text(splitPlanos, margin, finalY);
-        finalY += (splitPlanos.length * 10) + 5;
-    } else {
-        autoTable(doc, {
-            startY: finalY,
-            head: [['REFERENCIA SAP', 'CANT.', 'DESCRIPCION', 'POSICIÓN DE FALDÓN']],
-            body: [['', '', '', '']],
-            theme: 'plain',
-            headStyles: { fillColor: [240, 240, 240], textColor: 0, fontStyle: 'bold', lineWidth: 0.5, lineColor: 0 },
-            bodyStyles: { lineWidth: 0.5, lineColor: 200, minCellHeight: 20 },
-            styles: { fontSize: 8, cellPadding: 3 },
-        });
-        finalY = (doc as any).lastAutoTable.finalY || finalY;
-    }
-    
-    finalY = (doc as any).lastAutoTable.finalY || finalY;
-    finalY += 15;
-
-    doc.setFontSize(9);
+    doc.setFontSize(6.5);
     doc.setFont('helvetica', 'normal');
-    doc.text(`Fecha de entrega: ${quote.fecha_entrega ? format(new Date(quote.fecha_entrega), "dd/MM/yyyy") : ''}`, margin, finalY);
-    finalY += 15;
-    doc.text(`Fecha minima requerida por comercial/cliente: ${quote.fecha_minima_requerida || ''}`, margin, finalY);
-    finalY += 15;
-    
+    doc.setTextColor(...textDark);
+    doc.text('• BANCOLOMBIA Cta Cte: 008927404-01  |  Convenio Recaudo: 34368', margin + 6, finalY + (hasDiscount ? 23 : 22));
+    doc.text('• BANCO DE BOGOTÁ Cta Cte: 406-007-252  |  Código Recaudo: 008617', margin + 6, finalY + (hasDiscount ? 34 : 31));
+    doc.setTextColor(...textMuted);
+    doc.text('Enviar soporte al email cartera@firplak.com con copia a su asesor comercial.', margin + 6, finalY + (hasDiscount ? 46 : 41));
+
+    doc.setFontSize(7);
     doc.setFont('helvetica', 'bold');
-    doc.text(`NOTAS: ${quote.notas_sap || ''}`, margin, finalY);
-    finalY += 15;
-    
-    if (quote.comentarios) {
+    doc.setTextColor(...secondaryBlue);
+    doc.text('VALIDEZ DE LA OFERTA: 15 DÍAS HÁBILES', margin + 6, finalY + (hasDiscount ? 64 : 52));
+
+    // Caja de Totales (Derecha)
+    const totalsW = 185;
+    const totalsH = boxH;
+    const totalsX = pageWidth - margin - totalsW;
+
+    doc.setFillColor(...bgLight);
+    doc.setDrawColor(...borderLight);
+    doc.setLineWidth(0.75);
+    doc.roundedRect(totalsX, finalY, totalsW, totalsH, 3, 3, 'FD');
+
+    if (hasDiscount) {
+        // Fila 1: Subtotal Bruto sin IVA
+        doc.setFontSize(7);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(...textMuted);
+        doc.text('SUBTOTAL (SIN IVA)', totalsX + 8, finalY + 12);
         doc.setFont('helvetica', 'normal');
+        doc.setTextColor(...textDark);
+        doc.text(`${isUSD ? 'USD $' : '$'} ${currencyFormatter.format(subtotalBruto)}`, totalsX + totalsW - 8, finalY + 12, { align: 'right' });
+
+        // Fila 2: Descuento Comercial en pesos
+        doc.setFontSize(7);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(22, 163, 74); // Verde oscuro #16A34A
+        doc.text('DESCUENTO COMERCIAL', totalsX + 8, finalY + 23);
+        doc.text(`-${isUSD ? 'USD $' : '$'} ${currencyFormatter.format(descuentoTotal)}`, totalsX + totalsW - 8, finalY + 23, { align: 'right' });
+
+        // Fila 3: Subtotal Neto sin IVA
+        doc.setFontSize(7);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(...textMuted);
+        doc.text('SUBTOTAL NETO (SIN IVA)', totalsX + 8, finalY + 34);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(...textDark);
+        doc.text(`${isUSD ? 'USD $' : '$'} ${currencyFormatter.format(subtotal)}`, totalsX + totalsW - 8, finalY + 34, { align: 'right' });
+
+        // Fila 4: IVA
+        doc.setFontSize(7);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(...textMuted);
+        doc.text(isUSD ? 'IVA (0% Exportación)' : 'IVA (19%)', totalsX + 8, finalY + 45);
+        doc.setTextColor(...textDark);
+        doc.text(`${isUSD ? 'USD $' : '$'} ${currencyFormatter.format(iva)}`, totalsX + totalsW - 8, finalY + 45, { align: 'right' });
+
+        // Barra destacada Gran Total con IVA
+        doc.setFillColor(...primaryNavy);
+        doc.rect(totalsX, finalY + 52, totalsW, 22, 'F');
         doc.setFontSize(8);
-        const splitComentarios = doc.splitTextToSize(`OBSERVACIONES: ${quote.comentarios}`, pageWidth - margin * 2);
-        doc.text(splitComentarios, margin, finalY);
-        finalY += (splitComentarios.length * 10) + 5;
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(255, 255, 255);
+        doc.text('GRAN TOTAL (CON IVA)', totalsX + 8, finalY + 66);
+        doc.setFontSize(9.5);
+        doc.text(`${isUSD ? 'USD $' : '$'} ${currencyFormatter.format(granTotal)}`, totalsX + totalsW - 8, finalY + 66.5, { align: 'right' });
+    } else {
+        // Fila Subtotal sin IVA
+        doc.setFontSize(7.5);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(...textMuted);
+        doc.text('SUBTOTAL (SIN IVA)', totalsX + 8, finalY + 13);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(...textDark);
+        doc.text(`${isUSD ? 'USD $' : '$'} ${currencyFormatter.format(subtotal)}`, totalsX + totalsW - 8, finalY + 13, { align: 'right' });
+
+        // Fila IVA
+        doc.setFontSize(7.5);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(...textMuted);
+        doc.text(isUSD ? 'IVA (0% Exportación)' : 'IVA (19%)', totalsX + 8, finalY + 26);
+        doc.setTextColor(...textDark);
+        doc.text(`${isUSD ? 'USD $' : '$'} ${currencyFormatter.format(iva)}`, totalsX + totalsW - 8, finalY + 26, { align: 'right' });
+
+        // Barra destacada Gran Total con IVA
+        doc.setFillColor(...primaryNavy);
+        doc.rect(totalsX, finalY + 35, totalsW, 23, 'F');
+        doc.setFontSize(8.5);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(255, 255, 255);
+        doc.text('GRAN TOTAL (CON IVA)', totalsX + 8, finalY + 49.5);
+        doc.setFontSize(10);
+        doc.text(`${isUSD ? 'USD $' : '$'} ${currencyFormatter.format(granTotal)}`, totalsX + totalsW - 8, finalY + 50, { align: 'right' });
     }
-    
-    finalY += 10;
 
-    doc.setFontSize(7);
-    doc.setFont('helvetica', 'normal');
-    const legalText = `Con la firma o aceptación de este documento (vía e-mail), usted nos autoriza para tratar sus datos personales de acuerdo con la Ley Colombiana 1581 de 2012 "Protección de Datos Personales" y con nuestra política de tratamiento de datos personales. Conozca esta política y los mecanismos para ejercer sus derechos en http://www.firplak.com/privacy_policies`;
-    doc.text(doc.splitTextToSize(legalText, pageWidth - margin * 2), margin, finalY);
-    finalY += 35;
+    finalY += boxH + 10;
 
-    // Obtener nombre del asesor
-    let displayAdvisorName = advisorName || opportunity?.owner_user_id || 'Generado desde CRM';
-    
-    // Solo buscamos si no se nos pasó ya el nombre para evitar retrasos asíncronos que bloquean el nombre del archivo en Chrome
+    // ─────────────────────────────────────────────────────────────
+    // 6. PLANOS / OBSERVACIONES / ESPECIFICACIONES TÉCNICAS
+    // ─────────────────────────────────────────────────────────────
+    if (quote?.planos_hidromasaje || quote?.notas_sap || quote?.comentarios) {
+        const obsH = 44;
+        doc.setFillColor(...bgLight);
+        doc.setDrawColor(...borderLight);
+        doc.setLineWidth(0.75);
+        doc.roundedRect(margin, finalY, contentWidth, obsH, 3, 3, 'FD');
+
+        doc.setFillColor(...bgHeader);
+        doc.rect(margin, finalY, contentWidth, 12, 'F');
+        doc.setFontSize(7);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(...primaryNavy);
+        doc.text('OBSERVACIONES Y CONDICIONES ESPECÍFICAS', margin + 6, finalY + 8.5);
+
+        let oy = finalY + 20;
+        doc.setFontSize(7);
+        if (quote?.fecha_entrega) {
+            doc.setFont('helvetica', 'bold');
+            doc.setTextColor(...textDark);
+            doc.text(`Fecha estimada de entrega: ${format(new Date(quote.fecha_entrega), "dd/MM/yyyy")}`, margin + 6, oy);
+            oy += 9;
+        }
+        if (quote?.notas_sap) {
+            doc.setFont('helvetica', 'normal');
+            doc.setTextColor(...textDark);
+            doc.text(`Notas SAP: ${quote.notas_sap.substring(0, 110)}`, margin + 6, oy);
+            oy += 9;
+        }
+        if (quote?.comentarios) {
+            doc.setFont('helvetica', 'normal');
+            doc.setTextColor(...textMuted);
+            doc.text(`Comentarios: ${quote.comentarios.substring(0, 110)}`, margin + 6, oy);
+        }
+        finalY += obsH + 10;
+    } else {
+        finalY += 5;
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // 7. FIRMAS Y ACEPTACIÓN DEL DOCUMENTO
+    // ─────────────────────────────────────────────────────────────
+    // Obtener nombre del asesor comercial
+    let displayAdvisorName = advisorName || opportunity?.owner_user_id || 'Asesor Firplak';
     if (!advisorName && opportunity?.owner_user_id) {
         try {
             const { supabase } = await import('@/lib/supabase');
@@ -337,7 +603,7 @@ export async function generateQuotePdf(quote: any, items: any[], account: any, o
                 .select('full_name')
                 .eq('id', opportunity.owner_user_id)
                 .single();
-            
+
             if (userData?.full_name) {
                 displayAdvisorName = userData.full_name;
             }
@@ -346,27 +612,104 @@ export async function generateQuotePdf(quote: any, items: any[], account: any, o
         }
     }
 
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'bold');
-    doc.text(`ACEPTADO : _____________________________`, margin, finalY);
-    doc.text(`ASESOR : ${displayAdvisorName}`, 300, finalY);
-    finalY += 15;
-    doc.text(`CC./NIT No.                       Contacto : ${account?.telefono || ''}`, margin, finalY);
-    finalY += 30;
+    const signCardW = (contentWidth - cardGap) / 2;
+    const signCardH = 44;
+    const signLeftX = margin;
+    const signRightX = margin + signCardW + cardGap;
 
-    // FOOTER
-    doc.setFontSize(8);
-    doc.text(`SOMOS AUTORRETENEDORES RES. 64 de MAYO 3 DE 1995`, pageWidth / 2, finalY, { align: 'center' });
-    finalY += 10;
+    // Caja Firma Cliente
+    doc.setDrawColor(...borderLight);
+    doc.setFillColor(...bgLight);
+    doc.roundedRect(signLeftX, finalY, signCardW, signCardH, 3, 3, 'FD');
+    
+    doc.setFontSize(6.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...textMuted);
+    doc.text('ACEPTADO POR EL CLIENTE', signLeftX + 6, finalY + 9);
+    
+    doc.setDrawColor(...textMuted);
+    doc.setLineWidth(0.5);
+    doc.line(signLeftX + 6, finalY + 28, signLeftX + signCardW - 6, finalY + 28);
+    
+    doc.setFontSize(6.5);
     doc.setFont('helvetica', 'normal');
-    doc.text(`Autopista Sur, Calle 29 No. 41-15 Itagui – Antioquia. PBX 444 17 71. Fax. 281 76 07. www.firplak.com`, pageWidth / 2, finalY, { align: 'center' });
+    doc.setTextColor(...textDark);
+    doc.text(`Firma / C.C. o NIT: ____________________  Fecha: ___/___/______`, signLeftX + 6, finalY + 38);
+
+    // Caja Firma Asesor Firplak
+    doc.setDrawColor(...borderLight);
+    doc.setFillColor(...bgLight);
+    doc.roundedRect(signRightX, finalY, signCardW, signCardH, 3, 3, 'FD');
+
+    doc.setFontSize(6.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...primaryNavy);
+    doc.text('FIRPLAK S.A.S. - ASESOR COMERCIAL', signRightX + 6, finalY + 9);
+
+    doc.setFontSize(7.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...textDark);
+    doc.text(displayAdvisorName, signRightX + 6, finalY + 22);
+
+    doc.setFontSize(6.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...textMuted);
+    doc.text(`Contacto Asesor / PBX: (604) 444 17 71`, signRightX + 6, finalY + 33);
+    doc.text(`Email: cartera@firplak.com • www.firplak.com`, signRightX + 6, finalY + 41);
+
+    finalY += signCardH + 10;
+
+    // ─────────────────────────────────────────────────────────────
+    // 8. TEXTO LEGAL Y PIE DE PÁGINA
+    // ─────────────────────────────────────────────────────────────
+    doc.setFontSize(5.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...textMuted);
+    const legalText = 'Con la firma o aceptación de este documento (vía e-mail), usted nos autoriza para tratar sus datos personales de acuerdo con la Ley Colombiana 1581 de 2012 "Protección de Datos Personales" y nuestra política disponible en www.firplak.com/privacy_policies.';
+    doc.text(legalText, pageWidth / 2, finalY, { align: 'center', maxWidth: contentWidth });
+
+    finalY += 9;
+    doc.setFontSize(6.5);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...primaryNavy);
+    doc.text('SOMOS AUTORRETENEDORES RES. 64 DE MAYO 3 DE 1995', pageWidth / 2, finalY, { align: 'center' });
+
+    finalY += 8;
+    doc.setFontSize(6);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...textMuted);
+    doc.text('Autopista Sur, Calle 29 No. 41-15 Itagüí – Antioquia • PBX: (604) 444 17 71 • Fax: (604) 281 76 07 • www.firplak.com', pageWidth / 2, finalY, { align: 'center' });
+
+    return doc;
+}
+
+export async function generateQuotePdfBlob(
+    quote: any,
+    items: any[],
+    account: any,
+    opportunity: any,
+    advisorName?: string
+): Promise<Blob> {
+    const doc = await buildQuotePdfDoc(quote, items, account, opportunity, advisorName);
+    const pdfArrayBuffer = doc.output('arraybuffer');
+    return new Blob([pdfArrayBuffer], { type: 'application/pdf' });
+}
+
+export async function generateQuotePdf(
+    quote: any,
+    items: any[],
+    account: any,
+    opportunity: any,
+    save = true,
+    advisorName?: string
+): Promise<string | void> {
+    const doc = await buildQuotePdfDoc(quote, items, account, opportunity, advisorName);
 
     if (save) {
-        // Obtenemos los datos como ArrayBuffer para mayor compatibilidad con File System API
         const pdfArrayBuffer = doc.output('arraybuffer');
         const safeFileName = `Cotizacion_${(quote.numero_cotizacion || 'Borrador').toString().replace(/[/\\?%*:|"<>]/g, '_')}.pdf`;
 
-        // Intentar usar File System Access API (Nativo de Chrome, evita problemas de nombres UUID)
+        // Intentar usar File System Access API si está disponible
         if (typeof window !== 'undefined' && 'showSaveFilePicker' in window) {
             try {
                 const handle = await (window as any).showSaveFilePicker({
@@ -381,19 +724,15 @@ export async function generateQuotePdf(quote: any, items: any[], account: any, o
                 await writable.close();
                 return;
             } catch (err: any) {
-                // Si el usuario cancela el diálogo, no hacemos nada
                 if (err.name === 'AbortError') return;
-                console.warn('showSaveFilePicker no disponible o falló, usando fallback:', err);
+                console.warn('showSaveFilePicker no disponible o cancelado, usando fallback:', err);
             }
         }
-        
-        // Fallback tradicional si la API no está disponible (ej. navegadores antiguos o no-Chrome)
+
+        // Fallback tradicional
         const blob = new Blob([pdfArrayBuffer], { type: 'application/pdf' });
         saveAs(blob, safeFileName);
     } else {
-        // En lugar de guardar, retornamos el contenido en base64 (string)
-        // doc.output('datauristring') devuelve algo como "data:application/pdf;filename=generated.pdf;base64,JVBER..."
-        // Para Graph API, generalmente enviamos solo el base64 sin el prefijo "data:..."
         const dataUriString = doc.output('datauristring');
         const base64Content = dataUriString.split(',')[1];
         return base64Content;

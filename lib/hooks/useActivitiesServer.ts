@@ -64,7 +64,7 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
     }, [userRole, currentUserId]);
 
     const fetchActivities = useCallback(async (isLoadMore = false) => {
-        if (!currentUserId) return; // Wait for user
+        if (!currentUserId || !userRole) return; // Wait for user and role
 
         const setIsLoadingData = useSyncStore.getState().setIsLoadingData;
         setLoading(true);

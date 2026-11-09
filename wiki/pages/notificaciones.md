@@ -20,6 +20,7 @@ completó N días después de su vencimiento (N configurable, 0 = el mismo día)
 
 - La evaluación corre en la Edge Function `check-overdue-activities` (Supabase),
   programada por cron (configuración en `docs/CONFIGURACION_CRON_NOTIFICACIONES.md`).
+- **Destinatario estricto:** La notificación se genera para el usuario asignado a la actividad (`activity.user_id`), nunca para el dueño de la oportunidad si son distintos (`20261105120000_fix_check_overdue_activities_assigned_user.sql`). Esto previene que actividades vencidas del setter alarmen a los asesores comerciales en B2C. En el cliente, `useNotifications.ts` aplica `shouldShowActivityNotification()` como salvaguarda adicional.
 
 ## Implementación
 

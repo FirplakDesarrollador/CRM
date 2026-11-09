@@ -509,13 +509,10 @@ function ActivitiesContent() {
         const filtered = sourceActivities.filter(act => {
             if (act.is_deleted) return false;
 
-            // Apply role-based filtering: VENDEDOR and similar roles only see their own activities or those of opportunities they collaborate on
+            // Apply role-based filtering: VENDEDOR and similar roles only see their own activities (setter or other users' activities are never shown to the advisor)
             if (!canViewAll) {
                 if (!effectiveUserId) return false; // Prevent leak if identity is genuinely unknown
-                
-                const isOwner = act.user_id === effectiveUserId;
-                const isCollaborator = act.opportunity_id ? collaborativeOppIds.has(act.opportunity_id) : false;
-                if (!isOwner && !isCollaborator) {
+                if (act.user_id !== effectiveUserId) {
                     return false;
                 }
             }
@@ -596,10 +593,8 @@ function ActivitiesContent() {
         today.setHours(0, 0, 0, 0);
         const effectiveUserId = user?.id || activeUserId;
         return sourceActivities.filter(act => {
-            if (!canViewAll && effectiveUserId) {
-                const isOwner = act.user_id === effectiveUserId;
-                const isCollaborator = act.opportunity_id ? collaborativeOppIds.has(act.opportunity_id) : false;
-                if (!isOwner && !isCollaborator) return false;
+            if (!canViewAll) {
+                if (!effectiveUserId || act.user_id !== effectiveUserId) return false;
             }
             if (act.is_completed) return false;
             if (act.is_deleted) return false;

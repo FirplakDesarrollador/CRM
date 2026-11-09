@@ -3,7 +3,7 @@
 import { usePedidos } from "@/lib/hooks/usePedidos";
 import { LocalCuenta, LocalOportunidad, LocalQuote, db } from "@/lib/db";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Plus, Edit2, AlertCircle, Trash2, Receipt, Calendar, Truck, Send, Download, Mail, Loader2 } from "lucide-react";
+import { Plus, Edit2, AlertCircle, Trash2, Receipt, Calendar, Truck, Send, Download, Mail, Loader2, Eye, FileSpreadsheet } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { cn } from "@/components/ui/utils";
@@ -11,9 +11,12 @@ import { useFormAutoSave } from "@/lib/hooks/useFormAutoSave";
 import { AutoSaveIndicator } from "@/components/ui/AutoSaveIndicator";
 import { syncEngine } from "@/lib/sync";
 import { SendQuoteModal } from "@/components/quotes/SendQuoteModal";
+import { QuotePreviewModal } from "@/components/quotes/QuotePreviewModal";
 import { generateQuotePdf } from "@/lib/pdfGenerator";
+import { generateQuoteExcel } from "@/lib/quoteExcelGenerator";
 import {
     buildPedidoDocumentData,
+    canDownloadPedidoPdf,
     getMissingPedidoFormalizationFields,
     PedidoDocumentItem,
     PedidoWithItems,
@@ -50,6 +53,7 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
     const [editingUuid, setEditingUuid] = useState<string | null>(null);
     const [preparingPedidoUuid, setPreparingPedidoUuid] = useState<string | null>(null);
     const [sendContext, setSendContext] = useState<PedidoFormalizationContext | null>(null);
+    const [previewContext, setPreviewContext] = useState<PedidoFormalizationContext | null>(null);
 
     const quoteItems = useLiveQuery(() => db.quoteItems.where('cotizacion_id').equals(quote.id).toArray(), [quote.id]);
     const opp = useLiveQuery(() => db.opportunities.get(quote.opportunity_id), [quote.opportunity_id]);
@@ -64,11 +68,18 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
 
     const isWinner = opp?.status === 'WINNER' || quote.status === 'WINNER';
 
-    const prepareFormalizationContext = async (pedido: PedidoWithItems) => {
-        const missingFields = getMissingPedidoFormalizationFields(pedido);
-        if (missingFields.length > 0) {
-            alert(`No es posible generar o enviar la cotización formal hasta completar el pedido:\n\n• ${missingFields.join('\n• ')}`);
+    const prepareFormalizationContext = async (pedido: PedidoWithItems, requireFullFormalization = false) => {
+        if (!canDownloadPedidoPdf(pedido)) {
+            alert("El pedido debe tener al menos un producto con cantidad mayor a 0 para generar el documento.");
             return null;
+        }
+
+        if (requireFullFormalization) {
+            const missingFields = getMissingPedidoFormalizationFields(pedido);
+            if (missingFields.length > 0) {
+                alert(`No es posible enviar la cotización formal hasta completar el pedido:\n\n• ${missingFields.join('\n• ')}`);
+                return null;
+            }
         }
 
         setPreparingPedidoUuid(pedido.uuid_generado);
@@ -120,7 +131,7 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
     };
 
     const handleDownloadPdf = async (pedido: PedidoWithItems) => {
-        const context = await prepareFormalizationContext(pedido);
+        const context = await prepareFormalizationContext(pedido, false);
         if (!context) return;
 
         await generateQuotePdf(
@@ -133,8 +144,26 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
         );
     };
 
+    const handlePreviewPedido = async (pedido: PedidoWithItems) => {
+        const context = await prepareFormalizationContext(pedido, false);
+        if (context) setPreviewContext(context);
+    };
+
+    const handleDownloadExcel = async (pedido: PedidoWithItems) => {
+        const context = await prepareFormalizationContext(pedido, false);
+        if (!context) return;
+
+        await generateQuoteExcel(
+            context.quote,
+            context.quoteItems,
+            context.account,
+            context.opportunity,
+            context.advisorName,
+        );
+    };
+
     const handleSendQuote = async (pedido: PedidoWithItems) => {
-        const context = await prepareFormalizationContext(pedido);
+        const context = await prepareFormalizationContext(pedido, true);
         if (context) setSendContext(context);
     };
 
@@ -186,6 +215,7 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
                     {pedidosCollection.map(ped => {
                         const missingFormalizationFields = getMissingPedidoFormalizationFields(ped);
                         const canFormalize = missingFormalizationFields.length === 0;
+                        const canDownloadPdf = canDownloadPedidoPdf(ped);
                         const isPreparing = preparingPedidoUuid === ped.uuid_generado;
 
                         return (
@@ -205,7 +235,7 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
                                 </div>
                                 {!canFormalize && (
                                     <p className="mt-2 max-w-[220px] text-xs font-medium text-amber-700">
-                                        Completa el pedido para habilitar el PDF y el envío formal.
+                                        Completa el pedido para habilitar el envío formal.
                                     </p>
                                 )}
                             </div>
@@ -253,13 +283,33 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
                             <div className="flex flex-wrap items-center gap-2">
                                 <button
                                     type="button"
+                                    onClick={() => handlePreviewPedido(ped)}
+                                    className="flex items-center gap-1.5 p-2 border rounded border-slate-200 text-slate-700 hover:bg-slate-50 transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+                                    title={canDownloadPdf ? "Previsualizar documento" : "Vincula al menos un producto con cantidad"}
+                                    disabled={!canDownloadPdf || isPreparing}
+                                >
+                                    <Eye className="w-4 h-4 text-slate-600" />
+                                    <span className="text-sm font-medium hidden sm:inline">Ver</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => handleDownloadExcel(ped)}
+                                    className="flex items-center gap-1.5 p-2 border rounded border-emerald-200 text-emerald-700 hover:bg-emerald-50 transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+                                    title={canDownloadPdf ? "Descargar cotización/pedido en Excel (.xlsx)" : "Vincula al menos un producto con cantidad"}
+                                    disabled={!canDownloadPdf || isPreparing}
+                                >
+                                    <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                                    <span className="text-sm font-medium hidden sm:inline">Excel</span>
+                                </button>
+                                <button
+                                    type="button"
                                     onClick={() => handleDownloadPdf(ped)}
-                                    className="flex items-center gap-2 p-2 border rounded border-blue-200 text-blue-700 hover:bg-blue-50 transition-colors disabled:cursor-not-allowed disabled:opacity-40"
-                                    title={canFormalize ? "Descargar cotización formal en PDF" : `Faltan: ${missingFormalizationFields.join(', ')}`}
-                                    disabled={!canFormalize || isPreparing}
+                                    className="flex items-center gap-1.5 p-2 border rounded border-blue-200 text-blue-700 hover:bg-blue-50 transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+                                    title={canDownloadPdf ? "Descargar cotización/pedido en PDF" : "Vincula al menos un producto con cantidad para generar el PDF"}
+                                    disabled={!canDownloadPdf || isPreparing}
                                 >
                                     {isPreparing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                                    <span className="text-sm font-medium">PDF</span>
+                                    <span className="text-sm font-medium hidden sm:inline">PDF</span>
                                 </button>
                                 <button
                                     type="button"
@@ -325,6 +375,22 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
                     opportunity={sendContext.opportunity}
                     quoteItems={sendContext.quoteItems}
                     advisorName={sendContext.advisorName}
+                />
+            )}
+
+            {previewContext && (
+                <QuotePreviewModal
+                    isOpen={!!previewContext}
+                    onClose={() => setPreviewContext(null)}
+                    quote={previewContext.quote}
+                    account={previewContext.account}
+                    opportunity={previewContext.opportunity}
+                    quoteItems={previewContext.quoteItems}
+                    advisorName={previewContext.advisorName}
+                    onSendEmail={() => {
+                        const ped = pedidosCollection.find(p => p.uuid_generado === previewContext.quote.id);
+                        if (ped) handleSendQuote(ped);
+                    }}
                 />
             )}
         </div>

@@ -21,6 +21,7 @@ import {
     ListTodo,
 } from "lucide-react";
 import { useActivities, LocalActivity } from "@/lib/hooks/useActivities";
+import { activitiesVisibleToViewer } from "@/lib/sellerVisibility";
 import { hydrateOpportunityActivities } from "@/lib/serverHydration";
 import { CreateActivityModal } from "@/components/activities/CreateActivityModal";
 import { useActivityFollowUp } from "@/components/activities/ActivityFollowUp";
@@ -1899,7 +1900,8 @@ function ActivitiesTab({ opportunityId, accountId }: { opportunityId: string, ac
         else resetFollowUp(act.id);
     };
 
-    const sortedActivities = activities?.sort((a, b) => new Date(b.fecha_inicio).getTime() - new Date(a.fecha_inicio).getTime());
+    const visibleActivities = activitiesVisibleToViewer(activities, viewerRole, viewerId);
+    const sortedActivities = visibleActivities.slice().sort((a, b) => new Date(b.fecha_inicio).getTime() - new Date(a.fecha_inicio).getTime());
 
     // Catalogs
     const classifications = useLiveQuery(() => db.activityClassifications.toArray().then(arr => arr.filter(c => !c.is_deleted)), []) || [];

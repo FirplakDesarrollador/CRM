@@ -39,22 +39,20 @@ formas/términos de pago, orden de compra, ¿es muestra?, ¿aplica contrato?, mu
 incumplimiento, etc. La integración se encola en `CRM_SapIntegrationQueue`
 (ver [[integraciones]]).
 
-## Generación de PDF (formato F-V-29)
+## Generación de PDF y Excel (formato F-V-29)
 
-`lib/pdfGenerator.ts` (jspdf + autotable) genera el PDF de cotización. La migración
+`lib/pdfGenerator.ts` (jspdf + autotable) y `lib/quoteExcelGenerator.ts` (exceljs) generan los documentos oficiales de cotización y pedido. La migración
 `20260429_add_pdf_fields_to_quotes_and_orders` añadió campos del formato F-V-29:
 cliente final y su NIT, contactos (ventas/logístico/tesorería), condiciones de entrega
 (piso, escaleras, servicio de subida de hidromasaje, entrega en obra, bodega externa/Firplak),
 planos de hidromasaje, fecha de entrega.
 
-La descarga del PDF y el envío por correo viven en las acciones de cada pedido dentro
-del submódulo **Pedido**. No están disponibles desde el encabezado general de la
-cotización. Antes de habilitarlas, `getMissingPedidoFormalizationFields` verifica los
-nueve datos obligatorios y que el pedido tenga productos con cantidades válidas. El
-documento usa las cantidades parciales, descuentos, total y datos logísticos del pedido
-seleccionado.
-
-- **Cálculo de Precios e IVA en PDF (`calculatePdfItemRow` y `calculatePdfTotals`):** Todos los precios de lista son base neta sin IVA (`VALOR UNITARIO` = precio de lista exacto sin deducciones). El valor total de cada línea es el subtotal tras aplicar el porcentaje de descuento (`DTO`). El `SUBTOTAL` del documento corresponde a la suma de los valores totales netos de las líneas. El `IVA 19%` se adiciona al final tras el descuento (`subtotal * 0.19` en COP; 0 en exportación USD). El `GRAN TOTAL` equivale a `SUBTOTAL + IVA`.
+- **Previsualización interactiva (`QuotePreviewModal.tsx`):**
+  Tanto en el encabezado general del editor de cotizaciones (`QuoteEditorPage`) como en cada pedido vinculado (`PedidosList`), el botón **Previsualizar** (o «Ver») abre un modal en pantalla con el visor embebido del documento F-V-29 generado en memoria (`generateQuotePdfBlob`), permitiendo revisar los ítems, precios y totales antes de descargar o enviar. El diseño cuenta con maquetación ejecutiva, paleta de marca Firplak (Azul Marino `#1E3A4C`), tarjetas de cliente/despacho, tabla de ítems cebrada y el logotipo corporativo oficial de Firplak ("inspirando hogares"). Desde este mismo modal es posible descargar en PDF, descargar en Excel o disparar el envío por correo.
+- **Exportación a Excel (`lib/quoteExcelGenerator.ts`):**
+  Permite descargar la cotización en archivo `.xlsx` estructurado con la plantilla corporativa Firplak (cabecera F-V-29, datos de cliente/asesor, tabla de ítems con formato de moneda, y desglose de subtotales e impuestos).
+- **Cálculo de Precios e IVA en PDF y Excel (`calculatePdfItemRow` y `calculatePdfTotals`):**
+  Todos los precios de lista son base neta sin IVA (`VALOR UNITARIO` = precio de lista exacto sin deducciones). El valor total de cada línea es el subtotal tras aplicar el porcentaje de descuento (`DTO`). El `SUBTOTAL` del documento corresponde a la suma de los valores totales netos de las líneas. El `IVA 19%` se adiciona al final tras el descuento (`subtotal * 0.19` en COP; 0 en exportación USD). El `GRAN TOTAL` equivale a `SUBTOTAL + IVA`. Ambos generadores (PDF y Excel) comparten de manera estricta estas funciones puras.
 
 ## Campos Obligatorios para Guardar Pedido (Total o Parcial)
 
@@ -102,6 +100,6 @@ Al crear un nuevo pedido parcial (`!pedidoUuid`), el formulario de creación rec
 ## Fuentes
 
 - `app/oportunidades/[id]/cotizaciones/`, `app/pedidos/page.tsx`
-- `components/quotes/PedidosEditor.tsx`, `SendQuoteModal.tsx`
-- `lib/hooks/usePedidos.ts`, `useProducts.ts`, `lib/pdfGenerator.ts`, `lib/db.ts`, `lib/opportunityQuoteSync.ts`, `lib/quotePricing.ts`, `lib/pedidoHelpers.ts`
+- `components/quotes/PedidosEditor.tsx`, `SendQuoteModal.tsx`, `QuotePreviewModal.tsx`
+- `lib/hooks/usePedidos.ts`, `useProducts.ts`, `lib/pdfGenerator.ts`, `lib/quoteExcelGenerator.ts`, `lib/db.ts`, `lib/opportunityQuoteSync.ts`, `lib/quotePricing.ts`, `lib/pedidoHelpers.ts`
 - Migraciones: `20260109_add_es_pedido`, `20260113_volume_discounts`, `20260421_alterar_crm_pedidos`, `20260429_add_pdf_fields_to_quotes_and_orders`, `20260729_required_order_fields.sql`, `20260904193842_persist_crm_editable_fields.sql`, `20260914180000_add_pod_to_orders_and_quotes.sql`

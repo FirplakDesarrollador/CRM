@@ -192,7 +192,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
     // Phase IDs are read from refs (populated once on mount) to avoid triggering
     // a cascade of refetches when they resolve after initial load.
     const fetchOpportunities = useCallback(async (isLoadMore = false) => {
-        if (!currentUserId) return; // Wait for user
+        if (!currentUserId || !userRole) return; // Wait for user and role
         if (!phasesLoadedRef.current) return; // Wait for phases to load
 
         const setIsLoadingData = useSyncStore.getState().setIsLoadingData;
@@ -422,6 +422,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 const acc = accMap.get(item.account_id);
                 const ph = phaseMap.get(item.fase_id as number);
                 const itemActs = actsByOpp.get(item.id) || [];
+                const visibleActs = activitiesVisibleToViewer(itemActs, userRole, currentUserId);
                 const usr = userMap.get(item.owner_user_id || '');
                 return {
                     ...item,
@@ -429,8 +430,8 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                     fase_data: ph ? { nombre: ph.nombre } : null,
                     vendedor: usr ? { full_name: usr.full_name || usr.email } : null,
                     estado_data: null,
-                    actividades: itemActs,
-                    activity_summary: computeOpportunityActivitySummary(itemActs)
+                    actividades: visibleActs,
+                    activity_summary: computeOpportunityActivitySummary(visibleActs)
                 };
             });
 
@@ -763,10 +764,14 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 }));
             }
 
-            let combinedResults = [...pendingLocalOpps, ...(result as any[])].map((o: any) => ({
-                ...o,
-                activity_summary: computeOpportunityActivitySummary(activitiesVisibleToViewer<ActivityItem>(o.actividades, userRole, currentUserId))
-            }));
+            let combinedResults = [...pendingLocalOpps, ...(result as any[])].map((o: any) => {
+                const visibleActs = activitiesVisibleToViewer<ActivityItem>(o.actividades, userRole, currentUserId);
+                return {
+                    ...o,
+                    actividades: visibleActs,
+                    activity_summary: computeOpportunityActivitySummary(visibleActs)
+                };
+            });
             if (searchTerm && searchTerm.trim()) {
                 combinedResults = combinedResults.filter(o =>
                     (searchIsPhone && opportunityMatchesPhone(o, serverPhoneMatches)) ||

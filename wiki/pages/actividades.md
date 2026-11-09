@@ -39,8 +39,7 @@ visitas y eventos del equipo comercial. Pueden asociarse a [[oportunidades]] y a
 - Vencimiento: las actividades no completadas después de su fecha generan
   [[notificaciones]] de tipo `ACTIVITY_OVERDUE` (Edge Function
   `check-overdue-activities`, ejecutada por cron).
-- Visibilidad por rol: VENDEDOR solo las propias; COORDINADOR/ADMIN todas
-  (ver [[roles-y-permisos]]; RLS ajustado en `20260428_fix_activities_rls`).
+- Visibilidad por rol: VENDEDOR solo las propias (`user_id = currentUserId`); en canal B2C las actividades del setter nunca se atribuyen ni aparecen como vencidas para el asesor aunque este sea dueño o colaborador de la oportunidad o cuenta (`20261105120000_fix_check_overdue_activities_assigned_user.sql`, `lib/sellerVisibility.ts`). COORDINADOR/ADMIN ven todas (ver [[roles-y-permisos]]; RLS ajustado en `20260428_fix_activities_rls`).
 
 ## Notas operativas
 
