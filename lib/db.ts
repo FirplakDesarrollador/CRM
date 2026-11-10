@@ -169,6 +169,7 @@ export interface LocalQuoteItem {
     max_discount_pct?: number;
     final_unit_price?: number;
     descripcion_linea?: string;
+    is_deleted?: boolean;
     created_by?: string;
     updated_by?: string;
     updated_at?: string;

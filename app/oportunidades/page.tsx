@@ -72,6 +72,8 @@ function OpportunitiesContent() {
         setPhaseFilter,
         setStatusFilter,
         setOriginFilter,
+        setPlantaFilter,
+        setFamiliaFilter,
         setCountryFilter,
         setCityFilter,
         setStartDate,
@@ -262,6 +264,26 @@ function OpportunitiesContent() {
         return null;
     });
 
+    const [selectedPlanta, setSelectedPlanta] = useState<string | null>(() => {
+        const fromUrl = searchParams.get('planta');
+        if (fromUrl) return fromUrl;
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_oportunidades_state');
+            if (saved) return new URLSearchParams(saved).get('planta') || null;
+        }
+        return null;
+    });
+
+    const [selectedFamilia, setSelectedFamilia] = useState<string | null>(() => {
+        const fromUrl = searchParams.get('familia');
+        if (fromUrl) return fromUrl;
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_oportunidades_state');
+            if (saved) return new URLSearchParams(saved).get('familia') || null;
+        }
+        return null;
+    });
+
     // Synchronize initial & restored filter values from URL or sessionStorage to the server hook
     useEffect(() => {
         const savedState = typeof window !== 'undefined' ? sessionStorage.getItem('crm_oportunidades_state') : null;
@@ -285,6 +307,8 @@ function OpportunitiesContent() {
         const endClose = searchParams.get('endClose') || saved.get('endClose') || null;
         const initialCountry = searchParams.get('country') || saved.get('country') || null;
         const initialCity = searchParams.get('city') || saved.get('city') || null;
+        const initialPlanta = searchParams.get('planta') || saved.get('planta') || null;
+        const initialFamilia = searchParams.get('familia') || saved.get('familia') || null;
 
         setSearchTerm(initialSearch);
         setInputValue(initialSearch);
@@ -311,6 +335,10 @@ function OpportunitiesContent() {
         setStatusFilterState(initialStatus as any);
         setOriginFilter(initialOrigin);
         setSelectedOrigin(initialOrigin);
+        setPlantaFilter(initialPlanta);
+        setSelectedPlanta(initialPlanta);
+        setFamiliaFilter(initialFamilia);
+        setSelectedFamilia(initialFamilia);
         setStartDate(start);
         setStartDateState(start);
         setEndDate(end);
@@ -393,6 +421,12 @@ function OpportunitiesContent() {
         if (selectedOrigin) params.set('origin', selectedOrigin);
         else params.delete('origin');
 
+        if (selectedPlanta) params.set('planta', selectedPlanta);
+        else params.delete('planta');
+
+        if (selectedFamilia) params.set('familia', selectedFamilia);
+        else params.delete('familia');
+
         if (statusFilter && statusFilter !== 'open') params.set('status', statusFilter);
         else params.delete('status');
         
@@ -438,13 +472,15 @@ function OpportunitiesContent() {
         
         const query = queryString ? `?${queryString}` : window.location.pathname;
         router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
-    }, [tab, selectedAccountOwnerIds, selectedChannel, selectedSubclass, selectedSegment, selectedPhase, selectedOrigin, selectedCountry, selectedCity, statusFilter, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc, searchParams, router]); // Search is handled by the debounced effect above.
+    }, [tab, selectedAccountOwnerIds, selectedChannel, selectedSubclass, selectedSegment, selectedPhase, selectedOrigin, selectedPlanta, selectedFamilia, selectedCountry, selectedCity, statusFilter, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc, searchParams, router]); // Search is handled by the debounced effect above.
 
 
     const handleFilterChange = useCallback(({ 
         channelId, subclassificationId, segmentId, phaseId, statusFilter: newStatus,
         startDate: sD, endDate: eD, startClosingDate: sCD, endClosingDate: eCD,
-        origin: oG
+        origin: oG,
+        planta: pL,
+        familia: fM
     }: {
         channelId: string | null;
         subclassificationId: number | null;
@@ -456,6 +492,8 @@ function OpportunitiesContent() {
         startClosingDate: string | null;
         endClosingDate: string | null;
         origin: string | null;
+        planta?: string | null;
+        familia?: string | null;
     }) => {
         setSelectedChannel(channelId);
         setSelectedSubclass(subclassificationId);
@@ -467,6 +505,8 @@ function OpportunitiesContent() {
         setStartClosingDateState(sCD);
         setEndClosingDateState(eCD);
         setSelectedOrigin(oG);
+        setSelectedPlanta(pL || null);
+        setSelectedFamilia(fM || null);
         
         setChannelFilter(channelId);
         setSubclassificationFilter(subclassificationId);
@@ -478,7 +518,9 @@ function OpportunitiesContent() {
         setStartClosingDate(sCD);
         setEndClosingDate(eCD);
         setOriginFilter(oG);
-    }, [setChannelFilter, setSubclassificationFilter, setSegmentFilter, setPhaseFilter, setStatusFilter, setStartDate, setEndDate, setStartClosingDate, setEndClosingDate, setOriginFilter]);
+        setPlantaFilter(pL || null);
+        setFamiliaFilter(fM || null);
+    }, [setChannelFilter, setSubclassificationFilter, setSegmentFilter, setPhaseFilter, setStatusFilter, setStartDate, setEndDate, setStartClosingDate, setEndClosingDate, setOriginFilter, setPlantaFilter, setFamiliaFilter]);
 
     // PERF FIX: Stable callback references
     const handleTabChange = useCallback((newTab: 'mine' | 'collab' | 'all' | 'team' | 'web') => {
@@ -1045,6 +1087,8 @@ function OpportunitiesContent() {
                         initialPhaseId={selectedPhase}
                         initialStatusFilter={statusFilter}
                         initialOrigin={selectedOrigin}
+                        initialPlanta={selectedPlanta}
+                        initialFamilia={selectedFamilia}
                         initialDates={{
                             startDate,
                             endDate,

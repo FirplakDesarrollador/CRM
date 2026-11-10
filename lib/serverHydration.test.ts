@@ -8,8 +8,7 @@ let responses: Record<string, unknown[]> = {};
 function builder(table: string) {
     const call: Call = { table, ops: [] };
     calls.push(call);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mock encadenable del cliente de Supabase
-    const proxy: any = new Proxy({}, {
+    const proxy: unknown = new Proxy({}, {
         get(_t, prop: string) {
             if (prop === 'then') {
                 return (resolve: (v: unknown) => void) => {

@@ -1,15 +1,16 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
-import { syncEngine } from '@/lib/sync';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { db } from '@/lib/db';
 import { useSyncStore } from '@/lib/stores/useSyncStore';
 import { matchesSearchTokens, getSearchTokens, getPhoneIlikePatterns, accentInsensitiveCondition, applyAccentInsensitiveFilter } from '@/lib/utils';
 import { getCellphoneSearchDigits, findPhoneMatchesServer, findPhoneMatchesLocal, opportunityMatchesPhone, PhoneSearchMatches } from '@/lib/phoneSearch';
 import { computeOpportunityActivitySummary, OpportunityActivitySummary, ActivityItem } from '@/lib/opportunityActivities';
-import { PROSPECTO_PHASE_ID, getEquivalentPhaseIds, PhaseCatalogItem, calculateTotalAmount, computeProgressiveBatch, DEFAULT_OPPORTUNITIES_PAGE_SIZE } from '@/lib/opportunityColumnFilterHelpers';
+import { PROSPECTO_PHASE_ID, getEquivalentPhaseIds, PhaseCatalogItem, calculateTotalAmount, DEFAULT_OPPORTUNITIES_PAGE_SIZE } from '@/lib/opportunityColumnFilterHelpers';
 import { toStartOfDayISO, toEndOfDayISO } from '@/lib/dateFilterHelpers';
 import { activitiesVisibleToViewer, sellerCanSeeOpportunity, sellerOpportunityOrFilter } from '@/lib/sellerVisibility';
+import { FlatQuoteItemProduct, getOpportunityIdsByProductFilters } from '@/lib/opportunityProductFilterHelpers';
+import { fetchFullCatalog, PriceListProduct } from '@/lib/hooks/useProducts';
 
 export type OpportunityServer = {
     id: string;
@@ -84,6 +85,8 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
     });
     const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => (getInitialParam('status') as StatusFilter | null) || 'open');
     const [originFilter, setOriginFilter] = useState<string | null>(() => getInitialParam('origin'));
+    const [plantaFilter, setPlantaFilter] = useState<string | null>(() => getInitialParam('planta'));
+    const [familiaFilter, setFamiliaFilter] = useState<string | null>(() => getInitialParam('familia'));
     const [accountIdFilter, setAccountIdFilter] = useState<string | null>(null);
     const [countryFilter, setCountryFilter] = useState<number | null>(() => {
         const val = getInitialParam('country');
@@ -311,6 +314,39 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 }
             }
 
+            if (plantaFilter || familiaFilter) {
+                const allQuotes = await db.quotes.toArray();
+                const allQuoteItems = await db.quoteItems.toArray();
+                let catalog: PriceListProduct[] = [];
+                try {
+                    catalog = await fetchFullCatalog();
+                } catch {
+                    catalog = [];
+                }
+                const prodMap = new Map(catalog.map(p => [p.id, p]));
+                const quoteOppMap = new Map(allQuotes.map(q => [q.id, q.opportunity_id]));
+
+                const flatItems: FlatQuoteItemProduct[] = [];
+                for (const qi of allQuoteItems) {
+                    if (qi.is_deleted) continue;
+                    const oppId = quoteOppMap.get(qi.cotizacion_id);
+                    if (!oppId) continue;
+                    const prod = qi.producto_id ? prodMap.get(qi.producto_id) : null;
+                    flatItems.push({
+                        opportunity_id: oppId,
+                        planta: prod?.planta || null,
+                        familia: prod?.familia || null
+                    });
+                }
+
+                const matchingOppIds = new Set(getOpportunityIdsByProductFilters(flatItems, {
+                    planta: plantaFilter,
+                    familia: familiaFilter
+                }));
+
+                localOpps = localOpps.filter(o => matchingOppIds.has(o.id));
+            }
+
             if (startDate) {
                 const startISO = toStartOfDayISO(startDate);
                 localOpps = localOpps.filter(o => o.created_at && (!startISO || new Date(o.created_at) >= new Date(startISO)));
@@ -360,18 +396,18 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 } else if (userFilter === 'web') {
                     localOpps = localOpps.filter(o =>
                         Boolean((o.url_origen && o.url_origen.trim() !== '') ||
-                        (o.origen_oportunidad && (
-                            o.origen_oportunidad.toLowerCase().includes('web') ||
-                            o.origen_oportunidad.toLowerCase().includes('pagina') ||
-                            o.origen_oportunidad.toLowerCase().includes('página')
-                        )))
+                            (o.origen_oportunidad && (
+                                o.origen_oportunidad.toLowerCase().includes('web') ||
+                                o.origen_oportunidad.toLowerCase().includes('pagina') ||
+                                o.origen_oportunidad.toLowerCase().includes('página')
+                            )))
                     );
                 }
             }
 
             localOpps.sort((a, b) => {
-                let valA: any;
-                let valB: any;
+                let valA: string | number = '';
+                let valB: string | number = '';
 
                 if (sortField === 'nombre') {
                     valA = a.nombre || "";
@@ -505,6 +541,30 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 collabOppIds = Array.from(new Set((collabRows || []).map(row => row.oportunidad_id).filter(Boolean)));
             }
 
+            let matchedProductOppIds: string[] | null = null;
+            if (plantaFilter || familiaFilter) {
+                let quoteItemsQuery = supabase
+                    .from('CRM_CotizacionItems')
+                    .select('cotizacion:CRM_Cotizaciones!inner(opportunity_id), producto:CRM_ListaDePrecios!inner(planta, familia)')
+                    .eq('is_deleted', false);
+
+                if (plantaFilter) {
+                    quoteItemsQuery = quoteItemsQuery.eq('producto.planta', plantaFilter);
+                }
+                if (familiaFilter) {
+                    quoteItemsQuery = quoteItemsQuery.eq('producto.familia', familiaFilter);
+                }
+
+                const { data: quoteItemsData, error: qiError } = await quoteItemsQuery;
+                if (qiError) {
+                    console.warn('[useOpportunitiesServer] Error al filtrar por planta/familia:', qiError);
+                }
+                matchedProductOppIds = Array.from(new Set((quoteItemsData || []).map((it: { cotizacion?: { opportunity_id?: string } | Array<{ opportunity_id?: string }> | null }) => {
+                    const oppId = Array.isArray(it.cotizacion) ? it.cotizacion[0]?.opportunity_id : it.cotizacion?.opportunity_id;
+                    return oppId;
+                }).filter(Boolean))) as string[];
+            }
+
             const useInnerJoin = Boolean(channelFilter || subclassificationFilter || countryFilter || (cityFilter && cityFilter.trim() !== ''));
             const accountRelation = useInnerJoin ? 'account:CRM_Cuentas!inner(nombre, canal_id, subclasificacion_id, ciudad, pais_id)' : 'account:CRM_Cuentas(nombre, canal_id, subclasificacion_id, ciudad, pais_id)';
 
@@ -587,6 +647,14 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                         q = q.or('origen_oportunidad.ilike.%wp%,origen_oportunidad.ilike.%whatsapp%');
                     } else {
                         q = q.ilike('origen_oportunidad', `%${lowerOrigin}%`);
+                    }
+                }
+
+                if (matchedProductOppIds !== null) {
+                    if (matchedProductOppIds.length > 0) {
+                        q = q.in('id', matchedProductOppIds);
+                    } else {
+                        q = q.eq('id', '00000000-0000-0000-0000-000000000000');
                     }
                 }
 
@@ -817,7 +885,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
             setLoading(false);
             useSyncStore.getState().setIsLoadingData(false);
         }
-    }, [currentUserId, isVendedor, subordinateIds, pageSize, userFilter, searchTerm, accountIdFilter, accountOwnerIds, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, originFilter, countryFilter, cityFilter, phasesReady, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc]);
+    }, [currentUserId, isVendedor, subordinateIds, pageSize, userFilter, searchTerm, accountIdFilter, accountOwnerIds, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, originFilter, plantaFilter, familiaFilter, countryFilter, cityFilter, phasesReady, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc]);
 
     useEffect(() => {
         fetchOpportunities(false);
@@ -871,6 +939,10 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
         setStatusFilter,
         setOriginFilter,
         originFilter,
+        setPlantaFilter,
+        plantaFilter,
+        setFamiliaFilter,
+        familiaFilter,
         setAccountIdFilter,
         setCountryFilter,
         countryFilter,
