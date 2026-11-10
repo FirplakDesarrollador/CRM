@@ -3,6 +3,20 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-11-10 - Depuración Segura de Oportunidades Duplicadas (1.831 Registros)
+
+- **Requerimiento:** Procesar las recomendaciones del archivo `oportunidades_duplicadas_v2_recomendaciones.csv` para dar de baja las oportunidades redundantes marcadas como `ELIMINAR` sin perder auditoría ni historial comercial.
+- **Diagnóstico en Base de Datos:**
+  - De las 1.831 oportunidades sugeridas para eliminar, 1.626 ya se encontraban previamente en estado inactivo (`is_deleted = true`).
+  - Se identificaron 204 oportunidades que permanecían activas en el CRM.
+  - De las 204 activas, 190 eran copias vacías sin cotizaciones ni actividades. 14 oportunidades contaban con actividades o cotizaciones secundarias vinculadas.
+- **Acciones Ejecutadas:**
+  - Script [`execution/execute_safe_eliminar.mjs`](file:///c:/Users/analista2.desarrollo/Desktop/apps/CRM/execution/execute_safe_eliminar.mjs):
+    1. **Reasignación segura:** Las actividades y cotizaciones de los 14 registros fueron traspasadas hacia la oportunidad principal activa de su respectivo grupo (`CONSERVAR`).
+    2. **Borrado lógico:** Se aplicó `is_deleted = true` y `updated_at = NOW()` a las 204 oportunidades.
+    3. **Verificación:** Se confirmó 0 registros activos remanentes (`stillActiveCount = 0`). Las vistas de embudo y listados de los asesores quedan limpios y sincronizados.
+- **Páginas afectadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+
 ## 2026-11-09 - Diagnóstico y Unificación de Comentarios de vTiger (Casos Christian Alvarez)
 
 - **Requerimiento:** Analizar y solucionar el reporte presentado por Christian Álvarez Román respecto a 6 números de teléfono (`3158908746`, `3160489049`, `3148900111`, `3183701635`, `3176433925`, `3229081415`) donde manifestaba que *"no migraron en su totalidad los comentarios del CRM Dimarka"*.
