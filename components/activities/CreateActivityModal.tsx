@@ -21,6 +21,8 @@ import { AutoSaveIndicator } from "@/components/ui/AutoSaveIndicator";
 import { SearchableSelect } from "@/components/ui/SearchableSelect";
 import { isB2COnlyActivityClassification, userHasB2CAccess } from "@/lib/b2c";
 import { getRecentSubjects, rememberSubject, nextNumberedSubjects, uniqueSubjects } from "@/lib/activitySubjects";
+import { activityEntityHrefs } from "@/lib/activityModalLinks";
+import { hydrateActivityReferences } from "@/lib/serverHydration";
 
 interface CreateActivityModalProps {
     onClose: () => void;
@@ -267,6 +269,18 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
 
         fillAccount();
     }, [watchedOpportunityId, setValue]);
+
+    useEffect(() => {
+        const opportunityId = initialData?.opportunity_id || initialOpportunityId || '';
+        const accountId = initialData?.account_id || initialAccountId || '';
+        if (!opportunityId && !accountId) return;
+        let cancelled = false;
+        hydrateActivityReferences({ opportunity_id: opportunityId, account_id: accountId })
+            .catch(error => {
+                if (!cancelled) console.warn('[CreateActivityModal] no se pudo traer la cuenta o la oportunidad', error);
+            });
+        return () => { cancelled = true; };
+    }, [initialData?.opportunity_id, initialData?.account_id, initialOpportunityId, initialAccountId]);
 
     // Pre-resolve initial account name
     useEffect(() => {
@@ -1493,12 +1507,39 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         }
     }, [fechaInicio, tipo, setValue, isEditing, form.formState.dirtyFields.fecha_inicio, form.formState.dirtyFields.tipo_actividad]);
 
+    const entityHrefs = activityEntityHrefs({
+        opportunityId: watchedOpportunityId || initialOpportunityId || initialData?.opportunity_id,
+        accountId: watchedAccountId || initialAccountId || initialData?.account_id || relatedOpportunity?.account_id || opportunityAccountRef.current,
+    });
+
     return (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl md:rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col max-h-[95vh] md:max-h-[90vh]">
                 <div className="p-6 border-b border-slate-100 flex justify-between items-center shrink-0">
                     <div>
                         <h2 className="text-xl font-bold text-slate-900">{isEditing ? 'Editar Actividad' : 'Programar Actividad'}</h2>
+                        {(entityHrefs.accountHref || entityHrefs.opportunityHref) && (
+                            <div className="flex flex-wrap items-center gap-2 mt-2" data-testid="activity-entity-links">
+                                {entityHrefs.accountHref && (
+                                    <Link
+                                        href={entityHrefs.accountHref}
+                                        data-testid="activity-go-account"
+                                        className="inline-flex items-center rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700 hover:bg-blue-100 transition-colors"
+                                    >
+                                        Ir a la cuenta
+                                    </Link>
+                                )}
+                                {entityHrefs.opportunityHref && (
+                                    <Link
+                                        href={entityHrefs.opportunityHref}
+                                        data-testid="activity-go-opportunity"
+                                        className="inline-flex items-center rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700 hover:bg-blue-100 transition-colors"
+                                    >
+                                        Ir a la oportunidad
+                                    </Link>
+                                )}
+                            </div>
+                        )}
                         {relatedOpportunity && relatedAccount && (
                             <div className="flex items-center gap-1.5 mt-1 text-sm flex-wrap">
                                 <Link href={`/cuentas?id=${relatedAccount.id}`} className="text-blue-600 hover:underline font-semibold transition-colors">

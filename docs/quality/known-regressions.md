@@ -18,6 +18,7 @@ La memoria historica detallada continua en `bugs-knowhow.md`. Esta vista conecta
 | MCP devolvia fixtures como datos reales al faltar `SUPABASE_SERVICE_ROLE_KEY` y agenda sin paginacion | `docs/failures/2026-10-29-INC-2026-011.md`; `lib/mcp/database.ts`; `tests/crm-mcp.test.ts` | R1 | `product-tests` | VERIFIED enfocado: 2 RED por causa esperada; suite MCP GREEN 36/36 |
 | Token MCP basado solo en JWT de sesión expiraba y rompía bots/reportes programados | `docs/failures/2026-10-29-INC-2026-012.md`; `lib/mcp/personal-token.ts`; `tests/mcp-auth.test.ts`; `tests/mcp-token.test.ts` | R1, R10 | `product-tests` | VERIFIED enfocado: helpers y autenticación PAT, suite MCP GREEN 41/41 |
 | Leads web guardados como Consumidor Final aunque vTiger trae apellido/nombre | `docs/failures/2026-11-03-INC-2026-013.md`; `lib/leadDeduplication.ts`; `supabase/functions/wordpress-lead-intake/leadNaming.ts`; `tests/leadDeduplication.test.ts` | R7 | `product-tests` | VERIFIED enfocado: 10/10; falta redespliegue de la Edge Function para cubrimiento en producción |
+| Popup de actividades que se cierra, pierde filtros o no abre por deep link; "Hasta la fecha" esconde las de hoy | `docs/failures/2026-11-10-INC-2026-015.md`; `bugs-knowhow.md` Bug 20261110-01; `lib/actividadesUi.test.ts`; `lib/serverHydration.test.ts` | R6 | `product-tests` | VERIFIED enfocado: 40/40. Sin sesion real del CRM para el pantallazo |
 
 Una regresion nueva se registra con `npm run qa:incident`. La nota debe identificar la prueba RED, la etapa que la ejecuta y la evidencia GREEN.
 

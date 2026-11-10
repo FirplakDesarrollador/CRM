@@ -35,7 +35,7 @@ vi.mock('./supabase', () => ({
 }));
 
 import { db } from './db';
-import { hydrateOpportunityActivities, hydrateActivitiesForSearch, hydrateOwnActivities } from './serverHydration';
+import { hydrateOpportunityActivities, hydrateActivitiesForSearch, hydrateOwnActivities, hydrateActivityById, hydrateActivityReferences } from './serverHydration';
 import { accentInsensitiveRegex, accentInsensitiveCondition } from './utils';
 
 const OPP = 'opp-1';
@@ -127,5 +127,50 @@ describe('serverHydration', () => {
         const ops = actCall.ops.map(([op, args]) => `${op}:${args.join('|')}`);
         expect(ops).toContain('eq:user_id|seller-1');
         expect(ops).toContain('or:is_completed.eq.false,fecha_inicio.gte.2025-10-30T12:00:00.000Z');
+    });
+
+    it('deep link trae la actividad que no está en Dexie junto con su oportunidad y su cuenta', async () => {
+        responses.CRM_Actividades = [act('deep-1', { asunto: 'Llamada en servidor' })];
+        responses.CRM_Oportunidades = [{ id: OPP, nombre: 'POT900 - Tienda', account_id: 'acc-1', is_deleted: false }];
+        responses.CRM_Cuentas = [{ id: 'acc-1', nombre: 'Tienda Norte', is_deleted: false }];
+
+        const added = await hydrateActivityById('deep-1', { viewerId: 'admin-1', viewerRole: 'ADMIN' });
+
+        expect(added).toBe(1);
+        expect((await db.activities.get('deep-1'))?.asunto).toBe('Llamada en servidor');
+        expect((await db.opportunities.get(OPP))?.nombre).toBe('POT900 - Tienda');
+        expect((await db.accounts.get('acc-1'))?.nombre).toBe('Tienda Norte');
+        const actCall = calls.find(c => c.table === 'CRM_Actividades')!;
+        const ops = actCall.ops.map(([op, args]) => `${op}:${args.join('|')}`);
+        expect(ops).toContain('eq:id|deep-1');
+        expect(ops.some(op => op.startsWith('eq:user_id'))).toBe(false);
+    });
+
+    it('un asesor solo trae por id una actividad asignada a él y no pisa la copia local', async () => {
+        responses.CRM_Actividades = [act('deep-2', { asunto: 'servidor' })];
+        responses.CRM_Oportunidades = [{ id: OPP, account_id: 'acc-1', nombre: 'Opp', is_deleted: false }];
+        responses.CRM_Cuentas = [{ id: 'acc-1', nombre: 'Cuenta', is_deleted: false }];
+        await db.activities.add(act('deep-2', { asunto: 'local' }) as unknown as Parameters<typeof db.activities.add>[0]);
+
+        const added = await hydrateActivityById('deep-2', { viewerId: 'seller-1', viewerRole: 'VENDEDOR' });
+
+        expect(added).toBe(0);
+        expect((await db.activities.get('deep-2'))?.asunto).toBe('local');
+        expect(await db.opportunities.get(OPP)).toBeTruthy();
+        const actCall = calls.find(c => c.table === 'CRM_Actividades')!;
+        const ops = actCall.ops.map(([op, args]) => `${op}:${args.join('|')}`);
+        expect(ops).toContain('eq:id|deep-2');
+        expect(ops).toContain('eq:user_id|seller-1');
+    });
+
+    it('hydrateActivityReferences guarda la oportunidad y la cuenta que faltan sin tocar actividades', async () => {
+        responses.CRM_Oportunidades = [{ id: OPP, nombre: 'POT1', account_id: 'acc-9', is_deleted: false }];
+        responses.CRM_Cuentas = [{ id: 'acc-9', nombre: 'Cuenta 9', is_deleted: false }];
+
+        await hydrateActivityReferences({ opportunity_id: OPP, account_id: null });
+
+        expect((await db.opportunities.get(OPP))?.account_id).toBe('acc-9');
+        expect((await db.accounts.get('acc-9'))?.nombre).toBe('Cuenta 9');
+        expect(await db.activities.count()).toBe(0);
     });
 });
