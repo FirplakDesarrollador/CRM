@@ -3,6 +3,21 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-11-09 - Diagnóstico y Unificación de Comentarios de vTiger (Casos Christian Alvarez)
+
+- **Requerimiento:** Analizar y solucionar el reporte presentado por Christian Álvarez Román respecto a 6 números de teléfono (`3158908746`, `3160489049`, `3148900111`, `3183701635`, `3176433925`, `3229081415`) donde manifestaba que *"no migraron en su totalidad los comentarios del CRM Dimarka"*.
+- **Diagnóstico y Causa Raíz:**
+  1. Los comentarios de vTiger (`vtiger_modcomments`) **SÍ se migraron al 100%** a Supabase en su momento (ej. notas `1. R. Sep`, `2. Se hacen preguntas de intención de compra`).
+  2. Sin embargo, dichos comentarios quedaron alojados en los registros clonados con prefijo `POT...` (`POT58382`, `POT58388`, `POT58393`, `POT58385`, `POT58405`, `POT58407`).
+  3. Al mismo tiempo existía en el CRM la oportunidad creada vía Web para cada uno de esos clientes, donde estaban asociadas las 3 actividades de seguimiento del Setter (`seguimiento setter`, `2. seguimiento setter`, etc.), pero sin las notas históricas de vTiger.
+  4. Al abrir la oportunidad web en el CRM y no ver los comentarios, el asesor asumió que se habían perdido y las cerró hoy como perdidas con la nota *"No migran comentarios del crm"*.
+- **Acciones Ejecutadas:**
+  - Script [`execution/sync_and_unify_comments_6_cases.mjs`](file:///c:/Users/analista2.desarrollo/Desktop/apps/CRM/execution/sync_and_unify_comments_6_cases.mjs):
+    1. Se fusionaron de forma cronológica los comentarios históricos de vTiger dentro de la oportunidad activa que maneja el asesor.
+    2. Se reactivaron las 6 oportunidades a estado **Abierta** y fase **Primer contacto**, limpiando la pérdida errónea.
+    3. Se marcaron las oportunidades duplicadas `POT...` como fusionadas (`is_deleted = true`) para evitar dispersión en el tablero.
+    4. Se forzó `updated_at = NOW()` para sincronización inmediata en la PWA y navegadores de los usuarios.
+
 ## 2026-11-09 - Cotizaciones: Rediseño Estético y Corporativo del PDF F-V-29 con Logo Oficial Firplak e Ingesta de Cierre Masivo
 
 - **Requerimiento:** Modernizar el diseño visual de la cotización/pedido formal (F-V-29) para que sea estético, ejecutivo y profesional, incorporando el logo oficial exacto de Firplak ("inspirando hogares") proporcionado por el usuario.
