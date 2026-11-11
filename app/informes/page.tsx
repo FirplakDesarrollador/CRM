@@ -417,6 +417,7 @@ export default function InformesPage() {
                         probabilidad,
                         probability,
                         fecha_cierre_estimada,
+                        fecha_entrega,
                         created_at,
                         owner_user_id,
                         account_id,
@@ -607,8 +608,11 @@ export default function InformesPage() {
 
                         if (!quote || !quote.items || quote.items.length === 0) return;
 
-                        const dtComercial = getYearAndMonth(opp.fecha_cierre_estimada);
-                        const dtPlanta = getYearAndMonth(opp.fecha_cierre_estimada);
+                        // Mes planta y mes comercial salen de la fecha de entrega que registra el asesor;
+                        // si la oportunidad no la tiene, se usa la fecha de cierre estimada como antes.
+                        const fechaOpp = opp.fecha_entrega || opp.fecha_cierre_estimada;
+                        const dtComercial = getYearAndMonth(fechaOpp);
+                        const dtPlanta = getYearAndMonth(fechaOpp);
 
                         const anioFact = dtComercial.year;
                         const mesComercial = dtComercial.monthName;
