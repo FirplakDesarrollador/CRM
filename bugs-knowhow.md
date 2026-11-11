@@ -2100,3 +2100,31 @@ Toda consulta, contador (`overdueCount`, `activity_summary`), pestaña de detall
 
 Tags:
 [setter] [b2c] [actividades-vencidas] [notificaciones] [seller-visibility] [oportunidades] [cuentas]
+
+---
+
+## [Bug ID: 20261110-01]
+
+Context:
+`/actividades` (`app/actividades/page.tsx`, `components/activities/CreateActivityModal.tsx`, `lib/serverHydration.ts`). Un asesor en `?user=` no podia abrir el popup y no veia las actividades de hoy.
+
+Problem:
+1. Clic en la lista o en el mes: el popup no queda abierto y la URL pierde `?user=` y los demas filtros.
+2. Deep link `?id=` no abre si la actividad no esta en Dexie.
+3. El encabezado del modal solo enlazaba cuenta y oportunidad si ambas ya estaban en la copia local.
+4. "Hasta la fecha" + orden "proxima" lista de la mas vieja a la mas nueva, de 20 en 20. Con 127 atrasadas, las de hoy empiezan en la 128.
+
+Root Cause:
+El `href` era `/actividades?id=` sin filtros. El `router.replace` debounced reescribia la query sin `id` y el efecto de deep link cerraba el modal. Ese efecto no consultaba Supabase. Los links del modal exigian `relatedOpportunity && relatedAccount`. El orden `soonest` no separaba el dia de hoy.
+
+Fix Applied:
+1. `lib/activityListParams.ts`: el enlace conserva filtros; la sync de la URL respeta el id fijado y no cierra el modal por un replace atrasado.
+2. `hydrateActivityById` / `hydrateActivityReferences`: lectura de la actividad, su oportunidad y su cuenta. No pisa Dexie ni escribe en Supabase.
+3. `activityEntityHrefs`: "Ir a la cuenta" y "Ir a la oportunidad" con los ids, y se deja el detalle que el modal ya mostraba.
+4. `splitUpToDateSections`: en "Hasta la fecha", Hoy va antes de Atrasadas.
+
+Prevention Rule:
+**El id del popup y los filtros de /actividades viajan juntos.** Un replace de filtros no puede borrar `id` mientras el modal sigue abierto, y el href de la fila tiene que copiar la query actual. "Hasta la fecha" muestra primero el bloque de hoy y despues las atrasadas; no se esconden las vencidas.
+
+Tags:
+[actividades] [modal] [deep-link] [filtros] [hasta-la-fecha] [dexie] [r6]

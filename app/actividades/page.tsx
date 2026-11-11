@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState, useMemo, useRef } from 'react';
+import { Fragment, Suspense, useEffect, useState, useMemo, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useActivities, LocalActivity } from '@/lib/hooks/useActivities';
 import { useInfiniteScroll } from '@/lib/hooks/useInfiniteScroll';
@@ -38,13 +38,35 @@ import { useActivityFollowUp } from '@/components/activities/ActivityFollowUp';
 import { isB2COnlyActivityClassification, userHasB2CAccess } from '@/lib/b2c';
 import { getCellphoneSearchDigits, findPhoneMatchesLocal, findPhoneMatchesServer, opportunityMatchesPhone, PhoneSearchMatches } from '@/lib/phoneSearch';
 import { supabase } from '@/lib/supabase';
-import { hydrateActivitiesForSearch } from '@/lib/serverHydration';
+import { hydrateActivitiesForSearch, hydrateActivityById } from '@/lib/serverHydration';
+import { activityListHref, activityModalUrlDecision, mergeActivityListSearchParams, type ActivityListUrlState } from '@/lib/activityListParams';
+import { sortActivities, splitUpToDateSections } from '@/lib/activityAgendaSections';
 import { matchesSearchTokens } from '@/lib/utils';
 import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { UserPickerFilter } from '@/components/cuentas/UserPickerFilter';
 
 type ActivityView = 'agenda' | 'month' | 'all';
 type ActivityStatus = 'all' | 'completed' | 'pending' | 'overdue';
+
+async function loadDeepLinkedActivity(
+    id: string,
+    viewer: { viewerId: string | null; viewerRole: string | null }
+): Promise<LocalActivity | null> {
+    try {
+        const local = await db.activities.get(id);
+        if (local) return local;
+    } catch (error) {
+        console.warn('[ActivitiesPage] local DB fetch failed', error);
+    }
+    if (!viewer.viewerRole) return null;
+    try {
+        await hydrateActivityById(id, viewer);
+        return (await db.activities.get(id)) || null;
+    } catch (error) {
+        console.warn('[ActivitiesPage] no se pudo traer la actividad del servidor', error);
+        return null;
+    }
+}
 
 function ActivitiesContent() {
     const searchParams = useSearchParams();
@@ -269,75 +291,63 @@ function ActivitiesContent() {
         }
     }, [searchParams]);
 
-    // Sync all filters to URL to persist across "back" navigations
+    const listUrlState = useMemo<ActivityListUrlState>(() => ({
+        view,
+        searchQuery,
+        filterType,
+        filterClassification,
+        filterSubclassification,
+        filterUser,
+        filterStatus,
+        filterChannel,
+        filterDateFrom,
+        filterDateTo,
+        sortOrder,
+        agendaDateMode,
+        omitCompleted,
+    }), [view, searchQuery, filterType, filterClassification, filterSubclassification, filterUser, filterStatus, filterChannel, filterDateFrom, filterDateTo, sortOrder, agendaDateMode, omitCompleted]);
+
+    const listSearch = useMemo(() => {
+        const merged = mergeActivityListSearchParams(new URLSearchParams(searchParams.toString()), listUrlState, undefined);
+        merged.delete('id');
+        return merged.toString();
+    }, [searchParams, listUrlState]);
+
+    const pinnedUrlActivityIdRef = useRef<string | null | undefined>(undefined);
+    const ignoreStaleUrlIdRef = useRef(false);
+    const deepLinkTaskRef = useRef<{ id: string; promise: Promise<LocalActivity | null> } | null>(null);
+
+    // Sync all filters to URL to persist across "back" navigations.
+    // Lee la URL viva y el id fijado por el modal: un replace atrasado no puede
+    // borrar ?id= ni los filtros (user, estado, etc.).
     useEffect(() => {
         const timer = setTimeout(() => {
-            const params = new URLSearchParams(Array.from(searchParams.entries()));
-            
-            if (view !== 'agenda') params.set('view', view);
-            else params.delete('view');
-            
-            if (searchQuery) params.set('search', searchQuery);
-            else params.delete('search');
-            
-            if (filterType) params.set('type', filterType);
-            else params.delete('type');
-            
-            if (filterClassification) params.set('classification', filterClassification);
-            else params.delete('classification');
-            
-            if (filterSubclassification) params.set('subclassification', filterSubclassification);
-            else params.delete('subclassification');
-            
-            if (filterUser) params.set('user', filterUser);
-            else params.delete('user');
-            
-            if (filterStatus !== 'all') params.set('status', filterStatus);
-            else params.delete('status');
-            
-            if (filterChannel) params.set('channel', filterChannel);
-            else params.delete('channel');
-            
-            if (filterDateFrom) params.set('dateFrom', filterDateFrom);
-            else params.delete('dateFrom');
-            
-            if (filterDateTo) params.set('dateTo', filterDateTo);
-            else params.delete('dateTo');
+            const live = new URLSearchParams(window.location.search);
+            const params = mergeActivityListSearchParams(live, listUrlState, pinnedUrlActivityIdRef.current);
 
-            if (sortOrder !== 'soonest') params.set('order', sortOrder);
-            else params.delete('order');
-
-            if (agendaDateMode !== 'up_to') params.set('dateMode', agendaDateMode);
-            else params.delete('dateMode');
-
-            if (!omitCompleted) params.set('omitCompleted', 'false');
-            else params.delete('omitCompleted');
-
-            const queryString = params.toString();
-            
-            // Save to sessionStorage without ID for cross-module persistence
             const storageParams = new URLSearchParams(params);
             storageParams.delete('id');
             const storageQuery = storageParams.toString();
             if (storageQuery) {
                 sessionStorage.setItem('crm_actividades_state', storageQuery);
-            } else if (searchParams.toString() !== '') {
+            } else if (live.toString() !== '') {
                 sessionStorage.removeItem('crm_actividades_state');
             }
 
-            // Normalize and compare to prevent infinite router.replace loops
-            const currentParams = new URLSearchParams(searchParams.toString());
-            currentParams.sort();
-            const newParams = new URLSearchParams(queryString);
-            newParams.sort();
+            const normalize = (value: URLSearchParams) => {
+                const copy = new URLSearchParams(value);
+                copy.sort();
+                return copy.toString();
+            };
 
-            if (currentParams.toString() !== newParams.toString()) {
+            if (normalize(live) !== normalize(params)) {
+                const queryString = params.toString();
                 const query = queryString ? `?${queryString}` : window.location.pathname;
                 router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
             }
         }, 500);
         return () => clearTimeout(timer);
-    }, [view, agendaDateMode, omitCompleted, searchQuery, filterType, filterClassification, filterSubclassification, filterUser, filterStatus, filterChannel, filterDateFrom, filterDateTo, sortOrder, searchParams, router]);
+    }, [listUrlState, searchParams, router]);
 
     // Performance: Display limit for pagination
     const [displayLimit, setDisplayLimit] = useState(20);
@@ -382,77 +392,48 @@ function ActivitiesContent() {
 
     const lastProcessedUrlIdRef = useRef<string | null>(null);
 
+    const activityHref = (activityId: string) => activityListHref(activityId, listSearch);
+
     const openActivityModal = (act: LocalActivity) => {
+        ignoreStaleUrlIdRef.current = false;
+        pinnedUrlActivityIdRef.current = act.id;
+        lastProcessedUrlIdRef.current = act.id;
         setSelectedActivity(act);
         setIsModalOpen(true);
-        lastProcessedUrlIdRef.current = act.id;
-        const params = new URLSearchParams(Array.from(searchParams.entries()));
+        const params = new URLSearchParams(window.location.search);
         params.set('id', act.id);
-        const query = params.toString() ? `?${params.toString()}` : window.location.pathname;
-        router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
+        const query = params.toString();
+        router.replace(query ? `${window.location.pathname}?${query}` : window.location.pathname, { scroll: false });
     };
 
     const closeActivityModal = () => {
+        ignoreStaleUrlIdRef.current = true;
+        pinnedUrlActivityIdRef.current = null;
+        lastProcessedUrlIdRef.current = null;
         setIsModalOpen(false);
         setSelectedActivity(null);
-        lastProcessedUrlIdRef.current = null;
-        const params = new URLSearchParams(Array.from(searchParams.entries()));
+        const params = new URLSearchParams(window.location.search);
         params.delete('id');
-        const query = params.toString() ? `?${params.toString()}` : window.location.pathname;
-        router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
+        const query = params.toString();
+        router.replace(query ? `${window.location.pathname}?${query}` : window.location.pathname, { scroll: false });
     };
 
-    // Deep linking: detect id in URL and open edit modal without auto-closing during live updates
     useEffect(() => {
-        const id = searchParams.get('id');
-
-        if (!id) {
-            if (lastProcessedUrlIdRef.current !== null) {
+        const onPopState = () => {
+            const id = new URLSearchParams(window.location.search).get('id');
+            ignoreStaleUrlIdRef.current = false;
+            if (!id) {
+                pinnedUrlActivityIdRef.current = null;
                 lastProcessedUrlIdRef.current = null;
                 setIsModalOpen(false);
                 setSelectedActivity(null);
+                return;
             }
-            return;
-        }
-
-        if (id === lastProcessedUrlIdRef.current && isModalOpen) {
-            return;
-        }
-
-        const findAndOpen = async () => {
-            let act = activities?.find(a => a.id === id);
-            if (!act) {
-                try {
-                    act = await db.activities.get(id);
-                } catch (e) {
-                    console.warn("[ActivitiesPage] local DB fetch failed", e);
-                }
-            }
-            if (!act && typeof navigator !== 'undefined' && navigator.onLine) {
-                try {
-                    const { data } = await supabase
-                        .from('CRM_Actividades')
-                        .select('*')
-                        .eq('id', id)
-                        .maybeSingle();
-                    if (data) {
-                        await db.activities.put(data);
-                        act = data;
-                    }
-                } catch (e) {
-                    console.warn("[ActivitiesPage] server JIT activity fetch failed", e);
-                }
-            }
-            if (act) {
-                lastProcessedUrlIdRef.current = id;
-                if (act.fecha_inicio) setSelectedDate(new Date(act.fecha_inicio));
-                setSelectedActivity(act);
-                setIsModalOpen(true);
-            }
+            pinnedUrlActivityIdRef.current = id;
         };
-
-        findAndOpen();
-    }, [searchParams, activities, isModalOpen]);
+        window.addEventListener('popstate', onPopState);
+        return () => window.removeEventListener('popstate', onPopState);
+    }, []);
 
 
 
@@ -519,15 +500,13 @@ function ActivitiesContent() {
         const oppMap = new Map(opportunities.map(o => [o.id, o]));
         const accMap = new Map(accounts.map(a => [a.id, a]));
 
-        const effectiveUserId = user?.id || activeUserId;
-
         const filtered = sourceActivities.filter(act => {
             if (act.is_deleted) return false;
 
             // Apply role-based filtering: VENDEDOR and similar roles only see their own activities (setter or other users' activities are never shown to the advisor)
             if (!canViewAll) {
-                if (!effectiveUserId) return false; // Prevent leak if identity is genuinely unknown
-                if (act.user_id !== effectiveUserId) {
+                if (!activeUserId) return false; // Prevent leak if identity is genuinely unknown
+                if (act.user_id !== activeUserId) {
                     return false;
                 }
             }
@@ -598,7 +577,7 @@ function ActivitiesContent() {
         });
 
         return filtered;
-    }, [activities, filterType, filterClassification, filterSubclassification, debouncedSearchQuery, canViewAll, user, activeUserId, collaborativeOppIds, filterUser, filterStatus, omitCompleted, filterChannel, filterDateFrom, filterDateTo, opportunities, accounts, contacts, serverPhoneMatches]);
+    }, [activities, filterType, filterClassification, filterSubclassification, debouncedSearchQuery, canViewAll, activeUserId, collaborativeOppIds, filterUser, filterStatus, omitCompleted, filterChannel, filterDateFrom, filterDateTo, opportunities, accounts, contacts, serverPhoneMatches]);
 
     // Count overdue activities for badge (computed from role-filtered but ignoring current status filter)
     const overdueCount = useMemo(() => {
@@ -606,10 +585,9 @@ function ActivitiesContent() {
         if (sourceActivities.length === 0) return 0;
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        const effectiveUserId = user?.id || activeUserId;
         return sourceActivities.filter(act => {
             if (!canViewAll) {
-                if (!effectiveUserId || act.user_id !== effectiveUserId) return false;
+                if (!activeUserId || act.user_id !== activeUserId) return false;
             }
             if (act.is_completed) return false;
             if (act.is_deleted) return false;
@@ -617,7 +595,66 @@ function ActivitiesContent() {
             actDate.setHours(0, 0, 0, 0);
             return actDate < today;
         }).length;
-    }, [activities, canViewAll, user, activeUserId, collaborativeOppIds]);
+    }, [activities, canViewAll, activeUserId, collaborativeOppIds]);
+
+    // Deep linking: abre el modal por ?id= y, si no está en Dexie, la trae del servidor.
+    // Va después de los useMemo que dependen de activeUserId: si el efecto lo captura antes,
+    // el compilador de React no puede conservar esa memoización.
+    useEffect(() => {
+        const id = searchParams.get('id');
+        const ignoreStaleUrlId = ignoreStaleUrlIdRef.current;
+        if (!id) ignoreStaleUrlIdRef.current = false;
+
+        const decision = activityModalUrlDecision({
+            urlId: id,
+            pinnedActivityId: pinnedUrlActivityIdRef.current,
+            ignoreStaleUrlId,
+            lastProcessedUrlId: lastProcessedUrlIdRef.current,
+            isModalOpen,
+        });
+
+        if (decision === 'close') {
+            lastProcessedUrlIdRef.current = null;
+            pinnedUrlActivityIdRef.current = null;
+            setIsModalOpen(false);
+            setSelectedActivity(null);
+            return;
+        }
+        if (decision !== 'open' || !id) return;
+
+        pinnedUrlActivityIdRef.current = id;
+        const requestedId = id;
+        const cached = activities?.find(item => item.id === requestedId) || null;
+        let active = true;
+        let pending: Promise<LocalActivity | null>;
+        if (cached) {
+            pending = Promise.resolve(cached);
+        } else if (!role) {
+            pending = Promise.resolve(null);
+        } else if (deepLinkTaskRef.current?.id === requestedId) {
+            pending = deepLinkTaskRef.current.promise;
+        } else {
+            const promise = loadDeepLinkedActivity(requestedId, {
+                viewerId: user?.id || activeUserId || null,
+                viewerRole: role,
+            }).then(act => {
+                if (!act && deepLinkTaskRef.current?.id === requestedId) deepLinkTaskRef.current = null;
+                return act;
+            });
+            deepLinkTaskRef.current = { id: requestedId, promise };
+            pending = promise;
+        }
+
+        pending.then(act => {
+            if (!active || pinnedUrlActivityIdRef.current !== requestedId || !act) return;
+            lastProcessedUrlIdRef.current = requestedId;
+            if (act.fecha_inicio) setSelectedDate(new Date(act.fecha_inicio));
+            setSelectedActivity(act);
+            setIsModalOpen(true);
+        });
+
+        return () => { active = false; };
+    }, [searchParams, activities, isModalOpen, role, user?.id, activeUserId]);
 
     // For agenda/all views: filter by selected date + sort
     const filteredActivities = useMemo(() => {
@@ -639,19 +676,25 @@ function ActivitiesContent() {
                 return actDate <= endOfSelectedDay;
             });
         }
-        return [...result].sort((a, b) => {
-            if (sortOrder === 'title' || sortOrder === 'title_desc') {
-                const comparison = (a.asunto || '').localeCompare(b.asunto || '', 'es', { sensitivity: 'base' });
-                return sortOrder === 'title_desc' ? -comparison : comparison;
-            }
-            const difference = new Date(a.fecha_inicio).getTime() - new Date(b.fecha_inicio).getTime();
-            return sortOrder === 'latest' ? -difference : difference;
-        });
+        return sortActivities(result, sortOrder);
     }, [globallyFilteredActivities, view, selectedDate, agendaDateMode, sortOrder, filterDateFrom, filterDateTo]);
+
+    const dateRangeActive = Boolean(filterDateFrom || filterDateTo);
+    const agendaPresentation = useMemo(() => {
+        const grouped = view === 'agenda' && agendaDateMode === 'up_to' && !dateRangeActive;
+        const sections = grouped ? splitUpToDateSections(filteredActivities, selectedDate) : null;
+        const ordered = sections ? sections.flatMap(section => section.items) : filteredActivities;
+        const headings = new Map<string, { id: string; title: string; count: number }>();
+        sections?.forEach(section => {
+            const first = section.items[0];
+            if (first) headings.set(first.id, { id: section.id, title: section.title, count: section.items.length });
+        });
+        return { ordered, headings };
+    }, [filteredActivities, view, agendaDateMode, dateRangeActive, selectedDate]);
 
     const { sentinelRef: activitiesSentinelRef } = useInfiniteScroll({
         loading: false,
-        hasMore: (filteredActivities?.length || 0) > displayLimit,
+        hasMore: agendaPresentation.ordered.length > displayLimit,
         onLoadMore: () => setDisplayLimit(prev => prev + 20),
     });
 
@@ -739,7 +782,6 @@ function ActivitiesContent() {
         return map;
     }, [globallyFilteredActivities]);
 
-    const dateRangeActive = Boolean(filterDateFrom || filterDateTo);
     const formatRangeDate = (iso: string) => {
         const [y, m, d] = iso.split('-').map(Number);
         return new Date(y, (m || 1) - 1, d || 1).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' });
@@ -1239,7 +1281,8 @@ function ActivitiesContent() {
                                             Fecha {sortOrder === 'soonest' ? '↑' : sortOrder === 'latest' ? '↓' : '↕'}
                                         </button>
                                     </div>
-                                    {filteredActivities.slice(0, displayLimit).map((act) => {
+                                    {agendaPresentation.ordered.slice(0, displayLimit).map((act) => {
+                                        const sectionHeading = agendaPresentation.headings.get(act.id);
                                         const opp = opportunities?.find(o => o.id === act.opportunity_id);
                                         const searchAcc = act.account_id ? accounts.find(a => a.id === act.account_id) : (opp?.account_id ? accounts.find(a => a.id === opp.account_id) : null);
 
@@ -1260,10 +1303,23 @@ function ActivitiesContent() {
                                         const subName = subclassificationNode?.nombre;
 
                                         return (
+                                            <Fragment key={act.id}>
+                                            {sectionHeading && (
+                                                <div data-testid={`activities-section-${sectionHeading.id}`} className="flex items-center gap-2 px-1">
+                                                    <h3 className={cn(
+                                                        "text-xs font-black uppercase tracking-wider",
+                                                        sectionHeading.id === 'atrasadas' ? "text-red-600" : "text-blue-700"
+                                                    )}>
+                                                        {sectionHeading.title}
+                                                    </h3>
+                                                    <span className="text-[10px] font-bold text-slate-500 bg-white border border-slate-200 rounded-full px-1.5 py-0.5">
+                                                        {sectionHeading.count}
+                                                    </span>
+                                                </div>
+                                            )}
                                             <a
-                                                key={act.id}
-                                                href={`/actividades?id=${act.id}`}
-                                                onClick={(e) => handleEntityLinkClick(e, `/actividades?id=${act.id}`, () => openActivityModal(act))}
+                                                href={activityHref(act.id)}
+                                                onClick={(e) => handleEntityLinkClick(e, activityHref(act.id), () => openActivityModal(act))}
                                                 className={cn(
                                                     "group p-4 bg-white rounded-2xl border transition-all hover:shadow-md cursor-pointer block no-underline text-inherit",
                                                     act.is_completed
@@ -1361,11 +1417,12 @@ function ActivitiesContent() {
                                                     </div>
                                                 </div>
                                             </a>
+                                            </Fragment>
                                         );
                                     })}
 
                                     {/* Load More Button & Infinite Scroll Sentinel */}
-                                    {filteredActivities.length > displayLimit && (
+                                    {agendaPresentation.ordered.length > displayLimit && (
                                         <div ref={activitiesSentinelRef} className="flex justify-center pt-8 pb-12">
                                             <button
                                                 onClick={() => setDisplayLimit(prev => prev + 20)}
@@ -1459,10 +1516,10 @@ function ActivitiesContent() {
                                                             return (
                                                                 <div key={act.id} className="flex gap-1 group/act">
                                                                     <a
-                                                                        href={`/actividades?id=${act.id}`}
+                                                                        href={activityHref(act.id)}
                                                                         onClick={(e) => {
                                                                             e.stopPropagation();
-                                                                            handleEntityLinkClick(e, `/actividades?id=${act.id}`, () => openActivityModal(act));
+                                                                            handleEntityLinkClick(e, activityHref(act.id), () => openActivityModal(act));
                                                                         }}
                                                                         className={cn(
                                                                             "text-[9px] px-1 py-0.5 rounded truncate font-medium border-l-2 flex-1 cursor-pointer no-underline block",
@@ -1523,10 +1580,10 @@ function ActivitiesContent() {
                                                                     return (
                                                                         <a 
                                                                             key={act.id} 
-                                                                            href={`/actividades?id=${act.id}`}
+                                                                            href={activityHref(act.id)}
                                                                             onClick={(e) => {
                                                                                 e.stopPropagation();
-                                                                                handleEntityLinkClick(e, `/actividades?id=${act.id}`, () => openActivityModal(act));
+                                                                                handleEntityLinkClick(e, activityHref(act.id), () => openActivityModal(act));
                                                                             }}
                                                                             className={cn(
                                                                                 "relative group/tip flex items-center gap-2 p-1.5 rounded border-l-2 transition-all hover:bg-slate-50 cursor-pointer no-underline text-inherit block",

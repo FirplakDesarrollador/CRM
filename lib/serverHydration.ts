@@ -95,9 +95,9 @@ async function addMissing(
 }
 
 /** Trae del servidor las oportunidades/cuentas referenciadas que no están localmente. */
-async function hydrateReferences(activities: Row[]): Promise<void> {
+async function hydrateReferences(activities: ReadonlyArray<Record<string, unknown>>): Promise<void> {
     const oppIds = new Set<string>();
-    for (const a of activities) if (typeof a.opportunity_id === 'string') oppIds.add(a.opportunity_id);
+    for (const a of activities) if (typeof a.opportunity_id === 'string' && a.opportunity_id) oppIds.add(a.opportunity_id);
     const localOpps = await db.opportunities.bulkGet(Array.from(oppIds));
     const missingOppIds = Array.from(oppIds).filter((_, i) => !localOpps[i]);
 
@@ -113,7 +113,7 @@ async function hydrateReferences(activities: Row[]): Promise<void> {
     await addMissing('opportunities', 'CRM_Oportunidades', oppsToAdd);
 
     const accountIds = new Set<string>();
-    for (const a of activities) if (typeof a.account_id === 'string') accountIds.add(a.account_id);
+    for (const a of activities) if (typeof a.account_id === 'string' && a.account_id) accountIds.add(a.account_id);
     for (const o of oppsToAdd) if (typeof o.account_id === 'string') accountIds.add(o.account_id);
     const localAccounts = await db.accounts.bulkGet(Array.from(accountIds));
     const missingAccountIds = Array.from(accountIds).filter((_, i) => !localAccounts[i]);
@@ -219,4 +219,36 @@ export async function hydrateOwnActivities(userId: string, now: Date = new Date(
 
     await hydrateReferences(rows);
     return addMissing('activities', 'CRM_Actividades', rows);
+}
+
+/**
+ * Deep link `?id=`: trae esa actividad si no está en la copia local, y con ella
+ * su oportunidad y su cuenta. No escribe en Supabase. No pisa filas locales ni
+ * cambios pendientes. Un asesor solo puede traer una actividad asignada a él.
+ */
+export async function hydrateActivityById(activityId: string, viewer: Viewer): Promise<number> {
+    if (!activityId || !isOnline()) return 0;
+    if (isSellerRole(viewer.viewerRole) && !viewer.viewerId) return 0;
+
+    let query = supabase
+        .from('CRM_Actividades')
+        .select('*')
+        .eq('is_deleted', false)
+        .eq('id', activityId);
+    if (isSellerRole(viewer.viewerRole)) query = query.eq('user_id', viewer.viewerId as string);
+
+    const { data, error } = await query.limit(1);
+    if (error) throw error;
+    const rows = ((data || []) as Row[]).filter(row => row && row.id);
+    if (rows.length === 0) return 0;
+
+    await hydrateReferences(rows);
+    return addMissing('activities', 'CRM_Actividades', rows);
+}
+
+/** Guarda en Dexie la oportunidad y la cuenta de una actividad cuando todavía no están en la copia local. */
+export async function hydrateActivityReferences(activity: { opportunity_id?: string | null; account_id?: string | null }): Promise<void> {
+    if (!isOnline()) return;
+    if (!activity.opportunity_id && !activity.account_id) return;
+    await hydrateReferences([activity]);
 }
