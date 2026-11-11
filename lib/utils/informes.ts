@@ -74,7 +74,8 @@ export const downloadCSV = <T extends object>(
 };
 
 export interface SopRow {
-  anio_fact: number;
+  // number en fechas válidas; "Sin fecha" cuando la oportunidad no tiene fecha de entrega
+  anio_fact: number | string;
   mes_planta: string;
   mes_comercial: string;
   estado: string;
@@ -90,7 +91,7 @@ export interface SopRow {
   cantidad_total: number;
   valor_total: number;
   probabilidad: number;
-  quincena: number;
+  quincena: number | string;
 }
 
 /**
@@ -153,8 +154,13 @@ export const downloadSopExcel = async (
     row.getCell('cantidad_total').numFmt = '#,##0';
     row.getCell('valor_total').numFmt = '$#,##0';
     row.getCell('probabilidad').numFmt = '0%';
-    row.getCell('anio_fact').numFmt = '0';
-    row.getCell('quincena').numFmt = '0';
+    // No aplicar formato numérico a "Sin fecha" para evitar NaN en Excel
+    if (typeof item.anio_fact === 'number') {
+      row.getCell('anio_fact').numFmt = '0';
+    }
+    if (typeof item.quincena === 'number') {
+      row.getCell('quincena').numFmt = '0';
+    }
     row.font = { name: 'Segoe UI', size: 10 };
   });
 
@@ -181,18 +187,28 @@ export const downloadSopExcel = async (
   // 1. Extract dimensions (Channels, Years, Months)
   const channels = Array.from(new Set(data.map(d => d.grupo_cliente || 'Desconocido'))).sort();
   
-  // Get unique Year-Month combinations
-  const yearMonthMap: Record<number, Set<string>> = {};
+  // Get unique Year-Month combinations. "Sin fecha" se agrupa al final, no como NaN.
+  type SopYearKey = number | string;
+  const yearMonthMap = new Map<SopYearKey, Set<string>>();
   data.forEach(d => {
-    const yr = d.anio_fact || new Date().getFullYear();
+    const yr: SopYearKey = (d.anio_fact !== null && d.anio_fact !== undefined && d.anio_fact !== 0)
+      ? d.anio_fact
+      : new Date().getFullYear();
     const ms = d.mes_comercial || 'Desconocido';
-    if (!yearMonthMap[yr]) {
-      yearMonthMap[yr] = new Set<string>();
+    if (!yearMonthMap.has(yr)) {
+      yearMonthMap.set(yr, new Set<string>());
     }
-    yearMonthMap[yr].add(ms);
+    yearMonthMap.get(yr)!.add(ms);
   });
 
-  const sortedYears = Object.keys(yearMonthMap).map(Number).sort((a, b) => a - b);
+  const sortedYears = Array.from(yearMonthMap.keys()).sort((a, b) => {
+    const aNum = typeof a === 'number';
+    const bNum = typeof b === 'number';
+    if (aNum && bNum) return (a as number) - (b as number);
+    if (aNum && !bNum) return -1;
+    if (!aNum && bNum) return 1;
+    return String(a).localeCompare(String(b), 'es');
+  });
   
   // Meses ordenados en español para orden correcto en columnas
   const mesOrden: Record<string, number> = {
@@ -205,7 +221,7 @@ export const downloadSopExcel = async (
   // Siguientes columnas mapeadas por año y mes
   interface ColDef {
     colIndex: number;
-    year: number | null;
+    year: number | string | null;
     month: string | null;
     isTotal: boolean;
     headerLabel: string;
@@ -214,7 +230,7 @@ export const downloadSopExcel = async (
   let colCounter = 2; // Inicia en B
 
   sortedYears.forEach(year => {
-    const months = Array.from(yearMonthMap[year]).sort((a, b) => {
+    const months = Array.from(yearMonthMap.get(year) || []).sort((a, b) => {
       return (mesOrden[a] || 99) - (mesOrden[b] || 99);
     });
     
@@ -254,7 +270,7 @@ export const downloadSopExcel = async (
   // Combinar celdas de cabecera por años
   let currentStartCol = 2;
   sortedYears.forEach(year => {
-    const monthsInYear = yearMonthMap[year].size;
+    const monthsInYear = yearMonthMap.get(year)?.size || 0;
     const endCol = currentStartCol + monthsInYear; // Meses + Total
     wsTd.mergeCells(3, currentStartCol, 3, endCol);
     const yrCell = wsTd.getCell(3, currentStartCol);
@@ -294,7 +310,7 @@ export const downloadSopExcel = async (
     row.getCell(1).font = { name: 'Segoe UI', size: 10 };
     
     let channelRowTotal = 0;
-    const channelYearTotals: Record<number, number> = {};
+    const channelYearTotals: Record<string, number> = {};
 
     colDefs.forEach(def => {
       const cell = row.getCell(def.colIndex);
