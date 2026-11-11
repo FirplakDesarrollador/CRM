@@ -608,16 +608,18 @@ export default function InformesPage() {
 
                         if (!quote || !quote.items || quote.items.length === 0) return;
 
-                        // Mes planta y mes comercial salen de la fecha de entrega que registra el asesor;
-                        // si la oportunidad no la tiene, se usa la fecha de cierre estimada como antes.
-                        const fechaOpp = opp.fecha_entrega || opp.fecha_cierre_estimada;
+                        // Mes planta y mes comercial salen solo de la fecha de entrega de la oportunidad.
+                        // Si no hay fecha_entrega, año/mes/quincena se muestran como "Sin fecha"
+                        // (ya no se usa fecha_cierre_estimada como respaldo).
+                        const fechaOpp = opp.fecha_entrega;
                         const dtComercial = getYearAndMonth(fechaOpp);
                         const dtPlanta = getYearAndMonth(fechaOpp);
+                        const sinFechaEntrega = !fechaOpp || fechaOpp === '-' || dtComercial.monthName === 'Sin fecha';
 
-                        const anioFact = dtComercial.year;
-                        const mesComercial = dtComercial.monthName;
-                        const mesPlanta = dtPlanta.monthName;
-                        const quincena = dtComercial.day <= 15 ? 1 : 2;
+                        const anioFact = sinFechaEntrega ? 'Sin fecha' : dtComercial.year;
+                        const mesComercial = sinFechaEntrega ? 'Sin fecha' : dtComercial.monthName;
+                        const mesPlanta = sinFechaEntrega ? 'Sin fecha' : dtPlanta.monthName;
+                        const quincena = sinFechaEntrega ? 'Sin fecha' : (dtComercial.day <= 15 ? 1 : 2);
 
                         if (selectedSopAnio && String(anioFact) !== selectedSopAnio) return;
                         if (selectedSopMes && mesComercial !== selectedSopMes) return;
@@ -657,6 +659,13 @@ export default function InformesPage() {
                     setIsExporting(false);
                     return;
                 }
+
+                // Las filas sin fecha de entrega quedan al final, sin reordenar el resto.
+                sopRows.sort((a, b) => {
+                    const aSin = a.anio_fact === 'Sin fecha' || a.mes_comercial === 'Sin fecha' ? 1 : 0;
+                    const bSin = b.anio_fact === 'Sin fecha' || b.mes_comercial === 'Sin fecha' ? 1 : 0;
+                    return aSin - bSin;
+                });
 
                 const currentDateTime = new Date().toISOString().replace(/:/g, '-').split('.')[0];
                 const fileName = `Informe_SOP_${currentDateTime}`;
