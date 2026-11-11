@@ -342,6 +342,9 @@ const LOSS_REASONS = [
 
 function SummaryTab({ opportunity }: { opportunity: any }) {
     const { updateOpportunity } = useOpportunities();
+    // Usuario logueado: lo usa isB2COpportunity en handlePhaseChange.
+    // Sin esta línea, `user` no existe y cambiar de fase lanza ReferenceError.
+    const { user } = useCurrentUser();
     const { origins: opportunityOrigins } = useOpportunityOrigins();
     const { quotes } = useQuotes(opportunity.id);
     const [localAmount, setLocalAmount] = useState(opportunity.amount || 0);
