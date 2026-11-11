@@ -15,6 +15,7 @@ interface QuotePreviewModalProps {
     opportunity?: LocalOportunidad;
     quoteItems: LocalQuoteItem[];
     advisorName?: string;
+    advisorEmail?: string;
     onSendEmail?: () => void;
 }
 
@@ -26,6 +27,7 @@ export function QuotePreviewModal({
     opportunity,
     quoteItems,
     advisorName,
+    advisorEmail,
     onSendEmail,
 }: QuotePreviewModalProps) {
     const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
@@ -49,7 +51,7 @@ export function QuotePreviewModal({
 
         (async () => {
             try {
-                const blob = await generateQuotePdfBlob(quote, quoteItems, account, opportunity, advisorName);
+                const blob = await generateQuotePdfBlob(quote, quoteItems, account, opportunity, advisorName, advisorEmail);
                 if (!isMounted) return;
                 const url = URL.createObjectURL(blob);
                 setPdfBlobUrl(url);
@@ -66,7 +68,7 @@ export function QuotePreviewModal({
         return () => {
             isMounted = false;
         };
-    }, [isOpen, quote, quoteItems, account, opportunity, advisorName]);
+    }, [isOpen, quote, quoteItems, account, opportunity, advisorName, advisorEmail]);
 
     if (!isOpen) return null;
 
@@ -84,7 +86,7 @@ export function QuotePreviewModal({
     const handleDownloadPdf = async () => {
         setIsDownloadingPdf(true);
         try {
-            await generateQuotePdf(quote, quoteItems, account, opportunity, true, advisorName);
+            await generateQuotePdf(quote, quoteItems, account, opportunity, true, advisorName, advisorEmail);
         } catch (err) {
             console.error("Error descargando PDF:", err);
         } finally {

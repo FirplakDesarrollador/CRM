@@ -45,6 +45,7 @@ interface PedidoFormalizationContext {
     account?: LocalCuenta;
     opportunity?: LocalOportunidad;
     advisorName: string;
+    advisorEmail?: string;
 }
 
 export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, onEditStateChange?: (isEditing: boolean) => void }) {
@@ -87,6 +88,7 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
             const opportunity = opp || await db.opportunities.get(quote.opportunity_id);
             const account = opportunity ? await db.accounts.get(opportunity.account_id) : undefined;
             let advisorName = "";
+            let advisorEmail = "";
             let productCodes: Record<string, string> = {};
 
             try {
@@ -95,10 +97,11 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
                 if (opportunity?.owner_user_id) {
                     const { data: userData } = await supabase
                         .from('CRM_Usuarios')
-                        .select('full_name')
+                        .select('full_name, email')
                         .eq('id', opportunity.owner_user_id)
                         .maybeSingle();
                     advisorName = userData?.full_name || "";
+                    advisorEmail = userData?.email || "";
                 }
 
                 const productIds = (pedido.items || []).map(item => item.producto_id).filter(Boolean);
@@ -124,6 +127,7 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
                 account,
                 opportunity,
                 advisorName,
+                advisorEmail,
             } satisfies PedidoFormalizationContext;
         } finally {
             setPreparingPedidoUuid(null);
@@ -141,6 +145,7 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
             context.opportunity,
             true,
             context.advisorName,
+            context.advisorEmail,
         );
     };
 
@@ -375,6 +380,7 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
                     opportunity={sendContext.opportunity}
                     quoteItems={sendContext.quoteItems}
                     advisorName={sendContext.advisorName}
+                    advisorEmail={sendContext.advisorEmail}
                 />
             )}
 
@@ -387,6 +393,7 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
                     opportunity={previewContext.opportunity}
                     quoteItems={previewContext.quoteItems}
                     advisorName={previewContext.advisorName}
+                    advisorEmail={previewContext.advisorEmail}
                     onSendEmail={() => {
                         const ped = pedidosCollection.find(p => p.uuid_generado === previewContext.quote.id);
                         if (ped) handleSendQuote(ped);

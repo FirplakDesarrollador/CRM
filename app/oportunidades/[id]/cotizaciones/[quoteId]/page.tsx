@@ -34,6 +34,7 @@ export default function QuoteEditorPage() {
     const router = useRouter();
     const quoteId = params.quoteId as string;
     const oppId = params.id as string;
+    const { user: currentUser } = useCurrentUser();
 
     const { quotes, updateQuote, updateQuoteTotal } = useQuotes(oppId);
     const quote = quotes?.find(q => q.id === quoteId);
@@ -49,13 +50,15 @@ export default function QuoteEditorPage() {
         const qItems = await db.quoteItems.where('cotizacion_id').equals(quoteId).toArray();
         
         let advisorName = "";
+        let advisorEmail = "";
         let enrichedItems = qItems;
 
         try {
             const { supabase } = await import('@/lib/supabase');
             if (opp?.owner_user_id) {
-                const { data: uData } = await supabase.from('CRM_Usuarios').select('full_name').eq('id', opp.owner_user_id).single();
+                const { data: uData } = await supabase.from('CRM_Usuarios').select('full_name, email').eq('id', opp.owner_user_id).single();
                 advisorName = uData?.full_name || "";
+                advisorEmail = uData?.email || "";
             }
             const productIds = qItems.map(i => i.producto_id).filter(Boolean);
             if (productIds.length > 0) {
@@ -71,17 +74,20 @@ export default function QuoteEditorPage() {
             console.error("Error pre-fetching PDF data", e);
         }
 
-        return { opp, acc, qItems: enrichedItems, advisorName };
+        return { opp, acc, qItems: enrichedItems, advisorName, advisorEmail };
     }, [quote]);
+
+    const effectiveAdvisorName = currentUser?.user_metadata?.full_name || (currentUser as any)?.name || sendContext?.advisorName || "Asesor Firplak";
+    const effectiveAdvisorEmail = currentUser?.email || sendContext?.advisorEmail || "";
 
     const handleDownloadPdf = () => {
         if (!quote || !sendContext) return;
-        generateQuotePdf(quote, sendContext.qItems, sendContext.acc, sendContext.opp, true, sendContext.advisorName);
+        generateQuotePdf(quote, sendContext.qItems, sendContext.acc, sendContext.opp, true, effectiveAdvisorName, effectiveAdvisorEmail);
     };
 
     const handleDownloadExcel = () => {
         if (!quote || !sendContext) return;
-        generateQuoteExcel(quote, sendContext.qItems, sendContext.acc, sendContext.opp, sendContext.advisorName);
+        generateQuoteExcel(quote, sendContext.qItems, sendContext.acc, sendContext.opp, effectiveAdvisorName);
     };
 
     if (!quote) return <div className="p-8">Cargando cotización...</div>;
@@ -156,7 +162,8 @@ export default function QuoteEditorPage() {
                         account={sendContext.acc || undefined} 
                         opportunity={sendContext.opp} 
                         quoteItems={sendContext.qItems}
-                        advisorName={sendContext.advisorName}
+                        advisorName={effectiveAdvisorName}
+                        advisorEmail={effectiveAdvisorEmail}
                     />
                 )}
 
@@ -168,7 +175,8 @@ export default function QuoteEditorPage() {
                         account={sendContext.acc || undefined}
                         opportunity={sendContext.opp}
                         quoteItems={sendContext.qItems}
-                        advisorName={sendContext.advisorName}
+                        advisorName={effectiveAdvisorName}
+                        advisorEmail={effectiveAdvisorEmail}
                         onSendEmail={() => setIsSendModalOpen(true)}
                     />
                 )}

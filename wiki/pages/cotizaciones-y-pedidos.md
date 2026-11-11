@@ -49,6 +49,9 @@ planos de hidromasaje, fecha de entrega.
 
 - **Previsualización interactiva (`QuotePreviewModal.tsx`):**
   Tanto en el encabezado general del editor de cotizaciones (`QuoteEditorPage`) como en cada pedido vinculado (`PedidosList`), el botón **Previsualizar** (o «Ver») abre un modal en pantalla con el visor embebido del documento F-V-29 generado en memoria (`generateQuotePdfBlob`), permitiendo revisar los ítems, precios y totales antes de descargar o enviar. El diseño cuenta con maquetación ejecutiva, paleta de marca Firplak (Azul Marino `#1E3A4C`), tarjetas de cliente/despacho, tabla de ítems cebrada y el logotipo corporativo oficial de Firplak ("inspirando hogares"). Desde este mismo modal es posible descargar en PDF, descargar en Excel o disparar el envío por correo.
+- **Firma del Asesor y Pie de Página F-V-29 (`lib/pdfGenerator.ts`):**
+  - **Correo del Asesor Comercial:** La tarjeta de firma de Firplak muestra el correo corporativo del asesor autenticado en la sesión (`currentUser.email`) o del propietario de la oportunidad (`CRM_Usuarios.email`), reemplazando la cuenta genérica fija de cartera.
+  - **Espaciado y Distribución del Pie:** La sección legal (Tratamiento de Datos Personales con salto de línea dinámico `splitTextToSize`), la resolución de autorretenedores y los datos de contacto corporativo se calculan con espaciado vertical armonizado (`footerY` dinámico) anclado al pie de la página, eliminando sobreposiciones y colisiones contra las cajas de firma.
 - **Exportación a Excel (`lib/quoteExcelGenerator.ts`):**
   Permite descargar la cotización en archivo `.xlsx` estructurado con la plantilla corporativa Firplak (cabecera F-V-29, datos de cliente/asesor, tabla de ítems con formato de moneda, y desglose de subtotales e impuestos).
 - **Cálculo de Precios e IVA en PDF y Excel (`calculatePdfItemRow` y `calculatePdfTotals`):**

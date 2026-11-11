@@ -3,6 +3,53 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-11-10 - PDF de Cotización F-V-29: Correo Dinámico del Asesor Autenticado y Espaciado del Pie de Página
+
+- **Requerimiento:** En el formato oficial de cotización PDF (F-V-29), mostrar en la caja de firma del asesor comercial el correo corporativo del asesor que se encuentra logueado (en lugar del correo fijo de cartera), y corregir el texto inferior de ley y autorretenedores que se encontraba superpuesto y pegado contra las firmas.
+- **Cambios Implementados:**
+  1. **Correo del Asesor Logueado:**
+     - En `lib/pdfGenerator.ts`, `buildQuotePdfDoc` recibe y resuelve `advisorEmail`. Prioriza el correo del usuario logueado (`currentUser.email`), con fallback a la consulta en `CRM_Usuarios` por `owner_user_id` o nombre del asesor, y finalmente `cartera@firplak.com` solo si no existe usuario autenticado.
+     - En `QuoteEditorPage` (`app/oportunidades/[id]/cotizaciones/[quoteId]/page.tsx`), `QuotePreviewModal.tsx`, `SendQuoteModal.tsx` y `PedidosEditor.tsx`, se propaga `advisorEmail` a todas las invocaciones de previsualización, descarga y envío de PDF.
+  2. **Espaciado y Maquetación del Pie de Página:**
+     - Se corrigió la colisión entre el texto legal de protección de datos (que toma 2 líneas) y `SOMOS AUTORRETENEDORES RES. 64 DE MAYO 3 DE 1995` mediante el cálculo dinámico de altura (`doc.splitTextToSize`).
+     - Se rediseñó el espaciado vertical (`footerY`) anclando el bloque legal y de contacto corporativo armónicamente al pie de la página (`pageHeight - margin - totalFooterHeight`), garantizando una separación cómoda de al menos 24pt respecto a las cajas de firma en lugar de estar apiñado contra el borde inferior de las mismas.
+  3. **Pruebas y Verificación:** Se actualizaron y validaron las pruebas en `tests/quoteExcelAndPreview.test.ts` (4 de 4 pasadas en verde).
+- **Páginas afectadas:** `wiki/pages/cotizaciones-y-pedidos.md`, `wiki/LOG.md`.
+
+## 2026-11-10 - Autocompletado automático de Fecha de Cierre Estimada para Canal Propio (B2C / Ecommerce)
+
+- **Requerimiento:** Para los asesores y oportunidades del canal Ecommerce / Canal Propio / B2C, autocompletar automáticamente el campo **Fecha Cierre Estimada** (`fecha_cierre_estimada`) con la fecha del día en que se cambie la oportunidad a la fase **Cerrada Ganada** o **Cerrada Perdida**.
+- **Cambios Implementados:**
+  1. **Helper B2C (`lib/b2c.ts`):** Función `isB2COpportunity` que identifica de manera precisa oportunidades pertenecientes al canal B2C/Propio (`account.canal_id === 'PROPIO'`, `opportunity.canal_id === 'PROPIO'`, fase del canal `PROPIO`, origen web/ecommerce o asesores con canal `PROPIO` asignado), respetando y preservando canales industriales/corporativos (Obras y Distribución).
+  2. **Detalle de Oportunidad (`app/oportunidades/[id]/page.tsx`):** En `handlePhaseChange`, al pulsar sobre la fase *Cerrada Ganada* o *Cerrada Perdida*, si la oportunidad califica como B2C, se asigna `todayStr` (`YYYY-MM-DD` en hora local de Colombia) a `fecha_cierre_estimada`, actualizando reactivamente el estado local `localClosingDate` para que el campo de fecha de la interfaz se actualice de inmediato en pantalla y persista en Dexie y Supabase.
+  3. **Hook de Oportunidades (`lib/hooks/useOpportunities.ts`):** En `updateOpportunity`, si se marca `estado_id: 2` (Ganada) o `estado_id: 3` (Perdida) en una oportunidad B2C y no se especificó fecha previa en el payload, se salvaguarda el autocompletado con la fecha de hoy.
+  4. **Vista rápida (`components/opportunities/OpportunityQuickView.tsx`):** Al guardar el estado cerrado desde la vista rápida en negocios B2C, se autocompleta la fecha de cierre del día.
+  5. **Pruebas Unitarias:** Se agregaron pruebas unitarias en [`pruebas unitarias/oportunidades.test.ts`](file:///c:/Users/analista2.desarrollo/Desktop/apps/CRM/pruebas unitarias/oportunidades.test.ts) validando la detección B2C y el autocompletado de la fecha actual ante transiciones ganada/perdida.
+- **Páginas afectadas:** `wiki/pages/oportunidades.md`, `wiki/pages/canales-de-venta.md`, `wiki/LOG.md`.
+
+## 2026-11-10 - Solución a visualización de oportunidades en actividades (Causa Raíz ventana de sync de 3.000 registros e hidratación JIT)
+
+- **Caso reportado:** Actividad `https://crm-64yu.vercel.app/actividades?id=3b6952df-f8ee-4671-aa28-2d03aba5f17a` de Claudia Patricia Granada (`claudia.granada@firplak.com`) aparecía en la interfaz como "Sin oportunidad", a pesar de que las 505 huérfanas reales ya habían sido eliminadas y respaldadas.
+- **Diagnóstico y Causa Raíz:**
+  1. En Supabase, la actividad **SÍ tiene** `opportunity_id = 'b6a55100-a6f0-491b-af83-8935645fd93a'` (`POT34293 - HERNAN SUAREZ AGUDELO`, propiedad de Claudia, `is_deleted = false`).
+  2. En `lib/sync.ts`, la sincronización inicial de la PWA descarga un máximo de las **3.000 oportunidades más recientes** (`updated_at DESC`).
+  3. Dicha oportunidad fue actualizada el `2026-10-20`, existiendo más de 47.000 oportunidades más recientes en el CRM, por lo que **no formaba parte de las 3.000 cacheadas en IndexedDB (Dexie)**.
+  4. La actividad se actualizó recientemente, por lo que sí estaba en Dexie. Al abrir el modal o listar en `/actividades`, la búsqueda local `db.opportunities.get(act.opportunity_id)` retornaba `undefined`, omitiendo el badge y dejando el combobox en *"Seleccione una oportunidad..."*.
+- **Acciones Ejecutadas:**
+  1. **Inmediata en DB:** Se actualizó `updated_at = NOW()` en la oportunidad `b6a55100-a6f0-491b-af83-8935645fd93a` y en la cuenta `e3309233-b32f-444b-b5ef-c922fbced44c` (`HERNAN SUAREZ AGUDELO`) para ingresar inmediatamente a la cabeza de la cola de sync de Claudia.
+  2. **JIT Hydration en `CreateActivityModal.tsx`:** Al abrir cualquier actividad con `opportunity_id` o `account_id` no presente en Dexie, se realiza una consulta puntual a Supabase y se persiste en Dexie (`db.opportunities.put` / `db.accounts.put`), activando reactivamente `useLiveQuery` en el encabezado y formulario.
+  3. **Mejora en `OpportunityCombobox.tsx`:** Ahora soporta `initialLabel` y resolución asíncrona de respaldo contra Dexie/Supabase cuando la oportunidad no está en la primera página de 20 registros del hook de servidor.
+  4. **JIT Batch Hydration en `/actividades`:** Las actividades visibles en pantalla que referencien oportunidades o cuentas fuera de la ventana de caché local se hidratan en lotes mediante `.in('id', missingIds)` y se guardan en Dexie en segundo plano.
+  5. **Pruebas unitarias:** Se agregaron pruebas en [`pruebas unitarias/actividades.test.ts`](file:///c:/Users/analista2.desarrollo/Desktop/apps/CRM/pruebas unitarias/actividades.test.ts) validando la detección de IDs faltantes y la resolución de etiquetas en `OpportunityCombobox`. Todas pasaron satisfactoriamente (13 de 13).
+- **Páginas afectadas:** `wiki/pages/actividades.md`, `wiki/pages/sincronizacion-offline.md`, `wiki/LOG.md`.
+
+## 2026-11-10 - Depuración de actividades huérfanas de Claudia Granada (505) y unificación Web/POT (135)
+
+- **Unificación Web/POT:** 135 pares (oportunidad web con actividades + clon `POT` de migración vTiger con comentarios, creados con 2-3 s de diferencia) unificados con [`execution/unify_web_pot_pairs.mjs`](file:///c:/Users/analista2.desarrollo/Desktop/apps/CRM/execution/unify_web_pot_pairs.mjs): comentarios del POT pasados a la oportunidad web y POT con `is_deleted = true`. No se tocaron actividades, cotizaciones ni estados.
+- **Actividades sin oportunidad ni cuenta (Claudia Patricia Granada, `claudia.granada@firplak.com`):** 505 actividades (53 pendientes) de la migración vTiger (todas con `vtiger_activityid`, creadas 2023-03 a 2026-04) sin `opportunity_id` ni `account_id`. Solo 33 traían `vtiger_potentialid` y ninguno de esos negocios existe en el CRM, por lo que no se pudo recuperar el vínculo.
+- **Acción:** primero borrado lógico y luego, por instrucción del usuario, **borrado definitivo** con [`execution/hard_delete_claudia_orphan_activities.mjs`](file:///c:/Users/analista2.desarrollo/Desktop/apps/CRM/execution/hard_delete_claudia_orphan_activities.mjs). Las 505 filas se movieron (operación atómica) a la tabla `CRM_Backup_Actividades_Eliminadas` (migración `20261110_backup_actividades_eliminadas.sql`, fila completa en `data jsonb`; instrucciones de restauración en el encabezado de la migración). Archivo local adicional: `.tmp/backup_claudia_505_actividades_sin_oportunidad.json`. Sus 12.622 actividades con oportunidad quedaron intactas.
+- **Pendiente conocido:** otros usuarios tienen actividades huérfanas similares (Stiven Rua 626, Juan Fernando Ospina 472, canalpropio 213, ricardo.jimenez 176) sin tratar.
+
 ## 2026-11-10 - Depuración Segura de Oportunidades Duplicadas (1.831 Registros)
 
 - **Requerimiento:** Procesar las recomendaciones del archivo `oportunidades_duplicadas_v2_recomendaciones.csv` para dar de baja las oportunidades redundantes marcadas como `ELIMINAR` sin perder auditoría ni historial comercial.

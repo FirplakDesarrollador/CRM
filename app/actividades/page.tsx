@@ -428,6 +428,21 @@ function ActivitiesContent() {
                     console.warn("[ActivitiesPage] local DB fetch failed", e);
                 }
             }
+            if (!act && typeof navigator !== 'undefined' && navigator.onLine) {
+                try {
+                    const { data } = await supabase
+                        .from('CRM_Actividades')
+                        .select('*')
+                        .eq('id', id)
+                        .maybeSingle();
+                    if (data) {
+                        await db.activities.put(data);
+                        act = data;
+                    }
+                } catch (e) {
+                    console.warn("[ActivitiesPage] server JIT activity fetch failed", e);
+                }
+            }
             if (act) {
                 lastProcessedUrlIdRef.current = id;
                 if (act.fecha_inicio) setSelectedDate(new Date(act.fecha_inicio));
@@ -639,6 +654,77 @@ function ActivitiesContent() {
         hasMore: (filteredActivities?.length || 0) > displayLimit,
         onLoadMore: () => setDisplayLimit(prev => prev + 20),
     });
+
+    // JIT Hydration: Cuando las actividades visibles tienen oportunidad o cuenta
+    // que no está en la caché local (por ej. registros más antiguos que el límite
+    // inicial de 3.000), las consultamos en Supabase y las guardamos en Dexie para
+    // que useLiveQuery las resuelva de inmediato y muestre el badge y el link.
+    useEffect(() => {
+        if (!filteredActivities || typeof navigator === 'undefined' || !navigator.onLine) return;
+        const visible = filteredActivities.slice(0, displayLimit);
+
+        // 1. Oportunidades faltantes
+        const knownOppIds = new Set((opportunities || []).map(o => o.id));
+        const missingOppIds = Array.from(new Set(
+            visible
+                .map(a => a.opportunity_id)
+                .filter((id): id is string => Boolean(id) && !knownOppIds.has(id))
+        ));
+
+        // 2. Cuentas faltantes
+        const knownAccIds = new Set((accounts || []).map(a => a.id));
+        const missingAccIds = Array.from(new Set(
+            visible
+                .map(a => a.account_id)
+                .filter((id): id is string => Boolean(id) && !knownAccIds.has(id))
+        ));
+
+        if (missingOppIds.length === 0 && missingAccIds.length === 0) return;
+
+        let cancelled = false;
+
+        if (missingOppIds.length > 0) {
+            (async () => {
+                try {
+                    const { data, error } = await supabase
+                        .from('CRM_Oportunidades')
+                        .select('*')
+                        .in('id', missingOppIds);
+                    if (!cancelled && data && data.length > 0 && !error) {
+                        try {
+                            await db.opportunities.bulkPut(data);
+                        } catch (putErr) {
+                            console.warn('[ActivitiesPage] JIT bulkPut opportunities failed:', putErr);
+                        }
+                    }
+                } catch (fetchErr) {
+                    console.warn('[ActivitiesPage] JIT fetch opportunities failed:', fetchErr);
+                }
+            })();
+        }
+
+        if (missingAccIds.length > 0) {
+            (async () => {
+                try {
+                    const { data, error } = await supabase
+                        .from('CRM_Cuentas')
+                        .select('*')
+                        .in('id', missingAccIds);
+                    if (!cancelled && data && data.length > 0 && !error) {
+                        try {
+                            await db.accounts.bulkPut(data);
+                        } catch (putErr) {
+                            console.warn('[ActivitiesPage] JIT bulkPut accounts failed:', putErr);
+                        }
+                    }
+                } catch (fetchErr) {
+                    console.warn('[ActivitiesPage] JIT fetch accounts failed:', fetchErr);
+                }
+            })();
+        }
+
+        return () => { cancelled = true; };
+    }, [filteredActivities, displayLimit, opportunities, accounts]);
 
     // PERF FIX: Pre-group activities by day key for month view (computed once, not 31x)
     const activitiesByDay = useMemo(() => {

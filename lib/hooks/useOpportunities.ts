@@ -11,6 +11,8 @@ import { sendOpportunityDeletionEmail } from "@/lib/services/notifications";
 import { shouldUpdateOpportunityAmount, getOpportunityAmountFromQuote, resolveActiveQuote } from "@/lib/opportunityQuoteSync";
 import { sanitizeQuoteItemUpdates } from "@/lib/quotePricing";
 import { shouldKeepDiscountOnQtyChange } from "@/lib/discountExceptions";
+import { toInputDate } from "@/lib/date-utils";
+import { B2C_CHANNEL_ID } from "@/lib/b2c";
 
 // Helper to fetch pricing from server
 async function fetchPricing(productId: string, channelId: string, qty: number) {
@@ -352,12 +354,29 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
         // Remove undefined fields to avoid overwriting with undefined
         Object.keys(sanitizedUpdates).forEach(key => (sanitizedUpdates as any)[key] === undefined && delete (sanitizedUpdates as any)[key]);
 
+        // Auto-complete fecha_cierre_estimada for B2C on close (won/lost) if not provided
+        if ((sanitizedUpdates.estado_id === 2 || sanitizedUpdates.estado_id === 3) && updates.fecha_cierre_estimada === undefined) {
+            let isB2C = (current as any).canal_id === B2C_CHANNEL_ID;
+            if (!isB2C && current.account_id) {
+                const acc = await db.accounts.get(current.account_id);
+                if (acc?.canal_id === B2C_CHANNEL_ID) isB2C = true;
+            }
+            if (!isB2C && Array.isArray(user?.canales) && user.canales.includes(B2C_CHANNEL_ID)) {
+                isB2C = true;
+            }
+            if (isB2C) {
+                sanitizedUpdates.fecha_cierre_estimada = toInputDate(new Date());
+            }
+        }
+
         const updated = {
             ...current,
             ...sanitizedUpdates,
             updated_at: new Date().toISOString(),
             // Sanitize critical dates (Postgres dislikes empty strings for DATE type)
-            fecha_cierre_estimada: (updates.fecha_cierre_estimada === "" ? null : (updates.fecha_cierre_estimada ?? current.fecha_cierre_estimada)),
+            fecha_cierre_estimada: (sanitizedUpdates.fecha_cierre_estimada !== undefined
+                ? (sanitizedUpdates.fecha_cierre_estimada === "" ? null : sanitizedUpdates.fecha_cierre_estimada)
+                : (updates.fecha_cierre_estimada === "" ? null : (updates.fecha_cierre_estimada ?? current.fecha_cierre_estimada))),
             fecha_entrega: (updates.fecha_entrega === "" ? null : (updates.fecha_entrega ?? current.fecha_entrega))
         };
         // Double check if the merged result is still "" (from current)

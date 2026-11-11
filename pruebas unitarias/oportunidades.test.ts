@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { filterOpportunities } from "@/lib/filterUtils";
+import { isB2COpportunity } from "@/lib/b2c";
+import { toInputDate } from "@/lib/date-utils";
 
 describe("Filtrado de Oportunidades", () => {
     const mockAccounts = new Map([
@@ -172,6 +174,60 @@ describe("Filtrado de Oportunidades", () => {
         // Segunda página: restantes 25
         const page2 = filtered.slice(pageSize, pageSize * 2);
         expect(page2).toHaveLength(25);
+    });
+});
+
+describe("Autocompletado de Fecha Cierre Estimada en Canal B2C / Propio", () => {
+    const todayStr = toInputDate(new Date());
+
+    it("identifica correctamente si una oportunidad pertenece a B2C / Canal Propio / Ecommerce", () => {
+        // Caso 1: Por canal de la cuenta PROPIO
+        expect(isB2COpportunity({ canal_id: "PROPIO" }, null, null, null)).toBe(true);
+
+        // Caso 2: Por canal de la oportunidad PROPIO
+        expect(isB2COpportunity(null, { canal_id: "PROPIO" }, null, null)).toBe(true);
+
+        // Caso 3: Por origen web / ecommerce
+        expect(isB2COpportunity(null, { origen_oportunidad: "Página Web" }, null, null)).toBe(true);
+        expect(isB2COpportunity(null, { origen_oportunidad: "Ecommerce" }, null, null)).toBe(true);
+
+        // Caso 4: Por asesor del canal PROPIO
+        expect(isB2COpportunity(null, null, { role: "VENDEDOR", canales: ["PROPIO"] }, null)).toBe(true);
+
+        // Caso 5: No es B2C si es Obras o Distribución
+        expect(isB2COpportunity({ canal_id: "OBRAS_NAC" }, null, null, null)).toBe(false);
+        expect(isB2COpportunity({ canal_id: "DIST_NAC" }, null, null, null)).toBe(false);
+
+        // Caso 6: Asesor B2C no sobreescribe si la cuenta pertenece explícitamente a Obras
+        expect(isB2COpportunity({ canal_id: "OBRAS_NAC" }, null, { role: "VENDEDOR", canales: ["PROPIO"] }, null)).toBe(false);
+    });
+
+    it("autocompleta fecha_cierre_estimada con la fecha de hoy al pasar a Cerrada Ganada o Cerrada Perdida en B2C", () => {
+        const resolveClosingDateOnPhaseChange = (
+            phaseName: string,
+            isB2C: boolean,
+            currentClosingDate: string | null
+        ) => {
+            const normalized = phaseName.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+            const isClosing = normalized.includes("ganada") || normalized.includes("perdida");
+            if (isClosing && isB2C) {
+                return todayStr;
+            }
+            return currentClosingDate;
+        };
+
+        // B2C pasando a Cerrada Ganada -> autocompleta con hoy
+        expect(resolveClosingDateOnPhaseChange("Cerrada Ganada", true, null)).toBe(todayStr);
+        expect(resolveClosingDateOnPhaseChange("Cerrada Ganada", true, "2026-05-10")).toBe(todayStr);
+
+        // B2C pasando a Cerrada Perdida -> autocompleta con hoy
+        expect(resolveClosingDateOnPhaseChange("Cerrada Perdida", true, null)).toBe(todayStr);
+
+        // B2C pasando a fase intermedia (no cerrada) -> conserva la fecha actual
+        expect(resolveClosingDateOnPhaseChange("Primer contacto", true, "2026-11-20")).toBe("2026-11-20");
+
+        // Obras / Distribución pasando a Cerrada Ganada -> NO sobreescribe, conserva fecha estimada previa
+        expect(resolveClosingDateOnPhaseChange("Cerrada Ganada", false, "2026-12-31")).toBe("2026-12-31");
     });
 });
 

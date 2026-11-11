@@ -17,6 +17,7 @@ oportunidad pertenece a una [[cuentas|cuenta]], tiene un vendedor propietario, a
 - **Estados:** `CRM_EstadosOportunidad` (p. ej. "Contacto Inicial" = id 8, usado por el
   lead intake de WordPress — ver [[integraciones]]).
 - **Probabilidad:** campo añadido en `20260202_add_probability.sql`.
+- **Fecha de Cierre Estimada y Autocompletado B2C:** En el detalle `/oportunidades/[id]`, el campo `fecha_cierre_estimada` (`DATE`) permite planificar el cierre comercial. Para los asesores y oportunidades del **Canal Propio (B2C) / Ecommerce** (`effectiveAccount.canal_id === 'PROPIO'`, leads de origen Web/Ecommerce o asesores con canal `PROPIO`), al avanzar la negociación a **Cerrada Ganada** o **Cerrada Perdida** en la barra de fases (o vista rápida), este campo se **autocompleta automáticamente** con la fecha actual del día (`toInputDate(new Date())`), reflejándose de inmediato en la interfaz y persistiendo en la base de datos sin requerir digitación manual.
 - **Fecha de Entrega:** Campo `fecha_entrega` (`DATE` nullable) registrado en `CRM_Oportunidades` (migración `20261016000000_add_fecha_entrega_to_oportunidades.sql`) para estimar y coordinar los despachos desde la oportunidad. Editable inline con guardado automático en `/oportunidades/[id]` en la grilla junto a "Fecha Cierre Estimada" y "Moneda", seleccionable en el wizard `/oportunidades/nueva` y exportable a Excel en `/informes`.
 - **Cierre perdido:** requiere motivo de pérdida (`20260205_loss_reasons.sql`,
   `LossReasonModal.tsx`).

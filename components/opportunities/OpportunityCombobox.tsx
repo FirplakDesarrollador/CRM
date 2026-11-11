@@ -3,6 +3,8 @@
 import * as React from "react";
 import { Check, ChevronsUpDown, Loader2, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { db } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 import { useOpportunitiesServer } from "@/lib/hooks/useOpportunitiesServer";
 import {
     Popover,
@@ -23,13 +25,15 @@ interface OpportunityComboboxProps {
     accountId?: string;
     onChange: (value: string) => void;
     disabled?: boolean;
+    initialLabel?: string;
 }
 
 export function OpportunityCombobox({
     value,
     accountId,
     onChange,
-    disabled = false
+    disabled = false,
+    initialLabel
 }: OpportunityComboboxProps) {
     const [open, setOpen] = React.useState(false);
     const [search, setSearch] = React.useState("");
@@ -75,6 +79,57 @@ export function OpportunityCombobox({
         return opportunities.find(o => o.id === value);
     }, [value, opportunities]);
 
+    const [resolvedName, setResolvedName] = React.useState<string>("");
+
+    React.useEffect(() => {
+        const currentId = String(value || "");
+        if (!currentId || currentId === "undefined" || currentId === "null") {
+            setResolvedName("");
+            return;
+        }
+
+        // 1. Check in currently loaded opportunities
+        const found = opportunities.find(o => String(o.id) === currentId);
+        if (found) {
+            setResolvedName(found.nombre);
+            return;
+        }
+
+        // 2. Use initialLabel if provided
+        if (initialLabel) {
+            setResolvedName(initialLabel);
+            return;
+        }
+
+        // 3. Fallback to Dexie local DB
+        let isCancelled = false;
+        (async () => {
+            try {
+                const local = await db.opportunities.get(currentId);
+                if (isCancelled) return;
+                if (local?.nombre) {
+                    setResolvedName(local.nombre);
+                    return;
+                }
+                if (typeof navigator !== 'undefined' && navigator.onLine) {
+                    // 4. Fallback to Supabase JIT query
+                    const { data } = await supabase
+                        .from('CRM_Oportunidades')
+                        .select('id, nombre')
+                        .eq('id', currentId)
+                        .maybeSingle();
+                    if (!isCancelled && data?.nombre) {
+                        setResolvedName(data.nombre);
+                    }
+                }
+            } catch (e: any) {
+                console.warn('[OpportunityCombobox] Failed lookup for opp', e);
+            }
+        })();
+
+        return () => { isCancelled = true; };
+    }, [value, opportunities, initialLabel]);
+
     return (
         <Popover open={open} onOpenChange={setOpen}>
             <PopoverTrigger asChild>
@@ -88,7 +143,7 @@ export function OpportunityCombobox({
                     )}
                 >
                     <span className="truncate">
-                        {value && selectedOpp ? selectedOpp.nombre : "Seleccione una oportunidad..."}
+                        {value ? (selectedOpp?.nombre || resolvedName || initialLabel || "Cargando...") : "Seleccione una oportunidad..."}
                     </span>
                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                 </button>

@@ -233,34 +233,50 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
             let accountId = null;
 
             // 1. Try local cache for Opportunity
-            const localOpp = await db.opportunities.get(watchedOpportunityId);
+            let localOpp = await db.opportunities.get(watchedOpportunityId);
+            if (!localOpp && navigator.onLine) {
+                // 2. Fallback to Supabase for Opportunity (JIT sync full record into Dexie)
+                try {
+                    const { data } = await supabase
+                        .from('CRM_Oportunidades')
+                        .select('*')
+                        .eq('id', watchedOpportunityId)
+                        .maybeSingle();
+                    if (data) {
+                        await db.opportunities.put(data);
+                        localOpp = data;
+                    }
+                } catch (e) {
+                    console.warn('[CreateActivityModal] Failed to fetch opportunity from server:', e);
+                }
+            }
             if (localOpp?.account_id) {
                 accountId = localOpp.account_id;
-            } else if (navigator.onLine) {
-                // 2. Fallback to Supabase for Opportunity
-                const { data } = await supabase
-                    .from('CRM_Oportunidades')
-                    .select('account_id')
-                    .eq('id', watchedOpportunityId)
-                    .maybeSingle();
-                if (data?.account_id) accountId = data.account_id;
             }
 
             if (accountId) {
                 opportunityAccountRef.current = accountId;
                 setValue('account_id', accountId, { shouldDirty: true });
 
-                // Resolve account name independently
-                const localAcc = await db.accounts.get(accountId);
-                if (localAcc) {
+                // Resolve account name independently & JIT sync into Dexie
+                let localAcc = await db.accounts.get(accountId);
+                if (!localAcc && navigator.onLine) {
+                    try {
+                        const { data } = await supabase
+                            .from('CRM_Cuentas')
+                            .select('*')
+                            .eq('id', accountId)
+                            .maybeSingle();
+                        if (data) {
+                            await db.accounts.put(data);
+                            localAcc = data;
+                        }
+                    } catch (e) {
+                        console.warn('[CreateActivityModal] Failed to fetch account from server:', e);
+                    }
+                }
+                if (localAcc?.nombre) {
                     setResolvedAccountName(localAcc.nombre);
-                } else if (navigator.onLine) {
-                    const { data } = await supabase
-                        .from('CRM_Cuentas')
-                        .select('nombre')
-                        .eq('id', accountId)
-                        .maybeSingle();
-                    if (data?.nombre) setResolvedAccountName(data.nombre);
                 }
             }
         };
@@ -270,12 +286,25 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
 
     // Pre-resolve initial account name
     useEffect(() => {
-        if (initialAccountId) {
-            db.accounts.get(initialAccountId).then(acc => {
-                if (acc) setResolvedAccountName(acc.nombre);
+        const accId = initialAccountId || initialData?.account_id;
+        if (accId) {
+            db.accounts.get(accId).then(async (acc) => {
+                if (acc) {
+                    setResolvedAccountName(acc.nombre);
+                } else if (navigator.onLine) {
+                    try {
+                        const { data } = await supabase.from('CRM_Cuentas').select('*').eq('id', accId).maybeSingle();
+                        if (data) {
+                            await db.accounts.put(data);
+                            setResolvedAccountName(data.nombre);
+                        }
+                    } catch (e) {
+                        console.warn('[CreateActivityModal] Failed initial account fetch:', e);
+                    }
+                }
             });
         }
-    }, [initialAccountId]);
+    }, [initialAccountId, initialData?.account_id]);
 
     // Sync props to form if they change after mount (e.g. late loading from parent)
     useEffect(() => {
@@ -2122,6 +2151,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                 <label className="text-xs font-bold text-slate-500 uppercase">Oportunidad Relacionada</label>
                                 <OpportunityCombobox
                                     value={watch('opportunity_id')}
+                                    initialLabel={relatedOpportunity?.nombre}
                                     accountId={watch('account_id')}
                                     onChange={(val) => {
                                         setValue('opportunity_id', val, { shouldDirty: true, shouldValidate: true });

@@ -39,6 +39,7 @@ import { useSyncStore } from "@/lib/stores/useSyncStore";
 import { useOpportunityOrigins } from "@/lib/hooks/useOpportunityOrigins";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { OPPORTUNITY_CATEGORIES, parseOpportunityCategories, formatOpportunityCategories } from "@/lib/opportunityCategories";
+import { isB2COpportunity } from "@/lib/b2c";
 import { AccountModal } from "@/components/cuentas/AccountModal";
 import { EntityAuditHistoryTab } from "@/components/shared/EntityAuditHistoryTab";
 import { History } from "lucide-react";
@@ -564,31 +565,51 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     const handlePhaseChange = async (phaseId: number) => {
         const targetPhase = phases?.find(p => p.id === phaseId);
 
-        // Check if target is "Cerrada Perdida"
+        // Check if target is "Cerrada Perdida" or "Cerrada Ganada"
         const normalizedName = targetPhase?.nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") || "";
+        const isClosedWon = normalizedName.includes('ganada');
+        const isClosedLost = normalizedName.includes('perdida');
 
-        if (normalizedName.includes('perdida')) {
+        // B2C / Canal Propio / Ecommerce check
+        const isB2C = isB2COpportunity(effectiveAccount, opportunity, user, targetPhase);
+        const todayStr = toInputDate(new Date());
+
+        if (isClosedLost) {
             // Block if loss reason fields are not filled
             if (!lossFieldsComplete) return;
 
             const lostPhase = phases?.find(p => p.id === phaseId);
-            await updateOpportunity(opportunity.id, {
+            const updates: any = {
                 fase_id: phaseId,
                 razon_perdida: localRazonPerdida,
                 comentarios_perdida: localComentariosPerdida,
                 estado_id: 3,
                 probability: lostPhase?.probability ?? 0
-            });
+            };
+
+            if (isB2C) {
+                updates.fecha_cierre_estimada = todayStr;
+                setLocalClosingDate(todayStr);
+            }
+
+            await updateOpportunity(opportunity.id, updates);
             return;
         }
 
         // Check if target is "Cerrada Ganada"
-        if (normalizedName.includes('ganada')) {
-            await updateOpportunity(opportunity.id, {
+        if (isClosedWon) {
+            const updates: any = {
                 fase_id: phaseId,
                 estado_id: 2, // Explicitly set to Won status
                 probability: targetPhase?.probability ?? 100 // Propagate phase probability
-            });
+            };
+
+            if (isB2C) {
+                updates.fecha_cierre_estimada = todayStr;
+                setLocalClosingDate(todayStr);
+            }
+
+            await updateOpportunity(opportunity.id, updates);
             return;
         }
 

@@ -70,7 +70,8 @@ export async function buildQuotePdfDoc(
     items: any[],
     account: any,
     opportunity: any,
-    advisorName?: string
+    advisorName?: string,
+    advisorEmail?: string
 ): Promise<jsPDF> {
     const doc = new jsPDF('p', 'pt', 'a4');
 
@@ -85,6 +86,7 @@ export async function buildQuotePdfDoc(
 
     const margin = 28;
     const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
     const contentWidth = pageWidth - margin * 2;
     let y = margin;
 
@@ -593,22 +595,55 @@ export async function buildQuotePdfDoc(
     // ─────────────────────────────────────────────────────────────
     // 7. FIRMAS Y ACEPTACIÓN DEL DOCUMENTO
     // ─────────────────────────────────────────────────────────────
-    // Obtener nombre del asesor comercial
+    // Obtener nombre y correo del asesor comercial
     let displayAdvisorName = advisorName || opportunity?.owner_user_id || 'Asesor Firplak';
-    if (!advisorName && opportunity?.owner_user_id) {
+    let displayAdvisorEmail = advisorEmail || '';
+
+    if ((!advisorName || !displayAdvisorEmail) && opportunity?.owner_user_id) {
         try {
             const { supabase } = await import('@/lib/supabase');
             const { data: userData } = await supabase
                 .from('CRM_Usuarios')
-                .select('full_name')
+                .select('full_name, email')
                 .eq('id', opportunity.owner_user_id)
-                .single();
+                .maybeSingle();
 
-            if (userData?.full_name) {
+            if (userData?.full_name && !advisorName) {
                 displayAdvisorName = userData.full_name;
             }
+            if (userData?.email && !displayAdvisorEmail) {
+                displayAdvisorEmail = userData.email;
+            }
         } catch (e) {
-            console.warn('No se pudo obtener el nombre del asesor:', e);
+            console.warn('No se pudo obtener el nombre/correo del asesor:', e);
+        }
+    }
+
+    if (!displayAdvisorEmail && displayAdvisorName && displayAdvisorName !== 'Asesor Firplak') {
+        try {
+            const { supabase } = await import('@/lib/supabase');
+            const { data: userByName } = await supabase
+                .from('CRM_Usuarios')
+                .select('email')
+                .ilike('full_name', displayAdvisorName)
+                .maybeSingle();
+            if (userByName?.email) {
+                displayAdvisorEmail = userByName.email;
+            }
+        } catch (e) {
+            // ignore
+        }
+    }
+
+    if (!displayAdvisorEmail && typeof window !== 'undefined') {
+        try {
+            const { supabase } = await import('@/lib/supabase');
+            const { data: sessionData } = await supabase.auth.getSession();
+            if (sessionData?.session?.user?.email) {
+                displayAdvisorEmail = sessionData.session.user.email;
+            }
+        } catch (e) {
+            // ignore
         }
     }
 
@@ -655,30 +690,48 @@ export async function buildQuotePdfDoc(
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(...textMuted);
     doc.text(`Contacto Asesor / PBX: (604) 444 17 71`, signRightX + 6, finalY + 33);
-    doc.text(`Email: cartera@firplak.com • www.firplak.com`, signRightX + 6, finalY + 41);
-
-    finalY += signCardH + 10;
+    const emailToDisplay = displayAdvisorEmail || 'cartera@firplak.com';
+    doc.text(`Email: ${emailToDisplay} • www.firplak.com`, signRightX + 6, finalY + 41);
 
     // ─────────────────────────────────────────────────────────────
     // 8. TEXTO LEGAL Y PIE DE PÁGINA
     // ─────────────────────────────────────────────────────────────
+    const boxBottom = finalY + signCardH;
+    const legalText = 'Con la firma o aceptación de este documento (vía e-mail), usted nos autoriza para tratar sus datos personales de acuerdo con la Ley Colombiana 1581 de 2012 "Protección de Datos Personales" y nuestra política disponible en www.firplak.com/privacy_policies.';
+
     doc.setFontSize(5.5);
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(...textMuted);
-    const legalText = 'Con la firma o aceptación de este documento (vía e-mail), usted nos autoriza para tratar sus datos personales de acuerdo con la Ley Colombiana 1581 de 2012 "Protección de Datos Personales" y nuestra política disponible en www.firplak.com/privacy_policies.';
-    doc.text(legalText, pageWidth / 2, finalY, { align: 'center', maxWidth: contentWidth });
+    const legalLines = doc.splitTextToSize(legalText, contentWidth);
+    const legalHeight = legalLines.length * 7;
+    const totalFooterHeight = legalHeight + 6 + 9 + 5 + 8; // Altura requerida con espacios confortables
 
-    finalY += 9;
+    // Si no cabe en la página actual, saltar de página
+    if (boxBottom + 20 + totalFooterHeight > pageHeight - margin) {
+        doc.addPage();
+        finalY = margin;
+    }
+
+    // Posicionamiento armónico: si hay espacio suficiente, anclar elegantemente al pie de página;
+    // si no, mantener una separación mínima holgada de 24pt respecto a las firmas.
+    let footerY = Math.max(boxBottom + 24, pageHeight - margin - totalFooterHeight);
+
+    // Línea 1: Tratamiento de datos personales
+    doc.setTextColor(...textMuted);
+    doc.text(legalLines, pageWidth / 2, footerY, { align: 'center' });
+    footerY += legalHeight + 6;
+
+    // Línea 2: Autorretenedores
     doc.setFontSize(6.5);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(...primaryNavy);
-    doc.text('SOMOS AUTORRETENEDORES RES. 64 DE MAYO 3 DE 1995', pageWidth / 2, finalY, { align: 'center' });
+    doc.text('SOMOS AUTORRETENEDORES RES. 64 DE MAYO 3 DE 1995', pageWidth / 2, footerY, { align: 'center' });
+    footerY += 9;
 
-    finalY += 8;
+    // Línea 3: Dirección y canales de contacto
     doc.setFontSize(6);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(...textMuted);
-    doc.text('Autopista Sur, Calle 29 No. 41-15 Itagüí – Antioquia • PBX: (604) 444 17 71 • Fax: (604) 281 76 07 • www.firplak.com', pageWidth / 2, finalY, { align: 'center' });
+    doc.text('Autopista Sur, Calle 29 No. 41-15 Itagüí – Antioquia • PBX: (604) 444 17 71 • Fax: (604) 281 76 07 • www.firplak.com', pageWidth / 2, footerY, { align: 'center' });
 
     return doc;
 }
@@ -688,9 +741,10 @@ export async function generateQuotePdfBlob(
     items: any[],
     account: any,
     opportunity: any,
-    advisorName?: string
+    advisorName?: string,
+    advisorEmail?: string
 ): Promise<Blob> {
-    const doc = await buildQuotePdfDoc(quote, items, account, opportunity, advisorName);
+    const doc = await buildQuotePdfDoc(quote, items, account, opportunity, advisorName, advisorEmail);
     const pdfArrayBuffer = doc.output('arraybuffer');
     return new Blob([pdfArrayBuffer], { type: 'application/pdf' });
 }
@@ -701,9 +755,10 @@ export async function generateQuotePdf(
     account: any,
     opportunity: any,
     save = true,
-    advisorName?: string
+    advisorName?: string,
+    advisorEmail?: string
 ): Promise<string | void> {
-    const doc = await buildQuotePdfDoc(quote, items, account, opportunity, advisorName);
+    const doc = await buildQuotePdfDoc(quote, items, account, opportunity, advisorName, advisorEmail);
 
     if (save) {
         const pdfArrayBuffer = doc.output('arraybuffer');

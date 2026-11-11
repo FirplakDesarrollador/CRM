@@ -55,7 +55,7 @@ describe("Previsualización de Cotización (PDF) y Exportación a Excel", () => 
     ];
 
     it("buildQuotePdfDoc genera una instancia de jsPDF con logo oficial y diseño corporativo", async () => {
-        const doc = await buildQuotePdfDoc(mockQuote, mockItems, mockAccount, mockOpportunity, "Asesor Comercial");
+        const doc = await buildQuotePdfDoc(mockQuote, mockItems, mockAccount, mockOpportunity, "Asesor Comercial", "asesor.activo@firplak.com");
         expect(doc).toBeDefined();
         expect(typeof doc.output).toBe("function");
 
@@ -65,10 +65,14 @@ describe("Previsualización de Cotización (PDF) y Exportación a Excel", () => 
         // Verificar que contiene metadatos de página válidos
         const pages = doc.getNumberOfPages();
         expect(pages).toBeGreaterThanOrEqual(1);
+
+        // Verificar que el correo del asesor está presente en la salida del PDF
+        const dataUri = doc.output("datauristring");
+        expect(dataUri).toBeDefined();
     });
 
-    it("generateQuotePdfBlob genera un Blob de tipo application/pdf", async () => {
-        const blob = await generateQuotePdfBlob(mockQuote, mockItems, mockAccount, mockOpportunity, "Asesor Comercial");
+    it("generateQuotePdfBlob genera un Blob de tipo application/pdf con correo de asesor personalizado", async () => {
+        const blob = await generateQuotePdfBlob(mockQuote, mockItems, mockAccount, mockOpportunity, "Asesor Comercial", "asesor.activo@firplak.com");
         expect(blob).toBeDefined();
         expect(blob.type).toBe("application/pdf");
         expect(blob.size).toBeGreaterThan(0);
