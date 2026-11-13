@@ -1,0 +1,998 @@
+"use client";
+
+import React, { useCallback, useMemo, useState } from "react";
+import ReactECharts from "echarts-for-react";
+import Link from "next/link";
+import { CalendarCheck2, CheckCircle2, BarChart3, CalendarClock, AlertTriangle, FileWarning, ExternalLink, Download } from "lucide-react";
+import { useIndicadoresLookups } from "@/lib/hooks/useIndicadoresLookups";
+import { useCanalPropioVendedores, TipoCanalVendedor } from "@/lib/hooks/useCanalPropioVendedores";
+import { useLiveActivities } from "@/lib/hooks/useLiveActivities";
+import { useLiveOpportunities } from "@/lib/hooks/useLiveOpportunities";
+import { SearchableSelect, SearchableSelectOption } from "@/components/ui/SearchableSelect";
+import { MultiSelect, Option } from "@/components/ui/MultiSelect";
+import { formatCurrency } from "@/lib/utils";
+import { downloadCSV } from "@/lib/utils/informes";
+import { currentWeekMarkLine, getISOWeek, getWeekKey, withCurrentWeekMarker } from "./weekUtils";
+import { EChartsCallbackParams } from "./echartsTypes";
+import { isPlausibleYear } from "./dateUtils";
+import { getZonaByDepartamentoId, ZONA_OPTIONS } from "./zonas";
+
+const MONTH_LABELS = [
+    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+];
+
+const TIPO_CANAL_OPTIONS: { value: TipoCanalVendedor; label: string }[] = [
+    { value: "Fisico", label: "Físico" },
+    { value: "Online", label: "Online" },
+];
+
+interface Filters {
+    canalId: string;
+    tiposCanal: TipoCanalVendedor[];
+    year: string;
+    month: string;
+    day: string;
+    week: string;
+    asesorIds: string[]; // also set via chart/table click cross-filter
+    clasificacionIds: string[];
+    subclasificacionId: string;
+    zonaId: string;
+    faseIds: string[];
+    desde: string; // "" = sin límite, formato "YYYY-MM-DD"
+    hasta: string;
+}
+
+const EMPTY_FILTERS: Filters = {
+    canalId: "",
+    tiposCanal: [],
+    year: "",
+    month: "",
+    day: "",
+    week: "",
+    asesorIds: [],
+    clasificacionIds: [],
+    subclasificacionId: "",
+    zonaId: "",
+    faseIds: [],
+    desde: "",
+    hasta: "",
+};
+const CANAL_PROPIO_ID = "PROPIO";
+const WEEK_OPTIONS = Array.from({ length: 53 }, (_, i) => ({ value: String(i + 1), label: String(i + 1) }));
+
+type DetailKind = "completados" | "programados" | "atrasados" | "sinActividad";
+const DETAIL_KIND_LABELS: Record<DetailKind, string> = {
+    completados: "Completadas",
+    programados: "Programadas",
+    atrasados: "Atrasadas",
+    sinActividad: "Oportunidades sin actividad",
+};
+
+export function Page4Eventos() {
+    const { users, channels, accountsMap, subclasificaciones, activityClassifications, phases } = useIndicadoresLookups();
+    const { tipoByVendedor } = useCanalPropioVendedores();
+    // Live from Supabase, same rationale as Page 3: the offline cache can be
+    // stale for this data even right after a manual sync.
+    const { activities } = useLiveActivities();
+    const { opportunities } = useLiveOpportunities();
+    const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+    const [detailView, setDetailView] = useState<{ asesorId: string; kind: DetailKind } | null>(null);
+
+    const setFilter = <K extends keyof Filters>(key: K, value: Filters[K]) => {
+        setFilters(prev => ({ ...prev, [key]: value }));
+    };
+
+    const userNameMap = useMemo(() => {
+        const map = new Map<string, string>();
+        users.forEach(u => map.set(u.id, u.full_name?.trim() || u.email));
+        return map;
+    }, [users]);
+
+    const canalOptions: SearchableSelectOption[] = useMemo(
+        () => channels.map(c => ({ value: c.id, label: c.nombre })),
+        [channels]
+    );
+    const isCanalPropio = filters.canalId === CANAL_PROPIO_ID;
+
+    const setCanalFilter = (canalId: string) => {
+        setFilters(prev => ({
+            ...prev,
+            canalId,
+            tiposCanal: canalId === CANAL_PROPIO_ID ? prev.tiposCanal : [],
+            subclasificacionId: "",
+            zonaId: "",
+            faseIds: [],
+        }));
+    };
+
+    const asesorOptions: Option[] = useMemo(
+        () => users.map(u => ({ value: u.id, label: u.full_name?.trim() || u.email })),
+        [users]
+    );
+
+    const clasificacionOptions: Option[] = useMemo(
+        () =>
+            activityClassifications
+                .filter(c => !c.is_deleted)
+                .sort((a, b) => a.nombre.localeCompare(b.nombre))
+                .map(c => ({ value: String(c.id), label: c.nombre })),
+        [activityClassifications]
+    );
+
+    const clasificacionMap = useMemo(() => {
+        const map = new Map<number, string>();
+        activityClassifications.forEach(c => map.set(c.id, c.nombre));
+        return map;
+    }, [activityClassifications]);
+
+    const subclasOptions: SearchableSelectOption[] = useMemo(
+        () =>
+            subclasificaciones
+                .filter(s => !filters.canalId || s.canal_id === filters.canalId)
+                .map(s => ({ value: String(s.id), label: s.nombre })),
+        [subclasificaciones, filters.canalId]
+    );
+
+    // Fases, igual que en Cohort (Page1): dependen del canal elegido.
+    const faseOptions: Option[] = useMemo(() => {
+        if (!filters.canalId) return [];
+        return phases
+            .filter(p => p.canal_id === filters.canalId)
+            .sort((a, b) => a.orden - b.orden)
+            .map(p => ({ value: String(p.id), label: p.nombre }));
+    }, [phases, filters.canalId]);
+
+    // La fase es una propiedad de la oportunidad, no de la actividad — solo
+    // se puede resolver cuando la actividad está ligada a una oportunidad.
+    const oppFaseMap = useMemo(() => {
+        const map = new Map<string, number>();
+        (opportunities || []).forEach(o => {
+            if (o.fase_id != null) map.set(o.id, o.fase_id);
+        });
+        return map;
+    }, [opportunities]);
+
+    const faseNameMap = useMemo(() => {
+        const map = new Map<number, string>();
+        phases.forEach(p => map.set(p.id, p.nombre));
+        return map;
+    }, [phases]);
+
+    const resolveFaseNombre = useCallback(
+        (activity: { opportunity_id?: string | null }) => {
+            if (!activity.opportunity_id) return "Sin fase";
+            const faseId = oppFaseMap.get(activity.opportunity_id);
+            return faseId != null ? faseNameMap.get(faseId) || "Sin fase" : "Sin fase";
+        },
+        [oppFaseMap, faseNameMap]
+    );
+
+    // Activities only link to an opportunity sometimes; when account_id is
+    // empty, resolve the account through the linked opportunity (same
+    // pattern as app/actividades/page.tsx and Page2Clasificaciones).
+    const oppAccountMap = useMemo(() => {
+        const map = new Map<string, string>();
+        (opportunities || []).forEach(o => {
+            if (o.account_id) map.set(o.id, o.account_id);
+        });
+        return map;
+    }, [opportunities]);
+
+    const resolveAccount = useCallback(
+        (activity: { account_id?: string | null; opportunity_id?: string | null }) => {
+            const accountId = activity.account_id || (activity.opportunity_id ? oppAccountMap.get(activity.opportunity_id) : undefined);
+            return accountId ? accountsMap.get(accountId) : undefined;
+        },
+        [accountsMap, oppAccountMap]
+    );
+
+    const oppOwnerMap = useMemo(() => {
+        const map = new Map<string, string>();
+        (opportunities || []).forEach(o => {
+            if (o.owner_user_id) map.set(o.id, o.owner_user_id);
+        });
+        return map;
+    }, [opportunities]);
+
+    // El "asesor" de un evento es a quien está asignada la cuenta/oportunidad
+    // vinculada (owner_user_id), no quien registró la actividad (user_id) —
+    // un coordinador o asistente a veces registra la actividad por otro
+    // asesor, y lo que importa aquí es a quién le corresponde el seguimiento.
+    const resolveAssignedAdvisor = useCallback(
+        (activity: { account_id?: string | null; opportunity_id?: string | null; user_id?: string | null }) => {
+            if (activity.opportunity_id) {
+                const ownerId = oppOwnerMap.get(activity.opportunity_id);
+                if (ownerId) return ownerId;
+            }
+            if (activity.account_id) {
+                const ownerId = accountsMap.get(activity.account_id)?.owner_user_id;
+                if (ownerId) return ownerId;
+            }
+            return activity.user_id || null;
+        },
+        [oppOwnerMap, accountsMap]
+    );
+
+    const yearOptions: SearchableSelectOption[] = useMemo(() => {
+        const years = new Set<number>();
+        (activities || []).forEach(a => {
+            if (!a.fecha_inicio) return;
+            const year = new Date(a.fecha_inicio).getFullYear();
+            if (isPlausibleYear(year)) years.add(year);
+        });
+        years.add(new Date().getFullYear());
+        return Array.from(years)
+            .sort((a, b) => b - a)
+            .map(y => ({ value: String(y), label: String(y) }));
+    }, [activities]);
+
+    const monthOptions: SearchableSelectOption[] = MONTH_LABELS.map((label, idx) => ({ value: String(idx), label }));
+    const dayOptions: SearchableSelectOption[] = Array.from({ length: 31 }, (_, i) => ({
+        value: String(i + 1),
+        label: String(i + 1),
+    }));
+
+    // Actividades (Eventos + Tareas) matching Canal, Tipo Canal (Canal Propio
+    // only), SubClasificación, Clasificación, Año/Mes/Día and the Asesor
+    // filter/cross-filter.
+    const eventos = useMemo(() => {
+        const yearNum = filters.year ? Number(filters.year) : null;
+        const monthNum = filters.month !== "" ? Number(filters.month) : null;
+        const dayNum = filters.day ? Number(filters.day) : null;
+        const weekNum = filters.week ? Number(filters.week) : null;
+        const desdeDate = filters.desde ? new Date(`${filters.desde}T00:00:00`) : null;
+        const hastaDate = filters.hasta ? new Date(`${filters.hasta}T23:59:59.999`) : null;
+        const tipoSet = isCanalPropio && filters.tiposCanal.length > 0 ? new Set(filters.tiposCanal) : null;
+        const asesorSet = filters.asesorIds.length > 0 ? new Set(filters.asesorIds) : null;
+        const clasifSet = filters.clasificacionIds.length > 0 ? new Set(filters.clasificacionIds.map(Number)) : null;
+        const subclasId = filters.subclasificacionId ? Number(filters.subclasificacionId) : null;
+        const faseIdSet = filters.faseIds.length > 0 ? new Set(filters.faseIds.map(Number)) : null;
+        return (activities || []).filter(a => {
+            if (a.is_deleted) return false;
+            const assignedId = resolveAssignedAdvisor(a);
+            if (asesorSet && (!assignedId || !asesorSet.has(assignedId))) return false;
+            if (clasifSet && (a.clasificacion_id == null || !clasifSet.has(a.clasificacion_id))) return false;
+            if (faseIdSet) {
+                const faseId = a.opportunity_id ? oppFaseMap.get(a.opportunity_id) : undefined;
+                if (faseId == null || !faseIdSet.has(faseId)) return false;
+            }
+            const acc = filters.canalId || subclasId || filters.zonaId ? resolveAccount(a) : undefined;
+            if (filters.canalId && acc?.canal_id !== filters.canalId) return false;
+            if (subclasId && acc?.subclasificacion_id !== subclasId) return false;
+            if (filters.zonaId && getZonaByDepartamentoId(acc?.departamento_id) !== filters.zonaId) return false;
+            if (tipoSet) {
+                const tipo = assignedId ? tipoByVendedor.get(assignedId) : undefined;
+                if (!tipo || !tipoSet.has(tipo)) return false;
+            }
+            if (yearNum != null || monthNum != null || dayNum != null || weekNum != null || desdeDate || hastaDate) {
+                if (!a.fecha_inicio) return false;
+                const d = new Date(a.fecha_inicio);
+                if (yearNum != null && d.getFullYear() !== yearNum) return false;
+                if (monthNum != null && d.getMonth() !== monthNum) return false;
+                if (dayNum != null && d.getDate() !== dayNum) return false;
+                if (weekNum != null && getISOWeek(d) !== weekNum) return false;
+                if (desdeDate && d < desdeDate) return false;
+                if (hastaDate && d > hastaDate) return false;
+            }
+            return true;
+        });
+    }, [activities, filters, isCanalPropio, resolveAccount, resolveAssignedAdvisor, oppFaseMap, tipoByVendedor]);
+
+    const completados = useMemo(() => eventos.filter(a => a.is_completed), [eventos]);
+
+    // Same "atrasada" definition used across the app (app/actividades/page.tsx):
+    // not completed and its scheduled day is strictly before today.
+    const isOverdueEvent = (a: { fecha_inicio: string | null; is_completed: boolean | null }) => {
+        if (a.is_completed || !a.fecha_inicio) return false;
+        return new Date(a.fecha_inicio).setHours(0, 0, 0, 0) < new Date().setHours(0, 0, 0, 0);
+    };
+    const atrasados = useMemo(() => eventos.filter(isOverdueEvent), [eventos]);
+
+    // Detalle de actividades (Completadas/Programadas/Atrasadas) del asesor
+    // seleccionado en la tabla "Eventos por asesor".
+    const activityDetailRows = useMemo(() => {
+        if (!detailView || detailView.kind === "sinActividad") return [];
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        return eventos
+            .filter(a => resolveAssignedAdvisor(a) === detailView.asesorId)
+            .filter(a => {
+                if (detailView.kind === "completados") return a.is_completed;
+                if (detailView.kind === "programados") return !a.is_completed;
+                return isOverdueEvent(a);
+            })
+            .map(a => {
+                const fecha = a.fecha_inicio ? new Date(a.fecha_inicio) : null;
+                const diasAtraso = !a.is_completed && fecha
+                    ? Math.round((today.getTime() - new Date(fecha).setHours(0, 0, 0, 0)) / 86400000)
+                    : null;
+                return {
+                    id: a.id,
+                    asunto: a.asunto?.trim() || "Sin asunto",
+                    tipo: a.tipo_actividad === "EVENTO" ? "Evento" : "Tarea",
+                    clasificacion: a.clasificacion_id != null ? clasificacionMap.get(a.clasificacion_id) || "-" : "-",
+                    cuenta: resolveAccount(a)?.nombre || "Sin cuenta",
+                    fechaLabel: fecha ? fecha.toLocaleDateString("es-CO", { day: "2-digit", month: "short", year: "numeric" }) : "-",
+                    diasAtraso: diasAtraso != null && diasAtraso > 0 ? diasAtraso : null,
+                };
+            })
+            .sort((a, b) => (b.diasAtraso ?? 0) - (a.diasAtraso ?? 0));
+    }, [eventos, detailView, clasificacionMap, resolveAccount, resolveAssignedAdvisor]);
+
+    const detailAsesorName = detailView ? userNameMap.get(detailView.asesorId) || "Sin asesor" : null;
+
+    // "Programados" = pendientes por hacer (atrasadas + futuras), no el total
+    // historico de todo lo que se ha programado alguna vez. Mismo criterio
+    // que pendingTotal en lib/opportunityActivities.ts.
+    const pendientes = useMemo(() => eventos.filter(a => !a.is_completed), [eventos]);
+
+    // Oportunidades en el mismo alcance de Canal/Tipo Canal/SubClasificación/
+    // Asesor, pero sin el filtro de fecha de las actividades — "sin actividad"
+    // es un hecho de la oportunidad, no algo acotado a un rango de tiempo.
+    const scopedOpportunitiesForActivity = useMemo(() => {
+        const tipoSet = isCanalPropio && filters.tiposCanal.length > 0 ? new Set(filters.tiposCanal) : null;
+        const asesorSet = filters.asesorIds.length > 0 ? new Set(filters.asesorIds) : null;
+        const subclasId = filters.subclasificacionId ? Number(filters.subclasificacionId) : null;
+        return (opportunities || []).filter(o => {
+            if (o.is_deleted) return false;
+            if (asesorSet && (!o.owner_user_id || !asesorSet.has(o.owner_user_id))) return false;
+            const acc = o.account_id ? accountsMap.get(o.account_id) : undefined;
+            if (filters.canalId && acc?.canal_id !== filters.canalId) return false;
+            if (subclasId && acc?.subclasificacion_id !== subclasId) return false;
+            if (filters.zonaId && getZonaByDepartamentoId(acc?.departamento_id) !== filters.zonaId) return false;
+            if (tipoSet) {
+                const tipo = o.owner_user_id ? tipoByVendedor.get(o.owner_user_id) : undefined;
+                if (!tipo || !tipoSet.has(tipo)) return false;
+            }
+            return true;
+        });
+    }, [opportunities, filters.canalId, filters.subclasificacionId, filters.zonaId, filters.asesorIds, filters.tiposCanal, isCanalPropio, accountsMap, tipoByVendedor]);
+
+    // Mismo criterio que computeOpportunityActivitySummary (lib/opportunityActivities.ts):
+    // una oportunidad "tiene actividad" si existe al menos una actividad no
+    // eliminada ligada a ella, sin importar su tipo o fecha.
+    const activityCountByOpportunity = useMemo(() => {
+        const map = new Map<string, number>();
+        (activities || []).forEach(a => {
+            if (a.is_deleted || !a.opportunity_id) return;
+            map.set(a.opportunity_id, (map.get(a.opportunity_id) || 0) + 1);
+        });
+        return map;
+    }, [activities]);
+
+    const oportunidadesSinActividad = useMemo(
+        () => scopedOpportunitiesForActivity.filter(o => !activityCountByOpportunity.has(o.id)),
+        [scopedOpportunitiesForActivity, activityCountByOpportunity]
+    );
+
+    // Detalle de oportunidades sin actividad del asesor seleccionado.
+    const sinActividadDetailRows = useMemo(() => {
+        if (!detailView || detailView.kind !== "sinActividad") return [];
+        return scopedOpportunitiesForActivity
+            .filter(o => o.owner_user_id === detailView.asesorId && !activityCountByOpportunity.has(o.id))
+            .map(o => {
+                const acc = o.account_id ? accountsMap.get(o.account_id) : undefined;
+                return {
+                    id: o.id,
+                    nombre: o.nombre?.trim() || "Sin nombre",
+                    cuenta: acc?.nombre || "Sin cuenta",
+                    amount: Number(o.amount ?? 0),
+                    fechaLabel: o.created_at ? new Date(o.created_at).toLocaleDateString("es-CO", { day: "2-digit", month: "short", year: "numeric" }) : "-",
+                };
+            })
+            .sort((a, b) => a.cuenta.localeCompare(b.cuenta));
+    }, [scopedOpportunitiesForActivity, activityCountByOpportunity, detailView, accountsMap]);
+
+    const toggleAsesorFilter = (asesorId: string) => {
+        setFilters(prev => {
+            const isOnlySelected = prev.asesorIds.length === 1 && prev.asesorIds[0] === asesorId;
+            return { ...prev, asesorIds: isOnlySelected ? [] : [asesorId] };
+        });
+    };
+
+    // --- Table: Asesor | Completadas | Pendientes | Atrasadas ----------------
+    const advisorRows = useMemo(() => {
+        const map = new Map<string, { asesor: string; programados: number; completados: number; atrasados: number; sinActividad: number }>();
+        const getOrCreate = (id: string) => {
+            let entry = map.get(id);
+            if (!entry) {
+                entry = { asesor: userNameMap.get(id) || "Sin asesor", programados: 0, completados: 0, atrasados: 0, sinActividad: 0 };
+                map.set(id, entry);
+            }
+            return entry;
+        };
+        eventos.forEach(a => {
+            const assignedId = resolveAssignedAdvisor(a);
+            if (!assignedId) return;
+            const entry = getOrCreate(assignedId);
+            if (a.is_completed) {
+                entry.completados += 1;
+            } else {
+                entry.programados += 1;
+                if (isOverdueEvent(a)) entry.atrasados += 1;
+            }
+        });
+        // Oportunidades sin actividad, agrupadas por el asesor dueño de la
+        // oportunidad (no necesariamente el mismo que registra la actividad).
+        scopedOpportunitiesForActivity.forEach(o => {
+            if (!o.owner_user_id || activityCountByOpportunity.has(o.id)) return;
+            getOrCreate(o.owner_user_id).sinActividad += 1;
+        });
+        return Array.from(map.entries()).map(([id, v]) => ({ id, ...v }));
+    }, [eventos, userNameMap, scopedOpportunitiesForActivity, activityCountByOpportunity, resolveAssignedAdvisor]);
+
+    const advisorRowsAlpha = useMemo(
+        () => [...advisorRows].sort((a, b) => a.asesor.localeCompare(b.asesor)),
+        [advisorRows]
+    );
+
+    // Exporta el resumen agregado de la tabla "Eventos por asesor".
+    const handleExportAsesores = () => {
+        downloadCSV(
+            advisorRowsAlpha,
+            [
+                { header: "Asesor", key: "asesor" },
+                { header: "Completados", key: "completados" },
+                { header: "Programados", key: "programados" },
+                { header: "Atrasados", key: "atrasados" },
+                { header: "Sin actividad", key: "sinActividad" },
+            ],
+            "eventos_por_asesor_resumen"
+        );
+    };
+
+    // Exporta el listado de eventos individuales (no el resumen por asesor),
+    // tal como quedaron filtrados en pantalla.
+    const handleExportEventos = () => {
+        const rows = [...eventos]
+            .sort((a, b) => new Date(b.fecha_inicio || 0).getTime() - new Date(a.fecha_inicio || 0).getTime())
+            .map(a => {
+                const assignedId = resolveAssignedAdvisor(a);
+                return {
+                    asesor: assignedId ? userNameMap.get(assignedId) || "Sin asesor" : "Sin asesor",
+                    asunto: a.asunto?.trim() || "Sin asunto",
+                    cuenta: resolveAccount(a)?.nombre || "Sin cuenta",
+                    fase: resolveFaseNombre(a),
+                    tipo: a.tipo_actividad === "EVENTO" ? "Evento" : "Tarea",
+                    clasificacion: a.clasificacion_id != null ? clasificacionMap.get(a.clasificacion_id) || "-" : "-",
+                    estado: a.is_completed ? "Completado" : isOverdueEvent(a) ? "Atrasado" : "Programado",
+                    fecha: a.fecha_inicio ? new Date(a.fecha_inicio).toLocaleDateString("es-CO", { day: "2-digit", month: "short", year: "numeric" }) : "-",
+                };
+            });
+        downloadCSV(
+            rows,
+            [
+                { header: "Asesor", key: "asesor" },
+                { header: "Asunto", key: "asunto" },
+                { header: "Cuenta", key: "cuenta" },
+                { header: "Fase", key: "fase" },
+                { header: "Tipo", key: "tipo" },
+                { header: "Clasificación", key: "clasificacion" },
+                { header: "Estado", key: "estado" },
+                { header: "Fecha", key: "fecha" },
+            ],
+            "lista_de_eventos"
+        );
+    };
+
+    // --- Bar chart: eventos programados por asesor ---------------------------
+    const byAdvisorOption = useMemo(() => {
+        const sorted = [...advisorRows].sort((a, b) => b.programados - a.programados);
+        return {
+            textStyle: { fontFamily: "var(--font-geist-sans), sans-serif" },
+            tooltip: { trigger: "axis", axisPointer: { type: "shadow" }, backgroundColor: "#254153", borderWidth: 0, textStyle: { color: "#fff", fontSize: 12 } },
+            grid: { left: 40, right: 16, top: 16, bottom: 70 },
+            xAxis: {
+                type: "category",
+                data: sorted.map(r => r.asesor),
+                axisLabel: { fontSize: 10, color: "#94a3b8", rotate: 30, interval: 0 },
+                axisLine: { lineStyle: { color: "#e2e8f0" } },
+            },
+            yAxis: {
+                type: "value",
+                name: "Eventos Programados",
+                nameTextStyle: { fontSize: 10, color: "#94a3b8" },
+                axisLabel: { fontSize: 10, color: "#94a3b8" },
+                splitLine: { lineStyle: { color: "#f1f5f9" } },
+            },
+            series: [
+                {
+                    name: "Eventos Programados",
+                    type: "bar",
+                    barMaxWidth: 42,
+                    cursor: "pointer",
+                    itemStyle: { color: "#3b82f6", borderRadius: [4, 4, 0, 0] },
+                    data: sorted.map(r => ({ value: r.programados, id: r.id })),
+                },
+            ],
+        };
+    }, [advisorRows]);
+
+    const handleAdvisorBarClick = (params: EChartsCallbackParams) => {
+        const id = params?.data?.id;
+        if (id != null) toggleAsesorFilter(String(id));
+    };
+
+    // --- Bar chart: eventos completados y programados por semana -------------
+    const weeklyOption = useMemo(() => {
+        const programadosByWeek = new Map<string, number>();
+        const completadosByWeek = new Map<string, number>();
+        const atrasadosByWeek = new Map<string, number>();
+        const weekLabel = new Map<string, number>();
+
+        eventos.forEach(a => {
+            if (!a.fecha_inicio) return;
+            const { key, week } = getWeekKey(new Date(a.fecha_inicio));
+            weekLabel.set(key, week);
+            if (a.is_completed) {
+                completadosByWeek.set(key, (completadosByWeek.get(key) || 0) + 1);
+            } else {
+                // "Programadas" = pendientes por hacer (atrasadas + futuras).
+                programadosByWeek.set(key, (programadosByWeek.get(key) || 0) + 1);
+                if (isOverdueEvent(a)) atrasadosByWeek.set(key, (atrasadosByWeek.get(key) || 0) + 1);
+            }
+        });
+
+        const { weekKeys, currentIndex } = withCurrentWeekMarker(weekLabel);
+        return {
+            textStyle: { fontFamily: "var(--font-geist-sans), sans-serif" },
+            tooltip: { trigger: "axis", axisPointer: { type: "shadow" }, backgroundColor: "#254153", borderWidth: 0, textStyle: { color: "#fff", fontSize: 12 } },
+            legend: { top: 0, textStyle: { fontSize: 11, color: "#475569" } },
+            grid: { left: 40, right: 16, top: 36, bottom: 40 },
+            xAxis: {
+                type: "category",
+                name: "Semana",
+                nameLocation: "middle",
+                nameGap: 26,
+                nameTextStyle: { fontSize: 10, color: "#94a3b8" },
+                data: weekKeys.map(k => String(weekLabel.get(k))),
+                axisLabel: { fontSize: 10, color: "#94a3b8" },
+                axisLine: { lineStyle: { color: "#e2e8f0" } },
+            },
+            yAxis: {
+                type: "value",
+                axisLabel: { fontSize: 10, color: "#94a3b8" },
+                splitLine: { lineStyle: { color: "#f1f5f9" } },
+            },
+            series: [
+                {
+                    name: "Eventos Completados",
+                    type: "bar",
+                    barMaxWidth: 14,
+                    itemStyle: { color: "#38bdf8", borderRadius: [2, 2, 0, 0] },
+                    data: weekKeys.map(k => completadosByWeek.get(k) || 0),
+                },
+                {
+                    name: "Eventos Programados",
+                    type: "bar",
+                    barMaxWidth: 14,
+                    itemStyle: { color: "#1e3a8a", borderRadius: [2, 2, 0, 0] },
+                    data: weekKeys.map(k => programadosByWeek.get(k) || 0),
+                },
+                {
+                    name: "Eventos Atrasados",
+                    type: "bar",
+                    barMaxWidth: 14,
+                    itemStyle: { color: "#ef4444", borderRadius: [2, 2, 0, 0] },
+                    data: weekKeys.map(k => atrasadosByWeek.get(k) || 0),
+                    markLine: currentWeekMarkLine(currentIndex),
+                },
+            ],
+        };
+    }, [eventos]);
+
+    const hasActiveFilters =
+        filters.canalId || filters.tiposCanal.length > 0 || filters.year || filters.month || filters.day || filters.week ||
+        filters.asesorIds.length > 0 || filters.clasificacionIds.length > 0 || filters.subclasificacionId || filters.zonaId ||
+        filters.faseIds.length > 0 || filters.desde || filters.hasta;
+
+    return (
+        <div className="flex flex-col gap-6">
+            {/* Filter bar */}
+            <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-4">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 items-end">
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Canal</label>
+                        <SearchableSelect options={canalOptions} value={filters.canalId} onChange={setCanalFilter} placeholder="Todos" />
+                    </div>
+                    {isCanalPropio && (
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">Tipo Canal</label>
+                            <div className="flex items-center gap-4 h-[42px]">
+                                {TIPO_CANAL_OPTIONS.map(opt => (
+                                    <label key={opt.value} className="flex items-center gap-2 text-sm font-medium text-slate-600 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            className="w-4 h-4 rounded border-slate-300 text-[#254153] focus:ring-[#254153]"
+                                            checked={filters.tiposCanal.includes(opt.value)}
+                                            onChange={() =>
+                                                setFilters(prev => ({
+                                                    ...prev,
+                                                    tiposCanal: prev.tiposCanal.includes(opt.value)
+                                                        ? prev.tiposCanal.filter(t => t !== opt.value)
+                                                        : [...prev.tiposCanal, opt.value],
+                                                }))
+                                            }
+                                        />
+                                        {opt.label}
+                                    </label>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">SubClasificación</label>
+                        <SearchableSelect options={subclasOptions} value={filters.subclasificacionId} onChange={v => setFilter("subclasificacionId", v)} placeholder="Todas" />
+                    </div>
+                    {filters.canalId && (
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Zona</label>
+                            <SearchableSelect options={ZONA_OPTIONS} value={filters.zonaId} onChange={v => setFilter("zonaId", v)} placeholder="Todas" />
+                        </div>
+                    )}
+                    {filters.canalId && (
+                        <div>
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Fase</label>
+                            <MultiSelect options={faseOptions} selected={filters.faseIds} onChange={v => setFilter("faseIds", v)} placeholder="Todas" />
+                        </div>
+                    )}
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Clasificación</label>
+                        <MultiSelect options={clasificacionOptions} selected={filters.clasificacionIds} onChange={v => setFilter("clasificacionIds", v)} placeholder="Todas" />
+                    </div>
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Asesor</label>
+                        <MultiSelect options={asesorOptions} selected={filters.asesorIds} onChange={v => setFilter("asesorIds", v)} placeholder="Todos" />
+                    </div>
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Año</label>
+                        <SearchableSelect options={yearOptions} value={filters.year} onChange={v => setFilter("year", v)} placeholder="Todas" />
+                    </div>
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Mes</label>
+                        <SearchableSelect options={monthOptions} value={filters.month} onChange={v => setFilter("month", v)} placeholder="Todas" />
+                    </div>
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Día</label>
+                        <SearchableSelect options={dayOptions} value={filters.day} onChange={v => setFilter("day", v)} placeholder="Todas" />
+                    </div>
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Semana</label>
+                        <SearchableSelect options={WEEK_OPTIONS} value={filters.week} onChange={v => setFilter("week", v)} placeholder="Todas" />
+                    </div>
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Desde</label>
+                        <input
+                            type="date"
+                            value={filters.desde}
+                            onChange={e => setFilter("desde", e.target.value)}
+                            max={filters.hasta || undefined}
+                            className="min-h-[42px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
+                        />
+                    </div>
+                    <div>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Hasta</label>
+                        <input
+                            type="date"
+                            value={filters.hasta}
+                            onChange={e => setFilter("hasta", e.target.value)}
+                            min={filters.desde || undefined}
+                            className="min-h-[42px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
+                        />
+                    </div>
+                </div>
+                <div className="mt-3 flex items-center justify-between">
+                    {hasActiveFilters ? (
+                        <button onClick={() => setFilters(EMPTY_FILTERS)} className="text-xs font-bold text-slate-400 hover:text-[#254153] transition-colors underline">
+                            Limpiar filtros
+                        </button>
+                    ) : <span />}
+                    <button
+                        onClick={handleExportEventos}
+                        disabled={eventos.length === 0}
+                        title="Exporta el listado de eventos individuales (no el resumen) según los filtros activos"
+                        className="flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-[#254153] disabled:text-slate-300 disabled:cursor-not-allowed transition-colors"
+                    >
+                        <Download className="w-3.5 h-3.5" />
+                        Exportar lista de eventos ({eventos.length})
+                    </button>
+                </div>
+            </div>
+
+            {/* KPI cards */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-5 flex items-center gap-4">
+                    <div className="w-11 h-11 rounded-xl bg-[#254153] flex items-center justify-center text-white shrink-0">
+                        <CalendarClock className="w-5 h-5" />
+                    </div>
+                    <div>
+                        <p className="text-2xl font-black text-slate-900 tracking-tight tabular-nums">{pendientes.length}</p>
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Eventos Programados</p>
+                    </div>
+                </div>
+                <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-5 flex items-center gap-4">
+                    <div className="w-11 h-11 rounded-xl bg-emerald-500 flex items-center justify-center text-white shrink-0">
+                        <CheckCircle2 className="w-5 h-5" />
+                    </div>
+                    <div>
+                        <p className="text-2xl font-black text-slate-900 tracking-tight tabular-nums">{completados.length}</p>
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Eventos Completados</p>
+                    </div>
+                </div>
+                <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-5 flex items-center gap-4">
+                    <div className="w-11 h-11 rounded-xl bg-red-500 flex items-center justify-center text-white shrink-0">
+                        <AlertTriangle className="w-5 h-5" />
+                    </div>
+                    <div>
+                        <p className="text-2xl font-black text-slate-900 tracking-tight tabular-nums">{atrasados.length}</p>
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Eventos Atrasados</p>
+                    </div>
+                </div>
+                <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-5 flex items-center gap-4">
+                    <div className="w-11 h-11 rounded-xl bg-amber-500 flex items-center justify-center text-white shrink-0">
+                        <FileWarning className="w-5 h-5" />
+                    </div>
+                    <div>
+                        <p className="text-2xl font-black text-slate-900 tracking-tight tabular-nums">{oportunidadesSinActividad.length}</p>
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Oportunidades sin actividad</p>
+                    </div>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Table */}
+                <div className="lg:col-span-1 bg-white rounded-2xl border border-slate-200/60 shadow-sm p-5 flex flex-col">
+                    <div className="flex items-center justify-between mb-3">
+                        <h3 className="font-bold text-slate-800 text-sm">Eventos por asesor</h3>
+                        <button
+                            onClick={handleExportAsesores}
+                            disabled={advisorRowsAlpha.length === 0}
+                            title="Exportar este resumen por asesor a CSV según los filtros activos"
+                            className="flex items-center gap-1.5 text-[11px] font-bold text-slate-500 hover:text-[#254153] disabled:text-slate-300 disabled:cursor-not-allowed transition-colors"
+                        >
+                            <Download className="w-3.5 h-3.5" />
+                            Exportar resumen
+                        </button>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mb-2">Clic en un número para ver el detalle de esos eventos.</p>
+                    <div className="max-h-[340px] overflow-y-auto border border-slate-100 rounded-xl">
+                        <table className="w-full text-sm">
+                            <thead className="sticky top-0 bg-slate-50 z-10">
+                                <tr className="text-left text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                                    <th className="px-3 py-2">Asesor</th>
+                                    <th className="px-3 py-2 text-right">Completados</th>
+                                    <th className="px-3 py-2 text-right">Programados</th>
+                                    <th className="px-3 py-2 text-right">Atrasados</th>
+                                    <th className="px-3 py-2 text-right">Sin actividad</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-50">
+                                {advisorRowsAlpha.map(row => (
+                                    <tr
+                                        key={row.id}
+                                        onClick={() => toggleAsesorFilter(row.id)}
+                                        className={`cursor-pointer hover:bg-slate-50/60 transition-colors ${filters.asesorIds.includes(row.id) ? "bg-blue-50/60" : ""}`}
+                                    >
+                                        <td className="px-3 py-2 text-blue-700 font-medium">{row.asesor}</td>
+                                        <td
+                                            className={`px-3 py-2 text-right tabular-nums ${row.completados > 0 ? "text-slate-700 underline decoration-dotted cursor-pointer hover:text-[#254153]" : "text-slate-400"}`}
+                                            onClick={e => {
+                                                if (row.completados === 0) return;
+                                                e.stopPropagation();
+                                                setDetailView({ asesorId: row.id, kind: "completados" });
+                                            }}
+                                            title={row.completados > 0 ? "Ver eventos completados" : undefined}
+                                        >
+                                            {row.completados}
+                                        </td>
+                                        <td
+                                            className={`px-3 py-2 text-right font-semibold tabular-nums ${row.programados > 0 ? "text-slate-800 underline decoration-dotted cursor-pointer hover:text-[#254153]" : "text-slate-400"}`}
+                                            onClick={e => {
+                                                if (row.programados === 0) return;
+                                                e.stopPropagation();
+                                                setDetailView({ asesorId: row.id, kind: "programados" });
+                                            }}
+                                            title={row.programados > 0 ? "Ver eventos programados" : undefined}
+                                        >
+                                            {row.programados}
+                                        </td>
+                                        <td
+                                            className={`px-3 py-2 text-right tabular-nums ${row.atrasados > 0 ? "text-red-600 font-semibold underline decoration-dotted cursor-pointer hover:text-red-800" : "text-slate-400"}`}
+                                            onClick={e => {
+                                                if (row.atrasados === 0) return;
+                                                e.stopPropagation();
+                                                setDetailView({ asesorId: row.id, kind: "atrasados" });
+                                            }}
+                                            title={row.atrasados > 0 ? "Ver actividades atrasadas" : undefined}
+                                        >
+                                            {row.atrasados}
+                                        </td>
+                                        <td
+                                            className={`px-3 py-2 text-right tabular-nums ${row.sinActividad > 0 ? "text-amber-600 font-semibold underline decoration-dotted cursor-pointer hover:text-amber-800" : "text-slate-400"}`}
+                                            onClick={e => {
+                                                if (row.sinActividad === 0) return;
+                                                e.stopPropagation();
+                                                setDetailView({ asesorId: row.id, kind: "sinActividad" });
+                                            }}
+                                            title={row.sinActividad > 0 ? "Ver oportunidades sin actividad" : undefined}
+                                        >
+                                            {row.sinActividad}
+                                        </td>
+                                    </tr>
+                                ))}
+                                {advisorRowsAlpha.length === 0 && (
+                                    <tr>
+                                        <td colSpan={5} className="px-3 py-8 text-center text-slate-400">Sin datos para estos filtros.</td>
+                                    </tr>
+                                )}
+                            </tbody>
+                            {advisorRowsAlpha.length > 0 && (
+                                <tfoot className="sticky bottom-0 bg-white border-t border-slate-100">
+                                    <tr className="font-black text-slate-900">
+                                        <td className="px-3 py-2">Total</td>
+                                        <td className="px-3 py-2 text-right tabular-nums">{completados.length}</td>
+                                        <td className="px-3 py-2 text-right tabular-nums">{pendientes.length}</td>
+                                        <td className="px-3 py-2 text-right tabular-nums text-red-600">{atrasados.length}</td>
+                                        <td className="px-3 py-2 text-right tabular-nums text-amber-600">{oportunidadesSinActividad.length}</td>
+                                    </tr>
+                                </tfoot>
+                            )}
+                        </table>
+                    </div>
+                </div>
+
+                {/* Bar chart: por asesor */}
+                <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200/60 shadow-sm p-5 flex flex-col">
+                    <div className="flex items-center gap-2 mb-1">
+                        <BarChart3 className="w-4 h-4 text-[#254153]" />
+                        <h3 className="font-bold text-slate-800 text-sm">Eventos Programados por Asesor</h3>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mb-2">Clic en una barra (o en la tabla) para filtrar por ese asesor.</p>
+                    <div className="flex-1 min-h-[300px]">
+                        {advisorRows.length === 0 ? (
+                            <div className="h-full flex items-center justify-center text-sm text-slate-400">Sin datos para estos filtros.</div>
+                        ) : (
+                            <ReactECharts
+                                option={byAdvisorOption}
+                                style={{ height: "100%", width: "100%" }}
+                                opts={{ renderer: "svg" }}
+                                notMerge={true}
+                                onEvents={{ click: handleAdvisorBarClick }}
+                            />
+                        )}
+                    </div>
+                </div>
+            </div>
+
+            {/* Weekly chart */}
+            <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-5 flex flex-col">
+                <div className="flex items-center gap-2 mb-2">
+                    <CalendarCheck2 className="w-4 h-4 text-[#254153]" />
+                    <h3 className="font-bold text-slate-800 text-sm">Eventos Completados y Eventos Programados por Semana</h3>
+                </div>
+                <div className="min-h-[280px]">
+                    {eventos.length === 0 ? (
+                        <div className="h-[280px] flex items-center justify-center text-sm text-slate-400">Sin datos para estos filtros.</div>
+                    ) : (
+                        <ReactECharts option={weeklyOption} style={{ height: "280px", width: "100%" }} opts={{ renderer: "svg" }} notMerge={true} />
+                    )}
+                </div>
+            </div>
+
+            {/* Detail modal: Completados / Programados / Atrasados / Sin actividad */}
+            {detailView && (
+                <div
+                    className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
+                    onClick={() => setDetailView(null)}
+                >
+                    <div
+                        className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[80vh] flex flex-col overflow-hidden"
+                        onClick={e => e.stopPropagation()}
+                    >
+                        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+                            <div>
+                                <h3 className="font-bold text-slate-900">{DETAIL_KIND_LABELS[detailView.kind]} de {detailAsesorName}</h3>
+                                <p className="text-xs text-slate-400">
+                                    {detailView.kind === "sinActividad"
+                                        ? `${sinActividadDetailRows.length} oportunidad${sinActividadDetailRows.length === 1 ? "" : "es"}`
+                                        : `${activityDetailRows.length} actividad${activityDetailRows.length === 1 ? "" : "es"}`}
+                                </p>
+                            </div>
+                            <button
+                                onClick={() => setDetailView(null)}
+                                className="text-slate-400 hover:text-slate-700 text-xl leading-none px-2"
+                                aria-label="Cerrar"
+                            >
+                                ×
+                            </button>
+                        </div>
+                        <div className="overflow-y-auto">
+                            {detailView.kind === "sinActividad" ? (
+                                <table className="w-full text-sm">
+                                    <thead className="sticky top-0 bg-slate-50 z-10">
+                                        <tr className="text-left text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                                            <th className="px-4 py-2">Oportunidad</th>
+                                            <th className="px-4 py-2">Cuenta</th>
+                                            <th className="px-4 py-2 text-right">Monto</th>
+                                            <th className="px-4 py-2">Creada</th>
+                                            <th className="px-4 py-2"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-50">
+                                        {sinActividadDetailRows.map(row => (
+                                            <tr key={row.id} className="hover:bg-slate-50/60">
+                                                <td className="px-4 py-2 text-slate-800 font-medium">{row.nombre}</td>
+                                                <td className="px-4 py-2 text-slate-600">{row.cuenta}</td>
+                                                <td className="px-4 py-2 text-right text-slate-700 tabular-nums">{formatCurrency(row.amount)}</td>
+                                                <td className="px-4 py-2 text-slate-600">{row.fechaLabel}</td>
+                                                <td className="px-4 py-2 text-right">
+                                                    <Link
+                                                        href={`/oportunidades/${row.id}`}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        title="Abrir esta oportunidad"
+                                                        className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-slate-400 hover:text-[#254153] hover:bg-slate-100 transition-colors"
+                                                    >
+                                                        <ExternalLink className="w-4 h-4" />
+                                                    </Link>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                        {sinActividadDetailRows.length === 0 && (
+                                            <tr>
+                                                <td colSpan={5} className="px-4 py-8 text-center text-slate-400">Sin oportunidades para mostrar.</td>
+                                            </tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            ) : (
+                                <table className="w-full text-sm">
+                                    <thead className="sticky top-0 bg-slate-50 z-10">
+                                        <tr className="text-left text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                                            <th className="px-4 py-2">Asunto</th>
+                                            <th className="px-4 py-2">Cuenta</th>
+                                            <th className="px-4 py-2">Clasificación</th>
+                                            <th className="px-4 py-2">Fecha</th>
+                                            {detailView.kind === "atrasados" && <th className="px-4 py-2 text-right">Días atraso</th>}
+                                            <th className="px-4 py-2"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-50">
+                                        {activityDetailRows.map(row => (
+                                            <tr key={row.id} className="hover:bg-slate-50/60">
+                                                <td className="px-4 py-2 text-slate-800 font-medium">{row.asunto}</td>
+                                                <td className="px-4 py-2 text-slate-600">{row.cuenta}</td>
+                                                <td className="px-4 py-2 text-slate-600">{row.clasificacion}</td>
+                                                <td className="px-4 py-2 text-slate-600">{row.fechaLabel}</td>
+                                                {detailView.kind === "atrasados" && (
+                                                    <td className="px-4 py-2 text-right text-red-600 font-semibold tabular-nums">{row.diasAtraso ?? "-"}</td>
+                                                )}
+                                                <td className="px-4 py-2 text-right">
+                                                    <Link
+                                                        href={`/actividades?id=${row.id}`}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        title="Abrir esta actividad"
+                                                        className="inline-flex items-center justify-center w-7 h-7 rounded-lg text-slate-400 hover:text-[#254153] hover:bg-slate-100 transition-colors"
+                                                    >
+                                                        <ExternalLink className="w-4 h-4" />
+                                                    </Link>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                        {activityDetailRows.length === 0 && (
+                                            <tr>
+                                                <td colSpan={detailView.kind === "atrasados" ? 6 : 5} className="px-4 py-8 text-center text-slate-400">Sin actividades para mostrar.</td>
+                                            </tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}

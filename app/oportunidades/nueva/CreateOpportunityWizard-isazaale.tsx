@@ -16,6 +16,7 @@ import { db } from "@/lib/db";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { useConfig } from "@/lib/hooks/useConfig";
+import { getPriceClarification } from "@/lib/salesChannels";
 import { CollaboratorSelector, CollaboratorEntry } from "@/components/oportunidades/CollaboratorSelector";
 import { useUsers } from "@/lib/hooks/useUsers";
 import { MultiSelect } from "@/components/ui/MultiSelect";
@@ -395,7 +396,7 @@ export default function CreateOpportunityWizard() {
                 price = Number(product.lista_base_exportaciones) || 0;
                 break;
             case 'PROPIO':
-                price = Number(product.distribuidor_pvp_iva) || 0;
+                price = Number(product.pvp_sin_iva) || 0;
                 break;
             case 'DIST_NAC':
             default:
@@ -834,7 +835,7 @@ export default function CreateOpportunityWizard() {
                                                 case 'OBRAS_NAC': displayPrice = Number(product.lista_base_obras) || 0; break;
                                                 case 'OBRAS_INT':
                                                 case 'DIST_INT': displayPrice = Number(product.lista_base_exportaciones) || 0; break;
-                                                case 'PROPIO': displayPrice = Number(product.distribuidor_pvp_iva) || 0; break;
+                                                case 'PROPIO': displayPrice = Number(product.pvp_sin_iva) || 0; break;
                                                 default: displayPrice = Number(product.lista_base_cop) || 0;
                                             }
                                             if (Number(displayPrice) === 0) displayPrice = Number(product.lista_base_cop) || Number(product.pvp_sin_iva) || 0;

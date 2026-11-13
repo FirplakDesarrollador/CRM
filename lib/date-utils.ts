@@ -72,3 +72,27 @@ export function isDateOverdue(dateSource: string | Date | null | undefined): boo
 export function getFriendlyToday(): string {
     return format(new Date(), "EEEE, d 'de' MMMM 'de' yyyy", { locale: es });
 }
+
+/**
+ * Fecha y hora de creación en hora Colombia (America/Bogota), p. ej. "29/10/2026 10:37 a. m.".
+ * Se arma a partir de las partes para que el texto sea igual en todos los navegadores.
+ */
+export function formatColombiaDateTime(dateSource: string | Date | null | undefined, fallback = '-'): string {
+    if (!dateSource) return fallback;
+    const date = dateSource instanceof Date ? dateSource : new Date(dateSource);
+    if (!isValid(date)) return fallback;
+    const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'America/Bogota',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23',
+    }).formatToParts(date);
+    const get = (type: string) => parts.find(p => p.type === type)?.value || '';
+    const hour24 = Number(get('hour')) % 24;
+    const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
+    const period = hour24 < 12 ? 'a. m.' : 'p. m.';
+    return `${get('day')}/${get('month')}/${get('year')} ${String(hour12).padStart(2, '0')}:${get('minute')} ${period}`;
+}

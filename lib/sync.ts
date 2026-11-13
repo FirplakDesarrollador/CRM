@@ -1,6 +1,7 @@
 import { activateLocalDatabase, db, getActiveLocalUserId, OutboxItem } from './db';
 import type { Table } from 'dexie';
 import { supabase } from './supabase';
+import { hydrateOwnActivities } from './serverHydration';
 import { v4 as uuidv4 } from 'uuid';
 import { useSyncStore } from './stores/useSyncStore';
 import { generateProvisionalNit } from './nitUtils';
@@ -11,6 +12,7 @@ import {
     isRetryDue,
     isSyncLeaseExpired,
     shouldRefreshCatalogs,
+    isCatalogVersionNewer,
     syncCursorId
 } from './sync-runtime';
 
@@ -53,6 +55,26 @@ export interface LocalMutationRequest {
     entityId: string;
     changes: object;
     options?: { isSnapshot?: boolean };
+}
+
+/**
+ * Combina en orden cronológico (field_timestamp) los valores pendientes de un mismo
+ * registro en el outbox: snapshots completos/parciales y mutaciones de un solo campo.
+ * El valor más reciente de cada campo gana.
+ */
+export function mergePendingOutboxValues(items: OutboxItem[]): Record<string, unknown> {
+    const merged: Record<string, unknown> = {};
+    const ordered = [...items].sort((a, b) => (a.field_timestamp || 0) - (b.field_timestamp || 0));
+    for (const item of ordered) {
+        if (item.field_name === '_complete_snapshot_') {
+            if (item.new_value && typeof item.new_value === 'object') {
+                Object.assign(merged, item.new_value as Record<string, unknown>);
+            }
+        } else if (item.field_name && item.field_name !== '_sync_metadata' && item.field_name !== 'id') {
+            merged[item.field_name] = item.new_value;
+        }
+    }
+    return merged;
 }
 
 export class SyncEngine {
@@ -326,8 +348,10 @@ export class SyncEngine {
         // Universal Outbox Deduplication & Compaction:
         // Consolidates redundant snapshots and duplicate field mutations across all entities
         try {
+            // SYNCING no entra: tras liberar los leases vencidos, lo que sigue en SYNCING
+            // está en vuelo (p. ej. en otra pestaña) y borrarlo perdía ese cambio.
             const activeItems = await db.outbox
-                .where('status').anyOf(['PENDING', 'SYNCING', 'FAILED'])
+                .where('status').anyOf(['PENDING', 'FAILED'])
                 .toArray();
 
             if (activeItems.length > 1) {
@@ -349,6 +373,16 @@ export class SyncEngine {
                     if (snapshots.length > 0) {
                         snapshots.sort((a, b) => (b.field_timestamp || 0) - (a.field_timestamp || 0));
                         const keepSnapshot = snapshots[0];
+
+                        // Antes se borraban los demás items sin más: un cambio de campo
+                        // posterior al snapshot (o un snapshot parcial) se perdía. Ahora se
+                        // fusionan en orden cronológico dentro del snapshot que se conserva.
+                        const mergedValue = mergePendingOutboxValues(items);
+                        const latestTimestamp = Math.max(...items.map(i => i.field_timestamp || 0));
+                        await db.outbox.update(keepSnapshot.id, {
+                            new_value: mergedValue,
+                            field_timestamp: latestTimestamp
+                        });
 
                         for (const item of items) {
                             if (item.id !== keepSnapshot.id) {
@@ -804,29 +838,63 @@ export class SyncEngine {
         }
 
         if (batches['CRM_Actividades']) {
-            // 3.3c SELF-HEALING: Validate opportunity_id FK for Activities
-            // If the referenced opportunity doesn't exist on the server, set opportunity_id to null
-            // to avoid "violates foreign key constraint fk_crmact_opp" errors.
+            // 3.3c SELF-HEALING: Validate opportunity_id & account_id FK for Activities
+            // If the referenced opportunity or account doesn't exist on the server, set FK to null
+            // to avoid "violates foreign key constraint fk_crmact_opp" errors in both single fields and _complete_snapshot_.
             const actUpdates = batches['CRM_Actividades'];
             const oppIdsFromActivities = new Set<string>();
+            const accountIdsFromActivities = new Set<string>();
+
+            // 1. Sanitize empty strings and gather IDs from both single fields and _complete_snapshot_
             actUpdates.forEach(u => {
-                if (u.field === 'opportunity_id' && u.value && typeof u.value === 'string') {
-                    oppIdsFromActivities.add(u.value);
+                if (u.field === 'opportunity_id') {
+                    if (u.value && typeof u.value === 'string' && u.value.trim() && u.value !== 'null' && u.value !== 'undefined') {
+                        u.value = u.value.trim();
+                        oppIdsFromActivities.add(u.value);
+                    } else {
+                        u.value = null;
+                    }
+                } else if (u.field === 'account_id') {
+                    if (u.value && typeof u.value === 'string' && u.value.trim() && u.value !== 'null' && u.value !== 'undefined') {
+                        u.value = u.value.trim();
+                        accountIdsFromActivities.add(u.value);
+                    } else {
+                        u.value = null;
+                    }
+                } else if (u.field === '_complete_snapshot_' && u.value && typeof u.value === 'object') {
+                    const oppId = u.value.opportunity_id;
+                    if (oppId && typeof oppId === 'string' && oppId.trim() && oppId !== 'null' && oppId !== 'undefined') {
+                        u.value.opportunity_id = oppId.trim();
+                        oppIdsFromActivities.add(u.value.opportunity_id);
+                    } else {
+                        u.value.opportunity_id = null;
+                    }
+
+                    const accId = u.value.account_id;
+                    if (accId && typeof accId === 'string' && accId.trim() && accId !== 'null' && accId !== 'undefined') {
+                        u.value.account_id = accId.trim();
+                        accountIdsFromActivities.add(u.value.account_id);
+                    } else {
+                        u.value.account_id = null;
+                    }
                 }
             });
 
-            // Also check local DB for activities that have opportunity_id but it's not in the batch
+            // Also check local DB for activities that have opportunity_id/account_id
             const actEntityIds = Array.from(new Set(actUpdates.map(u => u.id)));
             for (const actId of actEntityIds) {
-                const hasOppInBatch = actUpdates.some(u => u.id === actId && u.field === 'opportunity_id');
-                if (!hasOppInBatch) {
-                    try {
-                        const localAct = await db.activities.get(actId);
-                        if (localAct?.opportunity_id) oppIdsFromActivities.add(localAct.opportunity_id);
-                    } catch (e) { /* ignore */ }
-                }
+                try {
+                    const localAct = await db.activities.get(actId);
+                    if (localAct?.opportunity_id && typeof localAct.opportunity_id === 'string' && localAct.opportunity_id.trim()) {
+                        oppIdsFromActivities.add(localAct.opportunity_id.trim());
+                    }
+                    if (localAct?.account_id && typeof localAct.account_id === 'string' && localAct.account_id.trim()) {
+                        accountIdsFromActivities.add(localAct.account_id.trim());
+                    }
+                } catch (e) { /* ignore */ }
             }
 
+            // Validate opportunities
             if (oppIdsFromActivities.size > 0) {
                 try {
                     const oppIdsToCheck = Array.from(oppIdsFromActivities);
@@ -858,15 +926,28 @@ export class SyncEngine {
                                         console.log(`[Sync] Nullifying opportunity_id for activity ${update.id} (truly missing opp: ${update.value})`);
                                         update.value = null;
                                     }
+                                    if (update.field === '_complete_snapshot_' && update.value && trulyMissingOppIds.includes(update.value.opportunity_id)) {
+                                        console.log(`[Sync] Nullifying snapshot opportunity_id for activity ${update.id} (truly missing opp: ${update.value.opportunity_id})`);
+                                        update.value.opportunity_id = null;
+                                    }
                                 }
 
-                                // Also update local Dexie to avoid re-queuing with bad FK
+                                // Also update local Dexie and outbox to avoid re-queuing with bad FK
                                 for (const actId of actEntityIds) {
                                     try {
                                         const localAct = await db.activities.get(actId);
                                         if (localAct?.opportunity_id && trulyMissingOppIds.includes(localAct.opportunity_id)) {
                                             await db.activities.update(actId, { opportunity_id: null });
                                             console.log(`[Sync] Updated local activity ${actId}: cleared opportunity_id (replaced with null)`);
+
+                                            const outboxItems = await db.outbox.where('entity_id').equals(actId).and(i => i.entity_type === 'CRM_Actividades').toArray();
+                                            for (const obItem of outboxItems) {
+                                                if (obItem.field_name === '_complete_snapshot_' && obItem.new_value && typeof obItem.new_value === 'object') {
+                                                    await db.outbox.update(obItem.id, {
+                                                        new_value: { ...obItem.new_value, opportunity_id: null }
+                                                    });
+                                                }
+                                            }
                                         }
                                     } catch (e) { 
                                         console.warn(`[Sync] Error updating local activity ${actId} during heal:`, e);
@@ -877,6 +958,67 @@ export class SyncEngine {
                     }
                 } catch (e) {
                     console.warn('[Sync] Failed to validate opportunity FKs for activities:', e);
+                }
+            }
+
+            // Validate accounts
+            if (accountIdsFromActivities.size > 0) {
+                try {
+                    const accIdsToCheck = Array.from(accountIdsFromActivities);
+                    const { data: existingAccs, error: accCheckErr } = await supabase
+                        .from('CRM_Cuentas')
+                        .select('id')
+                        .in('id', accIdsToCheck);
+
+                    if (!accCheckErr && existingAccs) {
+                        const foundAccIds = new Set(existingAccs.map(a => a.id));
+                        const missingAccIds = accIdsToCheck.filter(id => !foundAccIds.has(id));
+
+                        if (missingAccIds.length > 0) {
+                            const pendingAccs = await db.outbox
+                                .where('entity_type').equals('CRM_Cuentas')
+                                .and(i => i.status === 'PENDING' || i.status === 'SYNCING')
+                                .toArray();
+                            const pendingAccIds = new Set(pendingAccs.map(p => p.entity_id));
+
+                            const trulyMissingAccIds = missingAccIds.filter(id => !pendingAccIds.has(id));
+
+                            if (trulyMissingAccIds.length > 0) {
+                                console.warn(`[Sync] Self-healing: Found ${trulyMissingAccIds.length} truly missing accounts referenced by activities:`, trulyMissingAccIds);
+
+                                for (const update of actUpdates) {
+                                    if (update.field === 'account_id' && trulyMissingAccIds.includes(update.value)) {
+                                        update.value = null;
+                                    }
+                                    if (update.field === '_complete_snapshot_' && update.value && trulyMissingAccIds.includes(update.value.account_id)) {
+                                        update.value.account_id = null;
+                                    }
+                                }
+
+                                for (const actId of actEntityIds) {
+                                    try {
+                                        const localAct = await db.activities.get(actId);
+                                        if (localAct?.account_id && trulyMissingAccIds.includes(localAct.account_id)) {
+                                            await db.activities.update(actId, { account_id: null });
+
+                                            const outboxItems = await db.outbox.where('entity_id').equals(actId).and(i => i.entity_type === 'CRM_Actividades').toArray();
+                                            for (const obItem of outboxItems) {
+                                                if (obItem.field_name === '_complete_snapshot_' && obItem.new_value && typeof obItem.new_value === 'object') {
+                                                    await db.outbox.update(obItem.id, {
+                                                        new_value: { ...obItem.new_value, account_id: null }
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    } catch (e) {
+                                        console.warn(`[Sync] Error updating local activity ${actId} account during heal:`, e);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (e) {
+                    console.warn('[Sync] Failed to validate account FKs for activities:', e);
                 }
             }
         }
@@ -1022,6 +1164,12 @@ export class SyncEngine {
                                 if (table === 'CRM_Contactos' && result.message.includes('fk_crmcontactos_account')) {
                                     console.warn(`[Sync] Intercepted orphaned contact FK. Triggering repair for contact ID ${result.id}...`);
                                     setTimeout(() => this.healOrphanedContactAccount(result.id), 100);
+                                }
+
+                                // SELF-HEALING: Activity FK Opportunity scenario
+                                if (table === 'CRM_Actividades' && result.message.includes('fk_crmact_opp')) {
+                                    console.warn(`[Sync] Intercepted orphaned activity FK opportunity. Triggering repair for activity ID ${result.id}...`);
+                                    setTimeout(() => this.healOrphanedActivityOpportunity(result.id), 100);
                                 }
 
                                 await db.outbox.update(item.id, buildFailureUpdate(item, result.message));
@@ -1367,6 +1515,47 @@ export class SyncEngine {
     }
 
     /**
+     * SELF-HEALING: Resolves activities whose referenced opportunity violates FK constraint fk_crmact_opp
+     */
+    private async healOrphanedActivityOpportunity(actId: string) {
+        try {
+            console.log(`[Sync-Heal] Resolving orphaned activity opportunity for: ${actId}`);
+            // 1. Clear opportunity_id from local Dexie activity
+            await db.activities.update(actId, { opportunity_id: null });
+
+            // 2. Clear opportunity_id in all outbox items for this activity and reset to PENDING
+            const outboxItems = await db.outbox
+                .where('entity_id').equals(actId)
+                .and(i => i.entity_type === 'CRM_Actividades')
+                .toArray();
+
+            for (const item of outboxItems) {
+                if (item.field_name === '_complete_snapshot_' && typeof item.new_value === 'object' && item.new_value) {
+                    await db.outbox.update(item.id, {
+                        new_value: { ...item.new_value, opportunity_id: null },
+                        status: 'PENDING',
+                        error: undefined,
+                        retry_count: 0
+                    });
+                } else if (item.field_name === 'opportunity_id') {
+                    await db.outbox.update(item.id, {
+                        new_value: null,
+                        status: 'PENDING',
+                        error: undefined,
+                        retry_count: 0
+                    });
+                }
+            }
+
+            console.log(`[Sync-Heal] Repaired activity ${actId}: nullified opportunity_id and queued retry.`);
+            await this.updatePendingCount();
+            void this.triggerPush('self-heal-activity-opportunity');
+        } catch (e) {
+            console.error(`[Sync-Heal] Error healing orphaned activity opportunity:`, e);
+        }
+    }
+
+    /**
      * SELF-HEALING: Resolves issues where a contact is created locally but already exists on Supabase.
      */
     private async resolveDuplicateContact(badContactId: string, realContactId: string) {
@@ -1412,6 +1601,23 @@ export class SyncEngine {
             }
         }
         return null;
+    }
+
+    /** max(updated_at) de CRM_FasesOportunidad, o null si no se pudo consultar. */
+    private async fetchPhasesCatalogVersion(): Promise<string | null> {
+        try {
+            const { data, error } = await supabase
+                .from('CRM_FasesOportunidad')
+                .select('updated_at')
+                .not('updated_at', 'is', null)
+                .order('updated_at', { ascending: false })
+                .limit(1);
+            if (error) throw error;
+            return (data?.[0]?.updated_at as string | undefined) ?? null;
+        } catch (err: unknown) {
+            console.warn('[Sync] Could not check phases catalog version:', err instanceof Error ? err.message : err);
+            return null;
+        }
     }
 
     private async setSyncCursor(userId: string, tableName: string, cursor: string): Promise<void> {
@@ -1472,7 +1678,16 @@ export class SyncEngine {
             db.departments.count(),
             db.cities.count()
         ])).every(count => count > 0);
-        const refreshCatalogs = !catalogsReady || shouldRefreshCatalogs(catalogCursor);
+        // Las fases (y su probabilidad) pueden cambiar en el servidor antes de que venza
+        // el TTL de 24 h. Consulta barata de max(updated_at); si falla (sin conexión)
+        // se sigue con el comportamiento anterior.
+        const phasesVersion = await this.fetchPhasesCatalogVersion();
+        const storedPhasesVersion = await this.getSyncCursor(_user.id, '__phases_version__');
+        const phasesChanged = isCatalogVersionNewer(phasesVersion, storedPhasesVersion);
+        if (phasesChanged) {
+            console.log('[Sync] Phases catalog changed on server; refreshing catalogs before TTL.');
+        }
+        const refreshCatalogs = !catalogsReady || shouldRefreshCatalogs(catalogCursor) || phasesChanged;
 
         try {
             // Pull Accounts (CRM_Cuentas)
@@ -1866,6 +2081,9 @@ export class SyncEngine {
 
             if (catalogErrors.length === 0) {
                 await this.setSyncCursor(_user.id, '__catalogs__', upperBound);
+                if (phasesVersion) {
+                    await this.setSyncCursor(_user.id, '__phases_version__', phasesVersion);
+                }
             }
             } else {
                 console.log('[Sync] Catalog refresh skipped; cached catalogs are still within TTL.');
@@ -2196,24 +2414,25 @@ export class SyncEngine {
                     // Map SAP fields back to local friendly names
                     const mapped = {
                         ...p,
-                        fecha_minima_requerida: p['EXTRA_Fecha mínima requerida por comercial/cliente'],
-                        fecha_facturacion: p['EXTRA_Fecha de facturación'],
-                        tipo_facturacion: p['EXTRA_Tipo de facturación'],
-                        notas_sap: p['EXTRA_Notas'],
+                        fecha_entrega: p['fecha_entrega'] || p['EXTRA_Fecha mínima requerida por comercial/cliente'] || null,
+                        fecha_minima_requerida: p['EXTRA_Fecha mínima requerida por comercial/cliente'] || p['fecha_entrega'] || null,
+                        fecha_facturacion: p['EXTRA_Fecha de facturación'] || p['fecha_facturacion'] || null,
+                        tipo_facturacion: p['EXTRA_Tipo de facturación'] || p['tipo_facturacion'] || null,
+                        notas_sap: p['EXTRA_Notas'] || p['notas_sap'] || null,
                         formas_pago: p['EXTRA_Formas de pago'],
                         facturacion_electronica: p['EXTRA_Facturación Electrónica'] === 'Si' || p['EXTRA_Facturación Electrónica'] === 'true' || p['EXTRA_Facturación Electrónica'] === true,
                         oc_cot: p['EXTRA_OC/COT'],
-                        cierre_facturacion: p['EXTRA_Cierre Facturación'],
-                        es_muestra: p['EXTRA_¿Es una muestra?'] === 'Si' || p['EXTRA_¿Es una muestra?'] === 'true' || p['EXTRA_¿Es una muestra?'] === true,
+                        cierre_facturacion: p['EXTRA_Cierre Facturación'] ?? p['cierre_facturacion'] ?? false,
+                        es_muestra: p['EXTRA_¿Es una muestra?'] === 'Si' || p['EXTRA_¿Es una muestra?'] === 'true' || p['EXTRA_¿Es una muestra?'] === true || p['es_muestra'] === true,
                         aplica_contrato: p['EXTRA_¿Aplica contrato?'] === 'Si' || p['EXTRA_¿Aplica contrato?'] === 'true' || p['EXTRA_¿Aplica contrato?'] === true,
                         multa_incumplimiento: p['EXTRA_¿Multa por incumplimiento?'] === 'Si' || p['EXTRA_¿Multa por incumplimiento?'] === 'true' || p['EXTRA_¿Multa por incumplimiento?'] === true,
-                        orden_compra: p['EXTRA_Orden de compra/Purchase Order'],
+                        orden_compra: p['EXTRA_Orden de compra/Purchase Order'] || p['orden_compra'] || null,
                         puerto_embarque: p['EXTRA_Puerto embarque/Shipment Port'],
                         terminos_pago: p['EXTRA_Terminos de pago/Pay Terms'],
                         puerto_destino: p['EXTRA_Puerto destino/Destination Port'],
                         via_transporte: p['EXTRA_Via/Type of transport'],
                         flete: p['EXTRA_Flete/Freight'],
-                        incoterm: p['EXTRA_Incoterm/Incoterm'],
+                        incoterm: p['EXTRA_Incoterm/Incoterm'] || p['incoterm'] || null,
                         seguro: p['EXTRA_Seguro/Insurance']
                     };
 
@@ -2346,6 +2565,19 @@ export class SyncEngine {
                 pullErrors.push(`CRM_Actividades: ${actErr.message}`);
             }
 
+            // Actividades propias fuera del caché de 3.000 (una vez por copia local).
+            // No bloquea el sync: si falla, se reintenta en la próxima sincronización.
+            const ownActivitiesKey = '__own_activities_v1__';
+            if (_user?.id && !(await this.getSyncCursor(_user.id, ownActivitiesKey))) {
+                try {
+                    const added = await hydrateOwnActivities(_user.id);
+                    await this.setSyncCursor(_user.id, ownActivitiesKey, upperBound);
+                    console.log(`[Sync] Own activities backfill: ${added} added.`);
+                } catch (ownErr: unknown) {
+                    console.warn('[Sync] Own activities backfill failed (will retry):', ownErr instanceof Error ? ownErr.message : ownErr);
+                }
+            }
+
             if (pullErrors.length > 0) {
                 throw new Error(`Partial pull failed; cursor not advanced. ${pullErrors.join(' | ')}`);
             }
@@ -2401,10 +2633,14 @@ export class SyncEngine {
         if (options.isSnapshot) {
             const [primary, ...duplicates] = activeItems;
             if (primary) {
+                // Fusionar (no reemplazar): si había cambios pendientes de campos que no
+                // vienen en este snapshot (snapshot parcial, p. ej. solo is_deleted), se
+                // perdían al sobrescribir el item del outbox.
+                const pendingValues = mergePendingOutboxValues(activeItems);
                 await db.outbox.update(primary.id, {
                     ...resetForNewEdit,
                     field_name: '_complete_snapshot_',
-                    new_value: changes
+                    new_value: { ...pendingValues, ...changes }
                 });
                 if (duplicates.length > 0) await db.outbox.bulkDelete(duplicates.map(item => item.id));
             } else {

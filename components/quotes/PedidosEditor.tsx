@@ -3,7 +3,7 @@
 import { usePedidos } from "@/lib/hooks/usePedidos";
 import { LocalCuenta, LocalOportunidad, LocalQuote, db } from "@/lib/db";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Plus, Edit2, AlertCircle, Trash2, Receipt, Calendar, Truck, Send, Download, Mail, Loader2 } from "lucide-react";
+import { Plus, Edit2, AlertCircle, Trash2, Receipt, Calendar, Truck, Send, Download, Mail, Loader2, Eye, FileSpreadsheet } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { cn } from "@/components/ui/utils";
@@ -11,14 +11,18 @@ import { useFormAutoSave } from "@/lib/hooks/useFormAutoSave";
 import { AutoSaveIndicator } from "@/components/ui/AutoSaveIndicator";
 import { syncEngine } from "@/lib/sync";
 import { SendQuoteModal } from "@/components/quotes/SendQuoteModal";
+import { QuotePreviewModal } from "@/components/quotes/QuotePreviewModal";
 import { generateQuotePdf } from "@/lib/pdfGenerator";
+import { generateQuoteExcel } from "@/lib/quoteExcelGenerator";
 import {
     buildPedidoDocumentData,
+    canDownloadPedidoPdf,
     getMissingPedidoFormalizationFields,
     PedidoDocumentItem,
     PedidoWithItems,
 } from "@/lib/pedidoFormalization";
 import { isValidRealNit, isProvisionalNit } from "@/lib/nitUtils";
+import { normalizeDateToInput, calculateItemAvailableQty, buildMaxSelectedQuantities } from "@/lib/pedidoHelpers";
 
 const PEDIDO_WIZARD_LAST_STEP = 2;
 
@@ -41,6 +45,7 @@ interface PedidoFormalizationContext {
     account?: LocalCuenta;
     opportunity?: LocalOportunidad;
     advisorName: string;
+    advisorEmail?: string;
 }
 
 export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, onEditStateChange?: (isEditing: boolean) => void }) {
@@ -49,6 +54,7 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
     const [editingUuid, setEditingUuid] = useState<string | null>(null);
     const [preparingPedidoUuid, setPreparingPedidoUuid] = useState<string | null>(null);
     const [sendContext, setSendContext] = useState<PedidoFormalizationContext | null>(null);
+    const [previewContext, setPreviewContext] = useState<PedidoFormalizationContext | null>(null);
 
     const quoteItems = useLiveQuery(() => db.quoteItems.where('cotizacion_id').equals(quote.id).toArray(), [quote.id]);
     const opp = useLiveQuery(() => db.opportunities.get(quote.opportunity_id), [quote.opportunity_id]);
@@ -63,11 +69,18 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
 
     const isWinner = opp?.status === 'WINNER' || quote.status === 'WINNER';
 
-    const prepareFormalizationContext = async (pedido: PedidoWithItems) => {
-        const missingFields = getMissingPedidoFormalizationFields(pedido);
-        if (missingFields.length > 0) {
-            alert(`No es posible generar o enviar la cotización formal hasta completar el pedido:\n\n• ${missingFields.join('\n• ')}`);
+    const prepareFormalizationContext = async (pedido: PedidoWithItems, requireFullFormalization = false) => {
+        if (!canDownloadPedidoPdf(pedido)) {
+            alert("El pedido debe tener al menos un producto con cantidad mayor a 0 para generar el documento.");
             return null;
+        }
+
+        if (requireFullFormalization) {
+            const missingFields = getMissingPedidoFormalizationFields(pedido);
+            if (missingFields.length > 0) {
+                alert(`No es posible enviar la cotización formal hasta completar el pedido:\n\n• ${missingFields.join('\n• ')}`);
+                return null;
+            }
         }
 
         setPreparingPedidoUuid(pedido.uuid_generado);
@@ -75,6 +88,7 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
             const opportunity = opp || await db.opportunities.get(quote.opportunity_id);
             const account = opportunity ? await db.accounts.get(opportunity.account_id) : undefined;
             let advisorName = "";
+            let advisorEmail = "";
             let productCodes: Record<string, string> = {};
 
             try {
@@ -83,10 +97,11 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
                 if (opportunity?.owner_user_id) {
                     const { data: userData } = await supabase
                         .from('CRM_Usuarios')
-                        .select('full_name')
+                        .select('full_name, email')
                         .eq('id', opportunity.owner_user_id)
                         .maybeSingle();
                     advisorName = userData?.full_name || "";
+                    advisorEmail = userData?.email || "";
                 }
 
                 const productIds = (pedido.items || []).map(item => item.producto_id).filter(Boolean);
@@ -112,6 +127,7 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
                 account,
                 opportunity,
                 advisorName,
+                advisorEmail,
             } satisfies PedidoFormalizationContext;
         } finally {
             setPreparingPedidoUuid(null);
@@ -119,7 +135,7 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
     };
 
     const handleDownloadPdf = async (pedido: PedidoWithItems) => {
-        const context = await prepareFormalizationContext(pedido);
+        const context = await prepareFormalizationContext(pedido, false);
         if (!context) return;
 
         await generateQuotePdf(
@@ -129,11 +145,30 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
             context.opportunity,
             true,
             context.advisorName,
+            context.advisorEmail,
+        );
+    };
+
+    const handlePreviewPedido = async (pedido: PedidoWithItems) => {
+        const context = await prepareFormalizationContext(pedido, false);
+        if (context) setPreviewContext(context);
+    };
+
+    const handleDownloadExcel = async (pedido: PedidoWithItems) => {
+        const context = await prepareFormalizationContext(pedido, false);
+        if (!context) return;
+
+        await generateQuoteExcel(
+            context.quote,
+            context.quoteItems,
+            context.account,
+            context.opportunity,
+            context.advisorName,
         );
     };
 
     const handleSendQuote = async (pedido: PedidoWithItems) => {
-        const context = await prepareFormalizationContext(pedido);
+        const context = await prepareFormalizationContext(pedido, true);
         if (context) setSendContext(context);
     };
 
@@ -152,14 +187,14 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
 
     return (
         <div className="space-y-4">
-            <div className="flex justify-between items-center bg-white p-4 rounded-xl border shadow-sm">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white p-4 rounded-xl border shadow-sm">
                 <div>
                     <h3 className="font-bold text-lg text-slate-800">Pedidos Vinculados</h3>
                     <p className="text-sm text-slate-500">Maneja múltiples pedidos facturables para esta cotización.</p>
                 </div>
                 <button
                     onClick={() => setIsCreating(true)}
-                    className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition"
+                    className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition w-full sm:w-auto justify-center"
                 >
                     <Plus className="w-4 h-4" /> Nuevo Pedido Parcial
                 </button>
@@ -185,6 +220,7 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
                     {pedidosCollection.map(ped => {
                         const missingFormalizationFields = getMissingPedidoFormalizationFields(ped);
                         const canFormalize = missingFormalizationFields.length === 0;
+                        const canDownloadPdf = canDownloadPedidoPdf(ped);
                         const isPreparing = preparingPedidoUuid === ped.uuid_generado;
 
                         return (
@@ -204,13 +240,13 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
                                 </div>
                                 {!canFormalize && (
                                     <p className="mt-2 max-w-[220px] text-xs font-medium text-amber-700">
-                                        Completa el pedido para habilitar el PDF y el envío formal.
+                                        Completa el pedido para habilitar el envío formal.
                                     </p>
                                 )}
                             </div>
 
                             {/* Detalle solicitado por el usuario */}
-                            <div className="flex-1 grid grid-cols-2 gap-x-6 gap-y-2 border-l pl-6 ml-2">
+                            <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 border-t pt-3 md:border-t-0 md:pt-0 md:border-l md:pl-6 md:ml-2">
                                 <div className="col-span-2 space-y-1">
                                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Productos y Cantidades</p>
                                     <div className="flex flex-wrap gap-2">
@@ -218,7 +254,7 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
                                             const qItem = quoteItems.find(qi => qi.producto_id === item.producto_id);
                                             return (
                                                 <div key={item.id} className="flex items-center gap-2 bg-slate-50 border border-slate-100 px-2 py-1 rounded-lg text-xs">
-                                                    <span className="font-bold text-slate-700 truncate max-w-[150px]" title={qItem?.descripcion_linea}>
+                                                    <span className="font-bold text-slate-700 text-[13px] sm:text-xs break-words sm:truncate sm:max-w-[150px]" title={qItem?.descripcion_linea}>
                                                         {qItem?.descripcion_linea || 'Producto'}
                                                     </span>
                                                     <span className="bg-blue-100 text-blue-700 px-1.5 rounded font-black">x{item.cantidad}</span>
@@ -241,17 +277,44 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
                                         {ped.tipo_facturacion || 'No definido'}
                                     </p>
                                 </div>
+                                <div className="space-y-0.5">
+                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Tipo POD</p>
+                                    <p className="text-sm font-semibold text-slate-700 flex items-center gap-1.5">
+                                        <Truck className="w-3.5 h-3.5 text-slate-400" />
+                                        {ped.tipo_pod || 'POD Total'}
+                                    </p>
+                                </div>
                             </div>
                             <div className="flex flex-wrap items-center gap-2">
                                 <button
                                     type="button"
+                                    onClick={() => handlePreviewPedido(ped)}
+                                    className="flex items-center gap-1.5 p-2 border rounded border-slate-200 text-slate-700 hover:bg-slate-50 transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+                                    title={canDownloadPdf ? "Previsualizar documento" : "Vincula al menos un producto con cantidad"}
+                                    disabled={!canDownloadPdf || isPreparing}
+                                >
+                                    <Eye className="w-4 h-4 text-slate-600" />
+                                    <span className="text-sm font-medium hidden sm:inline">Ver</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => handleDownloadExcel(ped)}
+                                    className="flex items-center gap-1.5 p-2 border rounded border-emerald-200 text-emerald-700 hover:bg-emerald-50 transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+                                    title={canDownloadPdf ? "Descargar cotización/pedido en Excel (.xlsx)" : "Vincula al menos un producto con cantidad"}
+                                    disabled={!canDownloadPdf || isPreparing}
+                                >
+                                    <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                                    <span className="text-sm font-medium hidden sm:inline">Excel</span>
+                                </button>
+                                <button
+                                    type="button"
                                     onClick={() => handleDownloadPdf(ped)}
-                                    className="flex items-center gap-2 p-2 border rounded border-blue-200 text-blue-700 hover:bg-blue-50 transition-colors disabled:cursor-not-allowed disabled:opacity-40"
-                                    title={canFormalize ? "Descargar cotización formal en PDF" : `Faltan: ${missingFormalizationFields.join(', ')}`}
-                                    disabled={!canFormalize || isPreparing}
+                                    className="flex items-center gap-1.5 p-2 border rounded border-blue-200 text-blue-700 hover:bg-blue-50 transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+                                    title={canDownloadPdf ? "Descargar cotización/pedido en PDF" : "Vincula al menos un producto con cantidad para generar el PDF"}
+                                    disabled={!canDownloadPdf || isPreparing}
                                 >
                                     {isPreparing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                                    <span className="text-sm font-medium">PDF</span>
+                                    <span className="text-sm font-medium hidden sm:inline">PDF</span>
                                 </button>
                                 <button
                                     type="button"
@@ -317,6 +380,24 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
                     opportunity={sendContext.opportunity}
                     quoteItems={sendContext.quoteItems}
                     advisorName={sendContext.advisorName}
+                    advisorEmail={sendContext.advisorEmail}
+                />
+            )}
+
+            {previewContext && (
+                <QuotePreviewModal
+                    isOpen={!!previewContext}
+                    onClose={() => setPreviewContext(null)}
+                    quote={previewContext.quote}
+                    account={previewContext.account}
+                    opportunity={previewContext.opportunity}
+                    quoteItems={previewContext.quoteItems}
+                    advisorName={previewContext.advisorName}
+                    advisorEmail={previewContext.advisorEmail}
+                    onSendEmail={() => {
+                        const ped = pedidosCollection.find(p => p.uuid_generado === previewContext.quote.id);
+                        if (ped) handleSendQuote(ped);
+                    }}
                 />
             )}
         </div>
@@ -374,9 +455,11 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
     const [canSubmitFinalStep, setCanSubmitFinalStep] = useState(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const form = useForm({
+        shouldUnregister: false,
         defaultValues: {
-            fecha_facturacion: ped?.fecha_facturacion || "",
+            fecha_facturacion: normalizeDateToInput(ped?.fecha_facturacion),
             tipo_facturacion: ped?.tipo_facturacion || "",
+            tipo_pod: ped?.tipo_pod || "POD Total",
             cierre_facturacion: ped?.cierre_facturacion ?? false,
             es_muestra: ped?.es_muestra ?? false,
             orden_compra: ped?.orden_compra || "",
@@ -395,7 +478,7 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
             tiene_escaleras: ped?.tiene_escaleras ?? false,
             verificacion_previa_firplak: ped?.verificacion_previa_firplak ?? false,
             planos_hidromasaje: ped?.planos_hidromasaje || "",
-            fecha_entrega: ped?.fecha_entrega || "",
+            fecha_entrega: normalizeDateToInput(ped?.fecha_entrega || ped?.fecha_minima_requerida),
             nit_cliente_final: ped?.nit_cliente_final || "",
             entrega_en_obra: ped?.entrega_en_obra || false,
             bodega_externa: ped?.bodega_externa || false,
@@ -425,8 +508,10 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
             }
         }
         const pedData = {
-            fecha_facturacion: data.fecha_facturacion,
+            fecha_facturacion: data.fecha_facturacion || null,
             tipo_facturacion: data.tipo_facturacion,
+            tipo_pod: data.tipo_pod || "POD Total",
+            pod: data.tipo_pod || "POD Total",
             cierre_facturacion: Boolean(data.cierre_facturacion),
             es_muestra: Boolean(data.es_muestra),
             orden_compra: data.orden_compra,
@@ -445,6 +530,7 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
             verificacion_previa_firplak: Boolean(data.verificacion_previa_firplak),
             planos_hidromasaje: data.planos_hidromasaje,
             fecha_entrega: data.fecha_entrega || null,
+            fecha_minima_requerida: data.fecha_entrega || null,
             nit_cliente_final: data.nit_cliente_final,
             entrega_en_obra: data.entrega_en_obra,
             bodega_externa: data.bodega_externa,
@@ -453,6 +539,8 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
         await updatePedido(pedidoUuid, pedData);
         await updatePedidoItems(pedidoUuid, itemsToSave);
         await persistQuotePedidoFields(quote.id, {
+            tipo_pod: pedData.tipo_pod,
+            pod: pedData.pod,
             cierre_facturacion: pedData.cierre_facturacion,
             es_muestra: pedData.es_muestra,
             cliente_final: pedData.cliente_final,
@@ -498,8 +586,9 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
     // Populate logistic fields when 'ped' is loaded from local DB
     useEffect(() => {
         if (ped) {
-            setValue('fecha_facturacion', ped.fecha_facturacion || "");
+            setValue('fecha_facturacion', normalizeDateToInput(ped.fecha_facturacion));
             setValue('tipo_facturacion', ped.tipo_facturacion || "");
+            setValue('tipo_pod', ped.tipo_pod || "POD Total");
             setValue('cierre_facturacion', ped.cierre_facturacion ?? false);
             setValue('es_muestra', ped.es_muestra ?? false);
             setValue('orden_compra', ped.orden_compra || "");
@@ -518,7 +607,7 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
             setValue('tiene_escaleras', ped.tiene_escaleras ?? false);
             setValue('verificacion_previa_firplak', ped.verificacion_previa_firplak ?? false);
             setValue('planos_hidromasaje', ped.planos_hidromasaje || "");
-            setValue('fecha_entrega', ped.fecha_entrega || "");
+            setValue('fecha_entrega', normalizeDateToInput(ped.fecha_entrega || ped.fecha_minima_requerida));
             setValue('nit_cliente_final', ped.nit_cliente_final || "");
             setValue('entrega_en_obra', ped.entrega_en_obra || false);
             setValue('bodega_externa', ped.bodega_externa || false);
@@ -606,6 +695,8 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
         const pedData = {
             fecha_facturacion: data.fecha_facturacion,
             tipo_facturacion: data.tipo_facturacion,
+            tipo_pod: data.tipo_pod || "POD Total",
+            pod: data.tipo_pod || "POD Total",
             cierre_facturacion: Boolean(data.cierre_facturacion),
             es_muestra: Boolean(data.es_muestra),
             orden_compra: data.orden_compra,
@@ -624,6 +715,7 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
             verificacion_previa_firplak: Boolean(data.verificacion_previa_firplak),
             planos_hidromasaje: data.planos_hidromasaje,
             fecha_entrega: data.fecha_entrega || null,
+            fecha_minima_requerida: data.fecha_entrega || null,
             nit_cliente_final: data.nit_cliente_final,
             entrega_en_obra: data.entrega_en_obra,
             bodega_externa: data.bodega_externa,
@@ -641,6 +733,8 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
 
         // Sincronizar estos mismos campos en la Cotización principal para el PDF F-V-29
         await persistQuotePedidoFields(quote.id, {
+            tipo_pod: pedData.tipo_pod,
+            pod: pedData.pod,
             cierre_facturacion: pedData.cierre_facturacion,
             es_muestra: pedData.es_muestra,
             cliente_final: pedData.cliente_final,
@@ -666,6 +760,14 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
         } finally {
             setIsSubmitting(false);
         }
+    };
+
+        const handleSetAllMaxQuantities = () => {
+        if (!quoteItems || !consumosGlobales) return;
+        const maxQuantities = buildMaxSelectedQuantities(quoteItems, consumosGlobales);
+        Object.entries(maxQuantities).forEach(([prodId, qty]) => {
+            setValue(`selected_quantities.${prodId}`, qty, { shouldDirty: true, shouldValidate: true });
+        });
     };
 
     return (
@@ -712,8 +814,18 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
 
             {(!!pedidoUuid || wizardStep === 0) && (
                 <div className="bg-white p-5 rounded-xl border border-blue-200">
-                <h4 className="font-bold mb-4 text-blue-900 border-b pb-2 cursor-pointer flex justify-between">
-                    <span>1. Cantidades a Pedir</span>
+                <h4 className="font-bold mb-4 text-blue-900 border-b pb-2 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        <span>1. Cantidades a Pedir</span>
+                        <button
+                            type="button"
+                            onClick={handleSetAllMaxQuantities}
+                            className="text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-bold px-2.5 py-1 rounded-md transition-colors shadow-sm"
+                            title="Asignar el máximo disponible a todos los ítems"
+                        >
+                            Todo
+                        </button>
+                    </div>
                     <button type="button" onClick={onClose} className="text-sm text-slate-500 hover:text-slate-800">Cancelar</button>
                 </h4>
                 
@@ -722,7 +834,7 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
                         if (!qi.producto_id) return null;
                         const prodId = qi.producto_id;
                         const consumido = consumosGlobales[prodId] || 0;
-                        const disponible = qi.cantidad - consumido;
+                        const disponible = calculateItemAvailableQty(qi.cantidad, consumido);
                         
                         return (
                             <div key={qi.id} className="flex justify-between items-center bg-slate-50 p-3 rounded-lg border">
@@ -731,6 +843,20 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
                                     <p className="text-xs text-slate-500">Pactados en coti: {qi.cantidad} uds | Disponibles: <strong className="text-green-600">{disponible} uds</strong></p>
                                 </div>
                                 <div className="flex items-center gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() => setValue(`selected_quantities.${prodId}`, disponible, { shouldDirty: true, shouldValidate: true })}
+                                        disabled={disponible <= 0}
+                                        className={cn(
+                                            "text-xs font-bold px-2.5 py-1.5 rounded-md border transition-all shadow-sm",
+                                            disponible > 0
+                                                ? "bg-white text-blue-600 border-blue-200 hover:bg-blue-50 hover:border-blue-300"
+                                                : "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed opacity-60"
+                                        )}
+                                        title={disponible > 0 ? `Asignar ${disponible} uds` : "Sin unidades disponibles"}
+                                    >
+                                        Todo
+                                    </button>
                                     <input 
                                         type="number"
                                         className="w-20 p-2 border rounded-md text-sm text-center"
@@ -767,6 +893,17 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
                             <option value="">Seleccione...</option>
                             <option value="Standard">Estándar</option>
                             <option value="Anticipo">Anticipo</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label className="text-sm font-medium flex items-center gap-2 mb-1">
+                            <Truck className="w-4 h-4 text-slate-400" /> Tipo POD
+                        </label>
+                        <select {...register("tipo_pod")} className="w-full p-2 border rounded-lg">
+                            <option value="POD Total">POD Total</option>
+                            <option value="POD Parcial">POD Parcial</option>
+                            <option value="Sin POD">Sin POD</option>
                         </select>
                     </div>
 

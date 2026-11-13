@@ -25,7 +25,7 @@ export function getProductPrice(
     }
 
     const priceByChannel: Record<string, number> = {
-        PROPIO: Number(product.distribuidor_pvp_iva) || 0,
+        PROPIO: Number(product.pvp_sin_iva) || 0,
         DIST_NAC: Number(product.lista_base_cop) || 0,
         DIST_INT: Number(product.lista_base_exportaciones) || 0,
         OBRAS_NAC: Number(product.lista_base_obras) || 0,
@@ -36,4 +36,35 @@ export function getProductPrice(
         || Number(product.lista_base_cop)
         || Number(product.pvp_sin_iva)
         || 0;
+}
+
+/**
+ * Retorna el texto clarificador de la columna de origen de la lista de precios y su condición de IVA.
+ * Todos los precios base en Firplak se manejan sin IVA en cotizaciones y pedidos.
+ */
+export function getPriceClarification(
+    channelId?: string,
+    isExport = false,
+    isManual = false,
+): string {
+    if (isManual) {
+        return "Ítem manual (sin IVA)";
+    }
+
+    if (isExport) {
+        return "Columna: lista_base_exportaciones (sin IVA)";
+    }
+
+    switch (channelId) {
+        case "OBRAS_NAC":
+            return "Columna: lista_base_obras (sin IVA)";
+        case "OBRAS_INT":
+        case "DIST_INT":
+            return "Columna: lista_base_exportaciones (sin IVA)";
+        case "PROPIO":
+            return "Columna: pvp_sin_iva (sin IVA)";
+        case "DIST_NAC":
+        default:
+            return "Columna: lista_base_cop (sin IVA)";
+    }
 }

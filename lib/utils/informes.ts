@@ -34,9 +34,7 @@ export const downloadExcel = async <T extends object>(
   worksheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF254153' } };
 
   // Add Data
-  data.forEach((item) => {
-    worksheet.addRow(item);
-  });
+  worksheet.addRows(data);
 
   // Generate buffer and save
   const buffer = await workbook.xlsx.writeBuffer();
@@ -76,7 +74,8 @@ export const downloadCSV = <T extends object>(
 };
 
 export interface SopRow {
-  anio_fact: number;
+  // number en fechas válidas; "Sin fecha" cuando la oportunidad no tiene fecha de entrega
+  anio_fact: number | string;
   mes_planta: string;
   mes_comercial: string;
   estado: string;
@@ -92,7 +91,7 @@ export interface SopRow {
   cantidad_total: number;
   valor_total: number;
   probabilidad: number;
-  quincena: number;
+  quincena: number | string;
 }
 
 /**
@@ -155,8 +154,13 @@ export const downloadSopExcel = async (
     row.getCell('cantidad_total').numFmt = '#,##0';
     row.getCell('valor_total').numFmt = '$#,##0';
     row.getCell('probabilidad').numFmt = '0%';
-    row.getCell('anio_fact').numFmt = '0';
-    row.getCell('quincena').numFmt = '0';
+    // No aplicar formato numérico a "Sin fecha" para evitar NaN en Excel
+    if (typeof item.anio_fact === 'number') {
+      row.getCell('anio_fact').numFmt = '0';
+    }
+    if (typeof item.quincena === 'number') {
+      row.getCell('quincena').numFmt = '0';
+    }
     row.font = { name: 'Segoe UI', size: 10 };
   });
 
@@ -183,18 +187,28 @@ export const downloadSopExcel = async (
   // 1. Extract dimensions (Channels, Years, Months)
   const channels = Array.from(new Set(data.map(d => d.grupo_cliente || 'Desconocido'))).sort();
   
-  // Get unique Year-Month combinations
-  const yearMonthMap: Record<number, Set<string>> = {};
+  // Get unique Year-Month combinations. "Sin fecha" se agrupa al final, no como NaN.
+  type SopYearKey = number | string;
+  const yearMonthMap = new Map<SopYearKey, Set<string>>();
   data.forEach(d => {
-    const yr = d.anio_fact || new Date().getFullYear();
+    const yr: SopYearKey = (d.anio_fact !== null && d.anio_fact !== undefined && d.anio_fact !== 0)
+      ? d.anio_fact
+      : new Date().getFullYear();
     const ms = d.mes_comercial || 'Desconocido';
-    if (!yearMonthMap[yr]) {
-      yearMonthMap[yr] = new Set<string>();
+    if (!yearMonthMap.has(yr)) {
+      yearMonthMap.set(yr, new Set<string>());
     }
-    yearMonthMap[yr].add(ms);
+    yearMonthMap.get(yr)!.add(ms);
   });
 
-  const sortedYears = Object.keys(yearMonthMap).map(Number).sort((a, b) => a - b);
+  const sortedYears = Array.from(yearMonthMap.keys()).sort((a, b) => {
+    const aNum = typeof a === 'number';
+    const bNum = typeof b === 'number';
+    if (aNum && bNum) return (a as number) - (b as number);
+    if (aNum && !bNum) return -1;
+    if (!aNum && bNum) return 1;
+    return String(a).localeCompare(String(b), 'es');
+  });
   
   // Meses ordenados en español para orden correcto en columnas
   const mesOrden: Record<string, number> = {
@@ -207,7 +221,7 @@ export const downloadSopExcel = async (
   // Siguientes columnas mapeadas por año y mes
   interface ColDef {
     colIndex: number;
-    year: number | null;
+    year: number | string | null;
     month: string | null;
     isTotal: boolean;
     headerLabel: string;
@@ -216,7 +230,7 @@ export const downloadSopExcel = async (
   let colCounter = 2; // Inicia en B
 
   sortedYears.forEach(year => {
-    const months = Array.from(yearMonthMap[year]).sort((a, b) => {
+    const months = Array.from(yearMonthMap.get(year) || []).sort((a, b) => {
       return (mesOrden[a] || 99) - (mesOrden[b] || 99);
     });
     
@@ -256,7 +270,7 @@ export const downloadSopExcel = async (
   // Combinar celdas de cabecera por años
   let currentStartCol = 2;
   sortedYears.forEach(year => {
-    const monthsInYear = yearMonthMap[year].size;
+    const monthsInYear = yearMonthMap.get(year)?.size || 0;
     const endCol = currentStartCol + monthsInYear; // Meses + Total
     wsTd.mergeCells(3, currentStartCol, 3, endCol);
     const yrCell = wsTd.getCell(3, currentStartCol);
@@ -296,7 +310,7 @@ export const downloadSopExcel = async (
     row.getCell(1).font = { name: 'Segoe UI', size: 10 };
     
     let channelRowTotal = 0;
-    const channelYearTotals: Record<number, number> = {};
+    const channelYearTotals: Record<string, number> = {};
 
     colDefs.forEach(def => {
       const cell = row.getCell(def.colIndex);
@@ -391,12 +405,87 @@ export const downloadSopExcel = async (
 
 export interface OpportunityFlattenLookups {
   userMap: Map<string, string>;
-  segmentMap: Map<number, string>;
+  segmentMap: Map<number | string, string>;
   lossReasonMap: Map<number, string>;
   deptMap: Map<number, string>;
   cityMap: Map<number, string>;
   canalMap: Map<string, string>;
   countryMap: Map<number | string, string>;
+}
+
+export function formatActivityDate(rawDate: unknown): string {
+  if (!rawDate) return '-';
+  const d = new Date(String(rawDate));
+  if (isNaN(d.getTime())) return '-';
+
+  return new Intl.DateTimeFormat('es-CO', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'America/Bogota'
+  }).format(d).replace(',', '');
+}
+
+export function resolveOpportunityActivityInfo(actividades: any[] | any) {
+  if (!actividades) {
+    return {
+      fecha_actividad: '-',
+      estado_actividad: '-'
+    };
+  }
+
+  const actList = (Array.isArray(actividades) ? actividades : [actividades])
+    .filter(a => a && !a.is_deleted);
+
+  if (actList.length === 0) {
+    return {
+      fecha_actividad: '-',
+      estado_actividad: '-'
+    };
+  }
+
+  // 1. Prioridad: actividades pendientes
+  const pending = actList.filter(a => !a.is_completed);
+  let target: any;
+
+  if (pending.length > 0) {
+    // Ordenar ascendente por vencimiento (la fecha pendiente más próxima primero)
+    pending.sort((a, b) => {
+      const dateA = new Date(a.fecha_fin || a.fecha_inicio || 0).getTime();
+      const dateB = new Date(b.fecha_fin || b.fecha_inicio || 0).getTime();
+      return dateA - dateB;
+    });
+    target = pending[0];
+  } else {
+    // Si no hay pendientes, la completada más reciente
+    actList.sort((a, b) => {
+      const dateA = new Date(a.fecha_fin || a.fecha_inicio || 0).getTime();
+      const dateB = new Date(b.fecha_fin || b.fecha_inicio || 0).getTime();
+      return dateB - dateA;
+    });
+    target = actList[0];
+  }
+
+  const rawDate = target.fecha_fin || target.fecha_inicio;
+  const fechaStr = formatActivityDate(rawDate);
+  const estadoStr = target.is_completed ? 'Completada' : 'Pendiente';
+
+  return {
+    fecha_actividad: fechaStr,
+    estado_actividad: estadoStr
+  };
+}
+
+/**
+ * Determina el ID de usuario a utilizar para filtrar los datos a exportar.
+ * Si el usuario es ADMIN, puede filtrar por cualquier asesor (o ver todos si está vacío).
+ * Si no es ADMIN (es asesor/vendedor), el alcance está estrictamente bloqueado a su propio ID.
+ */
+export function resolveExportScope(isAdmin: boolean, selectedUser: string, currentUserId?: string | null): string {
+  return isAdmin ? selectedUser : (currentUserId || '');
 }
 
 export function mapOpportunityReportRow(
@@ -409,6 +498,14 @@ export function mapOpportunityReportRow(
   const estadoObj = getJoinedSingle(item.estado_info);
   const paisId = cuentaObj?.pais_id ?? item.pais_id;
   
+  const segObj = getJoinedSingle(item.segmento);
+  const segId = item.segmento_id;
+  const segmentoNombre = segObj?.nombre
+    || (segId ? (lookups.segmentMap.get(segId) || lookups.segmentMap.get(Number(segId)) || lookups.segmentMap.get(String(segId))) : null)
+    || '-';
+
+  const activityInfo = resolveOpportunityActivityInfo(item.actividades || item.actividad);
+
   return {
     ...item,
     cuenta_nombre: cuentaObj?.nombre || '-',
@@ -417,14 +514,18 @@ export function mapOpportunityReportRow(
     estado_nombre: estadoObj?.nombre || '-',
     vendedor_nombre: lookups.userMap.get(item.owner_user_id) || '-',
     creador_nombre: lookups.userMap.get(item.created_by) || '-',
-    segmento_nombre: lookups.segmentMap.get(item.segmento_id) || '-',
-    canal_nombre: lookups.canalMap.get(faseObj?.canal_id || cuentaObj?.canal_id) || '-',
+    segmento_nombre: segmentoNombre,
+    // Canal: primero el de la cuenta (como en la app); la fase solo como respaldo.
+    canal_nombre: lookups.canalMap.get(cuentaObj?.canal_id || faseObj?.canal_id) || '-',
     departamento_nombre: lookups.deptMap.get(item.departamento_id) || '-',
     ciudad_nombre: lookups.cityMap.get(item.ciudad_id) || '-',
     probabilidad: item.probabilidad ?? item.probability ?? 0,
     probability: item.probabilidad ?? item.probability ?? 0,
     razon_perdida_label: item.razon_perdida_id ? (lookups.lossReasonMap.get(item.razon_perdida_id) || item.razon_perdida) : (item.razon_perdida || '-'),
-    categorias_interes: formatOpportunityCategories(item.categoria_oportunidad) || '-'
+    categorias_interes: formatOpportunityCategories(item.categoria_oportunidad) || '-',
+    setter: item.setter || '-',
+    fecha_actividad: activityInfo.fecha_actividad,
+    estado_actividad: activityInfo.estado_actividad
   };
 }
 
@@ -433,6 +534,7 @@ export interface ActivityFlattenLookups {
   clasificacionMap: Map<number, string>;
   subclasificacionMap: Map<number, string>;
   tipoActividadMap: Map<number, string>;
+  canalMap?: Map<string, string>;
 }
 
 export function mapActivityReportRow(
@@ -450,10 +552,14 @@ export function mapActivityReportRow(
 
   const cuentaNombre = cuentaObj?.nombre || oppCuentaObj?.nombre || '-';
   const oppNombre = oppObj?.nombre || '-';
+  const oppFaseObj = oppObj ? getJoinedSingle(oppObj.fase) : null;
+  const canalId = cuentaObj?.canal_id || oppCuentaObj?.canal_id || oppFaseObj?.canal_id || null;
+  const canalNombre = canalId ? (lookups.canalMap?.get(canalId) || canalId) : '-';
 
   return {
     ...item,
     asunto: item.asunto || '-',
+    canal_nombre: canalNombre,
     clasificacion_nombre: clasifObj?.nombre || lookups.clasificacionMap.get(item.clasificacion_id) || '-',
     subclasificacion_nombre: subclasifObj?.nombre || lookups.subclasificacionMap.get(item.subclasificacion_id) || '-',
     cuenta_nombre: cuentaNombre,
@@ -466,5 +572,42 @@ export function mapActivityReportRow(
   };
 }
 
+/**
+ * Ejecuta una consulta PostgREST de Supabase por bloques (chunking) consecutivos.
+ * Previene que respuestas gigantes (e.g. 75.000 actividades o 68.000 oportunidades)
+ * excedan los buffers de Cloudflare o PostgREST (50k filas), evitando el fallo
+ * 'SyntaxError: Unterminated string in JSON'.
+ */
+export async function fetchAllInChunks(
+  baseQuery: any,
+  batchSize: number = 2500,
+  onProgress?: (totalFetched: number) => void
+): Promise<any[]> {
+  const allData: any[] = [];
+  let from = 0;
+  let hasMore = true;
 
+  while (hasMore) {
+    const to = from + batchSize - 1;
+    const { data: chunk, error } = await baseQuery.range(from, to);
+    if (error) throw error;
 
+    if (!chunk || chunk.length === 0) {
+      break;
+    }
+
+    allData.push(...chunk);
+
+    if (onProgress) {
+      onProgress(allData.length);
+    }
+
+    if (chunk.length < batchSize) {
+      hasMore = false;
+    } else {
+      from += batchSize;
+    }
+  }
+
+  return allData;
+}

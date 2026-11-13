@@ -19,8 +19,8 @@ export function LossReasonModal({ isOpen, onClose, onConfirm, isLoading = false 
     const [selectedReasonId, setSelectedReasonId] = useState<number | null>(null);
     const [isFetching, setIsFetching] = useState(false);
 
-    // Fetch from local Dexie first
-    const reasons = useLiveQuery(() => db.lossReasons.filter(r => r.is_active === true).toArray());
+    // Fetch from local Dexie first (excluding internal/legacy reasons like N/A)
+    const reasons = useLiveQuery(() => db.lossReasons.filter(r => r.is_active === true && r.descripcion !== 'N/A' && r.descripcion !== 'Otro').toArray());
 
     // JIT Sync: If local is empty, try fetch from server and seed local
     useEffect(() => {
@@ -28,7 +28,7 @@ export function LossReasonModal({ isOpen, onClose, onConfirm, isLoading = false 
             if (isOpen && (!reasons || reasons.length === 0) && !isFetching) {
                 setIsFetching(true);
                 try {
-                    const { data, error } = await supabase.from('CRM_RazonesPerdida').select('*').eq('is_active', true);
+                    const { data, error } = await supabase.from('CRM_RazonesPerdida').select('*').eq('is_active', true).not('descripcion', 'in', '("N/A","Otro")');
                     if (data && !error) {
                         await db.lossReasons.bulkPut(data);
                     }

@@ -6,10 +6,9 @@ informes exportables (`/informes`, solo ADMIN) y metas (`/configuracion/metas`).
 ## Dashboard de inicio (`/`)
 
 Grilla de tiles (`DashboardGrid`) con filtros globales (`DashboardFilters`,
-`useDashboardFilters`):
+`useDashboardFilters`): canal, asesor, subclasificación, nivel premium, origen de oportunidad (`origen_oportunidad` vía `CRM_OrigenesOportunidad`), búsqueda y rango de fechas:
 
-- **Embudo de ventas** (`SalesFunnelTile`): RPC `get_sales_funnel` (con variante
-  filtrada y fix de agrupación por fase `20260304`) sobre [[oportunidades]].
+- **Embudo de ventas** (`SalesFunnelTile`): RPC `get_sales_funnel_data` (con soporte para filtros de canal, asesor, tipo cliente, nivel premium, búsqueda, fechas y origen de oportunidad `20260911`, y cálculo de Tasa de Churn/Pérdidas). Se visualizan tanto oportunidades abiertas como perdidas.
 - **Resumen de oportunidades** (`OpportunitySummaryCard`).
 - **Objetivos** (`ObjectivesCard`): avance frente a metas.
 - **Distribución de clientes** (`ClientDistributionTile`) y **cuentas recientes**
@@ -20,13 +19,17 @@ Grilla de tiles (`DashboardGrid`) con filtros globales (`DashboardFilters`,
 
 Tiles de KPI como ventas ganadas (`VentasGanadasTile`).
 
-## Informes (`/informes`, solo ADMIN)
+## Informes (`/informes`)
 
-Reportes exportables a Excel (`exceljs`/`xlsx`, utilidades en `lib/utils/informes.ts`).
+Reportes exportables a Excel y CSV (`exceljs`/`xlsx`, utilidades en `lib/utils/informes.ts`).
 Permisos `view_reports` / `view_team_reports` / `export_reports` (ver [[roles-y-permisos]]).
+- **Acceso por Rol:**
+  - **ADMIN:** Puede exportar reportes generales consolidados o filtrar por cualquier asesor comercial (`selectedUser`).
+  - **VENDEDOR (Asesores):** Acceden a todas las entidades y filtros avanzados para exportar reportes específicos (Oportunidades, Cuentas, Contactos, Cotizaciones, Actividades, S&OP), pero su alcance está estrictamente bloqueado a su propia cartera (`scopeUserId = user.id`), garantizando que solo descarguen y visualicen sus propios registros. El selector de asesor muestra fijamente su nombre con la etiqueta *Solo tu información*.
+  - **Mi informe:** Tarjeta superior presente en la vista para descargar en un solo clic el libro consolidado multi-hoja personal.
 
 - **Filtros Avanzados y Exportación por Entidad:**
-  - **Oportunidades:** Rango fechas creación, asesor, canal, estado, fase, segmento, origen, rango de valor ($ min/max) y departamento/ciudad. La exportación incluye la columna **Categorías de Interés** (`categorias_interes` / `categoria_oportunidad`), país de la cuenta, fase, canal, vendedor y montos.
+  - **Oportunidades:** Rango fechas creación, asesor, canal, estado, fase, segmento, origen, rango de valor ($ min/max) y departamento/ciudad. La exportación incluye la columna **Categorías de Interés** (`categorias_interes` / `categoria_oportunidad`), país de la cuenta, fase, canal, vendedor, montos, y las columnas de actividad vinculada: **FECHA ACTIVIDAD** (vencimiento/cierre formateado `DD/MM/YYYY HH:mm`, priorizando la actividad pendiente más próxima o la última completada) y **ESTADO ACTIVIDAD** (`Pendiente`, `Completada` o `-`).
   - **Cuentas:** Rango fechas creación, asesor asignado, canal, tipo cliente premium/VIP y departamento/ciudad.
   - **Contactos:** Rango fechas creación, asesor/creador y cargo/rol de decisión.
   - **Cotizaciones:** Rango fechas creación, asesor, estado (DRAFT, SENT, WINNER, REJECTED, EXPIRED) y rango de valor ($ min/max).
@@ -51,4 +54,4 @@ Permisos `view_reports` / `view_team_reports` / `export_reports` (ver [[roles-y-
 - `app/informes/page.tsx`, `lib/utils/informes.ts`
 - `app/configuracion/metas/page.tsx`, `components/config/Goals*.tsx`
 - `lib/hooks/useSalesFunnel.ts`, `useDashboardFilters.ts`, `useConfig.ts`
-- Migraciones `20260127_*goals*`, `20260210/20260223_sales_funnel_rpc`
+- Migraciones `20260127_*goals*`, `20260210/20260223_sales_funnel_rpc`, `20260304_fix_sales_funnel_phase_grouping`, `20260911_add_origin_filter_to_sales_funnel`

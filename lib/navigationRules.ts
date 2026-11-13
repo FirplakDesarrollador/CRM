@@ -17,7 +17,7 @@ export const SYSTEM_NAV_ITEMS: NavItemConfig[] = [
     { label: "Tiendas-Ferias", href: "/tiendas" },
     { label: "Catálogo", href: "/catalogo" },
     { label: "Inventarios", href: "/inventarios", requiredRole: 'ADMIN' },
-    { label: "Informes", href: "/informes", requiredRole: 'ADMIN' },
+    { label: "Informes", href: "/informes" },
     { label: "Usuarios", href: "/usuarios", requiredRole: 'ADMIN' },
     { label: "Configuración", href: "/configuracion" },
 ];

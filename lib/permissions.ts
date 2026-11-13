@@ -97,6 +97,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
 
         // Reportes - solo propios
         'view_reports',
+        'export_reports',
 
         // Comisiones - solo propias
         'view_own_commissions',

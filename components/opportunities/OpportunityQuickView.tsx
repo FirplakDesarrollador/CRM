@@ -2,6 +2,9 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import { db } from "@/lib/db";
+import { isB2COpportunity } from "@/lib/b2c";
+import { toInputDate } from "@/lib/date-utils";
 import { X, TrendingUp, Calendar, Hash, Percent } from "lucide-react";
 import { ProbabilityDonut } from "@/components/ui/ProbabilityDonut";
 import { formatNumberCO } from "@/lib/utils";
@@ -133,17 +136,31 @@ export function OpportunityQuickView({ opportunityId, isOpen, onClose, onUpdate 
         setIsSaving(true);
         try {
             const targetPhase = phaseOptions.find(phase => phase.id === phaseId);
+            const isClosed = statusId === 2 || statusId === 3 || (targetPhase && isClosedPhase(targetPhase));
+            const updates: any = {
+                estado_id: statusId,
+                fase_id: phaseId,
+                probability: targetPhase?.probability ?? opportunity?.probability,
+                updated_at: new Date().toISOString()
+            };
+
+            const isB2C = isB2COpportunity(opportunity?.account, opportunity, null, targetPhase);
+            if (isClosed && isB2C) {
+                updates.fecha_cierre_estimada = toInputDate(new Date());
+            }
+
             const { error } = await supabase
                 .from('CRM_Oportunidades')
-                .update({
-                    estado_id: statusId,
-                    fase_id: phaseId,
-                    probability: targetPhase?.probability ?? opportunity?.probability,
-                    updated_at: new Date().toISOString()
-                })
+                .update(updates)
                 .eq('id', opportunityId);
 
             if (error) throw error;
+
+            try {
+                await db.opportunities.update(opportunityId, updates);
+            } catch (dexieErr) {
+                console.warn('[OpportunityQuickView] Dexie update warning:', dexieErr);
+            }
 
             if (onUpdate) onUpdate();
             onClose();

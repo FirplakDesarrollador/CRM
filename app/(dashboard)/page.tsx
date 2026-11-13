@@ -27,6 +27,7 @@ export default function Home() {
     advisor_id: null,
     subclasificacion_id: null,
     nivel_premium: null,
+    origen_oportunidad: null,
     search_query: null,
     date_from: null,
     date_to: null
@@ -52,6 +53,18 @@ export default function Home() {
       if (filters.subclasificacion_id && acc?.subclasificacion_id !== filters.subclasificacion_id) return false;
       if (filters.nivel_premium && acc?.nivel_premium !== filters.nivel_premium) return false;
 
+      // Origin Filter
+      if (filters.origen_oportunidad) {
+        if (!o.origen_oportunidad) return false;
+        const lowerOrigin = filters.origen_oportunidad.toLowerCase();
+        const val = o.origen_oportunidad.toLowerCase();
+        if (lowerOrigin === 'wp') {
+          if (!val.includes('wp') && !val.includes('whatsapp')) return false;
+        } else if (!val.includes(lowerOrigin)) {
+          return false;
+        }
+      }
+
       if (filters.search_query) {
         const query = filters.search_query.toLowerCase();
         const oppNameMatch = o.nombre?.toLowerCase().includes(query) || false;
@@ -71,6 +84,9 @@ export default function Home() {
         }
       }
 
+      // Origin Filter
+      if (filters.origen_oportunidad && o.origen_oportunidad !== filters.origen_oportunidad) return false;
+
       return true;
     });
 
@@ -79,6 +95,18 @@ export default function Home() {
       if (filters.subclasificacion_id && a.subclasificacion_id !== filters.subclasificacion_id) return false;
       if (filters.nivel_premium && a.nivel_premium !== filters.nivel_premium) return false;
       if (filters.advisor_id && a.owner_user_id !== filters.advisor_id) return false;
+
+      // Origin Filter for Accounts
+      if (filters.origen_oportunidad) {
+        if (!a.origen_cuenta) return false;
+        const lowerOrigin = filters.origen_oportunidad.toLowerCase();
+        const val = a.origen_cuenta.toLowerCase();
+        if (lowerOrigin === 'wp') {
+          if (!val.includes('wp') && !val.includes('whatsapp')) return false;
+        } else if (!val.includes(lowerOrigin)) {
+          return false;
+        }
+      }
 
       if (filters.search_query) {
         const query = filters.search_query.toLowerCase();
@@ -254,22 +282,36 @@ export default function Home() {
                 <tr
                   key={opp.id}
                   className="hover:bg-slate-50/80 transition-colors cursor-pointer"
-                  onClick={() => router.push(`/oportunidades/${opp.id}`)}
+                  onClick={(e) => {
+                    if (e.button === 1 || e.ctrlKey || e.metaKey) {
+                      window.open(`/oportunidades/${opp.id}`, '_blank');
+                      return;
+                    }
+                    if (e.button === 0) {
+                      router.push(`/oportunidades/${opp.id}`);
+                    }
+                  }}
                 >
                   <td className="px-6 py-4">
-                    <p className="font-bold text-slate-800">{opp.nombre}</p>
-                    <p className="text-[10px] text-slate-400 uppercase font-bold mt-0.5">{opp.fase_id || 'Prospecto'}</p>
+                    <Link href={`/oportunidades/${opp.id}`} className="block text-inherit no-underline">
+                      <p className="font-bold text-slate-800 hover:text-blue-600 transition-colors">{opp.nombre}</p>
+                      <p className="text-[10px] text-slate-400 uppercase font-bold mt-0.5">{opp.fase_id || 'Prospecto'}</p>
+                    </Link>
                   </td>
                   <td className="px-6 py-4 font-mono font-bold text-slate-700">
-                    {formatCurrency(opp.amount || opp.valor || 0)}
+                    <Link href={`/oportunidades/${opp.id}`} className="block text-inherit no-underline">
+                      {formatCurrency(opp.amount || opp.valor || 0)}
+                    </Link>
                   </td>
                   <td className="px-6 py-4">
-                    <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-md bg-slate-100 flex items-center justify-center">
-                        <Building2 className="w-3.5 h-3.5 text-slate-400" />
+                    <Link href={`/oportunidades/${opp.id}`} className="block text-inherit no-underline">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-md bg-slate-100 flex items-center justify-center">
+                          <Building2 className="w-3.5 h-3.5 text-slate-400" />
+                        </div>
+                        <span className="text-slate-600 font-medium">Empresa Registrada</span>
                       </div>
-                      <span className="text-slate-600 font-medium">Empresa Registrada</span>
-                    </div>
+                    </Link>
                   </td>
                 </tr>
               ))}

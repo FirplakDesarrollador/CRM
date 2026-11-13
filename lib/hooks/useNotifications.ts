@@ -4,6 +4,7 @@ import { db } from '@/lib/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Notification as PersistedNotification } from '@/lib/types/notifications';
 import { useCurrentUser } from './useCurrentUser';
+import { shouldShowActivityNotification } from '@/lib/sellerVisibility';
 
 export type NotificationType =
     | 'INACTIVE_CLIENT'
@@ -24,7 +25,7 @@ export interface NotificationItem {
 }
 
 export function useNotifications() {
-    const { user } = useCurrentUser();
+    const { user, role } = useCurrentUser();
     const [persistedNotifications, setPersistedNotifications] = useState<PersistedNotification[]>([]);
 
     // Fetch activities from local DB to check completion status
@@ -89,12 +90,15 @@ export function useNotifications() {
             });
         });
 
-        // Filter out activity notifications if the activity is already completed
+        // Filter out activity notifications if the activity is already completed or not assigned to the seller
         return items
             .filter(n => {
                 if (n.type === 'ACTIVITY_OVERDUE' && n.entityId) {
                     const activity = activities?.find(a => a.id === n.entityId);
                     if (activity?.is_completed) return false;
+                    if (!shouldShowActivityNotification(n.type, activity?.user_id, role, user?.id)) {
+                        return false;
+                    }
                 }
                 return true;
             })
@@ -107,7 +111,7 @@ export function useNotifications() {
                 const dateB = new Date(b.date || 0).getTime();
                 return dateB - dateA;
             });
-    }, [persistedNotifications, activities]);
+    }, [persistedNotifications, activities, role, user?.id]);
 
     const markAsRead = async (id: string) => {
         if (persistedNotifications.find(n => n.id === id)) {

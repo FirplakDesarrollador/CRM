@@ -6,6 +6,7 @@ export const OPPORTUNITY_CATEGORIES: Option[] = [
     { label: "Zona de Labores", value: "Zona de Labores" },
     { label: "Hidromasajes", value: "Hidromasajes" },
     { label: "Institucional", value: "Institucional" },
+    { label: "Carpintería de obras", value: "Carpintería de obras" },
 ];
 
 /**
