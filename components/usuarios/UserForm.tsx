@@ -14,7 +14,7 @@ import { db } from '@/lib/db';
 
 const userSchema = z.object({
     email: z.string().refine(val => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((val || "").trim()), { message: "Email inválido" }),
-    password: z.string().min(6, 'La contraseña debe tener al menos 6 caracteres').optional(),
+    password: z.string().min(6, 'La contraseña debe tener al menos 6 caracteres').optional().or(z.literal('')),
     full_name: z.string().min(2, 'El nombre debe tener al menos 2 caracteres'),
     role: z.enum(['ADMIN', 'COORDINADOR', 'VENDEDOR']),
     allowed_modules: z.array(z.string()).optional(),
