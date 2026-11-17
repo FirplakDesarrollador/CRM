@@ -6,6 +6,12 @@ import {
   resolveLeadPersonName,
 } from "./leadNaming.ts";
 import { normalizeAdvisorEmail, resolveLeadOwnerId } from "./ownerResolution.ts";
+import {
+  LEAD_MIN_AMOUNT_CONFIG_KEY,
+  parseLeadMinimumAmountConfig,
+  resolveLeadMinimumAmount,
+  shouldApplyLeadMinimum,
+} from "./leadMinimumAmount.ts";
 
 // ─── CONFIGURACIÓN Y CONSTANTES ──────────────────────────────────────────────
 const CANAL_ID          = "PROPIO";
@@ -227,13 +233,32 @@ Deno.serve(async (req: Request) => {
   // Si no existe oportunidad abierta reciente, crear la oportunidad normalmente
   const oportunidadNombre = resolveLeadOpportunityName(body.oportunidad?.nombre, nombreDeLaCuenta);
 
+  const categoriaOportunidad = Array.isArray(body.oportunidad?.categoria_oportunidad)
+    ? body.oportunidad.categoria_oportunidad.join(", ")
+    : body.oportunidad?.categoria_oportunidad;
+
+  // Monto mínimo por categoría (Planner "Funcionalidades CRM B2C_2").
+  // La tabla de montos está en CRM_Configuracion; si no hay monto para la
+  // categoría, el lead entra como siempre (amount = 0 por defecto en la tabla).
+  let montoMinimo: number | null = null;
+  if (shouldApplyLeadMinimum(body.oportunidad?.amount)) {
+    try {
+      const { data: cfg } = await supabase.from("CRM_Configuracion")
+        .select("value")
+        .eq("key", LEAD_MIN_AMOUNT_CONFIG_KEY)
+        .maybeSingle();
+      montoMinimo = resolveLeadMinimumAmount(categoriaOportunidad, parseLeadMinimumAmountConfig(cfg?.value));
+    } catch (e) {
+      console.warn("[wordpress-lead-intake] No se pudo leer el monto mínimo por categoría:", e);
+    }
+  }
+
   const { data: op, error: errOp } = await supabase.from("CRM_Oportunidades").insert({
     account_id: cuentaId,
     owner_user_id: ownerFinal, // <--- Asignado a la oportunidad
     nombre: oportunidadNombre,
-    categoria_oportunidad: Array.isArray(body.oportunidad?.categoria_oportunidad)
-      ? body.oportunidad.categoria_oportunidad.join(", ")
-      : body.oportunidad?.categoria_oportunidad,
+    categoria_oportunidad: categoriaOportunidad,
+    ...(montoMinimo !== null ? { amount: montoMinimo } : {}),
     estado_id: ESTADO_ID,
     origen_oportunidad: body.oportunidad?.origen_oportunidad,
     url_origen: body.oportunidad?.url_origen,
@@ -252,7 +277,8 @@ Deno.serve(async (req: Request) => {
     cuenta_id: cuentaId,
     oportunidad_id: op.id,
     asesor_asignado_id: ownerFinal,
-    confirmacion_db: op.owner_user_id
+    confirmacion_db: op.owner_user_id,
+    monto_minimo_aplicado: montoMinimo
   }), { 
     headers: { ...corsHeaders, "Content-Type": "application/json" } 
   });

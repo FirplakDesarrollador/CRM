@@ -10,6 +10,7 @@ import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { FileSpreadsheet, Loader2, Download, TableProperties, Users, Briefcase, Building2, Calendar as CalendarIcon, Filter, RotateCcw, DollarSign, MapPin, Tag } from 'lucide-react';
 import { cn } from '@/components/ui/utils';
 import { MiInformeCard } from '@/components/informes/MiInformeCard';
+import { userHasB2CAccess } from '@/lib/b2c';
 
 // Constantes para filtros
 const ENTIDADES = [
@@ -37,6 +38,8 @@ const SELECT_TRIGGER_CLASS = "w-full px-3 py-2.5 bg-slate-50 border border-slate
 
 export default function InformesPage() {
     const { role, user, isLoading: isLoadingUser } = useCurrentUser();
+    // Columnas pedidas por B2C (Canal Propio): solo PROPIO y ADMIN las ven.
+    const canSeeB2CReportColumns = userHasB2CAccess(user);
     const isAdmin = role === 'ADMIN';
     const { users } = useUsers();
 
@@ -728,6 +731,8 @@ export default function InformesPage() {
                     { header: 'MONEDA', key: 'currency_id', width: 10 },
                     { header: 'PROBABILIDAD (%)', key: 'probabilidad', width: 15 },
                     { header: 'FECHA CIERRE EST.', key: 'fecha_cierre_estimada', width: 18 },
+                    // Fecha real de cierre (Cerrada Ganada / Cerrada Perdida) — B2C y admins
+                    ...(canSeeB2CReportColumns ? [{ header: 'FECHA DE CIERRE', key: 'fecha_cierre', width: 18 }] : []),
                     { header: 'FECHA ENTREGA', key: 'fecha_entrega', width: 18 },
                     { header: 'FECHA ACTIVIDAD', key: 'fecha_actividad', width: 20 },
                     { header: 'ESTADO ACTIVIDAD', key: 'estado_actividad', width: 18 },

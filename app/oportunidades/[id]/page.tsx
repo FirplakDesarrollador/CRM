@@ -12,7 +12,7 @@ import { db, LocalCuenta } from "@/lib/db";
 import { ProbabilityDonut } from "@/components/ui/ProbabilityDonut";
 import { syncEngine } from "@/lib/sync";
 import { useLiveQuery } from "dexie-react-hooks";
-import { formatColombiaDate, isDateOverdue, toInputDate } from "@/lib/date-utils";
+import { formatColombiaDate, formatColombiaDateTime, isDateOverdue, toInputDate } from "@/lib/date-utils";
 import {
     Calendar as CalendarIcon,
     CheckCircle2,
@@ -39,7 +39,7 @@ import { useSyncStore } from "@/lib/stores/useSyncStore";
 import { useOpportunityOrigins } from "@/lib/hooks/useOpportunityOrigins";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { OPPORTUNITY_CATEGORIES, parseOpportunityCategories, formatOpportunityCategories } from "@/lib/opportunityCategories";
-import { isB2COpportunity } from "@/lib/b2c";
+import { isB2COpportunity, userHasB2CAccess } from "@/lib/b2c";
 import { AccountModal } from "@/components/cuentas/AccountModal";
 import { EntityAuditHistoryTab } from "@/components/shared/EntityAuditHistoryTab";
 import { History } from "lucide-react";
@@ -1177,6 +1177,20 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                     <div>
                                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Dirección</label>
                                         <p className="text-slate-700">{effectiveAccount.direccion} {effectiveAccount.ciudad && `• ${effectiveAccount.ciudad}`}</p>
+                                    </div>
+                                )}
+
+                                {/* Fechas de creación (B2C: Canal Propio y admins) */}
+                                {userHasB2CAccess(user) && (
+                                    <div className="grid grid-cols-2 gap-4" data-testid="opp-creation-dates">
+                                        <div>
+                                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Fecha creación oportunidad</label>
+                                            <p className="text-slate-700" data-testid="opp-created-at">{formatColombiaDateTime(opportunity.created_at, 'No registrada')}</p>
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Cuenta creada</label>
+                                            <p className="text-slate-700" data-testid="account-created-at">{formatColombiaDateTime((effectiveAccount as { created_at?: string | null }).created_at, 'No registrada')}</p>
+                                        </div>
                                     </div>
                                 )}
 

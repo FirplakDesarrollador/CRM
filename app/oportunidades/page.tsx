@@ -4,7 +4,7 @@ import { useOpportunitiesServer } from "@/lib/hooks/useOpportunitiesServer";
 import { useInfiniteScroll } from "@/lib/hooks/useInfiniteScroll";
 import React, { useState, useEffect, useCallback, Suspense, useMemo, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Plus, Search, Filter, Briefcase, ArrowUpDown, ChevronUp, ChevronDown, Columns3, Check, X, Loader2 } from "lucide-react";
+import { Plus, Search, Filter, Briefcase, ArrowUpDown, ChevronUp, ChevronDown, Columns3, Check, X, Loader2, GripVertical, RotateCcw } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/components/ui/utils";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
@@ -18,6 +18,17 @@ import { parseHandsontableDate } from "@/lib/dateFilterHelpers";
 import { computeOpportunityActivitySummary } from "@/lib/opportunityActivities";
 import { isNewTabClick, openLinkInBackgroundTab, wrapCellInRowLink } from "@/lib/rowLinks";
 import { buildOpportunityHotRow, resolveHotRowData, type HotInstanceLike, OPPORTUNITY_TABLE_COLUMN_KEYS } from "@/lib/opportunityTableHelpers";
+import {
+    activeColumnKeys,
+    defaultOpportunityTablePrefs,
+    loadOpportunityTablePrefs,
+    moveColumnStep,
+    moveColumnTo,
+    saveOpportunityTablePrefs,
+    toggleHiddenColumn,
+    type OpportunityTablePrefs
+} from "@/lib/opportunityColumnPrefs";
+import { userHasB2CAccess } from "@/lib/b2c";
 import { supabase } from "@/lib/supabase";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/db";
@@ -574,32 +585,57 @@ function OpportunitiesContent() {
         { key: 'vendedor',    label: 'Vendedor' },
     ];
 
-    const [visibleColumns, setVisibleColumns] = useState<string[]>(() => {
-        const defaultKeys = ALL_COLUMNS.map(c => c.key);
-        if (typeof window !== 'undefined') {
-            const saved = localStorage.getItem('crm_opp_visible_cols_v4') || localStorage.getItem('crm_opp_visible_cols_v3') || localStorage.getItem('crm_opp_visible_cols_v2') || localStorage.getItem('crm_opp_visible_cols');
-            if (saved) {
-                try {
-                    const parsed: string[] = JSON.parse(saved);
-                    if (Array.isArray(parsed)) {
-                        const savedSet = new Set(parsed);
-                        const missingKeys = defaultKeys.filter(k => !savedSet.has(k));
-                        const reordered = defaultKeys.filter(k => savedSet.has(k) || missingKeys.includes(k));
-                        localStorage.setItem('crm_opp_visible_cols_v4', JSON.stringify(reordered));
-                        return reordered;
-                    }
-                } catch (e) {}
-            }
-        }
-        return defaultKeys;
-    });
+    // Preferencias de columnas por usuario (orden + ocultas), guardadas en localStorage.
+    // Planner "Funcionalidades CRM B2C_2": cada usuario organiza sus columnas.
+    const { user } = useCurrentUser();
+    const canReorderColumns = userHasB2CAccess(user);
+    const [tablePrefs, setTablePrefs] = useState<OpportunityTablePrefs>(() =>
+        defaultOpportunityTablePrefs(OPPORTUNITY_TABLE_COLUMN_KEYS)
+    );
+    const [draggedColumnKey, setDraggedColumnKey] = useState<string | null>(null);
 
-    const toggleColumn = (key: string) => {
-        setVisibleColumns(prev => {
-            const next = prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key];
-            localStorage.setItem('crm_opp_visible_cols_v4', JSON.stringify(next));
+    // Cargar las preferencias del usuario cuando se conoce (o cambia) su id.
+    const prefsUserKey = user?.id ?? null;
+    const [prefsLoadedFor, setPrefsLoadedFor] = useState<string | null | undefined>(undefined);
+    if (prefsLoadedFor !== prefsUserKey && typeof window !== 'undefined') {
+        setPrefsLoadedFor(prefsUserKey);
+        setTablePrefs(loadOpportunityTablePrefs(window.localStorage, prefsUserKey, OPPORTUNITY_TABLE_COLUMN_KEYS));
+    }
+
+    const updateTablePrefs = useCallback((updater: (prev: OpportunityTablePrefs) => OpportunityTablePrefs) => {
+        setTablePrefs(prev => {
+            const next = updater(prev);
+            if (typeof window !== 'undefined') saveOpportunityTablePrefs(window.localStorage, user?.id, next);
             return next;
         });
+    }, [user?.id]);
+
+    // Columnas visibles en el orden que eligió el usuario (los B2C pueden reordenar).
+    const visibleColumns = useMemo(
+        () => activeColumnKeys(tablePrefs, OPPORTUNITY_TABLE_COLUMN_KEYS, canReorderColumns),
+        [tablePrefs, canReorderColumns]
+    );
+
+    // Lista del selector de columnas, en el orden del usuario.
+    const orderedColumnOptions = (canReorderColumns ? tablePrefs.order : OPPORTUNITY_TABLE_COLUMN_KEYS)
+        .map(key => ALL_COLUMNS.find(c => c.key === key))
+        .filter((c): c is { key: string; label: string } => Boolean(c));
+
+    const toggleColumn = (key: string) => {
+        updateTablePrefs(prev => toggleHiddenColumn(prev, key));
+    };
+
+    const moveColumn = (key: string, delta: -1 | 1) => {
+        updateTablePrefs(prev => ({ ...prev, order: moveColumnStep(prev.order, key, delta) }));
+    };
+
+    const dropColumnOn = (targetKey: string) => {
+        if (!draggedColumnKey || draggedColumnKey === targetKey) return;
+        updateTablePrefs(prev => ({
+            ...prev,
+            order: moveColumnTo(prev.order, prev.order.indexOf(draggedColumnKey), prev.order.indexOf(targetKey))
+        }));
+        setDraggedColumnKey(null);
     };
 
     const hotTableRef = useRef<{ hotInstance?: { toPhysicalRow?: (r: number) => number; getSourceDataAtRow?: (r: number) => unknown } } | null>(null);
@@ -608,7 +644,6 @@ function OpportunitiesContent() {
         return opportunities.map(opp => buildOpportunityHotRow(opp, countryMap));
     }, [opportunities, countryMap]);
 
-    const { user } = useCurrentUser();
     const colStorageKey = `crm_col_widths_oportunidades_${user?.id || 'default'}`;
     const [colWidths, setColWidths] = useState<Record<string, number>>({});
 
@@ -628,8 +663,7 @@ function OpportunitiesContent() {
             colIndex = arg1;
             width = arg2;
         }
-        const activeKeys = OPPORTUNITY_TABLE_COLUMN_KEYS
-            .filter(key => visibleColumns.includes(key));
+        const activeKeys = visibleColumns;
         const keyName = activeKeys[colIndex];
         if (keyName && width > 30) {
             setColWidths(prev => {
@@ -893,9 +927,8 @@ function OpportunitiesContent() {
     };
 
     const hotColumns = [
-        // Solo incluir las columnas marcadas como visibles, manteniendo el orden original
-        ...OPPORTUNITY_TABLE_COLUMN_KEYS
-            .filter(key => visibleColumns.includes(key))
+        // Solo las columnas visibles, en el orden que eligió el usuario
+        ...visibleColumns
             .map(key => ALL_COLUMN_DEFS[key])
             .filter(Boolean)
             .map(withOpportunityRowLink)
@@ -1070,45 +1103,110 @@ function OpportunitiesContent() {
                                 <div
                                     onClick={() => setShowColumnPicker(false)}
                                 />
-                                <div className="absolute right-0 top-full mt-2 z-50 bg-white border border-slate-200 rounded-2xl shadow-xl shadow-slate-200/60 p-4 w-52 animate-in fade-in slide-in-from-top-2 duration-200">
-                                    <div className="flex items-center justify-between mb-3">
-                                        <p className="text-xs font-bold text-slate-700 uppercase tracking-wide">Columnas visibles</p>
-                                        <button
-                                            onClick={() => {
-                                                const allKeys = ALL_COLUMNS.map(c => c.key);
-                                                setVisibleColumns(allKeys);
-                                                localStorage.setItem('crm_opp_visible_cols_v4', JSON.stringify(allKeys));
-                                            }}
-                                            className="text-[10px] text-indigo-600 hover:text-indigo-800 font-semibold transition-colors"
-                                        >
-                                            Todas
-                                        </button>
-                                    </div>
-                                    <div className="flex flex-col gap-1">
-                                        {ALL_COLUMNS.map(col => (
+                                <div
+                                    className={cn(
+                                        "absolute right-0 top-full mt-2 z-50 bg-white border border-slate-200 rounded-2xl shadow-xl shadow-slate-200/60 p-4 animate-in fade-in slide-in-from-top-2 duration-200",
+                                        canReorderColumns ? "w-64" : "w-52"
+                                    )}
+                                    data-testid="opp-column-picker"
+                                >
+                                    <div className="flex items-center justify-between mb-1">
+                                        <p className="text-xs font-bold text-slate-700 uppercase tracking-wide">
+                                            {canReorderColumns ? 'Organizar columnas' : 'Columnas visibles'}
+                                        </p>
+                                        <div className="flex items-center gap-2">
                                             <button
-                                                key={col.key}
-                                                onClick={() => toggleColumn(col.key)}
-                                                className={cn(
-                                                    "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 w-full text-left",
-                                                    visibleColumns.includes(col.key)
-                                                        ? "bg-indigo-50 text-indigo-700"
-                                                        : "text-slate-500 hover:bg-slate-50 hover:text-slate-700"
-                                                )}
+                                                onClick={() => updateTablePrefs(prev => ({ ...prev, hidden: [] }))}
+                                                className="text-[10px] text-indigo-600 hover:text-indigo-800 font-semibold transition-colors"
                                             >
-                                                <span className={cn(
-                                                    "w-4 h-4 rounded flex items-center justify-center border transition-all shrink-0",
-                                                    visibleColumns.includes(col.key)
-                                                        ? "bg-indigo-600 border-indigo-600"
-                                                        : "border-slate-300"
-                                                )}>
-                                                    {visibleColumns.includes(col.key) && (
-                                                        <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />
-                                                    )}
-                                                </span>
-                                                {col.label}
+                                                Todas
                                             </button>
-                                        ))}
+                                            {canReorderColumns && (
+                                                <button
+                                                    onClick={() => updateTablePrefs(() => defaultOpportunityTablePrefs(OPPORTUNITY_TABLE_COLUMN_KEYS))}
+                                                    className="text-[10px] text-slate-500 hover:text-slate-800 font-semibold transition-colors flex items-center gap-0.5"
+                                                    title="Volver al orden y columnas por defecto"
+                                                >
+                                                    <RotateCcw className="w-3 h-3" /> Restablecer
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                    {canReorderColumns && (
+                                        <p className="text-[10px] text-slate-400 mb-2">Arrastra o usa las flechas para cambiar el orden. Se guarda para tu usuario.</p>
+                                    )}
+                                    <div className="flex flex-col gap-1 max-h-[60vh] overflow-y-auto">
+                                        {orderedColumnOptions.map((col, index) => {
+                                            const isVisible = !tablePrefs.hidden.includes(col.key);
+                                            return (
+                                                <div
+                                                    key={col.key}
+                                                    data-testid={`opp-column-option-${col.key}`}
+                                                    draggable={canReorderColumns}
+                                                    onDragStart={(e) => {
+                                                        if (!canReorderColumns) return;
+                                                        setDraggedColumnKey(col.key);
+                                                        e.dataTransfer.effectAllowed = 'move';
+                                                    }}
+                                                    onDragOver={(e) => {
+                                                        if (canReorderColumns && draggedColumnKey) e.preventDefault();
+                                                    }}
+                                                    onDrop={(e) => {
+                                                        e.preventDefault();
+                                                        dropColumnOn(col.key);
+                                                    }}
+                                                    onDragEnd={() => setDraggedColumnKey(null)}
+                                                    className={cn(
+                                                        "flex items-center gap-1 rounded-lg transition-all duration-150",
+                                                        draggedColumnKey === col.key && "opacity-40",
+                                                        isVisible ? "bg-indigo-50" : "hover:bg-slate-50"
+                                                    )}
+                                                >
+                                                    {canReorderColumns && (
+                                                        <GripVertical className="w-3.5 h-3.5 text-slate-300 shrink-0 ml-1 cursor-grab" />
+                                                    )}
+                                                    <button
+                                                        onClick={() => toggleColumn(col.key)}
+                                                        className={cn(
+                                                            "flex items-center gap-3 px-2 py-2 text-sm font-medium flex-1 text-left min-w-0",
+                                                            isVisible ? "text-indigo-700" : "text-slate-500 hover:text-slate-700"
+                                                        )}
+                                                    >
+                                                        <span className={cn(
+                                                            "w-4 h-4 rounded flex items-center justify-center border transition-all shrink-0",
+                                                            isVisible ? "bg-indigo-600 border-indigo-600" : "border-slate-300"
+                                                        )}>
+                                                            {isVisible && (
+                                                                <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />
+                                                            )}
+                                                        </span>
+                                                        <span className="truncate">{col.label}</span>
+                                                    </button>
+                                                    {canReorderColumns && (
+                                                        <div className="flex flex-col pr-1">
+                                                            <button
+                                                                onClick={() => moveColumn(col.key, -1)}
+                                                                disabled={index === 0}
+                                                                className="p-0.5 text-slate-400 hover:text-indigo-700 disabled:opacity-20 disabled:cursor-not-allowed"
+                                                                title="Mover a la izquierda"
+                                                                aria-label={`Mover ${col.label} antes`}
+                                                            >
+                                                                <ChevronUp className="w-3 h-3" />
+                                                            </button>
+                                                            <button
+                                                                onClick={() => moveColumn(col.key, 1)}
+                                                                disabled={index === orderedColumnOptions.length - 1}
+                                                                className="p-0.5 text-slate-400 hover:text-indigo-700 disabled:opacity-20 disabled:cursor-not-allowed"
+                                                                title="Mover a la derecha"
+                                                                aria-label={`Mover ${col.label} después`}
+                                                            >
+                                                                <ChevronDown className="w-3 h-3" />
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
                                     </div>
                                 </div>
                             </>
@@ -1528,7 +1626,7 @@ function OpportunitiesContent() {
                                     beforeDropdownMenuShow={(instance: any) => {
                                         const activeRange = instance.hot?.getSelectedRangeActive();
                                         const col = activeRange ? activeRange.highlight?.col : -1;
-                                        const activeKeys = OPPORTUNITY_TABLE_COLUMN_KEYS.filter(key => visibleColumns.includes(key));
+                                        const activeKeys = visibleColumns;
                                         const colKey = activeKeys[col];
                                         if (isToolbarOwnedTableColumn('oportunidades', colKey)) {
                                             setTimeout(() => {
@@ -1538,7 +1636,7 @@ function OpportunitiesContent() {
                                     }}
                                     afterFilter={(conditionsStack: any[]) => {
                                         if (!conditionsStack || !Array.isArray(conditionsStack)) return;
-                                        const activeKeys = OPPORTUNITY_TABLE_COLUMN_KEYS.filter(key => visibleColumns.includes(key));
+                                        const activeKeys = visibleColumns;
                                         for (const colFilter of conditionsStack) {
                                             const colKey = activeKeys[colFilter.column];
                                             if (colKey === 'creada' && colFilter.conditions && colFilter.conditions.length > 0) {
