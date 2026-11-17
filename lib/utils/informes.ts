@@ -1,6 +1,7 @@
 import * as ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { formatOpportunityCategories } from '@/lib/opportunityCategories';
+import { resolveOpportunityCloseDate } from '@/lib/opportunityCloseDate';
 
 /**
  * Interface parameter for columns
@@ -525,7 +526,9 @@ export function mapOpportunityReportRow(
     categorias_interes: formatOpportunityCategories(item.categoria_oportunidad) || '-',
     setter: item.setter || '-',
     fecha_actividad: activityInfo.fecha_actividad,
-    estado_actividad: activityInfo.estado_actividad
+    estado_actividad: activityInfo.estado_actividad,
+    // Fecha real de cierre: solo para Cerrada Ganada / Cerrada Perdida
+    fecha_cierre: resolveOpportunityCloseDate(item) || '-'
   };
 }
 
