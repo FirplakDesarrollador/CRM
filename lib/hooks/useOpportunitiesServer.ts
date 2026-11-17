@@ -7,7 +7,8 @@ import { matchesSearchTokens, getSearchTokens, getPhoneIlikePatterns, accentInse
 import { getCellphoneSearchDigits, findPhoneMatchesServer, findPhoneMatchesLocal, opportunityMatchesPhone, PhoneSearchMatches } from '@/lib/phoneSearch';
 import { computeOpportunityActivitySummary, OpportunityActivitySummary, ActivityItem } from '@/lib/opportunityActivities';
 import { PROSPECTO_PHASE_ID, getEquivalentPhaseIds, PhaseCatalogItem, calculateTotalAmount, DEFAULT_OPPORTUNITIES_PAGE_SIZE } from '@/lib/opportunityColumnFilterHelpers';
-import { toStartOfDayISO, toEndOfDayISO } from '@/lib/dateFilterHelpers';
+import { toStartOfDayISO, toEndOfDayISO, toDateOnly, isDateOnlyInRange } from '@/lib/dateFilterHelpers';
+import { buildClosedStatusOrCondition, buildOpenPhaseOrCondition, matchesStatusFilter, matchesSetterFilter, normalizeSetterFilter, OPEN_EXCLUDED_STATES_IN, SetterFilter } from '@/lib/opportunityStatusFilter';
 import { activitiesVisibleToViewer, sellerCanSeeOpportunity, sellerOpportunityOrFilter } from '@/lib/sellerVisibility';
 import { FlatQuoteItemProduct, getOpportunityIdsByProductFilters } from '@/lib/opportunityProductFilterHelpers';
 import { fetchFullCatalog, PriceListProduct } from '@/lib/hooks/useProducts';
@@ -97,6 +98,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
         return val ? Number(val) : null;
     });
     const [cityFilter, setCityFilter] = useState<string | null>(() => getInitialParam('city'));
+    const [setterFilter, setSetterFilter] = useState<SetterFilter | null>(() => normalizeSetterFilter(getInitialParam('setter')));
 
     // Date Filters
     const [startDate, setStartDate] = useState<string | null>(() => getInitialParam('start'));
@@ -289,17 +291,15 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 allPhasesRef.current.some(p => p.id === phaseFilter && p.nombre.toLowerCase().includes('cerrada'))
             );
 
-            if (!isFilteringExplicitClosedPhase) {
-                if (statusFilter === 'won' && wonPhaseIdsRef.current.length > 0) {
-                    localOpps = localOpps.filter(o => wonPhaseIdsRef.current.includes(o.fase_id as number));
-                } else if (statusFilter === 'lost' && lostPhaseIdsRef.current.length > 0) {
-                    localOpps = localOpps.filter(o => lostPhaseIdsRef.current.includes(o.fase_id as number));
-                } else if (statusFilter === 'open' && closedPhaseIdsRef.current.length > 0) {
-                    localOpps = localOpps.filter(o =>
-                        !closedPhaseIdsRef.current.includes(o.fase_id as number) &&
-                        ![2, 3, 4, 11, 14].includes(o.estado_id as number)
-                    );
-                }
+            if (!isFilteringExplicitClosedPhase && statusFilter !== 'all') {
+                // Ganada = estado ganado O fase "Cerrada ganada"; Perdida = estado perdido O fase "Cerrada perdida".
+                localOpps = localOpps.filter(o =>
+                    matchesStatusFilter(o, statusFilter, wonPhaseIdsRef.current, lostPhaseIdsRef.current)
+                );
+            }
+
+            if (setterFilter) {
+                localOpps = localOpps.filter(o => matchesSetterFilter((o as any).setter, setterFilter));
             }
 
             if (accountIdFilter) {
@@ -373,13 +373,9 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 localOpps = localOpps.filter(o => o.created_at && (!endISO || new Date(o.created_at) <= new Date(endISO)));
             }
 
-            if (startClosingDate) {
-                const startCloseISO = toStartOfDayISO(startClosingDate);
-                localOpps = localOpps.filter(o => o.fecha_cierre_estimada && (!startCloseISO || new Date(o.fecha_cierre_estimada) >= new Date(startCloseISO)));
-            }
-            if (endClosingDate) {
-                const endCloseISO = toEndOfDayISO(endClosingDate);
-                localOpps = localOpps.filter(o => o.fecha_cierre_estimada && (!endCloseISO || new Date(o.fecha_cierre_estimada) <= new Date(endCloseISO)));
+            // fecha_cierre_estimada es "solo día": se compara como YYYY-MM-DD, sin pasar a UTC (evita corrimiento de un día).
+            if (startClosingDate || endClosingDate) {
+                localOpps = localOpps.filter(o => isDateOnlyInRange(o.fecha_cierre_estimada, startClosingDate, endClosingDate));
             }
 
             if (accountOwnerIds && accountOwnerIds.length > 0) {
@@ -661,13 +657,19 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 );
 
                 if (!isFilteringExplicitClosedPhase) {
-                    if (statusFilter === 'won') {
-                        q = q.in('estado_id', [2, 11]);
-                    } else if (statusFilter === 'lost') {
-                        q = q.in('estado_id', [3, 4, 14]);
+                    if (statusFilter === 'won' || statusFilter === 'lost') {
+                        // Estado ganado/perdido O fase "Cerrada ganada"/"Cerrada perdida"
+                        const closedCondition = buildClosedStatusOrCondition(statusFilter, wonPhaseIdsRef.current, lostPhaseIdsRef.current);
+                        if (closedCondition) q = q.or(closedCondition);
                     } else if (statusFilter === 'open') {
-                        q = q.not('estado_id', 'in', '(2,3,4,11,14)');
+                        q = q.not('estado_id', 'in', OPEN_EXCLUDED_STATES_IN);
+                        const openPhaseCondition = buildOpenPhaseOrCondition(closedPhaseIdsRef.current);
+                        if (openPhaseCondition) q = q.or(openPhaseCondition);
                     }
+                }
+
+                if (setterFilter) {
+                    q = setterFilter === 'NONE' ? q.is('setter', null) : q.eq('setter', setterFilter);
                 }
 
                 if (segmentFilter) {
@@ -726,14 +728,15 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                     if (endISO) q = q.lte('created_at', endISO);
                 }
 
+                // fecha_cierre_estimada es columna date: se filtra con YYYY-MM-DD (sin convertir a UTC).
                 if (startClosingDate) {
-                    const startCloseISO = toStartOfDayISO(startClosingDate);
-                    if (startCloseISO) q = q.gte('fecha_cierre_estimada', startCloseISO);
+                    const startCloseDay = toDateOnly(startClosingDate);
+                    if (startCloseDay) q = q.gte('fecha_cierre_estimada', startCloseDay);
                 }
 
                 if (endClosingDate) {
-                    const endCloseISO = toEndOfDayISO(endClosingDate);
-                    if (endCloseISO) q = q.lte('fecha_cierre_estimada', endCloseISO);
+                    const endCloseDay = toDateOnly(endClosingDate);
+                    if (endCloseDay) q = q.lte('fecha_cierre_estimada', endCloseDay);
                 }
 
                 if (accountOwnerIds && accountOwnerIds.length > 0) {
@@ -944,7 +947,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
             setLoading(false);
             useSyncStore.getState().setIsLoadingData(false);
         }
-    }, [currentUserId, isVendedor, subordinateIds, pageSize, userFilter, searchTerm, accountIdFilter, idFilter, accountOwnerIds, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, originFilter, plantaFilter, familiaFilter, countryFilter, cityFilter, phasesReady, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc]);
+    }, [currentUserId, isVendedor, subordinateIds, pageSize, userFilter, searchTerm, accountIdFilter, idFilter, accountOwnerIds, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, originFilter, plantaFilter, familiaFilter, countryFilter, cityFilter, setterFilter, phasesReady, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc]);
 
     useEffect(() => {
         fetchOpportunities(false);
@@ -1009,6 +1012,8 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
         countryFilter,
         setCityFilter,
         cityFilter,
+        setSetterFilter,
+        setterFilter,
         setStartDate,
         setEndDate,
         setStartClosingDate,
