@@ -7,10 +7,11 @@
  * La tabla de montos vive en CRM_Configuracion (key = LEAD_MIN_AMOUNT_CONFIG_KEY,
  * value jsonb). Formato:
  *   {
- *     "modo": "maximo",            // "maximo" (por defecto) o "suma" si trae varias categorías
- *     "montos": { "Baños": 300000, "Cocinas": 5000000, ... }   // COP; null = sin mínimo
+ *     "modo": "menor",             // "menor" (por defecto), "mayor" o "suma"
+ *     "montos": { "Baños": 232689, "Cocinas": 659579, ... }   // COP; null = sin mínimo
  *   }
- * También se acepta el objeto plano { "Baños": 300000, ... }.
+ * También se acepta el objeto plano { "Baños": 232689, ... }.
+ * Aliases de modo: "minimo" → menor, "maximo" → mayor.
  *
  * Este archivo no tiene dependencias para poder usarse desde la Edge Function
  * (Deno) y desde la app Next.js (lib/leadMinimumAmount.ts lo re-exporta).
@@ -18,7 +19,7 @@
 
 export const LEAD_MIN_AMOUNT_CONFIG_KEY = "lead_monto_minimo_por_categoria";
 
-export type LeadMinimumMode = "maximo" | "suma";
+export type LeadMinimumMode = "menor" | "mayor" | "suma";
 
 export interface LeadMinimumAmountConfig {
   mode: LeadMinimumMode;
@@ -71,6 +72,19 @@ function toPositiveNumber(v: unknown): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+function parseLeadMinimumMode(raw: unknown): LeadMinimumMode {
+  if (typeof raw !== "string") return "menor";
+  const mode = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+  if (mode === "suma") return "suma";
+  if (mode === "mayor" || mode === "maximo") return "mayor";
+  if (mode === "menor" || mode === "minimo") return "menor";
+  return "menor";
+}
+
 /** Lee el valor jsonb de CRM_Configuracion. Valores vacíos o inválidos se ignoran. */
 export function parseLeadMinimumAmountConfig(value: unknown): LeadMinimumAmountConfig {
   let obj: unknown = value;
@@ -82,13 +96,13 @@ export function parseLeadMinimumAmountConfig(value: unknown): LeadMinimumAmountC
     }
   }
   const amounts = new Map<string, number>();
-  let mode: LeadMinimumMode = "maximo";
+  let mode: LeadMinimumMode = "menor";
   if (obj && typeof obj === "object" && !Array.isArray(obj)) {
     const record = obj as Record<string, unknown>;
     const montos = record.montos && typeof record.montos === "object" && !Array.isArray(record.montos)
       ? record.montos as Record<string, unknown>
       : record;
-    if (typeof record.modo === "string" && record.modo.toLowerCase() === "suma") mode = "suma";
+    mode = parseLeadMinimumMode(record.modo);
     for (const [name, amount] of Object.entries(montos)) {
       if (name === "modo" || name === "montos") continue;
       const key = normalizeLeadCategory(name);
@@ -101,7 +115,8 @@ export function parseLeadMinimumAmountConfig(value: unknown): LeadMinimumAmountC
 
 /**
  * Monto mínimo para las categorías del lead, o null si ninguna tiene mínimo.
- * Varias categorías: el mayor (modo "maximo") o la suma (modo "suma").
+ * Varias categorías (solo las que tienen monto): el más bajo (modo "menor",
+ * por defecto), el más alto (modo "mayor") o la suma (modo "suma").
  */
 export function resolveLeadMinimumAmount(
   categories: unknown,
@@ -112,9 +127,9 @@ export function resolveLeadMinimumAmount(
     .map((c) => config.amounts.get(c))
     .filter((n): n is number => typeof n === "number" && n > 0);
   if (values.length === 0) return null;
-  return config.mode === "suma"
-    ? values.reduce((a, b) => a + b, 0)
-    : Math.max(...values);
+  if (config.mode === "suma") return values.reduce((a, b) => a + b, 0);
+  if (config.mode === "mayor") return Math.max(...values);
+  return Math.min(...values);
 }
 
 /** Solo se aplica el mínimo si el lead llega sin monto (vacío o 0). */
