@@ -29,6 +29,7 @@ import {
     getAvailablePhasesForChannel,
     PhaseCatalogItem
 } from '@/lib/opportunityColumnFilterHelpers';
+import { SETTER_FILTER_OPTIONS, SetterFilter } from '@/lib/opportunityStatusFilter';
 
 export interface FloatingColumnFilterAnchor {
     top: number;
@@ -51,6 +52,8 @@ export interface FloatingColumnFilterPopoverProps {
     onSelectStatus: (status: 'all' | 'open' | 'won' | 'lost') => void;
     selectedOrigin: string | null;
     onSelectOrigin: (origin: string | null) => void;
+    selectedSetter?: SetterFilter | null;
+    onSelectSetter?: (setter: SetterFilter | null) => void;
     selectedCountry: number | null;
     onSelectCountry: (countryId: number | null) => void;
     selectedCity: string | null;
@@ -72,6 +75,8 @@ export function FloatingColumnFilterPopover({
     onSelectStatus,
     selectedOrigin,
     onSelectOrigin,
+    selectedSetter = null,
+    onSelectSetter,
     selectedCountry,
     onSelectCountry,
     selectedCity,
@@ -665,6 +670,31 @@ export function FloatingColumnFilterPopover({
                                 })}
                             </div>
                         )}
+                    </div>
+                )}
+
+                {/* 5b. SETTER (se filtra en el servidor, no solo sobre las filas cargadas) */}
+                {anchor.colKey === 'setter' && (
+                    <div className="space-y-1">
+                        {[{ id: null as SetterFilter | null, label: 'Todas' }, ...SETTER_FILTER_OPTIONS].map((opt) => {
+                            const isSelected = (selectedSetter ?? null) === opt.id;
+                            return (
+                                <button
+                                    key={opt.id ?? 'ALL'}
+                                    onClick={() => {
+                                        onSelectSetter?.(opt.id);
+                                        onClose();
+                                    }}
+                                    className={cn(
+                                        "w-full px-2.5 py-1.5 text-left text-xs font-medium rounded-lg transition-colors flex items-center justify-between cursor-pointer",
+                                        isSelected ? "bg-blue-50 text-blue-700 font-bold" : "hover:bg-slate-50 text-slate-700"
+                                    )}
+                                >
+                                    <span>{opt.label}</span>
+                                    {isSelected && <Check className="w-3.5 h-3.5 text-blue-600 shrink-0" />}
+                                </button>
+                            );
+                        })}
                     </div>
                 )}
 

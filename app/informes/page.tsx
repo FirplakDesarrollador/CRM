@@ -435,7 +435,7 @@ export default function InformesPage() {
                 if (scopeUserId) oppQuery = oppQuery.eq('owner_user_id', scopeUserId);
 
                 oppQuery = oppQuery.order('created_at', { ascending: false }).order('id', { ascending: false });
-                const opps = await fetchAllInChunks(oppQuery, 2500, (total) => {
+                const opps = await fetchAllInChunks(oppQuery, 1000, (total) => {
                     setExportProgress(`Cargando oportunidades (${total.toLocaleString()})...`);
                 });
 
@@ -977,7 +977,7 @@ export default function InformesPage() {
             }
 
             query = query.order('created_at', { ascending: false }).order('id', { ascending: false });
-            const data = await fetchAllInChunks(query, 2500, (total) => {
+            const data = await fetchAllInChunks(query, 1000, (total) => {
                 setExportProgress(`Descargando registros (${total.toLocaleString()})...`);
             });
 
