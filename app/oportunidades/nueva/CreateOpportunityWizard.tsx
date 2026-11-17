@@ -17,6 +17,9 @@ import { ExpandableTextarea } from "@/components/ui/ExpandableTextarea";
 import { db } from "@/lib/db";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { supabase } from "@/lib/supabase";
+import { isB2COpportunity } from "@/lib/b2c";
+import { LEAD_MIN_AMOUNT_CONFIG_KEY, fetchLeadMinimumAmountConfig, parseLeadMinimumAmountConfig, resolveLeadMinimumAmount, shouldApplyLeadMinimum } from "@/lib/leadMinimumAmount";
 import { useConfig } from "@/lib/hooks/useConfig";
 import { getPriceClarification } from "@/lib/salesChannels";
 import { CollaboratorSelector, CollaboratorEntry } from "@/components/oportunidades/CollaboratorSelector";
@@ -554,6 +557,22 @@ export default function CreateOpportunityWizard() {
                 setter: data.setter || null,
                 collaborators: collaborators
             };
+
+            // B2C: si el prospecto entra sin valor, usar el monto mínimo de su categoría
+            // (tabla en CRM_Configuracion → lead_monto_minimo_por_categoria).
+            if (
+                shouldApplyLeadMinimum(sanitizedData.amount) &&
+                (!Array.isArray(data.items) || data.items.length === 0) &&
+                sanitizedData.categoria_oportunidad &&
+                isB2COpportunity(selectedAccount, sanitizedData, user)
+            ) {
+                const loadedValue = config?.[LEAD_MIN_AMOUNT_CONFIG_KEY];
+                const minConfig = loadedValue !== undefined
+                    ? parseLeadMinimumAmountConfig(loadedValue)
+                    : await fetchLeadMinimumAmountConfig(supabase);
+                const minimo = resolveLeadMinimumAmount(sanitizedData.categoria_oportunidad, minConfig);
+                if (minimo !== null) sanitizedData.amount = minimo;
+            }
 
             // Maintain legacy 'ciudad' string for list views
             if (sanitizedData.ciudad_id) {
