@@ -157,7 +157,7 @@ export function QuotePreviewModal({
                                 onClick={() => {
                                     setIsLoading(true);
                                     setError(null);
-                                    generateQuotePdfBlob(quote, quoteItems, account, opportunity, advisorName)
+                                    generateQuotePdfBlob(quote, quoteItems, account, opportunity, advisorName, advisorEmail)
                                         .then(blob => setPdfBlobUrl(URL.createObjectURL(blob)))
                                         .catch(() => setError("Reintento fallido."))
                                         .finally(() => setIsLoading(false));

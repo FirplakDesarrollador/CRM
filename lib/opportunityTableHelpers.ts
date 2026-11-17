@@ -10,6 +10,7 @@ export const OPPORTUNITY_TABLE_COLUMN_KEYS = [
     'ciudad',
     'canal',
     'origen',
+    'setter',
     'fase',
     'estado',
     'creada',
@@ -30,6 +31,7 @@ export interface OpportunityHotRow {
     ciudad: string;
     canal: string;
     origen: string;
+    setter: string;
     fase: string;
     estado: string;
     creada: string;
@@ -46,6 +48,7 @@ export interface OpportunityInput {
     nombre?: string | null;
     amount?: number | null;
     categoria_oportunidad?: string | string[] | null;
+    setter?: string | null;
     account?: {
         id?: string;
         nombre?: string | null;
@@ -95,6 +98,7 @@ export function buildOpportunityHotRow(
         ciudad: opp.account?.ciudad || 'Sin ciudad',
         canal: opp.account?.canal_id || '-',
         origen: opp.origen_oportunidad || '-',
+        setter: opp.setter ? String(opp.setter).toUpperCase().trim() : '-',
         fase: opp.fase_data?.nombre || 'Pros.',
         estado: opp.estado_data?.nombre || 'Abierta',
         creada: formatColombiaDateTime(opp.created_at),

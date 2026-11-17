@@ -450,6 +450,9 @@ export function FloatingColumnFilterPopover({
                                 {/* Etapas activas del embudo del canal */}
                                 {filteredPhases.map((ph, idx) => {
                                     const isSelected = selectedPhase === ph.id;
+                                    const lowerName = ph.nombre.toLowerCase();
+                                    const isWon = lowerName.includes('ganad');
+                                    const isLost = lowerName.includes('perdid');
                                     return (
                                         <button
                                             key={ph.id}
@@ -459,16 +462,33 @@ export function FloatingColumnFilterPopover({
                                             }}
                                             className={cn(
                                                 "w-full px-2.5 py-1.5 text-left text-xs font-medium rounded-lg transition-colors flex items-center justify-between cursor-pointer",
-                                                isSelected ? "bg-blue-50 text-blue-700 font-bold" : "hover:bg-slate-50 text-slate-700"
+                                                isSelected 
+                                                    ? (isWon ? "bg-emerald-50 text-emerald-800 font-bold" : isLost ? "bg-rose-50 text-rose-800 font-bold" : "bg-blue-50 text-blue-700 font-bold")
+                                                    : (isWon ? "hover:bg-emerald-50/60 text-slate-700 hover:text-emerald-800" : isLost ? "hover:bg-rose-50/60 text-slate-700 hover:text-rose-800" : "hover:bg-slate-50 text-slate-700")
                                             )}
                                         >
                                             <div className="flex items-center gap-2 truncate pr-2">
-                                                <span className="w-4 h-4 rounded-full bg-slate-100 flex items-center justify-center text-[9px] font-bold text-slate-500 shrink-0">
-                                                    {idx + 1}
-                                                </span>
+                                                {isWon ? (
+                                                    <span className="w-4 h-4 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-[9px] font-bold shrink-0">
+                                                        ✓
+                                                    </span>
+                                                ) : isLost ? (
+                                                    <span className="w-4 h-4 rounded-full bg-rose-100 text-rose-700 flex items-center justify-center text-[9px] font-bold shrink-0">
+                                                        ✕
+                                                    </span>
+                                                ) : (
+                                                    <span className="w-4 h-4 rounded-full bg-slate-100 flex items-center justify-center text-[9px] font-bold text-slate-500 shrink-0">
+                                                        {idx + 1}
+                                                    </span>
+                                                )}
                                                 <span className="truncate">{ph.nombre}</span>
                                             </div>
-                                            {isSelected && <Check className="w-3.5 h-3.5 text-blue-600 shrink-0" />}
+                                            {isSelected && (
+                                                <Check className={cn(
+                                                    "w-3.5 h-3.5 shrink-0",
+                                                    isWon ? "text-emerald-600" : isLost ? "text-rose-600" : "text-blue-600"
+                                                )} />
+                                            )}
                                         </button>
                                     );
                                 })}

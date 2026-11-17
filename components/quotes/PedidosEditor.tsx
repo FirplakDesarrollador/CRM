@@ -8,6 +8,7 @@ import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { cn } from "@/components/ui/utils";
 import { useFormAutoSave } from "@/lib/hooks/useFormAutoSave";
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { AutoSaveIndicator } from "@/components/ui/AutoSaveIndicator";
 import { syncEngine } from "@/lib/sync";
 import { SendQuoteModal } from "@/components/quotes/SendQuoteModal";
@@ -49,6 +50,7 @@ interface PedidoFormalizationContext {
 }
 
 export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, onEditStateChange?: (isEditing: boolean) => void }) {
+    const { user: currentUser } = useCurrentUser();
     const { pedidosCollection, deletePedido, updatePedido } = usePedidos(quote.id);
     const [isCreating, setIsCreating] = useState(false);
     const [editingUuid, setEditingUuid] = useState<string | null>(null);
@@ -87,21 +89,21 @@ export function PedidosList({ quote, onEditStateChange }: { quote: LocalQuote, o
         try {
             const opportunity = opp || await db.opportunities.get(quote.opportunity_id);
             const account = opportunity ? await db.accounts.get(opportunity.account_id) : undefined;
-            let advisorName = "";
-            let advisorEmail = "";
+            let advisorName = currentUser?.full_name || "";
+            let advisorEmail = currentUser?.email || "";
             let productCodes: Record<string, string> = {};
 
             try {
                 const { supabase } = await import('@/lib/supabase');
 
-                if (opportunity?.owner_user_id) {
+                if ((!advisorName || !advisorEmail) && opportunity?.owner_user_id) {
                     const { data: userData } = await supabase
                         .from('CRM_Usuarios')
                         .select('full_name, email')
                         .eq('id', opportunity.owner_user_id)
                         .maybeSingle();
-                    advisorName = userData?.full_name || "";
-                    advisorEmail = userData?.email || "";
+                    if (!advisorName) advisorName = userData?.full_name || "";
+                    if (!advisorEmail) advisorEmail = userData?.email || "";
                 }
 
                 const productIds = (pedido.items || []).map(item => item.producto_id).filter(Boolean);

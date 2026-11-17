@@ -78,6 +78,16 @@ describe("Previsualización de Cotización (PDF) y Exportación a Excel", () => 
         expect(blob.size).toBeGreaterThan(0);
     });
 
+    it("buildQuotePdfDoc y generateQuotePdfBlob aceptan los datos del asesor logueado (nombre y correo)", async () => {
+        const loggedName = "Esteban Muñoz Garcia";
+        const loggedEmail = "analista2.desarrollo@firplak.com";
+        const doc = await buildQuotePdfDoc(mockQuote, mockItems, mockAccount, mockOpportunity, loggedName, loggedEmail);
+        expect(doc).toBeDefined();
+        const blob = await generateQuotePdfBlob(mockQuote, mockItems, mockAccount, mockOpportunity, loggedName, loggedEmail);
+        expect(blob).toBeDefined();
+        expect(blob.size).toBeGreaterThan(0);
+    });
+
     it("buildQuoteExcelWorkbook crea un libro Excel con cabeceras, ítems y totales consistentes", async () => {
         const workbook = await buildQuoteExcelWorkbook(mockQuote, mockItems, mockAccount, mockOpportunity, "Asesor Comercial");
         expect(workbook).toBeDefined();

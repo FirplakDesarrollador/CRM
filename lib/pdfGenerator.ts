@@ -595,24 +595,57 @@ export async function buildQuotePdfDoc(
     // ─────────────────────────────────────────────────────────────
     // 7. FIRMAS Y ACEPTACIÓN DEL DOCUMENTO
     // ─────────────────────────────────────────────────────────────
-    // Obtener nombre y correo del asesor comercial
-    let displayAdvisorName = advisorName || opportunity?.owner_user_id || 'Asesor Firplak';
+    // Obtener nombre y correo del asesor comercial (prioridad: asesor logueado en CRM)
+    let displayAdvisorName = (advisorName && advisorName !== 'Asesor Firplak') ? advisorName : '';
     let displayAdvisorEmail = advisorEmail || '';
+    let displayAdvisorPhone = '';
 
-    if ((!advisorName || !displayAdvisorEmail) && opportunity?.owner_user_id) {
+    // 1. Prioridad: Resolver usuario logueado en la sesión del CRM
+    if ((!displayAdvisorName || !displayAdvisorEmail || !displayAdvisorPhone) && typeof window !== 'undefined' && process.env.NEXT_PUBLIC_SUPABASE_URL) {
+        try {
+            const { supabase } = await import('@/lib/supabase');
+            const { data: sessionData } = await supabase.auth.getSession();
+            const sessionEmail = sessionData?.session?.user?.email;
+            if (sessionEmail) {
+                const { data: loggedUser } = await supabase
+                    .from('CRM_Usuarios')
+                    .select('full_name, email, telefono')
+                    .eq('email', sessionEmail)
+                    .maybeSingle();
+
+                if (loggedUser?.full_name && !displayAdvisorName) {
+                    displayAdvisorName = loggedUser.full_name;
+                }
+                if (loggedUser?.email && !displayAdvisorEmail) {
+                    displayAdvisorEmail = loggedUser.email;
+                }
+                if (loggedUser?.telefono && !displayAdvisorPhone) {
+                    displayAdvisorPhone = loggedUser.telefono;
+                }
+            }
+        } catch (e) {
+            console.warn('No se pudo obtener datos del usuario logueado para el PDF:', e);
+        }
+    }
+
+    // 2. Fallback: Propietario de la oportunidad si no se pudo resolver el usuario logueado
+    if ((!displayAdvisorName || !displayAdvisorEmail || !displayAdvisorPhone) && opportunity?.owner_user_id && process.env.NEXT_PUBLIC_SUPABASE_URL) {
         try {
             const { supabase } = await import('@/lib/supabase');
             const { data: userData } = await supabase
                 .from('CRM_Usuarios')
-                .select('full_name, email')
+                .select('full_name, email, telefono')
                 .eq('id', opportunity.owner_user_id)
                 .maybeSingle();
 
-            if (userData?.full_name && !advisorName) {
+            if (userData?.full_name && !displayAdvisorName) {
                 displayAdvisorName = userData.full_name;
             }
             if (userData?.email && !displayAdvisorEmail) {
                 displayAdvisorEmail = userData.email;
+            }
+            if (userData?.telefono && !displayAdvisorPhone) {
+                displayAdvisorPhone = userData.telefono;
             }
         } catch (e) {
             console.warn('No se pudo obtener el nombre/correo del asesor:', e);
@@ -635,16 +668,11 @@ export async function buildQuotePdfDoc(
         }
     }
 
-    if (!displayAdvisorEmail && typeof window !== 'undefined') {
-        try {
-            const { supabase } = await import('@/lib/supabase');
-            const { data: sessionData } = await supabase.auth.getSession();
-            if (sessionData?.session?.user?.email) {
-                displayAdvisorEmail = sessionData.session.user.email;
-            }
-        } catch (e) {
-            // ignore
-        }
+    if (!displayAdvisorName) {
+        displayAdvisorName = 'Asesor Firplak';
+    }
+    if (!displayAdvisorEmail) {
+        displayAdvisorEmail = 'cartera@firplak.com';
     }
 
     const signCardW = (contentWidth - cardGap) / 2;
@@ -689,7 +717,8 @@ export async function buildQuotePdfDoc(
     doc.setFontSize(6.5);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(...textMuted);
-    doc.text(`Contacto Asesor / PBX: (604) 444 17 71`, signRightX + 6, finalY + 33);
+    const phoneToDisplay = displayAdvisorPhone ? `Contacto Asesor / Tel: ${displayAdvisorPhone} • PBX: (604) 444 17 71` : `Contacto Asesor / PBX: (604) 444 17 71`;
+    doc.text(phoneToDisplay, signRightX + 6, finalY + 33);
     const emailToDisplay = displayAdvisorEmail || 'cartera@firplak.com';
     doc.text(`Email: ${emailToDisplay} • www.firplak.com`, signRightX + 6, finalY + 41);
 

@@ -234,7 +234,7 @@ export function OpportunityFilters({
             .filter(p => {
                 const nombre = p.nombre.toLowerCase();
                 // Exclude closed phases from the phase dropdown
-                return !nombre.includes('cerrada');
+                return true;
             });
     }, [selectedChannel, phases]);
 

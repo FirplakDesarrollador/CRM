@@ -8,25 +8,13 @@ import { useUsers, User, CreateUserData, UpdateUserData } from '@/lib/hooks/useU
 import { X, Loader2 } from 'lucide-react';
 import { MultiSelect } from '@/components/ui/MultiSelect';
 import { SALES_CHANNELS } from '@/lib/salesChannels';
+import { userSchema, UserFormData } from '@/lib/userValidation';
 
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
 
-const userSchema = z.object({
-    email: z.string().refine(val => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((val || "").trim()), { message: "Email inválido" }),
-    password: z.string().min(6, 'La contraseña debe tener al menos 6 caracteres').optional().or(z.literal('')),
-    full_name: z.string().min(2, 'El nombre debe tener al menos 2 caracteres'),
-    role: z.enum(['ADMIN', 'COORDINADOR', 'VENDEDOR']),
-    allowed_modules: z.array(z.string()).optional(),
-    coordinadores: z.array(z.string()).optional(),
-    pais: z.string().optional(),
-    departamento: z.string().optional(),
-    paises: z.array(z.string()).optional(),
-    departamentos: z.array(z.string()).optional(),
-    canales: z.array(z.string()).optional(),
-});
-
-type UserFormData = z.infer<typeof userSchema>;
+export { userSchema };
+export type { UserFormData };
 
 interface UserFormProps {
     user: User | null;
@@ -68,7 +56,9 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
         resolver: zodResolver(userSchema),
         defaultValues: user ? {
             email: user.email,
+            password: '',
             full_name: user.full_name || '',
+            telefono: user.telefono || '',
             role: user.role,
             allowed_modules: user.allowed_modules || [],
             coordinadores: user.coordinadores || [],
@@ -78,6 +68,9 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
             departamentos: user.departamentos || (user.departamento ? [user.departamento] : []),
             canales: user.canales || [],
         } : {
+            password: '',
+            full_name: '',
+            telefono: '',
             role: 'VENDEDOR',
             allowed_modules: [],
             coordinadores: [],
@@ -116,6 +109,7 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
                 // Update existing user
                 const updates: UpdateUserData = {
                     full_name: data.full_name,
+                    telefono: data.telefono ? data.telefono.trim() : null,
                     role: data.role,
                     allowed_modules: data.allowed_modules,
                     coordinadores: data.coordinadores,
@@ -143,8 +137,8 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
                 }
             } else {
                 // Create new user
-                if (!data.password) {
-                    setError('La contraseña es requerida para crear un usuario');
+                if (!data.password || data.password.trim().length < 6) {
+                    setError('La contraseña es requerida para crear un nuevo usuario (mínimo 6 caracteres)');
                     return;
                 }
 
@@ -152,6 +146,7 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
                     email: data.email,
                     password: data.password,
                     full_name: data.full_name,
+                    telefono: data.telefono ? data.telefono.trim() : null,
                     role: data.role,
                     allowed_modules: data.allowed_modules,
                     coordinadores: data.coordinadores,
@@ -248,6 +243,22 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
                         />
                         {errors.full_name && (
                             <p className="mt-1 text-sm text-red-600">{errors.full_name.message}</p>
+                        )}
+                    </div>
+
+                    {/* Número de Teléfono */}
+                    <div>
+                        <label className="block text-sm font-semibold text-slate-700 mb-2">
+                            Número de Teléfono
+                        </label>
+                        <input
+                            type="tel"
+                            {...register('telefono')}
+                            className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#254153] focus:border-transparent"
+                            placeholder="Ej: +57 300 123 4567"
+                        />
+                        {errors.telefono && (
+                            <p className="mt-1 text-sm text-red-600">{errors.telefono.message}</p>
                         )}
                     </div>
 

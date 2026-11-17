@@ -6,6 +6,7 @@ export interface User {
     id: string;
     email: string;
     full_name: string | null;
+    telefono?: string | null;
     role: UserRole;
     is_active: boolean;
     allowed_modules?: string[] | null;
@@ -23,6 +24,7 @@ export interface CreateUserData {
     email: string;
     password: string;
     full_name: string;
+    telefono?: string | null;
     role: UserRole;
     allowed_modules?: string[];
     coordinadores?: string[];
@@ -35,6 +37,7 @@ export interface CreateUserData {
 
 export interface UpdateUserData {
     full_name?: string;
+    telefono?: string | null;
     role?: UserRole;
     is_active?: boolean;
     allowed_modules?: string[] | null;
@@ -128,6 +131,7 @@ export function useUsers() {
             // But we need to update the role, allowed_modules AND coordinadores
             // We'll prepare the update object
             const updates: any = { full_name: userData.full_name };
+            if (userData.telefono !== undefined) updates.telefono = userData.telefono;
             if (userData.role) updates.role = userData.role;
             if (userData.allowed_modules) updates.allowed_modules = userData.allowed_modules;
             if (userData.coordinadores) updates.coordinadores = userData.coordinadores;

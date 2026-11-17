@@ -77,7 +77,7 @@ export default function QuoteEditorPage() {
         return { opp, acc, qItems: enrichedItems, advisorName, advisorEmail };
     }, [quote]);
 
-    const effectiveAdvisorName = currentUser?.user_metadata?.full_name || (currentUser as any)?.name || sendContext?.advisorName || "Asesor Firplak";
+    const effectiveAdvisorName = currentUser?.full_name || currentUser?.user_metadata?.full_name || (currentUser as any)?.name || sendContext?.advisorName || "Asesor Firplak";
     const effectiveAdvisorEmail = currentUser?.email || sendContext?.advisorEmail || "";
 
     const handleDownloadPdf = () => {

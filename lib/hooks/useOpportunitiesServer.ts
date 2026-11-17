@@ -274,15 +274,22 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 }
             }
 
-            if (statusFilter === 'won' && wonPhaseIdsRef.current.length > 0) {
-                localOpps = localOpps.filter(o => wonPhaseIdsRef.current.includes(o.fase_id as number));
-            } else if (statusFilter === 'lost' && lostPhaseIdsRef.current.length > 0) {
-                localOpps = localOpps.filter(o => lostPhaseIdsRef.current.includes(o.fase_id as number));
-            } else if (statusFilter === 'open' && closedPhaseIdsRef.current.length > 0) {
-                localOpps = localOpps.filter(o =>
-                    !closedPhaseIdsRef.current.includes(o.fase_id as number) &&
-                    ![2, 3, 4, 11, 14].includes(o.estado_id as number)
-                );
+            const isFilteringExplicitClosedPhase = Boolean(
+                phaseFilter &&
+                allPhasesRef.current.some(p => p.id === phaseFilter && p.nombre.toLowerCase().includes('cerrada'))
+            );
+
+            if (!isFilteringExplicitClosedPhase) {
+                if (statusFilter === 'won' && wonPhaseIdsRef.current.length > 0) {
+                    localOpps = localOpps.filter(o => wonPhaseIdsRef.current.includes(o.fase_id as number));
+                } else if (statusFilter === 'lost' && lostPhaseIdsRef.current.length > 0) {
+                    localOpps = localOpps.filter(o => lostPhaseIdsRef.current.includes(o.fase_id as number));
+                } else if (statusFilter === 'open' && closedPhaseIdsRef.current.length > 0) {
+                    localOpps = localOpps.filter(o =>
+                        !closedPhaseIdsRef.current.includes(o.fase_id as number) &&
+                        ![2, 3, 4, 11, 14].includes(o.estado_id as number)
+                    );
+                }
             }
 
             if (accountIdFilter) {
@@ -604,12 +611,19 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                     q = q.eq('account.subclasificacion_id', subclassificationFilter);
                 }
 
-                if (statusFilter === 'won') {
-                    q = q.in('estado_id', [2, 11]);
-                } else if (statusFilter === 'lost') {
-                    q = q.in('estado_id', [3, 4, 14]);
-                } else if (statusFilter === 'open') {
-                    q = q.not('estado_id', 'in', '(2,3,4,11,14)');
+                const isFilteringExplicitClosedPhase = Boolean(
+                    phaseFilter &&
+                    allPhasesRef.current.some(p => p.id === phaseFilter && p.nombre.toLowerCase().includes('cerrada'))
+                );
+
+                if (!isFilteringExplicitClosedPhase) {
+                    if (statusFilter === 'won') {
+                        q = q.in('estado_id', [2, 11]);
+                    } else if (statusFilter === 'lost') {
+                        q = q.in('estado_id', [3, 4, 14]);
+                    } else if (statusFilter === 'open') {
+                        q = q.not('estado_id', 'in', '(2,3,4,11,14)');
+                    }
                 }
 
                 if (segmentFilter) {
@@ -744,6 +758,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                     origen_oportunidad,
                     categoria_oportunidad,
                     contactos_ids,
+                    setter,
                     ${accountRelation},
                     fase_data:CRM_FasesOportunidad(nombre),
                     estado_data:CRM_EstadosOportunidad(nombre),

@@ -52,8 +52,9 @@ export interface PhaseCatalogItem {
 }
 
 /**
- * Filtra las fases según el canal seleccionado, excluyendo fases de cierre ('cerrada'),
- * y deduplicando por nombre para que cada etapa única del embudo aparezca una sola vez.
+ * Filtra las fases según el canal seleccionado, incluyendo todas las etapas
+ * del ciclo comercial (también Cerrada ganada y Cerrada perdida)
+ * y deduplicando por nombre para que cada etapa única aparezca una sola vez.
  */
 export function getAvailablePhasesForChannel(
     phases: PhaseCatalogItem[],
@@ -61,10 +62,9 @@ export function getAvailablePhasesForChannel(
 ): PhaseCatalogItem[] {
     if (!selectedChannel) return [];
 
-    // 1. Filtrar por canal y descartar estados cerrados (manejados por filtro ESTADO)
+    // 1. Filtrar por canal
     const channelPhases = phases.filter(p =>
-        p.canal_id === selectedChannel &&
-        !p.nombre.toLowerCase().includes('cerrada')
+        p.canal_id === selectedChannel
     );
 
     // 2. Ordenar por 'orden' si existe

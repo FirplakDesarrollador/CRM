@@ -542,6 +542,7 @@ function OpportunitiesContent() {
         { key: 'ciudad',      label: 'Ciudad' },
         { key: 'canal',       label: 'Canal' },
         { key: 'origen',      label: 'Origen' },
+        { key: 'setter',      label: 'Setter' },
         { key: 'fase',        label: 'Fase' },
         { key: 'estado',      label: 'Estado' },
         { key: 'creada',      label: 'Creada' },
@@ -725,6 +726,23 @@ function OpportunitiesContent() {
                 const safe = v.replace(/"/g, '&quot;');
                 td.innerHTML = `<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;color:#475569;" title="${safe}">${v}</div>`;
                 td.style.overflow = 'hidden';
+                return td;
+            }
+        },
+        setter: {
+            data: 'setter', title: 'Setter', readOnly: true, width: colWidths['setter'] || 100, wordWrap: false,
+            renderer(_: unknown, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+                const val = (value || '').toUpperCase().trim();
+                let badge = '<span style="color:#94a3b8;font-weight:500;">-</span>';
+                if (val === 'CO') {
+                    badge = '<span style="display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:800;letter-spacing:0.04em;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;">CO</span>';
+                } else if (val === 'REC') {
+                    badge = '<span style="display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:800;letter-spacing:0.04em;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;">REC</span>';
+                } else if (val && val !== '-') {
+                    badge = `<span style="display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700;background:#f8fafc;color:#475569;border:1px solid #e2e8f0;">${val}</span>`;
+                }
+                td.innerHTML = `<div style="display:flex;align-items:center;height:100%;">${badge}</div>`;
+                td.style.overflow = 'visible';
                 return td;
             }
         },
@@ -1152,6 +1170,19 @@ function OpportunitiesContent() {
                                                 <span>{opp.account?.pais_id ? (countryMap[opp.account.pais_id] || "Colombia") : (opp.account?.pais || "Colombia")}</span>
                                                 <span className="text-slate-300">•</span>
                                                 <span className="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded text-[10.5px] font-bold">{opp.account?.canal_id || "-"}</span>
+                                                {Boolean((opp as any).setter) && (
+                                                    <>
+                                                        <span className="text-slate-300">•</span>
+                                                        <span className={cn(
+                                                            "px-1.5 py-0.5 rounded text-[10.5px] font-bold uppercase",
+                                                            (opp as any).setter === 'CO' ? "bg-blue-100 text-blue-700" :
+                                                            (opp as any).setter === 'REC' ? "bg-emerald-100 text-emerald-700" :
+                                                            "bg-slate-100 text-slate-700"
+                                                        )}>
+                                                            {(opp as any).setter}
+                                                        </span>
+                                                    </>
+                                                )}
                                             </div>
                                             <div className="text-slate-600 text-xs truncate font-medium">
                                                 <Link href={`/oportunidades/${opp.id}`} className="hover:text-blue-600 transition-colors">

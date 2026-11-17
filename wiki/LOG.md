@@ -3,6 +3,79 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-11-17 - Inclusión de Etapas Cerrada Ganada y Cerrada Perdida en Filtro de Fase
+
+- **Requerimiento:** Permitir que las etapas «Cerrada ganada» y «Cerrada perdida» aparezcan disponibles en el menú de filtrado por columna de FASE (`FloatingColumnFilterPopover`) y en la barra de filtros superiores de Oportunidades.
+- **Cambios Implementados:**
+  1. **Catálogo de Fases por Canal (`lib/opportunityColumnFilterHelpers.ts`):**
+     - Se eliminó la exclusión `!p.nombre.toLowerCase().includes('cerrada')` en `getAvailablePhasesForChannel`. Ahora retorna la totalidad del ciclo de vida de fases de cada canal (`CRM_FasesOportunidad`), incluyendo «Cerrada ganada» y «Cerrada perdida», manteniendo la deduplicación por nombre y el orden de etapas.
+  2. **Interfaz de Filtro Flotante (`components/oportunidades/FloatingColumnFilterPopover.tsx`):**
+     - Se agregaron estilos e iconos distintivos para fases cerradas: badge verde con `✓` para etapas ganadas y badge rojo con `✕` para etapas perdidas.
+  3. **Barra de Filtros Superiores (`components/oportunidades/OpportunityFilters.tsx`):**
+     - Se habilitó la presencia de fases cerradas en el dropdown «Todas las etapas».
+  4. **Servidor y Consulta (`lib/hooks/useOpportunitiesServer.ts`):**
+     - Se añadió `isFilteringExplicitClosedPhase`: si el usuario filtra explícitamente por una fase cerrada («Cerrada ganada» o «Cerrada perdida»), el servidor desactiva la condición por defecto de `statusFilter === 'open'` (`not in (2,3,4,11,14)`), asegurando que se consulten y muestren los registros de esa fase tanto en Supabase como en modo local/offline.
+  5. **Pruebas y Verificación:**
+     - Se actualizó [`tests/opportunityTableFilters.test.ts`](file:///c:/Users/analista2.desarrollo/Desktop/apps/CRM/tests/opportunityTableFilters.test.ts) (16/16 pasadas) y se validó [`tests/opportunitySetter.test.ts`](file:///c:/Users/analista2.desarrollo/Desktop/apps/CRM/tests/opportunitySetter.test.ts) (7/7 pasadas).
+- **Páginas afectadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+
+## 2026-11-17 - Incorporación de la Columna SETTER en la Tabla Principal de Oportunidades
+
+- **Requerimiento:** Incorporar la columna del Setter en la tabla principal de Oportunidades (`/oportunidades`), habilitando su visualización y alternancia en el selector de «Columnas visibles», y mostrando los badges correspondientes (`CO`, `REC`, o `-`) según el valor registrado en `CRM_Oportunidades.setter`.
+- **Cambios Implementados:**
+  1. **Helpers de Tabla y Contratos (`lib/opportunityTableHelpers.ts`):**
+     - Se añadió `'setter'` a `OPPORTUNITY_TABLE_COLUMN_KEYS`.
+     - Se amplió `OpportunityHotRow` (`setter: string`) y `OpportunityInput` (`setter?: string | null`).
+     - Se actualizó `buildOpportunityHotRow` para mapear `opp.setter` en mayúsculas y limpio (`CO`, `REC` o `-`).
+  2. **Consulta al Backend (`lib/hooks/useOpportunitiesServer.ts`):**
+     - Se incorporó `setter` en la lista de campos seleccionados de `CRM_Oportunidades` en `dataQuery`.
+  3. **Interfaz de Usuario y Selector de Columnas (`app/oportunidades/page.tsx`):**
+     - Se agregó `{ key: 'setter', label: 'Setter' }` a `ALL_COLUMNS` y su definición en `ALL_COLUMN_DEFS`.
+     - El renderer muestra badges distintivos: azul (`CO`), verde (`REC`) o un guion tenue (`-`) si no tiene asignación.
+     - En la vista móvil, se expone el badge de Setter en la tarjeta de la oportunidad.
+  4. **Pruebas y Verificación:**
+     - Se amplió `tests/opportunitySetter.test.ts` (7 de 7 pasadas) y `tests/opportunityTableFilters.test.ts` (16 de 16 pasadas).
+- **Páginas afectadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+
+## 2026-11-17 - Campo Número de Teléfono en Usuarios y Corrección de Validación de Contraseña Opcional
+
+- **Requerimiento:** 
+  1. Agregar el campo «Número de Teléfono» en el módulo de usuarios, tanto en la base de datos de Supabase como en el formulario de edición y creación de usuarios.
+  2. Corregir el campo «Nueva Contraseña (Opcional)» para que, al dejarlo en blanco al editar un usuario existente, no exija mínimo 6 caracteres ni intente cambiar la contraseña, permitiendo guardar los cambios sin errores.
+- **Cambios Implementados:**
+  1. **Corrección de Validación de Contraseña Opcional (`lib/userValidation.ts` y `components/usuarios/UserForm.tsx`):**
+     - Se ajustó el schema de Zod (`userSchema.password`) con `.refine(val => !val || val.trim() === '' || val.length >= 6)` para aceptar string vacío (`""`) sin disparar el error de longitud mínima.
+     - En `onSubmit`, si el campo está vacío, no se invoca `updateUserPassword` y se preserva intacta la contraseña actual del usuario. Para creación de nuevos usuarios, se mantiene la exigencia obligatoria de mínimo 6 caracteres.
+     - Se crearon pruebas unitarias en `tests/userValidation.test.ts` (5 de 5 pasadas).
+  2. **Base de Datos / Supabase (`CRM_Usuarios`):**
+     - Migración DDL aplicada: `ALTER TABLE public."CRM_Usuarios" ADD COLUMN IF NOT EXISTS telefono TEXT;`
+     - Se actualizó el trigger `handle_new_user()` para extraer y propagar `telefono` (o `phone`) desde los metadatos de Supabase Auth.
+     - Archivo versionado creado en `supabase/migrations/20261117100000_add_telefono_to_crm_usuarios.sql`.
+  3. **Modelos y Hooks (`lib/hooks/useUsers.ts`, `lib/stores/useUserStore.ts`):**
+     - Se añadió `telefono?: string | null` en las interfaces `User`, `CreateUserData`, `UpdateUserData` y `CurrentUser`.
+     - En `createUser` y `updateUser`, se propaga `telefono` en los payloads de inserción y actualización a `CRM_Usuarios`.
+  4. **Formulario Modal de Usuario (`components/usuarios/UserForm.tsx`):**
+     - Se integró el campo interactivo de entrada «Número de Teléfono» (`type="tel"`) con placeholder de ejemplo ubicado inmediatamente después de Nombre Completo.
+  5. **Listado de Usuarios (`components/usuarios/UserList.tsx`):**
+     - Se expone el número de teléfono con icono `Phone` tanto en la tabla desktop como en las tarjetas móviles.
+  6. **Integración con Documentos PDF (`lib/pdfGenerator.ts`):**
+     - El generador de PDF F-V-29 ahora consulta y refleja el teléfono corporativo del asesor logueado en la tarjeta de contacto comercial.
+- **Páginas afectadas:** `wiki/pages/roles-y-permisos.md`, `wiki/LOG.md`.
+
+## 2026-11-17 - PDF de Cotización F-V-29: Datos Dinámicos del Asesor Autenticado (Nombre y Correo)
+
+- **Requerimiento:** En el formato oficial de cotización PDF (F-V-29), asegurar que en la tarjeta de firma comercial («FIRPLAK S.A.S. - ASESOR COMERCIAL») aparezcan los datos completos (nombre y correo) del asesor que se encuentra logueado en el CRM, evitando que aparezca el nombre del propietario original de la oportunidad si otro usuario está generando o visualizando la cotización.
+- **Cambios Implementados:**
+  1. **Resolución de Nombre en `QuoteEditorPage` (`app/oportunidades/[id]/cotizaciones/[quoteId]/page.tsx`):**
+     - Se corrigió `effectiveAdvisorName` para evaluar prioritariamente `currentUser?.full_name` (de `useCurrentUser()`), antes de buscar metadatos o el nombre del propietario en `sendContext`.
+  2. **Resolución de Asesor en `PedidosEditor` (`components/quotes/PedidosEditor.tsx`):**
+     - Se integró `useCurrentUser()` en `PedidosList` y `prepareFormalizationContext` para asignar `advisorName` y `advisorEmail` desde `currentUser.full_name` y `currentUser.email` del usuario logueado en lugar de tomar ciegamente el propietario de la oportunidad.
+  3. **Prioridad y Fallbacks en `lib/pdfGenerator.ts` (`buildQuotePdfDoc`):**
+     - Si no se proporciona un nombre o correo explícito, consulta en primer lugar la sesión activa del CRM (`supabase.auth.getSession()` -> `CRM_Usuarios` por correo) para obtener tanto el `full_name` como el `email` del usuario en sesión. Solo en caso de ausencia de sesión recurre a `opportunity.owner_user_id` y por último al valor institucional por defecto.
+  4. **Corrección en `QuotePreviewModal.tsx`:** Se aseguró el paso de `advisorEmail` en el reintento de generación del blob.
+  5. **Pruebas y Verificación:** Se amplió `tests/quoteExcelAndPreview.test.ts` pasando 5 de 5 pruebas unitarias (`qa:focused`).
+- **Páginas afectadas:** `wiki/pages/cotizaciones-y-pedidos.md`, `wiki/LOG.md`.
+
 ## 2026-11-10 - PDF de Cotización F-V-29: Correo Dinámico del Asesor Autenticado y Espaciado del Pie de Página
 
 - **Requerimiento:** En el formato oficial de cotización PDF (F-V-29), mostrar en la caja de firma del asesor comercial el correo corporativo del asesor que se encuentra logueado (en lugar del correo fijo de cartera), y corregir el texto inferior de ley y autorretenedores que se encontraba superpuesto y pegado contra las firmas.
