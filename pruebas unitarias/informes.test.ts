@@ -260,12 +260,33 @@ describe('Descarga por lotes con fetchAllInChunks', () => {
         expect(result.length).toBe(6500);
         expect(result[0].id).toBe('row-1');
         expect(result[6499].id).toBe('row-6500');
-        expect(rangesCalled).toEqual([
-            [0, 2499],
-            [2500, 4999],
-            [5000, 7499]
-        ]);
-        expect(progressValues).toEqual([2500, 5000, 6500]);
+        // Los bloques se limitan a 1000 (max-rows de PostgREST)
+        expect(rangesCalled.length).toBe(7);
+        expect(rangesCalled[0]).toEqual([0, 999]);
+        expect(rangesCalled[6]).toEqual([6000, 6999]);
+        expect(progressValues).toEqual([1000, 2000, 3000, 4000, 5000, 6000, 6500]);
+    });
+
+    it('no se queda en 1000 filas cuando el servidor corta cada respuesta en 1000 (max-rows)', async () => {
+        const fakeDb = Array.from({ length: 3456 }, (_, i) => ({ id: i }));
+        const mockQuery = {
+            // Simula PostgREST: aunque se pidan más filas, nunca devuelve más de 1000
+            range: async (from: number, to: number) => ({ data: fakeDb.slice(from, Math.min(to + 1, from + 1000)), error: null })
+        };
+        const result = await fetchAllInChunks(mockQuery, 2500);
+        expect(result.length).toBe(3456);
+        expect(result[3455].id).toBe(3455);
+    });
+
+    it('con un total múltiplo exacto de 1000 hace una petición extra vacía y termina', async () => {
+        const fakeDb = Array.from({ length: 2000 }, (_, i) => ({ id: i }));
+        let calls = 0;
+        const mockQuery = {
+            range: async (from: number, to: number) => { calls++; return { data: fakeDb.slice(from, to + 1), error: null }; }
+        };
+        const result = await fetchAllInChunks(mockQuery);
+        expect(result.length).toBe(2000);
+        expect(calls).toBe(3);
     });
 
     it('maneja consultas sin datos retornando arreglo vacío sin error', async () => {
