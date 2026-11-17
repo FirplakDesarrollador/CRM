@@ -87,6 +87,8 @@ function OpportunitiesContent() {
         setFamiliaFilter,
         setCountryFilter,
         setCityFilter,
+        setterFilter,
+        setSetterFilter,
         setStartDate,
         setEndDate,
         setStartClosingDate,
@@ -477,6 +479,9 @@ function OpportunitiesContent() {
         if (selectedCity && selectedCity.trim() !== '') params.set('city', selectedCity.trim());
         else params.delete('city');
 
+        if (setterFilter) params.set('setter', setterFilter);
+        else params.delete('setter');
+
         if (sortField !== 'created_at') params.set('sort', sortField);
         else params.delete('sort');
         if (sortAsc) params.set('dir', 'asc');
@@ -501,7 +506,7 @@ function OpportunitiesContent() {
         
         const query = queryString ? `?${queryString}` : window.location.pathname;
         router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
-    }, [tab, selectedAccountOwnerIds, selectedChannel, selectedSubclass, selectedSegment, selectedPhase, selectedOrigin, selectedPlanta, selectedFamilia, selectedIdFilter, selectedCountry, selectedCity, statusFilter, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc, searchParams, router]); // Search is handled by the debounced effect above.
+    }, [tab, selectedAccountOwnerIds, selectedChannel, selectedSubclass, selectedSegment, selectedPhase, selectedOrigin, selectedPlanta, selectedFamilia, selectedIdFilter, selectedCountry, selectedCity, setterFilter, statusFilter, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc, searchParams, router]); // Search is handled by the debounced effect above.
 
 
     const handleFilterChange = useCallback(({ 
@@ -963,7 +968,7 @@ function OpportunitiesContent() {
         (selectedSegment ? 1 : 0) + (selectedPhase ? 1 : 0) + (selectedOrigin ? 1 : 0) +
         (statusFilter !== 'open' ? 1 : 0) + (startDate ? 1 : 0) + (endDate ? 1 : 0) +
         (startClosingDate ? 1 : 0) + (endClosingDate ? 1 : 0) +
-        (selectedCountry ? 1 : 0) + (selectedCity ? 1 : 0);
+        (selectedCountry ? 1 : 0) + (selectedCity ? 1 : 0) + (setterFilter ? 1 : 0);
 
     return (
         <div data-testid="opportunities-page" className="space-y-3.5 max-w-[1600px] mx-auto pb-8 md:pb-2 animate-in fade-in duration-300">
@@ -1586,6 +1591,7 @@ function OpportunitiesContent() {
                                                 vendedor: 'Asignado a',
                                                 estado: 'Estado',
                                                 origen: 'Origen Oportunidad',
+                                                setter: 'Setter',
                                                 pais: 'País de la Cuenta',
                                                 ciudad: 'Ciudad de la Cuenta'
                                             };
@@ -1756,6 +1762,7 @@ function OpportunitiesContent() {
                                                 origin: selectedOrigin,
                                                 country: selectedCountry,
                                                 city: selectedCity,
+                                                setter: setterFilter,
                                                 startDate,
                                                 endDate,
                                                 startClose: startClosingDate,
@@ -1830,6 +1837,8 @@ function OpportunitiesContent() {
                                         setSelectedCountry(cId);
                                         setCountryFilter(cId);
                                     }}
+                                    selectedSetter={setterFilter}
+                                    onSelectSetter={(st) => setSetterFilter(st)}
                                     selectedCity={selectedCity}
                                     onSelectCity={(city) => {
                                         setSelectedCity(city);
