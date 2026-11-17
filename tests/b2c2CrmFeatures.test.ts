@@ -68,26 +68,63 @@ describe('1. Fecha de cierre (CP / CG) en el reporte', () => {
 
 describe('2. Monto mínimo por categoría para leads', () => {
     const cfg = parseLeadMinimumAmountConfig({
-        modo: 'maximo',
-        montos: { 'Baños': 300000, 'Cocinas': '5.000.000', 'Hidromasajes': 1200000, 'Accesorios': null },
+        modo: 'menor',
+        montos: {
+            'Baños': 232689,
+            'Cocinas': 659579,
+            'Zona de Labores': 209159,
+            'Hidromasajes': 6134369,
+            'Accesorios': null,
+        },
     });
 
     it('lee la configuración e ignora montos vacíos', () => {
-        expect(cfg.amounts.get('banos')).toBe(300000);
-        expect(cfg.amounts.get('cocinas')).toBe(5000000);
+        expect(cfg.mode).toBe('menor');
+        expect(cfg.amounts.get('banos')).toBe(232689);
+        expect(cfg.amounts.get('cocinas')).toBe(659579);
+        expect(cfg.amounts.get('zona de labores')).toBe(209159);
+        expect(cfg.amounts.get('hidromasajes')).toBe(6134369);
         expect(cfg.amounts.has('accesorios')).toBe(false);
     });
 
     it('reconoce los nombres de WordPress y de la app', () => {
-        expect(resolveLeadMinimumAmount('Hidromasajes/Jacuzzis y Tinas', cfg)).toBe(1200000);
-        expect(resolveLeadMinimumAmount('baños ', cfg)).toBe(300000);
-        expect(resolveLeadMinimumAmount(['Cocinas'], cfg)).toBe(5000000);
+        expect(resolveLeadMinimumAmount('Hidromasajes/Jacuzzis y Tinas', cfg)).toBe(6134369);
+        expect(resolveLeadMinimumAmount('baños ', cfg)).toBe(232689);
+        expect(resolveLeadMinimumAmount(['Cocinas'], cfg)).toBe(659579);
     });
 
-    it('varias categorías: el mayor (o la suma en modo suma)', () => {
-        expect(resolveLeadMinimumAmount('Baños, Cocinas', cfg)).toBe(5000000);
+    it('varias categorías: el menor (configurable a mayor o suma)', () => {
+        expect(resolveLeadMinimumAmount('Baños, Cocinas', cfg)).toBe(232689);
+        expect(resolveLeadMinimumAmount('Baños, Zona de Labores, Hidromasajes', cfg)).toBe(209159);
+        // categorías sin monto no entran en la comparación
+        expect(resolveLeadMinimumAmount('Accesorios, Baños', cfg)).toBe(232689);
+
+        const mayor = parseLeadMinimumAmountConfig({ modo: 'mayor', montos: { 'Baños': 100, 'Cocinas': 200 } });
+        expect(mayor.mode).toBe('mayor');
+        expect(resolveLeadMinimumAmount('Baños, Cocinas', mayor)).toBe(200);
+
+        const maximoAlias = parseLeadMinimumAmountConfig({ modo: 'maximo', montos: { 'Baños': 100, 'Cocinas': 200 } });
+        expect(maximoAlias.mode).toBe('mayor');
+
         const suma = parseLeadMinimumAmountConfig({ modo: 'suma', montos: { 'Baños': 100, 'Cocinas': 200 } });
         expect(resolveLeadMinimumAmount('Baños, Cocinas', suma)).toBe(300);
+
+        const def = parseLeadMinimumAmountConfig({ montos: { 'Baños': 100, 'Cocinas': 200 } });
+        expect(def.mode).toBe('menor');
+        expect(resolveLeadMinimumAmount('Baños, Cocinas', def)).toBe(100);
+    });
+
+    it('la migración trae los montos de Daniela y modo menor', () => {
+        const sql = read('supabase', 'migrations', '20261117120000_lead_monto_minimo_por_categoria.sql');
+        expect(sql).toMatch(/"modo":\s*"menor"/);
+        expect(sql).toMatch(/"Baños":\s*232689/);
+        expect(sql).toMatch(/"Cocinas":\s*659579/);
+        expect(sql).toMatch(/"Zona de Labores":\s*209159/);
+        expect(sql).toMatch(/"Hidromasajes":\s*6134369/);
+        expect(sql).toMatch(/"Carpintería de obras":\s*null/);
+        expect(sql).toMatch(/"Institucional":\s*null/);
+        expect(sql).toMatch(/"Accesorios":\s*null/);
+        expect(sql).toMatch(/"Deseo contactar un asesor":\s*null/);
     });
 
     it('sin configuración o categoría sin monto no cambia nada', () => {
