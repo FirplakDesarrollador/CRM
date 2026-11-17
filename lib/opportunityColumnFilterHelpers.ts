@@ -19,6 +19,7 @@ export interface OpportunityFilterState {
     endClose?: string | null;
     accountId?: string | null;
     accountName?: string | null;
+    setter?: string | null;
 }
 
 export interface ChannelOption {
@@ -131,6 +132,8 @@ export function isColumnFilterActive(colKey: string, state: OpportunityFilterSta
             return Boolean(state.status && state.status !== 'open');
         case 'origen':
             return Boolean(state.origin);
+        case 'setter':
+            return Boolean(state.setter);
         case 'pais':
             return Boolean(state.country);
         case 'ciudad':

@@ -135,3 +135,39 @@ export const DATE_FILTER_PRESETS: DateRangePreset[] = [
     }
 ];
 
+
+/**
+ * Devuelve la parte YYYY-MM-DD de una fecha "solo día" (columna date de Postgres) sin convertirla a UTC.
+ * new Date('2026-11-30') se interpreta como medianoche UTC y en Colombia (UTC-5) se ve como el día anterior.
+ */
+export function toDateOnly(value: string | null | undefined): string | null {
+    if (!value) return null;
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value).trim());
+    return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
+}
+
+/** Formatea una fecha "solo día" YYYY-MM-DD como DD/MM/YYYY sin pasar por Date (sin corrimiento de zona). */
+export function formatDateOnlyDMY(value: string | null | undefined): string | null {
+    const d = toDateOnly(value);
+    if (!d) return null;
+    const [y, mo, da] = d.split('-');
+    return `${da}/${mo}/${y}`;
+}
+
+/** Indica si una fecha "solo día" está en el rango [start, end] (ambos inclusive, YYYY-MM-DD). */
+export function isDateOnlyInRange(value: string | null | undefined, start: string | null | undefined, end: string | null | undefined): boolean {
+    const d = toDateOnly(value);
+    if (!d) return false;
+    const s = toDateOnly(start);
+    const e = toDateOnly(end);
+    if (s && d < s) return false;
+    if (e && d > e) return false;
+    return true;
+}
+
+/** Una fecha "solo día" está vencida si es anterior al día de hoy (hora local). */
+export function isDateOnlyOverdue(value: string | null | undefined, now: Date = new Date()): boolean {
+    const d = toDateOnly(value);
+    if (!d) return false;
+    return d < formatLocalDateToYMD(now);
+}

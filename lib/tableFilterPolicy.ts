@@ -21,6 +21,7 @@ export const OPPORTUNITY_SERVER_FILTER_COLUMNS = [
     'vendedor',
     'estado',
     'origen',
+    'setter',
     'pais',
     'ciudad',
 ] as const;
