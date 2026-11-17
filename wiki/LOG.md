@@ -3,6 +3,28 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-11-17 - Incorporación de Filtro y Búsqueda por ID en Oportunidades
+
+- **Requerimiento:** Agregar filtro por ID en el módulo de Oportunidades (`/oportunidades`), tanto en los filtros avanzados como en la consulta general por UUID.
+- **Cambios Implementados:**
+  1. **Base de Datos / RPC PostgreSQL (`supabase/migrations/20261117120000_add_search_opportunities_by_id_rpc.sql`):**
+     - Se creó la función `public.search_opportunities_by_id(search_term text) RETURNS SETOF uuid` con `LANGUAGE sql STABLE SECURITY DEFINER` y permisos para roles `anon, authenticated, service_role`.
+     - Permite matching parcial y por prefijo sobre la columna `id::text` de `CRM_Oportunidades` sin sufrir limitaciones de operadores de tipo UUID en PostgREST.
+  2. **Componente de Filtros (`components/oportunidades/OpportunityFilters.tsx`):**
+     - Se añadió el campo `idFilter` en `OpportunityFiltersProps`, estado local `idFilter`, botón de limpieza y elemento input con `data-testid="opportunities-filter-id"`.
+  3. **Hook de Servidor (`lib/hooks/useOpportunitiesServer.ts`):**
+     - Se incorporó `idFilter` y `setIdFilter`.
+     - Resolución en Supabase: si es UUID completo aplica `.eq('id', cleanId)`; si es prefijo o parcial invoca la RPC `search_opportunities_by_id` y filtra con `.in('id', matchedIds)`.
+     - Resolución offline en Dexie: filtro insensible a mayúsculas sobre `o.id`.
+     - Soporte en `searchTerm`: si el término de búsqueda general es un UUID válido, aplica coincidencia directa sobre `id` tanto en Supabase como en Dexie.
+  4. **Página Principal (`app/oportunidades/page.tsx`):**
+     - Sincronización bidireccional de `selectedIdFilter` con la URL (`?oppId=` / `?id=`) y `sessionStorage`.
+     - Inclusión en `activeFilterCount` y apertura automática del drawer de filtros avanzados si la URL contiene `oppId` o `id`.
+  5. **Pruebas y Verificación:**
+     - Se creó `tests/opportunityIdFilter.test.ts` (5 de 5 pasadas).
+     - Se verificó regresión en `tests/opportunityTableFilters.test.ts` (16 de 16 pasadas) y `tests/opportunitySetter.test.ts` (7 de 7 pasadas).
+- **Páginas afectadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+
 ## 2026-11-17 - Inclusión de Etapas Cerrada Ganada y Cerrada Perdida en Filtro de Fase
 
 - **Requerimiento:** Permitir que las etapas «Cerrada ganada» y «Cerrada perdida» aparezcan disponibles en el menú de filtrado por columna de FASE (`FloatingColumnFilterPopover`) y en la barra de filtros superiores de Oportunidades.

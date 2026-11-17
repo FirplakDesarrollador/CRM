@@ -53,6 +53,7 @@ interface OpportunityFiltersProps {
         origin: string | null;
         planta?: string | null;
         familia?: string | null;
+        idFilter?: string | null;
     }) => void;
     initialChannelId?: string | null;
     initialSubclassId?: number | null;
@@ -62,6 +63,7 @@ interface OpportunityFiltersProps {
     initialOrigin?: string | null;
     initialPlanta?: string | null;
     initialFamilia?: string | null;
+    initialIdFilter?: string | null;
     initialDates?: {
         startDate: string | null;
         endDate: string | null;
@@ -80,6 +82,7 @@ export function OpportunityFilters({
     initialOrigin,
     initialPlanta,
     initialFamilia,
+    initialIdFilter,
     initialDates
 }: OpportunityFiltersProps) {
     const [channels, setChannels] = useState<Channel[]>([]);
@@ -97,6 +100,7 @@ export function OpportunityFilters({
     const [selectedOrigin, setSelectedOrigin] = useState<string | null>(initialOrigin || null);
     const [selectedPlanta, setSelectedPlanta] = useState<string | null>(initialPlanta || null);
     const [selectedFamilia, setSelectedFamilia] = useState<string | null>(initialFamilia || null);
+    const [idFilter, setIdFilter] = useState<string | null>(initialIdFilter || null);
     const { products } = useFullCatalog();
 
     const [startDate, setStartDate] = useState<string | null>(initialDates?.startDate || null);
@@ -105,6 +109,12 @@ export function OpportunityFilters({
     const [endClosingDate, setEndClosingDate] = useState<string | null>(initialDates?.endClosingDate || null);
 
     const [loadingMetadata, setLoadingMetadata] = useState(true);
+
+    useEffect(() => {
+        if (initialIdFilter !== undefined) {
+            setIdFilter(initialIdFilter || null);
+        }
+    }, [initialIdFilter]);
 
     useEffect(() => {
         if (initialOrigin !== undefined) {
@@ -269,7 +279,8 @@ export function OpportunityFilters({
             endClosingDate,
             origin: selectedOrigin,
             planta: selectedPlanta,
-            familia: selectedFamilia
+            familia: selectedFamilia,
+            idFilter
         });
     };
 
@@ -293,7 +304,8 @@ export function OpportunityFilters({
             endClosingDate,
             origin: selectedOrigin,
             planta: selectedPlanta,
-            familia: selectedFamilia
+            familia: selectedFamilia,
+            idFilter
         });
     };
 
@@ -314,7 +326,8 @@ export function OpportunityFilters({
             endClosingDate,
             origin: selectedOrigin,
             planta: selectedPlanta,
-            familia: selectedFamilia
+            familia: selectedFamilia,
+            idFilter
         });
     };
 
@@ -333,7 +346,8 @@ export function OpportunityFilters({
             endClosingDate,
             origin: selectedOrigin,
             planta: selectedPlanta,
-            familia: selectedFamilia
+            familia: selectedFamilia,
+            idFilter
         });
     };
 
@@ -356,7 +370,8 @@ export function OpportunityFilters({
             endClosingDate,
             origin: selectedOrigin,
             planta: selectedPlanta,
-            familia: selectedFamilia
+            familia: selectedFamilia,
+            idFilter
         });
     };
 
@@ -375,7 +390,8 @@ export function OpportunityFilters({
             endClosingDate,
             origin: val,
             planta: selectedPlanta,
-            familia: selectedFamilia
+            familia: selectedFamilia,
+            idFilter
         });
     };
 
@@ -402,7 +418,8 @@ export function OpportunityFilters({
             endClosingDate,
             origin: selectedOrigin,
             planta: val,
-            familia: nextFamilia
+            familia: nextFamilia,
+            idFilter
         });
     };
 
@@ -421,7 +438,28 @@ export function OpportunityFilters({
             endClosingDate,
             origin: selectedOrigin,
             planta: selectedPlanta,
-            familia: val
+            familia: val,
+            idFilter
+        });
+    };
+
+    const handleIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const val = e.target.value ? e.target.value.trim() : null;
+        setIdFilter(val);
+        onFilterChange({
+            channelId: selectedChannel,
+            subclassificationId: selectedSubclass,
+            segmentId: selectedSegment,
+            phaseId: selectedPhase,
+            statusFilter,
+            startDate,
+            endDate,
+            startClosingDate,
+            endClosingDate,
+            origin: selectedOrigin,
+            planta: selectedPlanta,
+            familia: selectedFamilia,
+            idFilter: val
         });
     };
 
@@ -434,6 +472,7 @@ export function OpportunityFilters({
         setSelectedOrigin(null);
         setSelectedPlanta(null);
         setSelectedFamilia(null);
+        setIdFilter(null);
         setStartDate(null);
         setEndDate(null);
         setStartClosingDate(null);
@@ -450,11 +489,12 @@ export function OpportunityFilters({
             endClosingDate: null,
             origin: null,
             planta: null,
-            familia: null
+            familia: null,
+            idFilter: null
         });
     };
 
-    const hasActiveFilters = selectedChannel || selectedSubclass || selectedSegment || selectedPhase || selectedOrigin || selectedPlanta || selectedFamilia || statusFilter !== 'open' || startDate || endDate || startClosingDate || endClosingDate;
+    const hasActiveFilters = selectedChannel || selectedSubclass || selectedSegment || selectedPhase || selectedOrigin || selectedPlanta || selectedFamilia || Boolean(idFilter) || statusFilter !== 'open' || startDate || endDate || startClosingDate || endClosingDate;
 
     if (loadingMetadata) return <div className="text-xs text-slate-400">Cargando filtros...</div>;
 
@@ -644,6 +684,46 @@ export function OpportunityFilters({
                             <option key={f} value={f}>{f}</option>
                         ))}
                     </select>
+                </div>
+
+                {/* ID Filter */}
+                <div className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 bg-white shadow-sm">
+                    <span className="text-xs font-bold text-slate-500 uppercase tracking-tight">ID:</span>
+                    <input
+                        type="text"
+                        data-testid="opportunities-filter-id"
+                        placeholder="Buscar por ID..."
+                        value={idFilter || ""}
+                        onChange={handleIdChange}
+                        className="text-sm bg-transparent border-none focus:ring-0 p-0 text-slate-700 font-medium w-36 placeholder:text-slate-400 placeholder:font-normal focus:outline-none"
+                    />
+                    {idFilter && (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setIdFilter(null);
+                                onFilterChange({
+                                    channelId: selectedChannel,
+                                    subclassificationId: selectedSubclass,
+                                    segmentId: selectedSegment,
+                                    phaseId: selectedPhase,
+                                    statusFilter,
+                                    startDate,
+                                    endDate,
+                                    startClosingDate,
+                                    endClosingDate,
+                                    origin: selectedOrigin,
+                                    planta: selectedPlanta,
+                                    familia: selectedFamilia,
+                                    idFilter: null
+                                });
+                            }}
+                            className="text-slate-400 hover:text-slate-600 p-0.5 rounded-full hover:bg-slate-100 transition-colors cursor-pointer"
+                            title="Limpiar filtro de ID"
+                        >
+                            <X className="w-3.5 h-3.5" />
+                        </button>
+                    )}
                 </div>
 
                 {/* Clear Button */}

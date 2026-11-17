@@ -83,7 +83,9 @@ function OpportunitiesContent() {
         setSortField,
         setSortAsc,
         sortField,
-        sortAsc
+        sortAsc,
+        idFilter,
+        setIdFilter
     } = useOpportunitiesServer({ pageSize: 100 });
 
     const { tableContainerRef, sentinelRef, triggerLoadMore } = useInfiniteScroll({
@@ -284,6 +286,16 @@ function OpportunitiesContent() {
         return null;
     });
 
+    const [selectedIdFilter, setSelectedIdFilter] = useState<string | null>(() => {
+        const fromUrl = searchParams.get('oppId') || searchParams.get('id');
+        if (fromUrl) return fromUrl;
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_oportunidades_state');
+            if (saved) return new URLSearchParams(saved).get('oppId') || null;
+        }
+        return null;
+    });
+
     // Synchronize initial & restored filter values from URL or sessionStorage to the server hook
     useEffect(() => {
         const savedState = typeof window !== 'undefined' ? sessionStorage.getItem('crm_oportunidades_state') : null;
@@ -309,6 +321,7 @@ function OpportunitiesContent() {
         const initialCity = searchParams.get('city') || saved.get('city') || null;
         const initialPlanta = searchParams.get('planta') || saved.get('planta') || null;
         const initialFamilia = searchParams.get('familia') || saved.get('familia') || null;
+        const initialId = searchParams.get('oppId') || searchParams.get('id') || saved.get('oppId') || null;
 
         setSearchTerm(initialSearch);
         setInputValue(initialSearch);
@@ -339,6 +352,8 @@ function OpportunitiesContent() {
         setSelectedPlanta(initialPlanta);
         setFamiliaFilter(initialFamilia);
         setSelectedFamilia(initialFamilia);
+        setSelectedIdFilter(initialId);
+        setIdFilter(initialId);
         setStartDate(start);
         setStartDateState(start);
         setEndDate(end);
@@ -427,6 +442,9 @@ function OpportunitiesContent() {
         if (selectedFamilia) params.set('familia', selectedFamilia);
         else params.delete('familia');
 
+        if (selectedIdFilter && selectedIdFilter.trim() !== '') params.set('oppId', selectedIdFilter.trim());
+        else params.delete('oppId');
+
         if (statusFilter && statusFilter !== 'open') params.set('status', statusFilter);
         else params.delete('status');
         
@@ -472,7 +490,7 @@ function OpportunitiesContent() {
         
         const query = queryString ? `?${queryString}` : window.location.pathname;
         router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
-    }, [tab, selectedAccountOwnerIds, selectedChannel, selectedSubclass, selectedSegment, selectedPhase, selectedOrigin, selectedPlanta, selectedFamilia, selectedCountry, selectedCity, statusFilter, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc, searchParams, router]); // Search is handled by the debounced effect above.
+    }, [tab, selectedAccountOwnerIds, selectedChannel, selectedSubclass, selectedSegment, selectedPhase, selectedOrigin, selectedPlanta, selectedFamilia, selectedIdFilter, selectedCountry, selectedCity, statusFilter, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc, searchParams, router]); // Search is handled by the debounced effect above.
 
 
     const handleFilterChange = useCallback(({ 
@@ -480,7 +498,8 @@ function OpportunitiesContent() {
         startDate: sD, endDate: eD, startClosingDate: sCD, endClosingDate: eCD,
         origin: oG,
         planta: pL,
-        familia: fM
+        familia: fM,
+        idFilter: iD
     }: {
         channelId: string | null;
         subclassificationId: number | null;
@@ -494,6 +513,7 @@ function OpportunitiesContent() {
         origin: string | null;
         planta?: string | null;
         familia?: string | null;
+        idFilter?: string | null;
     }) => {
         setSelectedChannel(channelId);
         setSelectedSubclass(subclassificationId);
@@ -507,6 +527,7 @@ function OpportunitiesContent() {
         setSelectedOrigin(oG);
         setSelectedPlanta(pL || null);
         setSelectedFamilia(fM || null);
+        setSelectedIdFilter(iD || null);
         
         setChannelFilter(channelId);
         setSubclassificationFilter(subclassificationId);
@@ -520,7 +541,8 @@ function OpportunitiesContent() {
         setOriginFilter(oG);
         setPlantaFilter(pL || null);
         setFamiliaFilter(fM || null);
-    }, [setChannelFilter, setSubclassificationFilter, setSegmentFilter, setPhaseFilter, setStatusFilter, setStartDate, setEndDate, setStartClosingDate, setEndClosingDate, setOriginFilter, setPlantaFilter, setFamiliaFilter]);
+        setIdFilter(iD || null);
+    }, [setChannelFilter, setSubclassificationFilter, setSegmentFilter, setPhaseFilter, setStatusFilter, setStartDate, setEndDate, setStartClosingDate, setEndClosingDate, setOriginFilter, setPlantaFilter, setFamiliaFilter, setIdFilter]);
 
     // PERF FIX: Stable callback references
     const handleTabChange = useCallback((newTab: 'mine' | 'collab' | 'all' | 'team' | 'web') => {
@@ -897,13 +919,14 @@ function OpportunitiesContent() {
     const getInitials = (name: string) => name ? name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : '??';
 
     const [showAdvancedFilters, setShowAdvancedFilters] = useState(() => Boolean(
+        searchParams.get('oppId') || searchParams.get('id') ||
         searchParams.get('channel') || searchParams.get('subclass') || searchParams.get('segment') ||
         searchParams.get('phase') || searchParams.get('origin') || searchParams.get('start') ||
         searchParams.get('end') || searchParams.get('startClose') || searchParams.get('endClose') ||
         (searchParams.get('status') && searchParams.get('status') !== 'open')
     ));
     const [showColumnPicker, setShowColumnPicker] = useState(false);
-    const activeFilterCount = selectedAccountOwnerIds.length + (selectedChannel ? 1 : 0) + (selectedSubclass ? 1 : 0) +
+    const activeFilterCount = (selectedIdFilter ? 1 : 0) + selectedAccountOwnerIds.length + (selectedChannel ? 1 : 0) + (selectedSubclass ? 1 : 0) +
         (selectedSegment ? 1 : 0) + (selectedPhase ? 1 : 0) + (selectedOrigin ? 1 : 0) +
         (statusFilter !== 'open' ? 1 : 0) + (startDate ? 1 : 0) + (endDate ? 1 : 0) +
         (startClosingDate ? 1 : 0) + (endClosingDate ? 1 : 0) +
@@ -1099,6 +1122,7 @@ function OpportunitiesContent() {
                 <div className="animate-in fade-in slide-in-from-top-4 duration-300">
                     <OpportunityFilters
                         onFilterChange={handleFilterChange}
+                        initialIdFilter={selectedIdFilter}
                         initialChannelId={selectedChannel}
                         initialSubclassId={selectedSubclass}
                         initialSegmentId={selectedSegment}

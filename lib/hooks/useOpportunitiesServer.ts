@@ -88,6 +88,10 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
     const [plantaFilter, setPlantaFilter] = useState<string | null>(() => getInitialParam('planta'));
     const [familiaFilter, setFamiliaFilter] = useState<string | null>(() => getInitialParam('familia'));
     const [accountIdFilter, setAccountIdFilter] = useState<string | null>(null);
+    const [idFilter, setIdFilter] = useState<string | null>(() => {
+        const val = getInitialParam('oppId') || getInitialParam('id');
+        return val ? val.trim() : null;
+    });
     const [countryFilter, setCountryFilter] = useState<number | null>(() => {
         const val = getInitialParam('country');
         return val ? Number(val) : null;
@@ -243,6 +247,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 localOpps = localOpps.filter(o =>
                     opportunityMatchesPhone(o, localPhoneMatches) ||
                     matchesSearchTokens([
+                        o.id,
                         o.nombre,
                         accMap.get(o.account_id)?.nombre,
                         userMap.get(o.owner_user_id || '')?.full_name,
@@ -251,6 +256,11 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                         ...(contactPhonesByAccount.get(o.account_id) || [])
                     ], searchTerm)
                 );
+            }
+
+            if (idFilter && idFilter.trim()) {
+                const cleanId = idFilter.trim().toLowerCase();
+                localOpps = localOpps.filter(o => o.id && o.id.toLowerCase().includes(cleanId));
             }
 
             if (channelFilter) {
@@ -572,12 +582,40 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 }).filter(Boolean))) as string[];
             }
 
+            let matchedIdOppIds: string[] | null = null;
+            if (idFilter && idFilter.trim()) {
+                const cleanId = idFilter.trim();
+                const isFullUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanId);
+                if (isFullUuid) {
+                    matchedIdOppIds = [cleanId];
+                } else {
+                    try {
+                        const { data: rpcIds, error: rpcErr } = await supabase.rpc('search_opportunities_by_id', { search_term: cleanId });
+                        if (!rpcErr && Array.isArray(rpcIds)) {
+                            matchedIdOppIds = rpcIds;
+                        } else {
+                            matchedIdOppIds = [];
+                        }
+                    } catch {
+                        matchedIdOppIds = [];
+                    }
+                }
+            }
+
             const useInnerJoin = Boolean(channelFilter || subclassificationFilter || countryFilter || (cityFilter && cityFilter.trim() !== ''));
             const accountRelation = useInnerJoin ? 'account:CRM_Cuentas!inner(nombre, canal_id, subclasificacion_id, ciudad, pais_id)' : 'account:CRM_Cuentas(nombre, canal_id, subclasificacion_id, ciudad, pais_id)';
 
             // Builder unificado para aplicar idénticos filtros a la consulta de datos y al conteo de totales
             const applyCommonFilters = (targetQuery: any) => {
                 let q = targetQuery.eq('is_deleted', false);
+
+                if (matchedIdOppIds !== null) {
+                    if (matchedIdOppIds.length > 0) {
+                        q = q.in('id', matchedIdOppIds);
+                    } else {
+                        q = q.eq('id', '00000000-0000-0000-0000-000000000000');
+                    }
+                }
 
                 if (searchTerm && searchTerm.trim() && searchIsPhone) {
                     const phoneConditions = [`nombre.ilike.${getPhoneIlikePatterns(phoneDigits)[0]}`];
@@ -590,16 +628,22 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                     }
                     q = q.or(phoneConditions.join(','));
                 } else if (searchTerm && searchTerm.trim()) {
-                    const tokens = getSearchTokens(searchTerm);
-                    for (const token of tokens) {
-                        const orConditions = [accentInsensitiveCondition('nombre', token)];
-                        if (searchAccountIds.length > 0) {
-                            orConditions.push(`account_id.in.(${searchAccountIds.join(',')})`);
+                    const cleanSearch = searchTerm.trim();
+                    const searchIsUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanSearch);
+                    if (searchIsUuid) {
+                        q = q.eq('id', cleanSearch);
+                    } else {
+                        const tokens = getSearchTokens(cleanSearch);
+                        for (const token of tokens) {
+                            const orConditions = [accentInsensitiveCondition('nombre', token)];
+                            if (searchAccountIds.length > 0) {
+                                orConditions.push(`account_id.in.(${searchAccountIds.join(',')})`);
+                            }
+                            if (searchUserIds.length > 0) {
+                                orConditions.push(`owner_user_id.in.(${searchUserIds.join(',')})`);
+                            }
+                            q = q.or(orConditions.join(','));
                         }
-                        if (searchUserIds.length > 0) {
-                            orConditions.push(`owner_user_id.in.(${searchUserIds.join(',')})`);
-                        }
-                        q = q.or(orConditions.join(','));
                     }
                 }
 
@@ -900,7 +944,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
             setLoading(false);
             useSyncStore.getState().setIsLoadingData(false);
         }
-    }, [currentUserId, isVendedor, subordinateIds, pageSize, userFilter, searchTerm, accountIdFilter, accountOwnerIds, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, originFilter, plantaFilter, familiaFilter, countryFilter, cityFilter, phasesReady, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc]);
+    }, [currentUserId, isVendedor, subordinateIds, pageSize, userFilter, searchTerm, accountIdFilter, idFilter, accountOwnerIds, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, originFilter, plantaFilter, familiaFilter, countryFilter, cityFilter, phasesReady, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc]);
 
     useEffect(() => {
         fetchOpportunities(false);
@@ -959,6 +1003,8 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
         setFamiliaFilter,
         familiaFilter,
         setAccountIdFilter,
+        idFilter,
+        setIdFilter,
         setCountryFilter,
         countryFilter,
         setCityFilter,
