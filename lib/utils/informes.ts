@@ -576,22 +576,30 @@ export function mapActivityReportRow(
 }
 
 /**
+ * Máximo de filas que PostgREST/Supabase devuelve por petición (max-rows = 1000).
+ * Si se piden bloques más grandes el servidor igual responde 1000 y el bucle creía que era el último bloque,
+ * por eso el Excel se quedaba en 1000 filas.
+ */
+export const POSTGREST_MAX_ROWS = 1000;
+
+/**
  * Ejecuta una consulta PostgREST de Supabase por bloques (chunking) consecutivos.
  * Previene que respuestas gigantes (e.g. 75.000 actividades o 68.000 oportunidades)
  * excedan los buffers de Cloudflare o PostgREST (50k filas), evitando el fallo
  * 'SyntaxError: Unterminated string in JSON'.
+ * Los bloques se limitan a POSTGREST_MAX_ROWS y se avanza según las filas recibidas.
  */
 export async function fetchAllInChunks(
   baseQuery: any,
-  batchSize: number = 2500,
+  batchSize: number = POSTGREST_MAX_ROWS,
   onProgress?: (totalFetched: number) => void
 ): Promise<any[]> {
   const allData: any[] = [];
+  const size = Math.max(1, Math.min(batchSize || POSTGREST_MAX_ROWS, POSTGREST_MAX_ROWS));
   let from = 0;
-  let hasMore = true;
 
-  while (hasMore) {
-    const to = from + batchSize - 1;
+  while (true) {
+    const to = from + size - 1;
     const { data: chunk, error } = await baseQuery.range(from, to);
     if (error) throw error;
 
@@ -605,11 +613,11 @@ export async function fetchAllInChunks(
       onProgress(allData.length);
     }
 
-    if (chunk.length < batchSize) {
-      hasMore = false;
-    } else {
-      from += batchSize;
+    // Bloque incompleto = último bloque. Si viene lleno se sigue pidiendo.
+    if (chunk.length < size) {
+      break;
     }
+    from += chunk.length;
   }
 
   return allData;
