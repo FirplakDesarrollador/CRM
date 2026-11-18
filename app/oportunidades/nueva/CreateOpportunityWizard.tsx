@@ -36,7 +36,6 @@ const schema = z.object({
     nombre: z.string().min(3, "Nombre requerido (mín. 3 caracteres)"),
     amount: z.coerce.number().min(0),
     currency_id: z.enum(["COP", "USD"]),
-    estado_id: z.coerce.number().default(1), // 1 = Abierta
     fase_id: z.coerce.number().min(1, "Fase requerida").default(1),
     segmento_id: z.coerce.number().nullable().optional(),
     pais_id: z.coerce.number().nullable().optional(),
@@ -191,7 +190,6 @@ export default function CreateOpportunityWizard() {
             account_id: '',
             nombre: '',
             currency_id: 'COP' as 'COP' | 'USD',
-            estado_id: 1,
             fase_id: 1,
             amount: 0,
             pais_id: null,
