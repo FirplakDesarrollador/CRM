@@ -39,7 +39,6 @@ export function filterOpportunities<T extends {
     account_id?: string | null;
     amount?: number | null;
     fase_id?: number | string | null;
-    estado_id?: number | null;
     owner_user_id?: string | null;
     created_by?: string | null;
     created_at?: string | null;
@@ -129,23 +128,14 @@ export function filterOpportunities<T extends {
             return false;
         }
 
-        // Status filter: won, lost, open
-        const faseNum = Number(o.fase_id);
+        // Status filter (won / lost / open): SOLO por la fase.
+        const faseNum = o.fase_id === null || o.fase_id === undefined || o.fase_id === "" ? NaN : Number(o.fase_id);
         if (statusFilter === "won") {
-            const isWonPhase = wonPhaseIds.length > 0 && wonPhaseIds.includes(faseNum);
-            const isWonState = [2, 11].includes(o.estado_id as number);
-            if (!isWonPhase && !isWonState) return false;
+            if (!wonPhaseIds.includes(faseNum)) return false;
         } else if (statusFilter === "lost") {
-            const isLostPhase = lostPhaseIds.length > 0 && lostPhaseIds.includes(faseNum);
-            const isLostState = [3, 4, 14].includes(o.estado_id as number);
-            if (!isLostPhase && !isLostState) return false;
+            if (!lostPhaseIds.includes(faseNum)) return false;
         } else if (statusFilter === "open") {
-            if (closedPhaseIds.length > 0 && closedPhaseIds.includes(faseNum)) {
-                return false;
-            }
-            if ([2, 3, 4, 11, 14].includes(o.estado_id as number)) {
-                return false;
-            }
+            if (closedPhaseIds.includes(faseNum)) return false;
         }
 
         // Origin filter

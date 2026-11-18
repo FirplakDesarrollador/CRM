@@ -19,7 +19,6 @@ export const OPPORTUNITY_SERVER_FILTER_COLUMNS = [
     'canal',
     'fase',
     'vendedor',
-    'estado',
     'origen',
     'setter',
     'pais',
