@@ -10,7 +10,7 @@ import { useLiveOpportunities } from "@/lib/hooks/useLiveOpportunities";
 import { SearchableSelect, SearchableSelectOption } from "@/components/ui/SearchableSelect";
 import { MultiSelect, Option } from "@/components/ui/MultiSelect";
 import { currentWeekMarkLine, getWeekKey, withCurrentWeekMarker } from "./weekUtils";
-import { EstadoBucket, getEstadoBucket } from "./estadoUtils";
+import { ResultadoBucket as EstadoBucket, buildPhaseOutcomeMap, getResultadoBucket } from "./faseResultadoUtils";
 import { EChartsCallbackParams } from "./echartsTypes";
 import { isPlausibleYear } from "./dateUtils";
 import { getZonaByDepartamentoId, ZONA_OPTIONS } from "./zonas";
@@ -62,7 +62,8 @@ const EMPTY_FILTERS: Filters = {
 const CANAL_PROPIO_ID = "PROPIO";
 
 export function Page5Cuentas() {
-    const { channels, users, subclasificaciones } = useIndicadoresLookups();
+    const { channels, users, subclasificaciones, phases } = useIndicadoresLookups();
+    const outcomeMap = useMemo(() => buildPhaseOutcomeMap(phases), [phases]);
     const { tipoByVendedor } = useCanalPropioVendedores();
     // Live from Supabase, same rationale as pages 3-4: the offline cache can
     // be stale for this data even right after a manual sync.
@@ -103,19 +104,19 @@ export function Page5Cuentas() {
         [subclasificaciones, filters.canalId]
     );
 
-    // A cuenta has no estado of its own — it's derived from the best result
-    // among its own (non-deleted) oportunidades: Ganada > Abierta > Perdida,
+    // A cuenta has no result of its own — it's derived from the best result
+    // (por FASE) among its own (non-deleted) oportunidades: Ganada > Abierta > Perdida,
     // and a cuenta with no oportunidades yet counts as "En prospección".
     const opportunitiesByAccount = useMemo(() => {
         const map = new Map<string, EstadoBucket[]>();
         (opportunities || []).forEach(o => {
             if (o.is_deleted || !o.account_id) return;
             const list = map.get(o.account_id) || [];
-            list.push(getEstadoBucket(o.estado_id));
+            list.push(getResultadoBucket(o.fase_id, outcomeMap));
             map.set(o.account_id, list);
         });
         return map;
-    }, [opportunities]);
+    }, [opportunities, outcomeMap]);
 
     const resolveAccountStatus = useCallback(
         (accountId: string): EstadoBucket => {
@@ -334,7 +335,7 @@ export function Page5Cuentas() {
                         </div>
                     )}
                     <div>
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Estado</label>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Resultado (fase)</label>
                         <MultiSelect options={ESTADO_OPTIONS} selected={filters.estados} onChange={v => setFilter("estados", v as EstadoBucket[])} placeholder="Todos" />
                     </div>
                     <div>
@@ -394,13 +395,13 @@ export function Page5Cuentas() {
                 </div>
             </div>
 
-            {/* Estado bar chart */}
+            {/* Resultado (fase) bar chart */}
             <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-5 flex flex-col">
                 <div className="flex items-center gap-2 mb-1">
                     <BarChart3 className="w-4 h-4 text-[#254153]" />
-                    <h3 className="font-bold text-slate-800 text-sm">Cuentas por Estado</h3>
+                    <h3 className="font-bold text-slate-800 text-sm">Cuentas por resultado (fase)</h3>
                 </div>
-                <p className="text-[11px] text-slate-400 mb-2">Clic en una barra para filtrar toda la página por ese estado.</p>
+                <p className="text-[11px] text-slate-400 mb-2">Clic en una barra para filtrar toda la página por ese resultado.</p>
                 <div className="min-h-[220px]">
                     {accountsWithoutEstado.length === 0 ? (
                         <div className="h-[220px] flex items-center justify-center text-sm text-slate-400">Sin datos para estos filtros.</div>

@@ -11,7 +11,6 @@ import { formatCurrency } from "@/lib/utils";
 import { SearchableSelect, SearchableSelectOption } from "@/components/ui/SearchableSelect";
 import { MultiSelect, Option } from "@/components/ui/MultiSelect";
 import { currentWeekMarkLine, getISOWeek, getWeekKey, withCurrentWeekMarker } from "./weekUtils";
-import { getEstadoBucket } from "./estadoUtils";
 import { EChartsCallbackParams } from "./echartsTypes";
 import { isPlausibleYear } from "./dateUtils";
 import { getZonaByDepartamentoId, ZONA_OPTIONS } from "./zonas";
@@ -168,7 +167,7 @@ export function Page6Prospectos() {
         return (opportunities || []).filter(o => {
             if (o.is_deleted) return false;
             if (o.fase_id && phaseIdSet.has(o.fase_id)) return false; // ya está en una etapa del embudo
-            if (getEstadoBucket(o.estado_id) !== "open") return false;
+            // Sin fase del embudo = abierta por definición (el resultado se calcula solo por la fase).
             if (asesorSet && (!o.owner_user_id || !asesorSet.has(o.owner_user_id))) return false;
             if (segmentoId && o.segmento_id !== segmentoId) return false;
             const acc = o.account_id ? accountsMap.get(o.account_id) : undefined;
