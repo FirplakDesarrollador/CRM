@@ -582,7 +582,6 @@ function OpportunitiesContent() {
         { key: 'origen',      label: 'Origen' },
         { key: 'setter',      label: 'Setter' },
         { key: 'fase',        label: 'Fase' },
-        { key: 'estado',      label: 'Estado' },
         { key: 'creada',      label: 'Creada' },
         { key: 'categoria',   label: 'Categoría de Interés' },
         { key: 'valor',       label: 'Valor' },
@@ -820,18 +819,6 @@ function OpportunitiesContent() {
                 else if (f.includes('ganad')) { bg = '#f0fdf4'; c = '#15803d'; bd = '#bbf7d0'; }
                 td.innerHTML = `<div style="display:flex;align-items:center;height:100%;"><span style="display:inline-block;padding:3px 10px;border-radius:99px;font-size:11px;font-weight:700;white-space:nowrap;background:${bg};color:${c};border:1px solid ${bd};line-height:1.4;">${value || ''}</span></div>`;
                 td.style.overflow = 'visible';
-                return td;
-            }
-        },
-        estado: {
-            data: 'estado', title: 'Estado', readOnly: true, width: colWidths['estado'] || 110, wordWrap: false,
-            renderer(_: unknown, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
-                const e = (value || '').toLowerCase();
-                let dot = '#94a3b8';
-                if (e.includes('abierta'))      dot = '#3b82f6';
-                else if (e.includes('ganada'))  dot = '#10b981';
-                else if (e.includes('perdida')) dot = '#ef4444';
-                td.innerHTML = `<div style="display:flex;align-items:center;gap:6px;height:100%;"><span style="width:7px;height:7px;border-radius:50%;background:${dot};flex-shrink:0;box-shadow:0 0 0 2px ${dot}33;"></span><span style="font-size:13px;font-weight:500;color:#334155;white-space:nowrap;">${value || ''}</span></div>`;
                 return td;
             }
         },
@@ -1324,13 +1311,6 @@ function OpportunitiesContent() {
                                     
                                     <div className="p-4 bg-slate-50/50 grid grid-cols-2 gap-y-3 gap-x-2 text-xs">
                                         <div>
-                                            <span className="block text-slate-400 mb-1">Estado</span>
-                                            <div className="flex items-center gap-1.5 font-medium text-slate-700">
-                                                <span className={cn("w-2 h-2 rounded-full", opp.estado_data?.nombre?.toLowerCase() === 'abierta' ? 'bg-blue-500' : 'bg-slate-300')}></span>
-                                                {opp.estado_data?.nombre || 'Abierta'}
-                                            </div>
-                                        </div>
-                                        <div>
                                             <span className="block text-slate-400 mb-1">Valor</span>
                                             <span className="font-bold text-slate-800">{formatCurrency(opp.amount || 0)}</span>
                                         </div>
@@ -1589,7 +1569,6 @@ function OpportunitiesContent() {
                                                 canal: 'Canal de Venta',
                                                 fase: 'Fase del Negocio',
                                                 vendedor: 'Asignado a',
-                                                estado: 'Estado',
                                                 origen: 'Origen Oportunidad',
                                                 setter: 'Setter',
                                                 pais: 'País de la Cuenta',
