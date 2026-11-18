@@ -113,7 +113,7 @@ export const downloadSopExcel = async (
     { header: 'Año fact', key: 'anio_fact', width: 12 },
     { header: 'Mes Planta', key: 'mes_planta', width: 15 },
     { header: 'Mes Comercial', key: 'mes_comercial', width: 15 },
-    { header: 'Estado', key: 'estado', width: 15 },
+    { header: 'Pedido / Proyectado', key: 'estado', width: 22 },
     { header: 'Asesor', key: 'asesor', width: 25 },
     { header: 'Grupo Cliente', key: 'grupo_cliente', width: 20 },
     { header: 'Subgrupo Cliente', key: 'subgrupo_cliente', width: 22 },
@@ -496,7 +496,6 @@ export function mapOpportunityReportRow(
   const getJoinedSingle = <T>(rel: T | T[]) => Array.isArray(rel) ? rel[0] : rel;
   const cuentaObj = getJoinedSingle(item.cuenta);
   const faseObj = getJoinedSingle(item.fase);
-  const estadoObj = getJoinedSingle(item.estado_info);
   const paisId = cuentaObj?.pais_id ?? item.pais_id;
   
   const segObj = getJoinedSingle(item.segmento);
@@ -512,7 +511,6 @@ export function mapOpportunityReportRow(
     cuenta_nombre: cuentaObj?.nombre || '-',
     pais_nombre: paisId ? (lookups.countryMap.get(paisId) || lookups.countryMap.get(Number(paisId)) || lookups.countryMap.get(String(paisId)) || '-') : '-',
     fase_nombre: faseObj?.nombre || '-',
-    estado_nombre: estadoObj?.nombre || '-',
     vendedor_nombre: lookups.userMap.get(item.owner_user_id) || '-',
     creador_nombre: lookups.userMap.get(item.created_by) || '-',
     segmento_nombre: segmentoNombre,
