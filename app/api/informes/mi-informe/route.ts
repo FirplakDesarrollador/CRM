@@ -88,7 +88,7 @@ export async function GET() {
         // 2. Oportunidades del asesor
         const oportunidades = await fetchAll((from, to) => supabase
             .from('CRM_Oportunidades')
-            .select('id, nombre, account_id, estado_id, fase_id, amount, currency_id, probabilidad, probability, fecha_cierre_estimada, segmento_id, departamento_id, ciudad_id, origen_oportunidad, created_at, actividades:CRM_Actividades(id, fecha_inicio, fecha_fin, is_completed, is_deleted)')
+            .select('id, nombre, account_id, fase_id, amount, currency_id, probabilidad, probability, fecha_cierre_estimada, segmento_id, departamento_id, ciudad_id, origen_oportunidad, created_at, actividades:CRM_Actividades(id, fecha_inicio, fecha_fin, is_completed, is_deleted)')
             .eq('owner_user_id', uid).eq('is_deleted', false)
             .order('created_at', { ascending: false }).order('id', { ascending: false }).range(from, to));
 
@@ -126,10 +126,9 @@ export async function GET() {
         (await fetchByIds(supabase, 'CRM_Oportunidades', 'id, nombre', 'id', missingOpps))
             .forEach((r) => oppNames.set(r.id as string, String(r.nombre ?? '')));
 
-        const [canales, fases, estados, segmentos, departamentos, ciudades, tipos, clasif, subclasif] = await Promise.all([
+        const [canales, fases, segmentos, departamentos, ciudades, tipos, clasif, subclasif] = await Promise.all([
             supabase.from('CRM_Canales').select('id, nombre'),
             supabase.from('CRM_FasesOportunidad').select('id, nombre'),
-            supabase.from('CRM_EstadosOportunidad').select('id, nombre'),
             supabase.from('CRM_Segmentos').select('id, nombre'),
             supabase.from('CRM_Departamentos').select('id, nombre'),
             fetchAll((from, to) => supabase.from('CRM_Ciudades').select('id, nombre').order('id').range(from, to)),
@@ -141,7 +140,6 @@ export async function GET() {
         const lookups: MiInformeLookups = {
             canales: toMap(canales.data),
             fases: toMap(fases.data),
-            estados: toMap(estados.data),
             segmentos: toMap(segmentos.data),
             departamentos: toMap(departamentos.data),
             ciudades: toMap(ciudades),
