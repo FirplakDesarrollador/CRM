@@ -1118,7 +1118,6 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                 nombre: oppName,
                 amount: data.amount || 0,
                 fase_id: finalFaseId,
-                estado_id: 1, // OPEN
                 currency_id: "COP",
                 origen_oportunidad: finalOrigen,
                 categoria_oportunidad: formattedCategories || undefined,
