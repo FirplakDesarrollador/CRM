@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
+import { fetchPhaseIdsByOutcome, openPhaseOrCondition } from '@/lib/opportunityPhaseQueries';
 import { syncEngine } from '@/lib/sync';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 
@@ -99,11 +100,13 @@ export function useCommissionDashboard() {
             const { data: entries, error: ledgerError } = await query;
             if (ledgerError) throw new Error(`Ledger Error: ${ledgerError.message}`);
 
-            // 3. Fetch Open Opportunities: VENDEDOR sees only own, COORDINADOR sees subordinates
+            // 3. Fetch Open Opportunities (abiertas = por FASE, el estado ya no se usa):
+            // VENDEDOR sees only own, COORDINADOR sees subordinates
             let oppsQuery = supabase
                 .from('CRM_Oportunidades')
-                .select('id, owner_user_id, amount, account_id, account:CRM_Cuentas!account_id (canal_id)')
-                .eq('estado_id', 1);
+                .select('id, owner_user_id, amount, account_id, account:CRM_Cuentas!account_id (canal_id)');
+            const openPhaseCond = openPhaseOrCondition((await fetchPhaseIdsByOutcome()).closed);
+            if (openPhaseCond) oppsQuery = oppsQuery.or(openPhaseCond);
 
             if (isVendedor) {
                 oppsQuery = oppsQuery.eq('owner_user_id', currentUserId!);

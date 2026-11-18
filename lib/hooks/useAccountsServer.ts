@@ -3,6 +3,7 @@ import { sellerCanSeeAccount } from '@/lib/sellerVisibility';
 import { supabase } from '@/lib/supabase';
 import { syncEngine } from '@/lib/sync';
 import { db } from '@/lib/db';
+import { buildPhaseOutcomeMap, getPhaseOutcome } from '@/lib/opportunityPhase';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useSyncStore } from '@/lib/stores/useSyncStore';
 import { matchesSearchTokens, getSearchTokens, getPhoneIlikePatterns } from '@/lib/utils';
@@ -116,6 +117,8 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                 console.log("[useAccountsServer] Device is offline or server failed. Executing local Dexie fallback...");
                 let localAccounts = await db.accounts.toArray();
                 const allOpps = await db.opportunities.toArray();
+                // Potencial = oportunidades ABIERTAS por fase (el estado ya no se usa).
+                const phaseOutcomeMap = buildPhaseOutcomeMap(await db.phases.toArray());
 
                 // Role filtering
                 const localCollabs = await db.opportunityCollaborators
@@ -238,7 +241,7 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                         .filter(o => 
                             o.account_id === item.id && 
                             !o.is_deleted && 
-                            ![11, 14, 2, 3, 4].includes(o.estado_id)
+                            getPhaseOutcome(o.fase_id, phaseOutcomeMap) === 'open'
                         )
                         .reduce((sum, o) => sum + (o.amount || o.valor || 0), 0)
                 }));

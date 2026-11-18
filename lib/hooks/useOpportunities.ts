@@ -1,4 +1,5 @@
 import { useLiveQuery } from "dexie-react-hooks";
+import { estadoIdForPhaseName, ESTADO_ID_ABIERTA } from '@/lib/opportunityPhase';
 import { sellerCanSeeOpportunity } from '@/lib/sellerVisibility';
 import { db, LocalOportunidad, LocalOpportunityCollaborator, LocalQuote, LocalQuoteItem } from "@/lib/db";
 import { syncEngine } from "@/lib/sync";
@@ -52,6 +53,21 @@ async function fetchPricing(productId: string, channelId: string, qty: number) {
 }
 
 // Helper to sanitize opportunity data before syncing
+/**
+ * estado_id que se guarda por dentro para una fase (1 Abierta / 2 Ganada / 3 Perdida, por el nombre de la fase).
+ * Si la fase no está en caché local, deja el valor de respaldo.
+ */
+async function backgroundEstadoIdForPhase(faseId: number | string | null | undefined, fallback: number): Promise<number> {
+    if (faseId === null || faseId === undefined || faseId === '') return fallback;
+    try {
+        const phase = await db.phases.get(Number(faseId));
+        if (phase) return estadoIdForPhaseName(phase.nombre);
+    } catch {
+        // Sin caché de fases: se deja el respaldo.
+    }
+    return fallback;
+}
+
 export function sanitizeOpportunityForSync(opp: any) {
     const {
         ciudad, // Text representation of city from UI
@@ -120,7 +136,8 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
             id,
             owner_user_id: oppData.owner_user_id || user?.id,
             account_id: oppData.account_id,
-            estado_id: oppData.estado_id || 1,
+            // estado_id ya no se muestra: se guarda por dentro según la fase (1/2/3) para comisiones e integraciones.
+            estado_id: await backgroundEstadoIdForPhase(oppData.fase_id || 1, ESTADO_ID_ABIERTA),
             fase_id: oppData.fase_id || 1,
             segmento_id: oppData.segmento_id ? Number(oppData.segmento_id) : null,
             departamento_id: oppData.departamento_id ? Number(oppData.departamento_id) : null,
@@ -350,6 +367,13 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
             contactos_ids: updates.contactos_ids !== undefined ? (Array.isArray(updates.contactos_ids) ? updates.contactos_ids : []) : undefined,
             setter: updates.setter !== undefined ? (updates.setter || null) : undefined,
         };
+
+        // estado_id (oculto en la UI) se mantiene sincronizado con la fase en segundo plano:
+        // cualquier cambio de fase (detalle, Kanban, vista rápida...) escribe 1/2/3 para que
+        // trg_opp_devengada (comisiones), export-api y n8n sigan funcionando.
+        if (sanitizedUpdates.fase_id !== undefined && sanitizedUpdates.fase_id !== null && updates.estado_id === undefined) {
+            sanitizedUpdates.estado_id = await backgroundEstadoIdForPhase(sanitizedUpdates.fase_id, current.estado_id ?? ESTADO_ID_ABIERTA);
+        }
 
         // Remove undefined fields to avoid overwriting with undefined
         Object.keys(sanitizedUpdates).forEach(key => (sanitizedUpdates as any)[key] === undefined && delete (sanitizedUpdates as any)[key]);
