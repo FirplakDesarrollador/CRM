@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useMemo } from 'react';
+import { getPhaseOutcomeByName, splitPhaseIdsByOutcome, type PhaseOutcome } from '@/lib/opportunityPhase';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useUsers } from '@/lib/hooks/useUsers';
 import { supabase } from '@/lib/supabase';
@@ -24,15 +25,14 @@ const ENTIDADES = [
 
 type EntidadType = typeof ENTIDADES[number]['id'];
 
-const ESTADOS_OPPORTUNIDADES = ['Abierta', 'Ganada', 'Perdida', 'Suspendida'];
+// Resultado de la oportunidad: se calcula SOLO por la fase (el estado ya no se usa ni se muestra).
+const RESULTADOS_OPORTUNIDAD: Array<{ label: string; value: PhaseOutcome }> = [
+    { label: 'Abierta', value: 'open' },
+    { label: 'Cerrada ganada', value: 'won' },
+    { label: 'Cerrada perdida', value: 'lost' },
+];
 const ESTADOS_COTIZACION = ['DRAFT', 'SENT', 'WINNER', 'REJECTED', 'EXPIRED'];
 const MESES_ES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
-const ESTADO_IDS_BY_NAME: Record<string, number[]> = {
-    Abierta: [1],
-    Ganada: [2, 11],
-    Perdida: [3, 14],
-    Suspendida: [4]
-};
 
 const SELECT_TRIGGER_CLASS = "w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-left text-slate-800 text-sm font-normal hover:bg-white focus:bg-white transition-all justify-between flex items-center";
 
@@ -214,8 +214,8 @@ export default function InformesPage() {
     ], [catalogs.canales]);
 
     const estadoOppOptions = useMemo(() => [
-        { label: 'Todos los estados', value: '' },
-        ...ESTADOS_OPPORTUNIDADES.map(e => ({ label: e, value: e }))
+        { label: 'Todos', value: '' },
+        ...RESULTADOS_OPORTUNIDAD
     ], []);
 
     const faseOptions = useMemo(() => [
@@ -424,11 +424,9 @@ export default function InformesPage() {
                         created_at,
                         owner_user_id,
                         account_id,
-                        estado_id,
                         fase_id,
                         cuenta:CRM_Cuentas(nombre, canal_id, subclasificacion_id),
-                        fase:CRM_FasesOportunidad(nombre, canal_id),
-                        estado_info:CRM_EstadosOportunidad(nombre)
+                        fase:CRM_FasesOportunidad(nombre, canal_id)
                     `)
                     .eq('is_deleted', false);
 
@@ -538,13 +536,13 @@ export default function InformesPage() {
                         if (!opp) return;
 
                         const cuentaObj = getJoinedSingle(opp.cuenta);
-                        const estadoObj = getJoinedSingle(opp.estado_info);
+                        const faseObj = getJoinedSingle(opp.fase);
 
                         const canalId = cuentaObj?.canal_id;
                         const subcanalId = cuentaObj?.subclasificacion_id;
 
                         if (selectedCanal && canalId !== selectedCanal) return;
-                        if (selectedEstado && estadoObj?.nombre !== selectedEstado) return;
+                        if (selectedEstado && getPhaseOutcomeByName(faseObj?.nombre) !== selectedEstado) return;
 
                         const fechaFact = (ped as any)['EXTRA_Fecha de facturación'] || ped.closeDate || ped.expectedCloseDate;
                         const fechaEntr = (ped as any)['EXTRA_Fecha mínima requerida por comercial/cliente'] || ped.expectedCloseDate || ped.closeDate;
@@ -596,14 +594,14 @@ export default function InformesPage() {
                         if (!opp) return;
 
                         const cuentaObj = getJoinedSingle(opp.cuenta);
-                        const estadoObj = getJoinedSingle(opp.estado_info);
+                        const faseObj = getJoinedSingle(opp.fase);
 
                         const canalId = cuentaObj?.canal_id;
                         const subcanalId = cuentaObj?.subclasificacion_id;
                         const oppProb = Number(opp.probabilidad || opp.probability || 0);
 
                         if (selectedCanal && canalId !== selectedCanal) return;
-                        if (selectedEstado && estadoObj?.nombre !== selectedEstado) return;
+                        if (selectedEstado && getPhaseOutcomeByName(faseObj?.nombre) !== selectedEstado) return;
                         if (minProbabilidad && oppProb < Number(minProbabilidad)) return;
 
                         const quote = quotesData.find(q => q.opportunity_id === oppId && q.status === 'WINNER')
@@ -638,7 +636,7 @@ export default function InformesPage() {
                                 anio_fact: anioFact,
                                 mes_planta: mesPlanta,
                                 mes_comercial: mesComercial,
-                                estado: estadoObj?.nombre || 'Proyectado',
+                                estado: faseObj?.nombre ? `Proyectado (${faseObj.nombre})` : 'Proyectado',
                                 asesor: userMap.get(opp.owner_user_id) || '-',
                                 grupo_cliente: canalMap.get(canalId) || '-',
                                 subgrupo_cliente: subclasificacionMap.get(subcanalId) || '-',
@@ -680,7 +678,7 @@ export default function InformesPage() {
                         { header: 'Año fact', key: 'anio_fact' },
                         { header: 'Mes Planta', key: 'mes_planta' },
                         { header: 'Mes Comercial', key: 'mes_comercial' },
-                        { header: 'Estado', key: 'estado' },
+                        { header: 'Pedido / Proyectado', key: 'estado' },
                         { header: 'Asesor', key: 'asesor' },
                         { header: 'Grupo Cliente', key: 'grupo_cliente' },
                         { header: 'Subgrupo Cliente', key: 'subgrupo_cliente' },
@@ -711,7 +709,6 @@ export default function InformesPage() {
                     *,
                     cuenta:CRM_Cuentas(nombre, canal_id, pais_id),
                     fase:CRM_FasesOportunidad(nombre, canal_id),
-                    estado_info:CRM_EstadosOportunidad(nombre),
                     segmento:CRM_Segmentos(nombre),
                     actividades:CRM_Actividades(id, fecha_inicio, fecha_fin, is_completed, created_at, is_deleted)
                 `;
@@ -725,7 +722,6 @@ export default function InformesPage() {
                     { header: 'CANAL', key: 'canal_nombre' },
                     { header: 'SEGMENTO', key: 'segmento_nombre', width: 25 },
                     { header: 'VENDEDOR', key: 'vendedor_nombre', width: 25 },
-                    { header: 'ESTADO', key: 'estado_nombre', width: 15 },
                     { header: 'FASE ACTUAL', key: 'fase_nombre', width: 20 },
                     { header: 'VALOR', key: 'amount', width: 15 },
                     { header: 'MONEDA', key: 'currency_id', width: 10 },
@@ -919,10 +915,11 @@ export default function InformesPage() {
             }
 
             if (selectedEstado && selectedEntidad === 'oportunidades') {
-                const estadoIds = ESTADO_IDS_BY_NAME[selectedEstado];
-                if (estadoIds?.length) {
-                    query = query.in('estado_id', estadoIds);
-                }
+                // Resultado por FASE: ganada / perdida = fases "Cerrada ...", abierta = el resto o sin fase.
+                const { won, lost, closed } = splitPhaseIdsByOutcome(catalogs.fases);
+                if (selectedEstado === 'won') query = query.in('fase_id', won.length ? won : [-1]);
+                else if (selectedEstado === 'lost') query = query.in('fase_id', lost.length ? lost : [-1]);
+                else if (selectedEstado === 'open' && closed.length) query = query.or(`fase_id.is.null,fase_id.not.in.(${closed.join(',')})`);
             }
 
             if (selectedFase && selectedEntidad === 'oportunidades') {
@@ -1186,15 +1183,15 @@ export default function InformesPage() {
                             </div>
                         )}
 
-                        {/* Estado Oportunidad */}
+                        {/* Resultado de la oportunidad (por fase) */}
                         {(selectedEntidad === 'oportunidades' || selectedEntidad === 'sop') && (
                             <div className="space-y-3">
-                                <label className="text-sm font-semibold text-slate-700">Estado Oportunidad</label>
+                                <label className="text-sm font-semibold text-slate-700">Resultado (por fase)</label>
                                 <SearchableSelect
                                     options={estadoOppOptions}
                                     value={selectedEstado}
                                     onChange={setSelectedEstado}
-                                    placeholder="Todos los estados"
+                                    placeholder="Todos"
                                     triggerClassName={SELECT_TRIGGER_CLASS}
                                 />
                             </div>
