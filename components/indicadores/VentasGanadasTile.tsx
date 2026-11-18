@@ -6,6 +6,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/db";
 import { DollarSign, Calendar as CalendarIcon, TrendingUp, Filter, Check, ChevronDown } from "lucide-react";
 import { cn } from "@/components/ui/utils";
+import { buildPhaseOutcomeMap, getPhaseOutcome } from "@/lib/opportunityPhase";
 
 
 export const VentasGanadasTile = () => {
@@ -22,6 +23,9 @@ export const VentasGanadasTile = () => {
     // 2. Fetch opportunities and phases
     const { opportunities } = useOpportunities();
     const phases = useLiveQuery(() => db.phases.toArray());
+
+    // Ganada = fase "Cerrada ganada" (el resultado se calcula solo por la fase).
+    const outcomeMap = useMemo(() => buildPhaseOutcomeMap(phases), [phases]);
 
     const channels = useMemo(() => {
         if (!phases) return [];
@@ -61,7 +65,7 @@ export const VentasGanadasTile = () => {
 
                 if (selectedChannel === "ALL") {
                     // Default logic: sum all won opportunities
-                    return opp.estado_id === 2;
+                    return getPhaseOutcome(opp.fase_id, outcomeMap) === "won";
                 } else {
                     // Filter by specific channel's phases
                     if (selectedPhases.length > 0) {
@@ -76,7 +80,7 @@ export const VentasGanadasTile = () => {
             })
             .reduce((sum, opp) => sum + (Number(opp.amount || opp.valor) || 0), 0);
 
-    }, [opportunities, selectedYear, selectedMonth, selectedChannel, selectedPhases, phasesForSelectedChannel]);
+    }, [opportunities, selectedYear, selectedMonth, selectedChannel, selectedPhases, phasesForSelectedChannel, outcomeMap]);
 
     const formatCurrency = (amount: number) => {
         return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(amount);
