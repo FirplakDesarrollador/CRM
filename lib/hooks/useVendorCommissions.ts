@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
+import { onlyOpenByPhase } from '@/lib/opportunityPhaseQueries';
 
 export type HistoricalCommission = {
     id: string;
@@ -86,14 +87,14 @@ export function useVendorCommissions(vendedorId: string | null, dateFrom: string
 
             // 2. Fetch Potential (Open Opportunities)
             // 2a. Opportunities owned by this vendor
-            const { data: ownedOpps, error: oppsError } = await supabase
+            // Abiertas = por FASE (sin fase o fase no cerrada); el estado ya no se usa.
+            const { data: ownedOpps, error: oppsError } = await onlyOpenByPhase(supabase
                 .from('CRM_Oportunidades')
                 .select(`
                     id, amount, account_id, owner_user_id,
                     account:CRM_Cuentas!account_id (nombre, canal_id)
                 `)
-                .eq('owner_user_id', vendedorId)
-                .eq('estado_id', 1);
+                .eq('owner_user_id', vendedorId));
 
             if (oppsError) throw new Error(oppsError.message);
 
@@ -125,14 +126,13 @@ export function useVendorCommissions(vendedorId: string | null, dateFrom: string
                     .filter(id => !ownedIds.has(id));
 
                 if (uniqueCollabIds.length > 0) {
-                    const { data: collabOppData } = await supabase
+                    const { data: collabOppData } = await onlyOpenByPhase(supabase
                         .from('CRM_Oportunidades')
                         .select(`
                             id, amount, account_id, owner_user_id,
                             account:CRM_Cuentas!account_id (nombre, canal_id)
                         `)
-                        .in('id', uniqueCollabIds)
-                        .eq('estado_id', 1);
+                        .in('id', uniqueCollabIds));
 
                     if (collabOppData) collabOpps = collabOppData;
                 }

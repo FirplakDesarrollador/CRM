@@ -8,7 +8,6 @@ import {
     matchesSetterFilter,
     normalizeSetterFilter,
     splitClosedPhaseIds,
-    OPEN_EXCLUDED_STATES_IN,
 } from '@/lib/opportunityStatusFilter';
 import { toDateOnly, formatDateOnlyDMY, isDateOnlyInRange, isDateOnlyOverdue } from '@/lib/dateFilterHelpers';
 import { buildOpportunityHotRow } from '@/lib/opportunityTableHelpers';
@@ -25,53 +24,54 @@ const phases = [
 ];
 const { won, lost } = splitClosedPhaseIds(phases);
 
-describe('Filtro Ganada/Perdida/Abiertas por estado O fase (casos de Christian)', () => {
-    it('separa fases cerradas ganadas y perdidas', () => {
+// Filas con estado_id (sigue en la BD) para comprobar que el filtro lo ignora.
+const withEstado = (estado_id: number, fase_id: number | null) => ({ estado_id, fase_id });
+
+describe('Filtro Ganada/Perdida/Abiertas SOLO por fase (estado oculto)', () => {
+    it('separa fases cerradas ganadas y perdidas (sin importar mayúsculas)', () => {
         expect(won).toEqual([121, 102]);
         expect(lost).toEqual([122, 103]);
     });
 
-    it('Ganada acepta estado ganado (2 u 11) o fase Cerrada ganada', () => {
-        expect(matchesStatusFilter({ estado_id: 2, fase_id: 116 }, 'won', won, lost)).toBe(true);
-        expect(matchesStatusFilter({ estado_id: 11, fase_id: null }, 'won', won, lost)).toBe(true);
-        // fase Cerrada ganada con estado Abierta (las 80 cruzadas)
-        expect(matchesStatusFilter({ estado_id: 1, fase_id: 121 }, 'won', won, lost)).toBe(true);
-        expect(matchesStatusFilter({ estado_id: '8', fase_id: '102' }, 'won', won, lost)).toBe(true);
-        expect(matchesStatusFilter({ estado_id: 1, fase_id: 116 }, 'won', won, lost)).toBe(false);
+    it('Ganada = fase Cerrada ganada; el estado se ignora', () => {
+        expect(matchesStatusFilter(withEstado(1, 121), 'won', won, lost)).toBe(true);
+        expect(matchesStatusFilter({ fase_id: '102' }, 'won', won, lost)).toBe(true);
+        // estado ganado con fase abierta ya NO cuenta como ganada
+        expect(matchesStatusFilter(withEstado(2, 116), 'won', won, lost)).toBe(false);
+        expect(matchesStatusFilter(withEstado(11, null), 'won', won, lost)).toBe(false);
     });
 
-    it('Perdida acepta estado perdido o fase Cerrada perdida', () => {
-        expect(matchesStatusFilter({ estado_id: 3, fase_id: 116 }, 'lost', won, lost)).toBe(true);
-        expect(matchesStatusFilter({ estado_id: 14, fase_id: 116 }, 'lost', won, lost)).toBe(true);
-        expect(matchesStatusFilter({ estado_id: 1, fase_id: 122 }, 'lost', won, lost)).toBe(true);
-        expect(matchesStatusFilter({ estado_id: 1, fase_id: 121 }, 'lost', won, lost)).toBe(false);
+    it('Perdida = fase Cerrada perdida', () => {
+        expect(matchesStatusFilter({ fase_id: 122 }, 'lost', won, lost)).toBe(true);
+        expect(matchesStatusFilter(withEstado(14, 116), 'lost', won, lost)).toBe(false);
+        expect(matchesStatusFilter({ fase_id: 121 }, 'lost', won, lost)).toBe(false);
     });
 
-    it('Abiertas excluye estado cerrado y fase cerrada', () => {
-        expect(matchesStatusFilter({ estado_id: 1, fase_id: 116 }, 'open', won, lost)).toBe(true);
-        expect(matchesStatusFilter({ estado_id: null, fase_id: null }, 'open', won, lost)).toBe(true);
-        expect(matchesStatusFilter({ estado_id: 1, fase_id: 121 }, 'open', won, lost)).toBe(false);
-        expect(matchesStatusFilter({ estado_id: 1, fase_id: 122 }, 'open', won, lost)).toBe(false);
-        expect(matchesStatusFilter({ estado_id: 2, fase_id: 116 }, 'open', won, lost)).toBe(false);
-        expect(matchesStatusFilter({ estado_id: 4, fase_id: 116 }, 'all', won, lost)).toBe(true);
+    it('Abiertas = sin fase o fase no cerrada', () => {
+        expect(matchesStatusFilter({ fase_id: 116 }, 'open', won, lost)).toBe(true);
+        expect(matchesStatusFilter({ fase_id: null }, 'open', won, lost)).toBe(true);
+        expect(matchesStatusFilter(withEstado(2, 116), 'open', won, lost)).toBe(true);
+        expect(matchesStatusFilter({ fase_id: 121 }, 'open', won, lost)).toBe(false);
+        expect(matchesStatusFilter({ fase_id: 122 }, 'open', won, lost)).toBe(false);
+        expect(matchesStatusFilter({ fase_id: 116 }, 'all', won, lost)).toBe(true);
     });
 
-    it('arma las condiciones PostgREST del servidor', () => {
-        expect(buildClosedStatusOrCondition('won', won, lost)).toBe('estado_id.in.(2,11),fase_id.in.(121,102)');
-        expect(buildClosedStatusOrCondition('lost', won, lost)).toBe('estado_id.in.(3,4,14),fase_id.in.(122,103)');
-        expect(buildClosedStatusOrCondition('won', [], [])).toBe('estado_id.in.(2,11)');
+    it('arma las condiciones PostgREST del servidor solo con fase_id', () => {
+        expect(buildClosedStatusOrCondition('won', won, lost)).toBe('fase_id.in.(121,102)');
+        expect(buildClosedStatusOrCondition('lost', won, lost)).toBe('fase_id.in.(122,103)');
+        expect(buildClosedStatusOrCondition('won', [], [])).toBe('fase_id.eq.-1');
         expect(buildClosedStatusOrCondition('open', won, lost)).toBeNull();
         expect(buildOpenPhaseOrCondition([...won, ...lost])).toBe('fase_id.is.null,fase_id.not.in.(121,102,122,103)');
         expect(buildOpenPhaseOrCondition([])).toBeNull();
-        expect(OPEN_EXCLUDED_STATES_IN).toBe('(2,11,3,4,14)');
     });
 
-    it('el hook usa estas condiciones en el servidor y en offline', () => {
+    it('el hook usa estas condiciones en el servidor y en offline, sin estado_id', () => {
         const hook = readFileSync(path.join(root, 'lib', 'hooks', 'useOpportunitiesServer.ts'), 'utf8');
         expect(hook).toContain('buildClosedStatusOrCondition(statusFilter');
         expect(hook).toContain('buildOpenPhaseOrCondition(closedPhaseIdsRef.current)');
         expect(hook).toContain('matchesStatusFilter(o, statusFilter');
-        expect(hook).not.toContain("q.in('estado_id', [2, 11])");
+        expect(hook).not.toContain('estado_id');
+        expect(hook).not.toContain('CRM_EstadosOportunidad');
     });
 });
 

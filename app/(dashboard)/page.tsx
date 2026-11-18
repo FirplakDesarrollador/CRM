@@ -6,6 +6,9 @@ import { useActivities } from "@/lib/hooks/useActivities";
 import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { useState, useMemo, useCallback, useRef } from "react";
+import { useLiveQuery } from "dexie-react-hooks";
+import { db } from "@/lib/db";
+import { buildPhaseOutcomeMap, getPhaseOutcome } from "@/lib/opportunityPhase";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Plus, Briefcase, Building2, TrendingUp } from "lucide-react";
@@ -140,13 +143,17 @@ export default function Home() {
   const currentOrderRef = useRef<string[]>(DEFAULT_TILES.map((t) => t.id));
   const savedOrderRef = useRef<string[]>(DEFAULT_TILES.map((t) => t.id));
 
+  // Abierta / ganada / perdida se calcula SOLO por la fase.
+  const phases = useLiveQuery(() => db.phases.toArray());
+  const outcomeMap = useMemo(() => buildPhaseOutcomeMap(phases), [phases]);
+
   // Find the "Important" opportunity (Highest value open)
   const importantOpportunity = useMemo(() => {
     if (!displayOpps) return null;
     return [...displayOpps]
-      .filter(o => o.estado_id === 1 || !o.estado_id)
+      .filter(o => getPhaseOutcome(o.fase_id, outcomeMap) === "open")
       .sort((a, b) => (Number(b.amount || b.valor) || 0) - (Number(a.amount || a.valor) || 0))[0];
-  }, [displayOpps]);
+  }, [displayOpps, outcomeMap]);
 
   // Calculate Stats for Objectives
   const stats = useMemo(() => {
@@ -172,7 +179,7 @@ export default function Home() {
     });
 
     const totalPipeline = displayOpps
-      .filter(o => o.estado_id === 1 || !o.estado_id)
+      .filter(o => getPhaseOutcome(o.fase_id, outcomeMap) === "open")
       .reduce((acc, curr) => acc + (Number(curr.amount || curr.valor) || 0), 0);
 
     return {
@@ -180,7 +187,7 @@ export default function Home() {
       newOpps: { current: monthlyOpps.length, goal: 50 },
       newAccounts: { current: monthlyAccounts.length, goal: 10 }
     };
-  }, [displayOpps, displayAccs]);
+  }, [displayOpps, displayAccs, outcomeMap]);
 
   // Recent Accounts
   const recentAccountsData = useMemo(() => {

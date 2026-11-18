@@ -4,28 +4,38 @@
  * Planner "Funcionalidades CRM B2C_2": "cp y cg - lleve a reporte columna de
  * fecha de cierre" (CP = Cerrada Perdida, CG = Cerrada Ganada).
  *
+ * Una oportunidad está cerrada SOLO si su FASE es "Cerrada ganada" o "Cerrada perdida"
+ * (ver lib/opportunityPhase.ts); el estado ya no se usa.
  * La tabla no tiene una columna "fecha_cierre" real. Se toma, en este orden:
- *  1. `_sync_metadata.estado_id` (epoch ms del último cambio de estado, lo
- *     escribe la app/sync cuando se cierra la oportunidad).
- *  2. `_sync_metadata.fase_id` (mismo dato cuando el cierre fue por fase).
+ *  1. `_sync_metadata.fase_id` (epoch ms del último cambio de fase, lo escribe la app/sync).
+ *  2. `_sync_metadata.estado_id` (datos viejos: el mismo momento cuando se cerró por estado).
  *  3. `fecha_cierre_estimada` (en B2C la app la pone en "hoy" al cerrar, y en
  *     los datos migrados trae la fecha de cierre del CRM anterior).
  * Para oportunidades abiertas devuelve null.
  */
 
-export const CLOSED_WON_ESTADO_ID = 2;
-export const CLOSED_LOST_ESTADO_ID = 3;
-export const CLOSED_ESTADO_IDS = [CLOSED_WON_ESTADO_ID, CLOSED_LOST_ESTADO_ID] as const;
+import { getPhaseOutcomeByName } from './opportunityPhase';
+
+type PhaseRel = { nombre?: string | null } | Array<{ nombre?: string | null }> | null | undefined;
 
 type CloseDateInput = {
-    estado_id?: number | string | null;
+    /** Fase unida (join CRM_FasesOportunidad) */
+    fase?: PhaseRel;
+    /** Nombre de la fase, si ya viene plano */
+    fase_nombre?: string | null;
     fecha_cierre_estimada?: string | null;
     _sync_metadata?: Record<string, unknown> | null;
 } | null | undefined;
 
+function phaseNameOf(opp: CloseDateInput): string | null {
+    if (!opp) return null;
+    if (opp.fase_nombre) return opp.fase_nombre;
+    const rel = Array.isArray(opp.fase) ? opp.fase[0] : opp.fase;
+    return rel?.nombre ?? null;
+}
+
 export function isClosedOpportunity(opp: CloseDateInput): boolean {
-    const estado = Number(opp?.estado_id);
-    return estado === CLOSED_WON_ESTADO_ID || estado === CLOSED_LOST_ESTADO_ID;
+    return getPhaseOutcomeByName(phaseNameOf(opp)) !== 'open';
 }
 
 /** Fecha YYYY-MM-DD en hora de Colombia. */
@@ -51,7 +61,7 @@ function epochFromMeta(meta: Record<string, unknown> | null | undefined, field: 
 export function resolveOpportunityCloseDate(opp: CloseDateInput): string | null {
     if (!opp || !isClosedOpportunity(opp)) return null;
     const meta = opp._sync_metadata ?? null;
-    const ts = epochFromMeta(meta, 'estado_id') ?? epochFromMeta(meta, 'fase_id');
+    const ts = epochFromMeta(meta, 'fase_id') ?? epochFromMeta(meta, 'estado_id');
     if (ts !== null) return toBogotaDateString(new Date(ts));
     const est = opp.fecha_cierre_estimada;
     if (est && /^\d{4}-\d{2}-\d{2}/.test(est)) return est.slice(0, 10);

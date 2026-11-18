@@ -14,7 +14,6 @@ type IdMap = Map<string | number, string>;
 export interface MiInformeLookups {
     canales: IdMap;
     fases: IdMap;
-    estados: IdMap;
     segmentos: IdMap;
     departamentos: IdMap;
     ciudades: IdMap;
@@ -111,7 +110,6 @@ export function buildMiInformeSheets(data: MiInformeData, lk: MiInformeLookups):
         columns: [
             { header: 'NOMBRE OPORTUNIDAD', key: 'nombre', width: 35 },
             { header: 'CUENTA', key: 'cuenta', width: 35 },
-            { header: 'ESTADO', key: 'estado', width: 15 },
             { header: 'FASE', key: 'fase', width: 20 },
             { header: 'VALOR', key: 'amount', width: 15 },
             { header: 'MONEDA', key: 'currency_id', width: 10 },
@@ -132,7 +130,6 @@ export function buildMiInformeSheets(data: MiInformeData, lk: MiInformeLookups):
                 id: o.id,
                 nombre: asText(o.nombre),
                 cuenta: lookup(lk.cuentas, o.account_id),
-                estado: lookup(lk.estados, o.estado_id),
                 fase: lookup(lk.fases, o.fase_id),
                 amount: Number(o.amount) || 0,
                 currency_id: asText(o.currency_id),

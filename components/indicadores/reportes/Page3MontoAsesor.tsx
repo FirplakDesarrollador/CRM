@@ -10,7 +10,7 @@ import { formatCurrency } from "@/lib/utils";
 import { SearchableSelect, SearchableSelectOption } from "@/components/ui/SearchableSelect";
 import { MultiSelect, Option } from "@/components/ui/MultiSelect";
 import { currentWeekMarkLine, getISOWeek, getWeekKey, withCurrentWeekMarker } from "./weekUtils";
-import { getEstadoBucket } from "./estadoUtils";
+import { buildPhaseOutcomeMap, getResultadoBucket } from "./faseResultadoUtils";
 import { EChartsCallbackParams } from "./echartsTypes";
 import { isPlausibleYear } from "./dateUtils";
 import { getZonaByDepartamentoId, ZONA_OPTIONS } from "./zonas";
@@ -54,7 +54,8 @@ const CANAL_PROPIO_ID = "PROPIO";
 const WEEK_OPTIONS = Array.from({ length: 53 }, (_, i) => ({ value: String(i + 1), label: String(i + 1) }));
 
 export function Page3MontoAsesor() {
-    const { users, channels, accountsMap, subclasificaciones, segments } = useIndicadoresLookups();
+    const { users, channels, accountsMap, subclasificaciones, segments, phases } = useIndicadoresLookups();
+    const outcomeMap = useMemo(() => buildPhaseOutcomeMap(phases), [phases]);
     const { tipoByVendedor } = useCanalPropioVendedores();
     // Queried live from Supabase (not the offline Dexie cache): comparing
     // against the source BI report showed the local mirror can be stale for
@@ -158,12 +159,11 @@ export function Page3MontoAsesor() {
         });
     }, [opportunities, filters, isCanalPropio, accountsMap, tipoByVendedor]);
 
-    // "won" = estado_id 2 (Ganada) — confirmed against the live DB: this alone
-    // reproduces the BI reference amount exactly for this team. The weekly
+    // "won" = fase "Cerrada ganada" (el resultado se calcula solo por la fase). The weekly
     // "cerradas" chart uses this same ganadas-only population, not won+lost.
     const wonOpportunities = useMemo(
-        () => scopedOpportunities.filter(o => getEstadoBucket(o.estado_id) === "won"),
-        [scopedOpportunities]
+        () => scopedOpportunities.filter(o => getResultadoBucket(o.fase_id, outcomeMap) === "won"),
+        [scopedOpportunities, outcomeMap]
     );
     const closedOpportunities = wonOpportunities;
 

@@ -43,6 +43,7 @@ import { isB2COpportunity, userHasB2CAccess } from "@/lib/b2c";
 import { AccountModal } from "@/components/cuentas/AccountModal";
 import { EntityAuditHistoryTab } from "@/components/shared/EntityAuditHistoryTab";
 import { History } from "lucide-react";
+import { getPhaseOutcomeByName, ESTADO_ID_ABIERTA, ESTADO_ID_GANADA, ESTADO_ID_PERDIDA } from "@/lib/opportunityPhase";
 
 export default function OpportunityDetailPage() {
     const params = useParams();
@@ -218,10 +219,8 @@ export default function OpportunityDetailPage() {
                 title={opportunity.nombre}
                 subtitle={formatOpportunityAmount(opportunity.amount, opportunity.currency_id || 'COP')}
                 status={
-                    opportunity.estado_id === 2 ? 'Ganada' :
-                        opportunity.estado_id === 3 ? 'Perdida' :
-                            opportunity.estado_id === 4 ? 'Cancelada' :
-                                (phaseMap.get(opportunity.fase_id) || opportunity.fase || 'Prospecto')
+                    // Solo la fase (el estado ya no se muestra).
+                    phaseMap.get(opportunity.fase_id) || opportunity.fase || 'Prospecto'
                 }
                 backHref="/oportunidades?view=list"
                 onTitleSave={async (nombre) => {
@@ -565,13 +564,16 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     // Computed: both loss reason fields are filled
     const lossFieldsComplete = localRazonPerdida.trim() !== "" && localComentariosPerdida.trim() !== "";
 
+    // Resultado actual (abierta / ganada / perdida) calculado SOLO por la fase.
+    const currentPhaseOutcome = getPhaseOutcomeByName(phases?.find(p => p.id === opportunity.fase_id)?.nombre);
+
     const handlePhaseChange = async (phaseId: number) => {
         const targetPhase = phases?.find(p => p.id === phaseId);
 
-        // Check if target is "Cerrada Perdida" or "Cerrada Ganada"
-        const normalizedName = targetPhase?.nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") || "";
-        const isClosedWon = normalizedName.includes('ganada');
-        const isClosedLost = normalizedName.includes('perdida');
+        // Check if target is "Cerrada Perdida" or "Cerrada Ganada" (solo por la fase)
+        const targetOutcome = getPhaseOutcomeByName(targetPhase?.nombre);
+        const isClosedWon = targetOutcome === 'won';
+        const isClosedLost = targetOutcome === 'lost';
 
         // B2C / Canal Propio / Ecommerce check
         const isB2C = isB2COpportunity(effectiveAccount, opportunity, user, targetPhase);
@@ -586,7 +588,8 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                 fase_id: phaseId,
                 razon_perdida: localRazonPerdida,
                 comentarios_perdida: localComentariosPerdida,
-                estado_id: 3,
+                // estado_id se sigue guardando por dentro (comisiones / integraciones); no se muestra.
+                estado_id: ESTADO_ID_PERDIDA,
                 probability: lostPhase?.probability ?? 0
             };
 
@@ -603,7 +606,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
         if (isClosedWon) {
             const updates: any = {
                 fase_id: phaseId,
-                estado_id: 2, // Explicitly set to Won status
+                estado_id: ESTADO_ID_GANADA, // Por dentro: dispara trg_opp_devengada (comisiones). No se muestra.
                 probability: targetPhase?.probability ?? 100 // Propagate phase probability
             };
 
@@ -616,10 +619,10 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
             return;
         }
 
-        // Default: just update phase, reset estado to Open if coming from a closed state
+        // Default: just update phase; estado_id (oculto) vuelve a Abierta
         await updateOpportunity(opportunity.id, {
             fase_id: phaseId,
-            estado_id: 1, // Reset to Open status when moving to any other phase
+            estado_id: ESTADO_ID_ABIERTA, // Por dentro, para triggers/integraciones. No se muestra.
             probability: targetPhase?.probability ?? 0 // Propagate phase probability
         });
     };
@@ -631,7 +634,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
             await updateOpportunity(opportunity.id, {
                 fase_id: pendingPhaseId,
                 razon_perdida_id: reasonId,
-                estado_id: 3,
+                estado_id: ESTADO_ID_PERDIDA,
                 probability: lostPhase?.probability ?? 0
             });
             setIsLossReasonModalOpen(false);
@@ -776,8 +779,8 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                 )}
             </div>
 
-            {/* Commission Badge - Only shown for Won opportunities */}
-            {opportunity.estado_id === 2 && (
+            {/* Commission Badge - Only shown for Won opportunities (fase "Cerrada ganada") */}
+            {currentPhaseOutcome === 'won' && (
                 <CommissionBadge opportunityId={opportunity.id} />
             )}
 
@@ -828,8 +831,8 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                             </div>
                             <ProbabilityDonut
                                 percentage={
-                                    opportunity.estado_id === 2 ? 100 : // Cerrada Ganada = 100%
-                                        opportunity.estado_id === 3 ? 0 :   // Cerrada Perdida = 0%
+                                    currentPhaseOutcome === 'won' ? 100 : // Cerrada Ganada = 100%
+                                        currentPhaseOutcome === 'lost' ? 0 :   // Cerrada Perdida = 0%
                                             // Always re-derive from current phase for accuracy;
                                             // fall back to stored probability only if phase not found locally
                                             (opportunity?.fase_id ? (phases?.find(p => p.id === opportunity.fase_id)?.probability ?? opportunity?.probability) : opportunity?.probability) ?? 0
@@ -1009,24 +1012,6 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                     <p className="text-[10px] text-orange-500 mt-1">
                                         La cuenta no tiene subclasificación u origen offline.
                                     </p>
-                                )}
-                            </div>
-                        </div>
-
-                        <div className="pt-4 border-t border-slate-100">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Estado</label>
-                            <div className={cn(
-                                "px-3 py-1.5 rounded-lg font-bold text-sm border",
-                                opportunity.estado_id === 2 ? "bg-green-50 text-green-700 border-green-100" :
-                                    opportunity.estado_id === 3 ? "bg-red-50 text-red-700 border-red-100" :
-                                        opportunity.estado_id === 4 ? "bg-slate-50 text-slate-700 border-slate-200" :
-                                            "bg-blue-50 text-blue-700 border-blue-100"
-                            )}>
-                                {opportunity.status || (
-                                    opportunity.estado_id === 1 ? 'Abierta' :
-                                        opportunity.estado_id === 2 ? 'Ganada' :
-                                            opportunity.estado_id === 3 ? 'Perdida' :
-                                                opportunity.estado_id === 4 ? 'Cancelada' : 'Abierta'
                                 )}
                             </div>
                         </div>

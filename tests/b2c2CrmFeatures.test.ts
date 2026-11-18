@@ -33,17 +33,17 @@ function memoryStorage(initial: Record<string, string> = {}) {
 describe('1. Fecha de cierre (CP / CG) en el reporte', () => {
     const closedAt = Date.UTC(2026, 10, 17, 3, 0, 0); // 16 nov 22:00 en Bogotá
 
-    it('usa la fecha del cambio de estado en hora Colombia', () => {
-        expect(resolveOpportunityCloseDate({ estado_id: 2, _sync_metadata: { estado_id: closedAt } })).toBe('2026-11-16');
-        expect(resolveOpportunityCloseDate({ estado_id: 3, _sync_metadata: { fase_id: closedAt } })).toBe('2026-11-16');
+    it('usa la fecha del cambio de fase en hora Colombia (cerrada = por FASE)', () => {
+        expect(resolveOpportunityCloseDate({ fase: { nombre: 'Cerrada ganada' }, _sync_metadata: { fase_id: closedAt } })).toBe('2026-11-16');
+        expect(resolveOpportunityCloseDate({ fase: [{ nombre: 'Cerrada Perdida' }], _sync_metadata: { estado_id: closedAt } })).toBe('2026-11-16');
     });
 
     it('si no hay metadata usa fecha_cierre_estimada', () => {
-        expect(resolveOpportunityCloseDate({ estado_id: 3, fecha_cierre_estimada: '2025-03-04', _sync_metadata: {} })).toBe('2025-03-04');
+        expect(resolveOpportunityCloseDate({ fase: { nombre: 'Cerrada Perdida' }, fecha_cierre_estimada: '2025-03-04', _sync_metadata: {} })).toBe('2025-03-04');
     });
 
     it('vacío para oportunidades abiertas', () => {
-        expect(resolveOpportunityCloseDate({ estado_id: 1, fecha_cierre_estimada: '2026-12-01', _sync_metadata: { estado_id: closedAt } })).toBeNull();
+        expect(resolveOpportunityCloseDate({ fase: { nombre: 'Primer contacto' }, fecha_cierre_estimada: '2026-12-01', _sync_metadata: { fase_id: closedAt } })).toBeNull();
     });
 
     it('el mapper del reporte trae fecha_cierre', () => {
@@ -51,8 +51,8 @@ describe('1. Fecha de cierre (CP / CG) en el reporte', () => {
             userMap: new Map(), segmentMap: new Map(), lossReasonMap: new Map(), deptMap: new Map(),
             cityMap: new Map(), canalMap: new Map(), countryMap: new Map(),
         } as Parameters<typeof mapOpportunityReportRow>[1];
-        expect(mapOpportunityReportRow({ estado_id: 2, _sync_metadata: { estado_id: closedAt } }, lookups).fecha_cierre).toBe('2026-11-16');
-        expect(mapOpportunityReportRow({ estado_id: 1 }, lookups).fecha_cierre).toBe('-');
+        expect(mapOpportunityReportRow({ fase: { nombre: 'Cerrada ganada' }, _sync_metadata: { fase_id: closedAt } }, lookups).fecha_cierre).toBe('2026-11-16');
+        expect(mapOpportunityReportRow({ fase: { nombre: 'Visita' } }, lookups).fecha_cierre).toBe('-');
     });
 
     it('la columna está en Informes > Oportunidades solo para B2C', () => {

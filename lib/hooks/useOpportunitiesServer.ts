@@ -8,7 +8,8 @@ import { getCellphoneSearchDigits, findPhoneMatchesServer, findPhoneMatchesLocal
 import { computeOpportunityActivitySummary, OpportunityActivitySummary, ActivityItem } from '@/lib/opportunityActivities';
 import { PROSPECTO_PHASE_ID, getEquivalentPhaseIds, PhaseCatalogItem, calculateTotalAmount, DEFAULT_OPPORTUNITIES_PAGE_SIZE } from '@/lib/opportunityColumnFilterHelpers';
 import { toStartOfDayISO, toEndOfDayISO, toDateOnly, isDateOnlyInRange } from '@/lib/dateFilterHelpers';
-import { buildClosedStatusOrCondition, buildOpenPhaseOrCondition, matchesStatusFilter, matchesSetterFilter, normalizeSetterFilter, OPEN_EXCLUDED_STATES_IN, SetterFilter } from '@/lib/opportunityStatusFilter';
+import { isClosedPhaseName, splitPhaseIdsByOutcome } from '@/lib/opportunityPhase';
+import { buildClosedStatusOrCondition, buildOpenPhaseOrCondition, matchesStatusFilter, matchesSetterFilter, normalizeSetterFilter, SetterFilter } from '@/lib/opportunityStatusFilter';
 import { activitiesVisibleToViewer, sellerCanSeeOpportunity, sellerOpportunityOrFilter } from '@/lib/sellerVisibility';
 import { FlatQuoteItemProduct, getOpportunityIdsByProductFilters } from '@/lib/opportunityProductFilterHelpers';
 import { fetchFullCatalog, PriceListProduct } from '@/lib/hooks/useProducts';
@@ -26,12 +27,10 @@ export type OpportunityServer = {
     created_at: string;
     fecha_cierre_estimada?: string | null;
     segmento_id?: number | null;
-    estado_id?: number | null;
     origen_oportunidad?: string | null;
     url_origen?: string | null;
     account?: { nombre: string; canal_id?: string; ciudad?: string | null; pais_id?: number | null; pais?: string | null } | null; // Joined data
     fase_data?: { nombre: string } | null; // Joined data
-    estado_data?: { nombre: string } | null; // Joined data
     vendedor?: { full_name: string } | null; // Joined data
     actividades?: Array<{ id: string; user_id?: string | null; fecha_fin?: string | null; is_completed?: boolean; is_deleted?: boolean }> | null;
     activity_summary?: OpportunityActivitySummary;
@@ -173,17 +172,8 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
 
             if (phases && phases.length > 0) {
                 allPhasesRef.current = phases;
-                const won: number[] = [];
-                const lost: number[] = [];
-
-                phases.forEach(p => {
-                    const nombre = p.nombre.toLowerCase();
-                    if (nombre.includes('ganada')) {
-                        won.push(p.id);
-                    } else if (nombre.includes('perdida')) {
-                        lost.push(p.id);
-                    }
-                });
+                // Ganada / perdida se calcula SOLO por la fase (nombre, sin tildes ni mayúsculas).
+                const { won, lost } = splitPhaseIdsByOutcome(phases);
 
                 wonPhaseIdsRef.current = won;
                 lostPhaseIdsRef.current = lost;
@@ -288,11 +278,11 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
 
             const isFilteringExplicitClosedPhase = Boolean(
                 phaseFilter &&
-                allPhasesRef.current.some(p => p.id === phaseFilter && p.nombre.toLowerCase().includes('cerrada'))
+                allPhasesRef.current.some(p => p.id === phaseFilter && isClosedPhaseName(p.nombre))
             );
 
             if (!isFilteringExplicitClosedPhase && statusFilter !== 'all') {
-                // Ganada = estado ganado O fase "Cerrada ganada"; Perdida = estado perdido O fase "Cerrada perdida".
+                // Ganada = fase "Cerrada ganada"; Perdida = fase "Cerrada perdida" (solo por fase).
                 localOpps = localOpps.filter(o =>
                     matchesStatusFilter(o, statusFilter, wonPhaseIdsRef.current, lostPhaseIdsRef.current)
                 );
@@ -478,7 +468,6 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                     account: acc ? { nombre: acc.nombre, canal_id: acc.canal_id, ciudad: acc.ciudad, pais_id: acc.pais_id } : null,
                     fase_data: ph ? { nombre: ph.nombre } : null,
                     vendedor: usr ? { full_name: usr.full_name || usr.email } : null,
-                    estado_data: null,
                     actividades: visibleActs,
                     activity_summary: computeOpportunityActivitySummary(visibleActs)
                 };
@@ -653,16 +642,15 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
 
                 const isFilteringExplicitClosedPhase = Boolean(
                     phaseFilter &&
-                    allPhasesRef.current.some(p => p.id === phaseFilter && p.nombre.toLowerCase().includes('cerrada'))
+                    allPhasesRef.current.some(p => p.id === phaseFilter && isClosedPhaseName(p.nombre))
                 );
 
                 if (!isFilteringExplicitClosedPhase) {
                     if (statusFilter === 'won' || statusFilter === 'lost') {
-                        // Estado ganado/perdido O fase "Cerrada ganada"/"Cerrada perdida"
+                        // Fase "Cerrada ganada" / "Cerrada perdida" (solo por fase)
                         const closedCondition = buildClosedStatusOrCondition(statusFilter, wonPhaseIdsRef.current, lostPhaseIdsRef.current);
                         if (closedCondition) q = q.or(closedCondition);
                     } else if (statusFilter === 'open') {
-                        q = q.not('estado_id', 'in', OPEN_EXCLUDED_STATES_IN);
                         const openPhaseCondition = buildOpenPhaseOrCondition(closedPhaseIdsRef.current);
                         if (openPhaseCondition) q = q.or(openPhaseCondition);
                     }
@@ -808,7 +796,6 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                     setter,
                     ${accountRelation},
                     fase_data:CRM_FasesOportunidad(nombre),
-                    estado_data:CRM_EstadosOportunidad(nombre),
                     vendedor:CRM_Usuarios!owner_user_id(full_name),
                     actividades:CRM_Actividades(id, user_id, fecha_inicio, fecha_fin, tipo_actividad, is_completed, is_deleted)
                 `);

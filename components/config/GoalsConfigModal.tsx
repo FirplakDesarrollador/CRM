@@ -81,7 +81,6 @@ export function GoalsConfigModal({ isOpen, onClose, initialUserId }: GoalsConfig
             const { data: oppData, error: oppError } = await supabase
                 .from('CRM_Oportunidades')
                 .select('id, nombre, account_id')
-                .not('estado_id', 'in', '(4,5)')
                 .eq('is_deleted', false)
                 .order('created_at', { ascending: false })
                 .limit(100);

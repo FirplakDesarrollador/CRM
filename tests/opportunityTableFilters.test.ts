@@ -56,7 +56,6 @@ describe('Filtros internos de tabla de oportunidades', () => {
             account: null,
             actividades: null,
             fase_data: null,
-            estado_data: null,
             created_at: null,
             fecha_cierre_estimada: null,
             vendedor: null
@@ -107,7 +106,6 @@ describe('Filtros internos de tabla de oportunidades', () => {
             'origen',
             'setter',
             'fase',
-            'estado',
             'creada',
             'categoria',
             'valor',
@@ -233,7 +231,6 @@ describe('Filtros internos de tabla de oportunidades', () => {
         expect(isColumnFilterActive('canal', stateEmpty)).toBe(false);
         expect(isColumnFilterActive('fase', stateEmpty)).toBe(false);
         expect(isColumnFilterActive('vendedor', stateEmpty)).toBe(false);
-        expect(isColumnFilterActive('estado', stateEmpty)).toBe(false); // 'open' is default
         expect(isColumnFilterActive('creada', stateEmpty)).toBe(false);
 
         const stateFiltered = {
@@ -253,7 +250,6 @@ describe('Filtros internos de tabla de oportunidades', () => {
         expect(isColumnFilterActive('canal', stateFiltered)).toBe(true);
         expect(isColumnFilterActive('fase', stateFiltered)).toBe(true);
         expect(isColumnFilterActive('vendedor', stateFiltered)).toBe(true);
-        expect(isColumnFilterActive('estado', stateFiltered)).toBe(true);
         expect(isColumnFilterActive('origen', stateFiltered)).toBe(true);
         expect(isColumnFilterActive('pais', stateFiltered)).toBe(true);
         expect(isColumnFilterActive('ciudad', stateFiltered)).toBe(true);

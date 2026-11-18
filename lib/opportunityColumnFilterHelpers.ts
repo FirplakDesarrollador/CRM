@@ -128,8 +128,6 @@ export function isColumnFilterActive(colKey: string, state: OpportunityFilterSta
             return Boolean(state.phase);
         case 'vendedor':
             return Boolean(state.ownerIds && state.ownerIds.length > 0);
-        case 'estado':
-            return Boolean(state.status && state.status !== 'open');
         case 'origen':
             return Boolean(state.origin);
         case 'setter':
