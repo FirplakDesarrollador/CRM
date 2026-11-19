@@ -26,6 +26,7 @@ visitas y eventos del equipo comercial. Pueden asociarse a [[oportunidades]] y a
   - **Mes:** Vista de cuadrícula mensual con conteo de actividades por día, tooltip contextual con indicador `group/day` y apertura directa del modal de edición sin cambiar la vista activa gracias a `e.stopPropagation()`.
 - Creación rápida vía `CreateActivityModal` desde varios módulos (también desde tiendas
   con `CreateStoreActivityModal`). La creación se estructura como un Wizard de 3 pasos (Tipo & Asunto, Clasificación & Fechas, Detalles).
+  - **Asignación de usuario al programar actividad (`lib/activityAssignee.ts`):** En el Paso 1 ("Tipo & Asunto") del wizard de creación, se incluye una lista desplegable con buscador (`SearchableSelect`, campo **ASIGNAR A**) cargada con todos los usuarios activos de la plataforma (`CRM_Usuarios` con `is_active = true`). Por defecto aparece preseleccionado el usuario logueado (`resolveDefaultActivityUserId` + `buildActivityUserOptions`), permitiendo asignarle la actividad a sí mismo o a cualquier otro usuario de la plataforma; `useActivities.createActivity` persiste el `user_id` seleccionado.
 - **Validaciones y obligatoriedad de campos:**
   - `clasificacion_id`: Obligatorio.
   - `fecha_inicio`: Obligatorio únicamente para tareas (Fecha de Vencimiento). Opcional para eventos.

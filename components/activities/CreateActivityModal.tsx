@@ -22,6 +22,7 @@ import { SearchableSelect } from "@/components/ui/SearchableSelect";
 import { isB2COnlyActivityClassification, userHasB2CAccess } from "@/lib/b2c";
 import { getRecentSubjects, rememberSubject, nextNumberedSubjects, uniqueSubjects } from "@/lib/activitySubjects";
 import { activityEntityHrefs } from "@/lib/activityModalLinks";
+import { buildActivityUserOptions, resolveDefaultActivityUserId } from "@/lib/activityAssignee";
 import { hydrateActivityReferences } from "@/lib/serverHydration";
 
 interface CreateActivityModalProps {
@@ -473,43 +474,66 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         updateActivity
     ]);
 
-    // Reassignment state (ADMIN / COORDINADOR only)
+    // Assignment & Reassignment state
+    const activeLocalUserId = useActiveLocalUserId();
+    const activeDbVersion = useActiveDatabaseVersion();
     const { user: currentUser, role: currentRole } = useCurrentUser();
     const canReassign = isEditing && (currentRole === 'ADMIN' || currentRole === 'COORDINADOR');
-    const [reassignUserId, setReassignUserId] = useState<string>(initialData?.user_id || '');
+    const hasManuallySelectedUserRef = useRef(false);
+    const [reassignUserId, setReassignUserId] = useState<string>(() =>
+        resolveDefaultActivityUserId({
+            initialDataUserId: initialData?.user_id,
+            currentUserId: currentUser?.id,
+            activeLocalUserId,
+        })
+    );
     const [reassignableUsers, setReassignableUsers] = useState<{ id: string; full_name: string | null; email: string }[]>([]);
 
     useEffect(() => {
-        if (!canReassign || !currentUser) return;
+        if (hasManuallySelectedUserRef.current) return;
+        const resolved = resolveDefaultActivityUserId({
+            initialDataUserId: initialData?.user_id,
+            currentUserId: currentUser?.id,
+            activeLocalUserId,
+        });
+        if (resolved && (!reassignUserId || (isEditing && initialData?.user_id && reassignUserId !== initialData.user_id))) {
+            setReassignUserId(resolved);
+        }
+    }, [isEditing, initialData?.user_id, currentUser?.id, activeLocalUserId, reassignUserId]);
+
+    useEffect(() => {
+        if (isEditing && !canReassign) return;
+        let cancelled = false;
         const fetchReassignableUsers = async () => {
-            if (currentRole === 'ADMIN') {
-                const { data } = await supabase
-                    .from('CRM_Usuarios')
-                    .select('id, full_name, email')
-                    .eq('is_active', true)
-                    .order('full_name');
-                if (data) setReassignableUsers(data);
-            } else {
-                // COORDINADOR: only themselves + their subordinates
-                const { data } = await supabase
-                    .from('CRM_Usuarios')
-                    .select('id, full_name, email')
-                    .eq('is_active', true)
-                    .or(`id.eq.${currentUser.id},coordinadores.cs.{${currentUser.id}}`)
-                    .order('full_name');
-                if (data) setReassignableUsers(data);
+            try {
+                if (isEditing && currentRole === 'COORDINADOR' && currentUser?.id) {
+                    // COORDINADOR on edit: only themselves + their subordinates
+                    const { data } = await supabase
+                        .from('CRM_Usuarios')
+                        .select('id, full_name, email')
+                        .eq('is_active', true)
+                        .or(`id.eq.${currentUser.id},coordinadores.cs.{${currentUser.id}}`)
+                        .order('full_name');
+                    if (!cancelled && data) setReassignableUsers(data);
+                } else {
+                    const { data } = await supabase
+                        .from('CRM_Usuarios')
+                        .select('id, full_name, email')
+                        .eq('is_active', true)
+                        .order('full_name');
+                    if (!cancelled && data) setReassignableUsers(data);
+                }
+            } catch (err) {
+                console.warn('[CreateActivityModal] Failed to load platform users:', err);
             }
         };
         fetchReassignableUsers();
-    }, [canReassign, currentUser, currentRole]);
+        return () => { cancelled = true; };
+    }, [isEditing, canReassign, currentUser?.id, currentRole]);
 
     const reassignOptions = useMemo(() => {
-        return reassignableUsers.map(u => ({
-            value: u.id,
-            label: u.full_name || u.email || `Usuario ${u.id}`,
-            searchValue: `${u.full_name || ''} ${u.email || ''}`
-        }));
-    }, [reassignableUsers]);
+        return buildActivityUserOptions(reassignableUsers, currentUser);
+    }, [reassignableUsers, currentUser]);
 
     // Check Microsoft Connection
     useEffect(() => {
@@ -1349,8 +1373,10 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                 _sync_metadata: initialData?._sync_metadata ? { ...initialData._sync_metadata } : {}
             };
 
-            // Include user_id reassignment if changed
-            if (canReassign && reassignUserId && reassignUserId !== initialData?.user_id) {
+            // Include assigned user_id on creation, or reassignment on edit if changed
+            if (!isEditing && reassignUserId) {
+                processed.user_id = reassignUserId;
+            } else if (canReassign && reassignUserId && reassignUserId !== initialData?.user_id) {
                 processed.user_id = reassignUserId;
             }
 
@@ -1469,8 +1495,6 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
     const watchedAsunto = watch('asunto');
 
     // Asuntos previos de la misma oportunidad (más recientes primero) para sugerirlos
-    const activeLocalUserId = useActiveLocalUserId();
-    const activeDbVersion = useActiveDatabaseVersion();
     const opportunitySubjects = useLiveQuery(async () => {
         if (isEditing || !watchedOpportunityId) return [] as string[];
         const acts = await db.activities.where('opportunity_id').equals(watchedOpportunityId).toArray();
@@ -1759,6 +1783,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                 value={reassignUserId}
                                 onChange={async (newUserId) => {
                                     if (!newUserId) return;
+                                    hasManuallySelectedUserRef.current = true;
                                     setReassignUserId(newUserId);
                                     if (isEditing && initialData?.id) {
                                         await updateActivity(initialData.id, { user_id: newUserId });
@@ -2223,6 +2248,27 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                     }}
                                 />
                             </div>
+
+                            {!isEditing && (
+                                <div className="space-y-1" data-testid="activity-assigned-user-field">
+                                    <label className="text-xs font-bold text-slate-500 uppercase">Asignar a</label>
+                                    <SearchableSelect
+                                        options={reassignOptions}
+                                        value={reassignUserId}
+                                        onChange={(newUserId) => {
+                                            if (!newUserId) return;
+                                            hasManuallySelectedUserRef.current = true;
+                                            setReassignUserId(newUserId);
+                                        }}
+                                        allowClear={false}
+                                        placeholder="Seleccionar usuario..."
+                                        searchPlaceholder="Buscar usuario por nombre o correo..."
+                                        emptyText="No se encontraron usuarios."
+                                        triggerClassName="bg-slate-50 border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-blue-500/20 focus:border-blue-500 text-slate-800 font-normal hover:border-slate-300"
+                                        className="z-[70]"
+                                    />
+                                </div>
+                            )}
                         </>
                     )}
 

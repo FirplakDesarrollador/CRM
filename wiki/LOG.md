@@ -3,6 +3,25 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-11-18 - Lista Desplegable de Asignación de Usuario al Programar Actividad
+
+- **Requerimiento:** Agregar en el modal «Programar Actividad» (`CreateActivityModal.tsx`) una lista desplegable con los usuarios activos de la plataforma para elegir a qué usuario se le asignará la actividad, apareciendo seleccionado por defecto el usuario logueado.
+- **Cambios Implementados:**
+  1. **Helpers de Asignación (`lib/activityAssignee.ts`):**
+     - `resolveDefaultActivityUserId`: resuelve el usuario seleccionado por defecto (al crear selecciona al usuario logueado `currentUser.id` o `activeLocalUserId`; al editar conserva `initialData.user_id`).
+     - `buildActivityUserOptions`: construye las opciones para `SearchableSelect` a partir de `CRM_Usuarios` (`is_active = true`), garantizando que el usuario logueado esté incluido de inmediato en la lista incluso antes de que finalice la consulta remota o en modo offline.
+     - `resolveActivityUserId`: resuelve el `user_id` final que persiste `createActivity`.
+  2. **Modal de Programar Actividad (`components/activities/CreateActivityModal.tsx`):**
+     - En modo creación (`!isEditing`), carga todos los usuarios activos de `CRM_Usuarios` y preselecciona al usuario autenticado.
+     - En el Paso 1 (`wizardStep === 0`, debajo de «Cuenta Relacionada»), muestra el campo desplegable con buscador **ASIGNAR A** (`data-testid="activity-assigned-user-field"`).
+     - En `handleActualSubmit`, incluye `processed.user_id = reassignUserId` al crear la actividad.
+  3. **Hook de Persistencia (`lib/hooks/useActivities.ts`):**
+     - `createActivity` ahora respeta `data.user_id` (mediante `resolveActivityUserId(data.user_id, userId)`) en lugar de forzar siempre el ID de la sesión local.
+  4. **Pruebas y Verificación:**
+     - Se agregaron 4 casos de prueba en [`lib/actividadesUi.test.ts`](file:///c:/Users/analista2.desarrollo/Desktop/apps/CRM/lib/actividadesUi.test.ts) (18/18 pasadas, verificadas en ciclo RED $\rightarrow$ GREEN).
+     - Se verificaron pruebas relacionadas en [`lib/serverHydration.test.ts`](file:///c:/Users/analista2.desarrollo/Desktop/apps/CRM/lib/serverHydration.test.ts) (10/10) y [`lib/persistence-contracts.test.ts`](file:///c:/Users/analista2.desarrollo/Desktop/apps/CRM/lib/persistence-contracts.test.ts) (3/3).
+- **Páginas afectadas:** `wiki/pages/actividades.md`, `wiki/LOG.md`.
+
 ## 2026-11-17 - Incorporación de Filtro y Búsqueda por ID en Oportunidades
 
 - **Requerimiento:** Agregar filtro por ID en el módulo de Oportunidades (`/oportunidades`), tanto en los filtros avanzados como en la consulta general por UUID.

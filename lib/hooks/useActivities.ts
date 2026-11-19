@@ -5,6 +5,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../supabase';
 import { useCurrentUser } from './useCurrentUser';
 import { activitiesVisibleToViewer, isSellerRole } from '../sellerVisibility';
+import { resolveActivityUserId } from '../activityAssignee';
 
 /**
  * Converts a date input value to a proper ISO string.
@@ -93,10 +94,11 @@ export function useActivities(filters?: { opportunity_id?: string, account_id?: 
         const now = Date.now();
         const startIso = toISODateString(data.fecha_inicio);
         const asuntoTrimmed = (data.asunto || 'Nueva Actividad').trim();
+        const assignedUserId = resolveActivityUserId(data.user_id, userId);
 
         if (
             lastCreatedActivity &&
-            lastCreatedActivity.userId === userId &&
+            lastCreatedActivity.userId === assignedUserId &&
             lastCreatedActivity.asunto === asuntoTrimmed &&
             lastCreatedActivity.accountId === data.account_id &&
             lastCreatedActivity.opportunityId === data.opportunity_id &&
@@ -111,7 +113,7 @@ export function useActivities(filters?: { opportunity_id?: string, account_id?: 
 
         const newActivity: LocalActivity = {
             id,
-            user_id: userId,
+            user_id: assignedUserId,
             tipo_actividad: data.tipo_actividad || 'EVENTO',
             prioridad: data.prioridad || 'Media',
             asunto: asuntoTrimmed,
@@ -150,7 +152,7 @@ export function useActivities(filters?: { opportunity_id?: string, account_id?: 
             }];
         });
         lastCreatedActivity = {
-            userId,
+            userId: assignedUserId,
             asunto: asuntoTrimmed,
             accountId: data.account_id,
             opportunityId: data.opportunity_id,

@@ -2,6 +2,11 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { activityEntityHrefs } from './activityModalLinks';
+import {
+    buildActivityUserOptions,
+    resolveActivityUserId,
+    resolveDefaultActivityUserId,
+} from './activityAssignee';
 import { sortActivities, splitUpToDateSections } from './activityAgendaSections';
 import {
     activityListHref,
@@ -213,3 +218,70 @@ describe('Accesos del modal de actividad', () => {
         expect(modal).toContain('Ir a la oportunidad');
     });
 });
+
+describe('Asignación de usuario al programar actividad', () => {
+    it('por defecto selecciona al usuario logueado al crear una actividad nueva y conserva el propietario al editar', () => {
+        expect(resolveDefaultActivityUserId({
+            initialDataUserId: null,
+            currentUserId: 'user-logged-in',
+            activeLocalUserId: 'user-local',
+        })).toBe('user-logged-in');
+
+        expect(resolveDefaultActivityUserId({
+            initialDataUserId: 'user-owner',
+            currentUserId: 'user-logged-in',
+            activeLocalUserId: 'user-local',
+        })).toBe('user-owner');
+
+        expect(resolveDefaultActivityUserId({
+            initialDataUserId: '',
+            currentUserId: null,
+            activeLocalUserId: 'user-local',
+        })).toBe('user-local');
+    });
+
+    it('incluye al usuario logueado en las opciones del desplegable aunque aún no haya cargado la lista completa', () => {
+        const initialOptions = buildActivityUserOptions([], {
+            id: 'user-1',
+            full_name: 'Esteban Muñoz',
+            email: 'analista2.desarrollo@firplak.com',
+        });
+        expect(initialOptions).toEqual([{
+            value: 'user-1',
+            label: 'Esteban Muñoz',
+            searchValue: 'Esteban Muñoz analista2.desarrollo@firplak.com',
+        }]);
+
+        const fullOptions = buildActivityUserOptions(
+            [
+                { id: 'user-1', full_name: 'Esteban Muñoz', email: 'analista2.desarrollo@firplak.com' },
+                { id: 'user-2', full_name: 'David Gómez', email: 'david@firplak.com' },
+            ],
+            {
+                id: 'user-1',
+                full_name: 'Esteban Muñoz',
+                email: 'analista2.desarrollo@firplak.com',
+            }
+        );
+        expect(fullOptions).toHaveLength(2);
+        expect(fullOptions.map(o => o.value)).toEqual(['user-1', 'user-2']);
+    });
+
+    it('createActivity respeta el user_id elegido en el desplegable o usa el usuario logueado como respaldo', () => {
+        expect(resolveActivityUserId('user-2', 'user-1')).toBe('user-2');
+        expect(resolveActivityUserId('  user-3  ', 'user-1')).toBe('user-3');
+        expect(resolveActivityUserId('', 'user-1')).toBe('user-1');
+        expect(resolveActivityUserId(undefined, 'user-1')).toBe('user-1');
+    });
+
+    it('CreateActivityModal muestra el desplegable de usuario asignado en el paso inicial y useActivities respeta user_id', () => {
+        const modal = readFileSync(path.join(process.cwd(), 'components/activities/CreateActivityModal.tsx'), 'utf8');
+        const hook = readFileSync(path.join(process.cwd(), 'lib/hooks/useActivities.ts'), 'utf8');
+
+        expect(modal).toContain('data-testid="activity-assigned-user-field"');
+        expect(modal).toContain('buildActivityUserOptions');
+        expect(modal).toContain('resolveDefaultActivityUserId');
+        expect(hook).toContain('resolveActivityUserId');
+    });
+});
+
