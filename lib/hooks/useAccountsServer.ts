@@ -330,16 +330,23 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
 
             if (searchTerm && searchTerm.trim()) {
                 const tokens = phoneDigits ? [phoneDigits] : getSearchTokens(searchTerm);
-                const orParts = tokens.flatMap(token => [
-                    `nombre.ilike.%${token}%`,
-                    `nit_base.ilike.%${token}%`,
-                    `telefono.ilike.%${token}%`,
-                    ...getPhoneIlikePatterns(token).map(pattern => `telefono.ilike.${pattern}`)
-                ]);
-                if (phoneAccountIds.size > 0) {
-                    orParts.push(`id.in.(${Array.from(phoneAccountIds).join(',')})`);
+                // Cada palabra debe coincidir (AND entre palabras, OR entre campos).
+                // Antes se unían todas las palabras con OR y el filtro AND se hacía en el
+                // cliente sobre la primera página, por lo que cuentas válidas no aparecían.
+                for (const token of tokens) {
+                    const orParts = [
+                        `nombre.ilike.%${token}%`,
+                        `nit_base.ilike.%${token}%`,
+                        `telefono.ilike.%${token}%`,
+                        `ciudad.ilike.%${token}%`,
+                        `email.ilike.%${token}%`,
+                        ...getPhoneIlikePatterns(token).map(pattern => `telefono.ilike.${pattern}`)
+                    ];
+                    if (phoneAccountIds.size > 0) {
+                        orParts.push(`id.in.(${Array.from(phoneAccountIds).join(',')})`);
+                    }
+                    query = query.or(orParts.join(','));
                 }
-                query = query.or(orParts.join(','));
             }
 
             if (assignedUserId) {
