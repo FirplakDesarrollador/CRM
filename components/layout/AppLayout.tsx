@@ -8,8 +8,8 @@ import { OfflineBanner } from "./OfflineBanner";
 import { useSyncStore } from "@/lib/stores/useSyncStore";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Loader2 } from "lucide-react";
-import { syncEngine } from "@/lib/sync";
-import { deactivateLocalDatabase } from "@/lib/db";
+import { activateLocalDatabase, deactivateLocalDatabase } from "@/lib/db";
+import { hydrateReferenceCatalogsFromSupabase } from "@/lib/supabaseDirect";
 import { usePathname } from "next/navigation";
 
 import { supabase } from "@/lib/supabase";
@@ -45,7 +45,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 return;
             }
             setIsLocalDataReady(false);
-            await syncEngine.initializeForUser(userId);
+            await activateLocalDatabase(userId);
+            void hydrateReferenceCatalogsFromSupabase();
+            useSyncStore.getState().setLastSyncTime(new Date());
             if (!cancelled) {
                 preparedUserIdRef.current = userId;
                 setIsLocalDataReady(true);
@@ -141,42 +143,6 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     // on EVERY link click, adding ~50-100ms GPU cost per navigation.
     // Navigation feedback is now handled by app/loading.tsx (Suspense boundary)
     // which renders a lightweight progress bar instead.
-
-    // Sync: initial + periodic (5 min) + visibility change (user returns to tab)
-    useEffect(() => {
-        if (isPublicPage || !isLocalDataReady) return;
-
-        // 1. Initial sync on mount
-        const timeoutId = setTimeout(() => {
-            syncEngine.triggerSync('app-mount');
-        }, 50);
-
-        // 2. Periodic sync every 5 minutes
-        const intervalId = setInterval(() => {
-            if (navigator.onLine) {
-                syncEngine.triggerSync('periodic-5m');
-            }
-        }, 5 * 60 * 1000);
-
-        // 3. Sync when user returns to tab (throttled to at most once every 2 minutes to prevent thrashing)
-        let lastVisibilitySync = Date.now();
-        const handleVisibilityChange = () => {
-            if (document.visibilityState === 'visible' && navigator.onLine) {
-                const now = Date.now();
-                if (now - lastVisibilitySync > 2 * 60 * 1000) {
-                    lastVisibilitySync = now;
-                    syncEngine.triggerSync('visibility');
-                }
-            }
-        };
-        document.addEventListener('visibilitychange', handleVisibilityChange);
-
-        return () => {
-            clearTimeout(timeoutId);
-            clearInterval(intervalId);
-            document.removeEventListener('visibilitychange', handleVisibilityChange);
-        };
-    }, [isPublicPage, isLocalDataReady]);
 
     const [isCollapsed, setIsCollapsed] = useState(false);
 

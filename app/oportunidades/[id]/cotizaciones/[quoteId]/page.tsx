@@ -10,6 +10,7 @@ import { QuotePreviewModal } from "@/components/quotes/QuotePreviewModal";
 import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { db, LocalQuote } from "@/lib/db";
+import { hydrateQuoteDetailFromSupabase } from "@/lib/supabaseDirect";
 import { Save, AlertTriangle, Truck, Receipt, Calendar, Search, Plus, Trash2, Loader2, Package, Download, Send, Eye, FileSpreadsheet } from "lucide-react";
 import { ExpandableTextarea } from "@/components/ui/ExpandableTextarea";
 import { cn } from "@/components/ui/utils";
@@ -38,6 +39,11 @@ export default function QuoteEditorPage() {
 
     const { quotes, updateQuote, updateQuoteTotal } = useQuotes(oppId);
     const quote = quotes?.find(q => q.id === quoteId);
+
+    useEffect(() => {
+        if (!quoteId) return;
+        void hydrateQuoteDetailFromSupabase(oppId, quoteId);
+    }, [oppId, quoteId]);
 
     const [activeSection, setActiveSection] = useState<'items' | 'sap'>('items');
     const [isSendModalOpen, setIsSendModalOpen] = useState(false);

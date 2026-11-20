@@ -8,7 +8,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { cn } from "@/components/ui/utils";
 import { toInputDate, toInputDateTime, parseColombiaDate } from "@/lib/date-utils";
 import { db, LocalActivity, LocalActivityClassification, LocalActivitySubclassification, useActiveLocalUserId, useActiveDatabaseVersion } from "@/lib/db";
-import { syncEngine } from "@/lib/sync";
+import { hydrateActivityCatalogsFromSupabase } from "@/lib/supabaseDirect";
 import { supabase } from "@/lib/supabase";
 import { DateTimePicker } from "@/components/ui/DateTimePicker";
 import { useActivities } from "@/lib/hooks/useActivities";
@@ -785,11 +785,10 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         }
     }, [initialData, setValue, onSubmit]); // Fixed dependencies
 
-    // PROACTIVE SYNC: If catalogs are empty, trigger a pull
+    // PROACTIVE LOAD: If catalogs are empty, fetch them directly from Supabase
     useEffect(() => {
         if (classifications.length === 0 && navigator.onLine) {
-            console.log("[CreateActivityModal] Catalogs empty, triggering sync...");
-            syncEngine.triggerSync();
+            void hydrateActivityCatalogsFromSupabase();
         }
     }, [classifications.length]);
 

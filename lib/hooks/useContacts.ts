@@ -1,7 +1,9 @@
 
+import { useEffect } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, LocalContact } from "@/lib/db";
-import { syncEngine } from "@/lib/sync";
+import { executeDirectMutations, fetchRecordDirect, DirectMutationRequest } from "@/lib/supabaseDirect";
+import { supabase } from "@/lib/supabase";
 import { v4 as uuidv4 } from 'uuid';
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { registrarEliminacionFallida } from "@/lib/eliminaciones";
@@ -9,6 +11,33 @@ import { registrarEliminacionFallida } from "@/lib/eliminaciones";
 export function useContacts(accountId?: string) {
     const { user, isAdmin, isCoordinador } = useCurrentUser();
     const userId = user?.id;
+
+    // Direct Supabase fetch for contacts of this account
+    useEffect(() => {
+        if (!accountId || typeof window === 'undefined' || !navigator.onLine) return;
+        if (process.env.NODE_ENV !== 'production' && window.location?.pathname?.startsWith('/e2e/')) return;
+
+        let cancelled = false;
+        const loadContacts = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('CRM_Contactos')
+                    .select('*')
+                    .eq('account_id', accountId)
+                    .eq('is_deleted', false);
+                if (!cancelled && !error && Array.isArray(data) && data.length > 0) {
+                    await db.contacts.bulkPut(data as LocalContact[]);
+                }
+            } catch (err) {
+                console.warn('[useContacts] Direct Supabase load warning:', err);
+            }
+        };
+        void loadContacts();
+        return () => {
+            cancelled = true;
+        };
+    }, [accountId]);
+
     const contacts = useLiveQuery(
         () => accountId
             ? db.contacts.where('account_id').equals(accountId).toArray()
@@ -35,7 +64,7 @@ export function useContacts(accountId?: string) {
         }
 
         const id = uuidv4();
-        const { data: { user } } = await syncEngine.getCurrentUser();
+        const { data: { user: authUser } } = await supabase.auth.getUser();
 
         const newContact: LocalContact = {
             id,
@@ -46,13 +75,13 @@ export function useContacts(accountId?: string) {
             telefono: data.telefono,
             es_principal: data.es_principal || false,
             comentarios: data.comentarios,
-            created_by: user?.id,
-            updated_by: user?.id,
+            created_by: authUser?.id,
+            updated_by: authUser?.id,
             updated_at: new Date().toISOString()
         };
 
-        await syncEngine.commitLocalChanges([db.contacts], async () => {
-            const requests = [];
+        await executeDirectMutations(async () => {
+            const requests: DirectMutationRequest[] = [];
             if (newContact.es_principal) {
                 const previousPrincipals = await db.contacts
                     .where('account_id').equals(newContact.account_id)
@@ -61,11 +90,11 @@ export function useContacts(accountId?: string) {
                 for (const contact of previousPrincipals) {
                     const updated = { ...contact, es_principal: false, updated_at: new Date().toISOString() };
                     await db.contacts.put(updated);
-                    requests.push({ entityTable: 'CRM_Contactos', entityId: contact.id, changes: updated, options: { isSnapshot: true } });
+                    requests.push({ entityTable: 'CRM_Contactos', entityId: contact.id, changes: updated as unknown as Record<string, unknown> });
                 }
             }
-            await db.contacts.add(newContact);
-            requests.push({ entityTable: 'CRM_Contactos', entityId: id, changes: newContact, options: { isSnapshot: true } });
+            await db.contacts.put(newContact);
+            requests.push({ entityTable: 'CRM_Contactos', entityId: id, changes: newContact as unknown as Record<string, unknown> });
             return requests;
         });
         return id;
@@ -73,14 +102,13 @@ export function useContacts(accountId?: string) {
 
     const updateContact = async (id: string, updates: Partial<LocalContact>) => {
         const fullUpdates = { ...updates, updated_at: new Date().toISOString() };
-        
-        // Use db.contacts.get to check local existence, but if not found, we'll still proceed with a PUT
-        await syncEngine.commitLocalChanges([db.contacts], async () => {
-            const currentLocal = await db.contacts.get(id);
+        const currentLocal = (await db.contacts.get(id)) || (await fetchRecordDirect<LocalContact>('CRM_Contactos', id));
+
+        await executeDirectMutations(async () => {
             const record = currentLocal
                 ? { ...currentLocal, ...fullUpdates }
                 : { id, ...fullUpdates } as LocalContact;
-            const requests = [];
+            const requests: DirectMutationRequest[] = [];
 
             if (fullUpdates.es_principal) {
                 const targetAccountId = fullUpdates.account_id || currentLocal?.account_id || accountId;
@@ -92,35 +120,35 @@ export function useContacts(accountId?: string) {
                     for (const contact of previousPrincipals) {
                         const updated = { ...contact, es_principal: false, updated_at: new Date().toISOString() };
                         await db.contacts.put(updated);
-                        requests.push({ entityTable: 'CRM_Contactos', entityId: contact.id, changes: updated, options: { isSnapshot: true } });
+                        requests.push({ entityTable: 'CRM_Contactos', entityId: contact.id, changes: updated as unknown as Record<string, unknown> });
                     }
                 }
             }
 
             await db.contacts.put(record);
-            requests.push({ entityTable: 'CRM_Contactos', entityId: id, changes: record, options: { isSnapshot: true } });
+            requests.push({ entityTable: 'CRM_Contactos', entityId: id, changes: record as unknown as Record<string, unknown> });
             return requests;
         });
     };
 
     const deleteContact = async (id: string) => {
-        const current = await db.contacts.get(id);
+        const current = (await db.contacts.get(id)) || (await fetchRecordDirect<LocalContact>('CRM_Contactos', id));
         if (!current) return;
         try {
-            // Permission Check: admin, coordinador, creador del contacto o dueño/creador de la cuenta
             let isOwner = !!userId && (current as { owner_user_id?: string; created_by?: string }).created_by === userId;
             if (!isOwner && userId && current.account_id) {
-                const acc = await db.accounts.get(current.account_id);
+                const acc = (await db.accounts.get(current.account_id)) || (await fetchRecordDirect<Record<string, unknown>>('CRM_Cuentas', current.account_id));
                 isOwner = !!acc && ((acc as { owner_user_id?: string; created_by?: string }).owner_user_id === userId || (acc as { owner_user_id?: string; created_by?: string }).created_by === userId);
             }
             if (!isAdmin && !isCoordinador && !isOwner) {
                 throw new Error("No tienes permiso para eliminar este contacto");
             }
-            await syncEngine.commitLocalChanges([db.contacts], async () => {
+            await executeDirectMutations(async () => {
                 await db.contacts.delete(id);
                 return [{
-                    entityTable: 'CRM_Contactos', entityId: id,
-                    changes: { ...current, is_deleted: true }, options: { isSnapshot: true }
+                    entityTable: 'CRM_Contactos',
+                    entityId: id,
+                    changes: { ...current, is_deleted: true, updated_at: new Date().toISOString() } as unknown as Record<string, unknown>,
                 }];
             });
         } catch (err) {

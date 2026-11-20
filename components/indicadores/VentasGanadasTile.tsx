@@ -2,8 +2,8 @@
 
 import React, { useMemo, useState, useRef, useEffect } from "react";
 import { useOpportunities } from "@/lib/hooks/useOpportunities";
-import { useLiveQuery } from "dexie-react-hooks";
-import { db } from "@/lib/db";
+import type { LocalPhase } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 import { DollarSign, Calendar as CalendarIcon, TrendingUp, Filter, Check, ChevronDown } from "lucide-react";
 import { cn } from "@/components/ui/utils";
 import { buildPhaseOutcomeMap, getPhaseOutcome } from "@/lib/opportunityPhase";
@@ -22,7 +22,22 @@ export const VentasGanadasTile = () => {
 
     // 2. Fetch opportunities and phases
     const { opportunities } = useOpportunities();
-    const phases = useLiveQuery(() => db.phases.toArray());
+    const [phases, setPhases] = useState<LocalPhase[] | undefined>(undefined);
+
+    useEffect(() => {
+        let cancelled = false;
+        supabase
+            .from("CRM_FasesOportunidad")
+            .select("*")
+            .then(({ data }) => {
+                if (!cancelled && data) {
+                    setPhases(data as LocalPhase[]);
+                }
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     // Ganada = fase "Cerrada ganada" (el resultado se calcula solo por la fase).
     const outcomeMap = useMemo(() => buildPhaseOutcomeMap(phases), [phases]);

@@ -7,7 +7,6 @@ import { useInfiniteScroll } from '@/lib/hooks/useInfiniteScroll';
 import { useDebounce } from '@/lib/hooks/useDebounce';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, getActiveLocalUserId, useActiveDatabaseVersion } from '@/lib/db';
-import { syncEngine } from '@/lib/sync';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { hasPermission } from '@/lib/permissions';
 import {
@@ -698,6 +697,29 @@ function ActivitiesContent() {
         onLoadMore: () => setDisplayLimit(prev => prev + 20),
     });
 
+    // Direct Supabase load when filtering by a specific advisor in /actividades
+    useEffect(() => {
+        if (!filterUser || !canViewAll || typeof navigator === 'undefined' || !navigator.onLine) return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('CRM_Actividades')
+                    .select('*')
+                    .eq('user_id', filterUser)
+                    .eq('is_deleted', false)
+                    .order('updated_at', { ascending: false })
+                    .limit(1000);
+                if (!cancelled && !error && Array.isArray(data) && data.length > 0) {
+                    await db.activities.bulkPut(data as LocalActivity[]);
+                }
+            } catch (err) {
+                console.warn('[ActivitiesPage] Direct advisor activities fetch warning:', err);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [filterUser, canViewAll]);
+
     // JIT Hydration: Cuando las actividades visibles tienen oportunidad o cuenta
     // que no está en la caché local (por ej. registros más antiguos que el límite
     // inicial de 3.000), las consultamos en Supabase y las guardamos en Dexie para
@@ -707,18 +729,18 @@ function ActivitiesContent() {
         const visible = filteredActivities.slice(0, displayLimit);
 
         // 1. Oportunidades faltantes
-        const knownOppIds = new Set((opportunities || []).map(o => o.id));
+        const oppById = new Map((opportunities || []).map(o => [o.id, o]));
         const missingOppIds = Array.from(new Set(
             visible
                 .map(a => a.opportunity_id)
-                .filter((id): id is string => Boolean(id) && !knownOppIds.has(id))
+                .filter((id): id is string => Boolean(id) && !oppById.has(id))
         ));
 
-        // 2. Cuentas faltantes
+        // 2. Cuentas faltantes (directas o de oportunidades conocidas)
         const knownAccIds = new Set((accounts || []).map(a => a.id));
         const missingAccIds = Array.from(new Set(
             visible
-                .map(a => a.account_id)
+                .flatMap(a => [a.account_id, a.opportunity_id ? oppById.get(a.opportunity_id)?.account_id : undefined])
                 .filter((id): id is string => Boolean(id) && !knownAccIds.has(id))
         ));
 

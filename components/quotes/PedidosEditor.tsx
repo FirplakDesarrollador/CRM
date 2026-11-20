@@ -10,7 +10,7 @@ import { cn } from "@/components/ui/utils";
 import { useFormAutoSave } from "@/lib/hooks/useFormAutoSave";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { AutoSaveIndicator } from "@/components/ui/AutoSaveIndicator";
-import { syncEngine } from "@/lib/sync";
+import { executeDirectMutations, fetchRecordDirect } from "@/lib/supabaseDirect";
 import { SendQuoteModal } from "@/components/quotes/SendQuoteModal";
 import { QuotePreviewModal } from "@/components/quotes/QuotePreviewModal";
 import { generateQuotePdf } from "@/lib/pdfGenerator";
@@ -28,14 +28,15 @@ import { normalizeDateToInput, calculateItemAvailableQty, buildMaxSelectedQuanti
 const PEDIDO_WIZARD_LAST_STEP = 2;
 
 async function persistQuotePedidoFields(quoteId: string, updates: Partial<LocalQuote>) {
-    await syncEngine.commitLocalChanges([db.quotes], async () => {
-        const current = await db.quotes.get(quoteId);
-        if (!current) throw new Error('La cotización ya no existe en los datos locales.');
+    const current = (await db.quotes.get(quoteId)) || (await fetchRecordDirect<LocalQuote>('CRM_Cotizaciones', quoteId));
+    if (!current) throw new Error('La cotización ya no existe.');
+    await executeDirectMutations(async () => {
         const merged = { ...current, ...updates, updated_at: new Date().toISOString() };
         await db.quotes.put(merged);
         return [{
-            entityTable: 'CRM_Cotizaciones', entityId: quoteId, changes: merged,
-            options: { isSnapshot: true }
+            entityTable: 'CRM_Cotizaciones',
+            entityId: quoteId,
+            changes: merged as unknown as Record<string, unknown>,
         }];
     });
 }

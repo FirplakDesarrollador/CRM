@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { isSellerRole, sellerCanSeeActivity } from '@/lib/sellerVisibility';
 import { supabase } from '@/lib/supabase';
-import { syncEngine } from '@/lib/sync';
 import { db } from '@/lib/db';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { matchesSearchTokens, getSearchTokens, accentInsensitiveCondition } from '@/lib/utils';

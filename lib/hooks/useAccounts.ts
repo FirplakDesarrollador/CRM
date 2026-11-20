@@ -1,6 +1,6 @@
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, LocalContact, LocalCuenta, LocalOportunidad } from "@/lib/db";
-import { syncEngine } from "@/lib/sync";
+import { executeDirectMutations, fetchRecordDirect } from "@/lib/supabaseDirect";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
@@ -104,18 +104,20 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
             };
         }
 
-        await syncEngine.commitLocalChanges([db.accounts, db.contacts], async () => {
-            await db.accounts.add(newAccount as LocalCuenta);
-            if (contactData) await db.contacts.add(contactData);
+        await executeDirectMutations(async () => {
+            await db.accounts.put(newAccount as LocalCuenta);
+            if (contactData) await db.contacts.put(contactData);
 
             return [
                 {
-                    entityTable: 'CRM_Cuentas', entityId: id, changes: newAccount,
-                    options: { isSnapshot: true }
+                    entityTable: 'CRM_Cuentas',
+                    entityId: id,
+                    changes: newAccount as unknown as Record<string, unknown>,
                 },
                 ...(contactData ? [{
-                    entityTable: 'CRM_Contactos', entityId: contactData.id, changes: contactData,
-                    options: { isSnapshot: true }
+                    entityTable: 'CRM_Contactos' as const,
+                    entityId: contactData.id,
+                    changes: contactData as unknown as Record<string, unknown>,
                 }] : [])
             ];
         });
@@ -218,7 +220,7 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
             }
         }
 
-        await syncEngine.commitLocalChanges([db.accounts, db.opportunities], async () => {
+        await executeDirectMutations(async () => {
             await db.accounts.update(id, fullUpdates);
             const mergedRecord = { ...currentLocal, ...fullUpdates } as LocalCuenta;
 
@@ -229,7 +231,6 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
                         updated_at: fullUpdates.updated_at
                     });
 
-                    // Dispatch optimistic update event for active views
                     if (typeof window !== 'undefined') {
                         window.dispatchEvent(new CustomEvent('crm-optimistic-update', {
                             detail: {
@@ -244,21 +245,23 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
 
             return [
                 {
-                    entityTable: 'CRM_Cuentas', entityId: id, changes: mergedRecord,
-                    options: { isSnapshot: true }
+                    entityTable: 'CRM_Cuentas',
+                    entityId: id,
+                    changes: mergedRecord as unknown as Record<string, unknown>,
                 },
                 ...oppUpdates.map(opp => ({
-                    entityTable: 'CRM_Oportunidades', entityId: opp.id, changes: sanitizeOpportunityForSync(opp),
-                    options: { isSnapshot: true }
+                    entityTable: 'CRM_Oportunidades' as const,
+                    entityId: opp.id,
+                    changes: sanitizeOpportunityForSync(opp),
                 }))
             ];
         });
     };
 
     const deleteAccount = async (id: string) => {
-        console.log('[useAccounts] deleteAccount - Starting Local-First cascade delete for:', id);
+        console.log('[useAccounts] deleteAccount - Starting direct cascade delete for:', id);
 
-        const currentAccount = await db.accounts.get(id);
+        const currentAccount = (await db.accounts.get(id)) || (await fetchRecordDirect<LocalCuenta>('CRM_Cuentas', id));
         if (!currentAccount) return;
 
         try {
@@ -268,7 +271,7 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
             throw new Error("No tienes permiso para eliminar esta cuenta");
         }
 
-        // 1. Gather all local child entities from Dexie
+        // 1. Gather all local child entities
         const contacts = await db.contacts.where('account_id').equals(id).toArray();
         const opportunities = await db.opportunities.where('account_id').equals(id).toArray();
         const oppIds = opportunities.map(o => o.id);
@@ -297,17 +300,8 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
             throw new Error("Esta cuenta tiene oportunidades con pedidos. Solo un administrador o coordinador puede eliminarla.");
         }
 
-        // 2. Delete local records and queue every server tombstone atomically.
-        await syncEngine.commitLocalChanges([
-            db.accounts,
-            db.contacts,
-            db.opportunities,
-            db.quotes,
-            db.quoteItems,
-            db.activities,
-            db.pedidos,
-            db.pedidoItems
-        ], async () => {
+        // 2. Delete local records and execute every server soft-delete directly in Supabase.
+        await executeDirectMutations(async () => {
             await db.accounts.delete(id);
             if (contacts.length > 0) await db.contacts.where('account_id').equals(id).delete();
             if (oppIds.length > 0) {
@@ -322,17 +316,17 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
             }
 
             return [
-                { entityTable: 'CRM_Cuentas', entityId: id, changes: { ...currentAccount, is_deleted: true }, options: { isSnapshot: true } },
-                ...contacts.map(contact => ({ entityTable: 'CRM_Contactos', entityId: contact.id, changes: { ...contact, is_deleted: true }, options: { isSnapshot: true } })),
-                ...opportunities.map(opp => ({ entityTable: 'CRM_Oportunidades', entityId: opp.id, changes: { ...opp, is_deleted: true }, options: { isSnapshot: true } })),
-                ...quotes.map(quote => ({ entityTable: 'CRM_Cotizaciones', entityId: quote.id, changes: { ...quote, is_deleted: true }, options: { isSnapshot: true } })),
+                { entityTable: 'CRM_Cuentas', entityId: id, changes: { ...currentAccount, is_deleted: true } as unknown as Record<string, unknown> },
+                ...contacts.map(contact => ({ entityTable: 'CRM_Contactos' as const, entityId: contact.id, changes: { ...contact, is_deleted: true } as unknown as Record<string, unknown> })),
+                ...opportunities.map(opp => ({ entityTable: 'CRM_Oportunidades' as const, entityId: opp.id, changes: sanitizeOpportunityForSync({ ...opp, is_deleted: true }) })),
+                ...quotes.map(quote => ({ entityTable: 'CRM_Cotizaciones' as const, entityId: quote.id, changes: { ...quote, is_deleted: true } as unknown as Record<string, unknown> })),
                 ...quoteItems.map(item => {
                     const { subtotal, ...itemData } = item;
-                    return { entityTable: 'CRM_CotizacionItems', entityId: item.id, changes: { ...itemData, is_deleted: true }, options: { isSnapshot: true } };
+                    return { entityTable: 'CRM_CotizacionItems' as const, entityId: item.id, changes: { ...itemData, is_deleted: true } as unknown as Record<string, unknown> };
                 }),
-                ...activities.map(act => ({ entityTable: 'CRM_Actividades', entityId: act.id, changes: { ...act, is_deleted: true }, options: { isSnapshot: true } })),
-                ...pedidos.map(ped => ({ entityTable: 'CRM_Pedidos', entityId: ped.uuid_generado, changes: { ...ped, is_deleted: true }, options: { isSnapshot: true } })),
-                ...pedidoItems.map(pItem => ({ entityTable: 'CRM_PedidoItems', entityId: pItem.id, changes: { ...pItem, is_deleted: true }, options: { isSnapshot: true } }))
+                ...activities.map(act => ({ entityTable: 'CRM_Actividades' as const, entityId: act.id, changes: { ...act, is_deleted: true } as unknown as Record<string, unknown> })),
+                ...pedidos.map(ped => ({ entityTable: 'CRM_Pedidos' as const, entityId: ped.uuid_generado, changes: { ...ped, is_deleted: true } as unknown as Record<string, unknown> })),
+                ...pedidoItems.map(pItem => ({ entityTable: 'CRM_PedidoItems' as const, entityId: pItem.id, changes: { ...pItem, is_deleted: true } as unknown as Record<string, unknown> }))
             ];
         });
         } catch (err) {
@@ -340,7 +334,7 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
             throw err;
         }
 
-        console.log('[useAccounts] All server mutations queued successfully for offline delete.');
+        console.log('[useAccounts] All server mutations persisted directly to Supabase.');
     };
 
     return {

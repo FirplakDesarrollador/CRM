@@ -6,7 +6,6 @@ import { formatCurrency } from "@/lib/utils";
 import { Loader2, TrendingUp, AlertCircle, ChevronRight, BarChart2, RefreshCw } from "lucide-react";
 import ReactECharts from "echarts-for-react";
 import { useSyncStore } from "@/lib/stores/useSyncStore";
-import { syncEngine } from "@/lib/sync";
 
 interface SalesFunnelTileProps {
     filters?: SalesFunnelFilters;
@@ -24,8 +23,6 @@ export function SalesFunnelTile({ filters }: SalesFunnelTileProps) {
 
     const handleRefresh = async () => {
         setIsRefreshing(true);
-        // Trigger a full sync and then revalidate the funnel data
-        await syncEngine.triggerSync();
         await mutate();
         setIsRefreshing(false);
     };

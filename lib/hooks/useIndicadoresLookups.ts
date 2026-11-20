@@ -1,8 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useLiveQuery } from "dexie-react-hooks";
-import { db } from "@/lib/db";
+import type {
+    LocalPhase,
+    LocalSubclasificacion,
+    LocalSegment,
+    LocalActivityClassification,
+} from "@/lib/db";
 import { supabase } from "@/lib/supabase";
 import { useUsers } from "@/lib/hooks/useUsers";
 
@@ -25,23 +29,35 @@ export interface IndicadoresAccountInfo {
  * embedded Power BI iframe.
  */
 export function useIndicadoresLookups() {
-    const phases = useLiveQuery(() => db.phases.toArray());
-    const subclasificaciones = useLiveQuery(() => db.subclasificaciones.toArray());
-    const segments = useLiveQuery(() => db.segments.toArray());
-    const accounts = useLiveQuery(() => db.accounts.toArray());
-    const activityClassifications = useLiveQuery(() => db.activityClassifications.toArray());
+    const [phases, setPhases] = useState<LocalPhase[]>([]);
+    const [subclasificaciones, setSubclasificaciones] = useState<LocalSubclasificacion[]>([]);
+    const [segments, setSegments] = useState<LocalSegment[]>([]);
+    const [accounts, setAccounts] = useState<Array<{ id: string } & IndicadoresAccountInfo>>([]);
+    const [activityClassifications, setActivityClassifications] = useState<LocalActivityClassification[]>([]);
     const { users, isLoading: isLoadingUsers } = useUsers();
 
     const [channels, setChannels] = useState<IndicadoresChannel[]>([]);
     useEffect(() => {
         let active = true;
-        supabase
-            .from("CRM_Canales")
-            .select("id, nombre")
-            .order("nombre")
-            .then(({ data }) => {
-                if (active && data) setChannels(data as IndicadoresChannel[]);
-            });
+        Promise.all([
+            supabase.from("CRM_Canales").select("id, nombre").order("nombre"),
+            supabase.from("CRM_FasesOportunidad").select("*"),
+            supabase.from("CRM_Subclasificacion").select("*"),
+            supabase.from("CRM_Segmentos").select("*"),
+            supabase.from("CRM_ClasificacionesActividad").select("*"),
+            supabase
+                .from("CRM_Cuentas")
+                .select("id, canal_id, subclasificacion_id, departamento_id, owner_user_id, nombre")
+                .eq("is_deleted", false),
+        ]).then(([channelsRes, phasesRes, subclasRes, segmentsRes, actClassRes, accountsRes]) => {
+            if (!active) return;
+            if (channelsRes.data) setChannels(channelsRes.data as IndicadoresChannel[]);
+            if (phasesRes.data) setPhases(phasesRes.data as LocalPhase[]);
+            if (subclasRes.data) setSubclasificaciones(subclasRes.data as LocalSubclasificacion[]);
+            if (segmentsRes.data) setSegments(segmentsRes.data as LocalSegment[]);
+            if (actClassRes.data) setActivityClassifications(actClassRes.data as LocalActivityClassification[]);
+            if (accountsRes.data) setAccounts(accountsRes.data as Array<{ id: string } & IndicadoresAccountInfo>);
+        });
         return () => {
             active = false;
         };

@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { sellerCanSeeAccount } from '@/lib/sellerVisibility';
 import { supabase } from '@/lib/supabase';
-import { syncEngine } from '@/lib/sync';
 import { db } from '@/lib/db';
 import { buildPhaseOutcomeMap, getPhaseOutcome } from '@/lib/opportunityPhase';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';

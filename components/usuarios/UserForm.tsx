@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -9,9 +9,8 @@ import { X, Loader2 } from 'lucide-react';
 import { MultiSelect } from '@/components/ui/MultiSelect';
 import { SALES_CHANNELS } from '@/lib/salesChannels';
 import { userSchema, UserFormData } from '@/lib/userValidation';
-
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '@/lib/db';
+import { supabase } from '@/lib/supabase';
+import type { LocalCountry, LocalDepartment } from '@/lib/db';
 
 export { userSchema };
 export type { UserFormData };
@@ -40,8 +39,23 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    const countriesList = useLiveQuery(() => db.countries.toArray()) || [];
-    const departmentsList = useLiveQuery(() => db.departments.toArray()) || [];
+    const [countriesList, setCountriesList] = useState<LocalCountry[]>([]);
+    const [departmentsList, setDepartmentsList] = useState<LocalDepartment[]>([]);
+
+    useEffect(() => {
+        let cancelled = false;
+        Promise.all([
+            supabase.from('CRM_Paises').select('*').order('nombre'),
+            supabase.from('CRM_Departamentos').select('*').order('nombre'),
+        ]).then(([countriesRes, deptsRes]) => {
+            if (cancelled) return;
+            if (countriesRes.data) setCountriesList(countriesRes.data as LocalCountry[]);
+            if (deptsRes.data) setDepartmentsList(deptsRes.data as LocalDepartment[]);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     const countryOptions = countriesList.map(c => ({ label: c.nombre, value: String(c.id) }));
     const channelOptions = SALES_CHANNELS.map(c => ({ label: c.nombre, value: c.id }));

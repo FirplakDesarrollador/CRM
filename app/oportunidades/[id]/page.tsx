@@ -10,7 +10,7 @@ import Link from "next/link";
 import { cn, formatNumberCO, formatOpportunityAmount } from "@/lib/utils";
 import { db, LocalCuenta } from "@/lib/db";
 import { ProbabilityDonut } from "@/components/ui/ProbabilityDonut";
-import { syncEngine } from "@/lib/sync";
+import { hydrateActivityCatalogsFromSupabase, hydrateOpportunityDetailFromSupabase } from "@/lib/supabaseDirect";
 import { useLiveQuery } from "dexie-react-hooks";
 import { formatColombiaDate, formatColombiaDateTime, isDateOverdue, toInputDate } from "@/lib/date-utils";
 import {
@@ -59,73 +59,53 @@ export default function OpportunityDetailPage() {
     const [serverOpportunity, setServerOpportunity] = useState<any>(null);
     const [isFetchingServer, setIsFetchingServer] = useState(false);
 
-    // Fallback: If not found locally, try to fetch from server (JIT Sync)
+    // Direct Supabase load for opportunity detail, account, contacts, collaborators, quotes and items
     useEffect(() => {
+        if (!id) return;
+        let cancelled = false;
+
         const fetchFromServer = async () => {
-            if (opportunities && !opportunity && !isFetchingServer && !serverOpportunity) {
-                if (!navigator.onLine) {
-                    console.warn(`[JIT Sync] Offline: Cannot fetch opportunity ${id}`);
-                    setServerOpportunity('NOT_FOUND');
-                    return;
-                }
-                console.log(`[JIT Sync] Opportunity ${id} not found locally. Fetching from server...`);
-                setIsFetchingServer(true);
-                setIsLoadingData(true);
-                try {
-                    // Fetch Opportunity
-                    const { data: oppData, error: oppError } = await supabase
-                        .from('CRM_Oportunidades')
-                        .select('*')
-                        .eq('id', id)
-                        .single();
+            if (!navigator.onLine) {
+                if (!opportunity) setServerOpportunity('NOT_FOUND');
+                return;
+            }
+            setIsFetchingServer(true);
+            setIsLoadingData(true);
+            try {
+                const { oppData, collaborators } = await hydrateOpportunityDetailFromSupabase(id);
+                if (cancelled) return;
 
-                    if (oppData && !oppError) {
-                        console.log(`[JIT Sync] Found opportunity on server. Saving locally...`);
-                        await db.opportunities.put(oppData);
-
-                        // Fetch Collaborators (Defensive)
-                        let isCollab = false;
-                        try {
-                            const { data: collabs, error: collabsError } = await supabase
-                                .from('CRM_Oportunidades_Colaboradores')
-                                .select('*')
-                                .eq('oportunidad_id', id);
-
-                            if (collabs && !collabsError) {
-                                await db.opportunityCollaborators.bulkPut(collabs);
-                                isCollab = collabs.some(c => c.usuario_id === currentUser?.id && !c.is_deleted);
-                            }
-                        } catch (err) {
-                            console.warn("Could not fetch collaborators from server (table might be missing):", err);
+                if (oppData) {
+                    const isCollab = collaborators.some(
+                        (c) => c.usuario_id === currentUser?.id && !c.is_deleted
+                    );
+                    if (userRole === 'VENDEDOR' && currentUser?.id) {
+                        const isOwner = oppData.owner_user_id === currentUser.id;
+                        if (!isOwner && !isCollab) {
+                            setServerOpportunity('UNAUTHORIZED');
+                            return;
                         }
-
-                        if (userRole === 'VENDEDOR') {
-                            // Asesor: solo dueño o colaborador (crear la oportunidad para otro no da acceso).
-                            const isOwner = oppData.owner_user_id === currentUser?.id;
-                            if (!isOwner && !isCollab) {
-                                setServerOpportunity('UNAUTHORIZED');
-                                return;
-                            }
-                        }
-
-                        setServerOpportunity('FOUND_AND_SAVED');
-
-                    } else if (oppError) {
-                        console.warn(`[JIT Sync] Opportunity not found on server either:`, oppError.message);
-                        setServerOpportunity('NOT_FOUND');
                     }
-                } catch (err) {
-                    console.error(`[JIT Sync] Error fetching opportunity:`, err);
+                    setServerOpportunity('FOUND_AND_SAVED');
+                } else if (!opportunity) {
                     setServerOpportunity('NOT_FOUND');
-                } finally {
+                }
+            } catch (err) {
+                console.error('[OpportunityDetail] Error fetching opportunity:', err);
+                if (!cancelled && !opportunity) setServerOpportunity('NOT_FOUND');
+            } finally {
+                if (!cancelled) {
                     setIsFetchingServer(false);
                     setIsLoadingData(false);
                 }
             }
         };
 
-        fetchFromServer();
-    }, [id, opportunity, opportunities, isFetchingServer, serverOpportunity]);
+        void fetchFromServer();
+        return () => {
+            cancelled = true;
+        };
+    }, [id, currentUser?.id, userRole]);
 
     const searchParams = useSearchParams();
     const initialTab = searchParams.get('tab') as any;
@@ -1930,11 +1910,10 @@ function ActivitiesTab({ opportunityId, accountId }: { opportunityId: string, ac
     const classifications = useLiveQuery(() => db.activityClassifications.toArray().then(arr => arr.filter(c => !c.is_deleted)), []) || [];
     const subclassifications = useLiveQuery(() => db.activitySubclassifications.toArray().then(arr => arr.filter(s => !s.is_deleted)), []) || [];
 
-    // PROACTIVE SYNC: If catalogs are empty, trigger a pull
+    // PROACTIVE LOAD: If catalogs are empty, fetch them directly from Supabase
     useEffect(() => {
         if (classifications.length === 0 && navigator.onLine) {
-            console.log("[ActivitiesTab] Catalogs empty, triggering sync...");
-            syncEngine.triggerSync();
+            void hydrateActivityCatalogsFromSupabase();
         }
     }, [classifications.length]);
 

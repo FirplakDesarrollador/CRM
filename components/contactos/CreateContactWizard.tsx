@@ -5,8 +5,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { useContacts } from "@/lib/hooks/useContacts";
-import { db, LocalContact } from "@/lib/db";
-import { useLiveQuery } from "dexie-react-hooks";
+import { supabase } from "@/lib/supabase";
 import { User, Phone, Mail, ChevronRight, Check, Loader2 } from "lucide-react";
 import { cn } from "@/components/ui/utils";
 
@@ -38,7 +37,28 @@ export function CreateContactWizard({ accountId, onSuccess, onCancel }: CreateCo
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [canSubmitFinalStep, setCanSubmitFinalStep] = useState(false);
 
-    const account = useLiveQuery(() => db.accounts.get(accountId), [accountId]);
+    const [account, setAccount] = useState<{ id: string; nombre: string } | undefined>(undefined);
+
+    useEffect(() => {
+        if (!accountId) {
+            setAccount(undefined);
+            return;
+        }
+        let cancelled = false;
+        supabase
+            .from('CRM_Cuentas')
+            .select('id, nombre')
+            .eq('id', accountId)
+            .maybeSingle()
+            .then(({ data }) => {
+                if (!cancelled) {
+                    setAccount((data as { id: string; nombre: string }) || undefined);
+                }
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [accountId]);
 
     const form = useForm<ContactFormData>({
         resolver: zodResolver(contactSchema),

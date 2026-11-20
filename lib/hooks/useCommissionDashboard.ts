@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { fetchPhaseIdsByOutcome, openPhaseOrCondition } from '@/lib/opportunityPhaseQueries';
-import { syncEngine } from '@/lib/sync';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 
 export type CommissionSummary = {
@@ -45,7 +44,7 @@ export function useCommissionDashboard() {
     const [dateTo, setDateTo] = useState<string | null>(null);
 
     useEffect(() => {
-        syncEngine.getCurrentUser().then(({ data: { user } }) => {
+        supabase.auth.getUser().then(({ data: { user } }) => {
             if (user) setCurrentUserId(user.id);
         });
     }, []);

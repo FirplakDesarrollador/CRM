@@ -3,6 +3,79 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-11-19 - Fase 4 Desmontaje de Base de Datos Local: Modales, Formularios de Contacto/Usuario, Indicadores y Notificaciones Directos a Supabase
+
+- **Requerimiento:** Completar la Fase 4 migrando los componentes y hooks restantes (`LossReasonModal`, `ContactForm`, `CreateContactWizard`, `UserForm`, `useIndicadoresLookups`, `VentasGanadasTile` y `useNotifications`) a consultas directas a Supabase sin usar `dexie-react-hooks` ni `db.*` (sin subir a `main`).
+- **Cambios Implementados:**
+  1. **`components/oportunidades/LossReasonModal.tsx`:** Carga directa de `CRM_RazonesPerdida` desde Supabase al abrir el modal (`isOpen`), eliminando `useLiveQuery` y `db.lossReasons`.
+  2. **`components/contactos/ContactForm.tsx`:** Consulta directa a `CRM_Cuentas` para verificar permisos de eliminación (`owner_user_id`, `created_by`) y verificación de duplicados directa contra `CRM_Contactos` en Supabase, eliminando `useLiveQuery` y `db`.
+  3. **`components/contactos/CreateContactWizard.tsx`:** Carga directa del nombre de la cuenta (`CRM_Cuentas`) desde Supabase por `accountId`, eliminando `useLiveQuery` y `db.accounts`.
+  4. **`components/usuarios/UserForm.tsx`:** Carga directa de `CRM_Paises` y `CRM_Departamentos` desde Supabase, eliminando `useLiveQuery` y `db.countries` / `db.departments`.
+  5. **`lib/hooks/useIndicadoresLookups.ts`:** Carga directa de `CRM_Canales`, `CRM_FasesOportunidad`, `CRM_Subclasificacion`, `CRM_Segmentos`, `CRM_ClasificacionesActividad` y `CRM_Cuentas` desde Supabase, eliminando `useLiveQuery` y `db`.
+  6. **`components/indicadores/VentasGanadasTile.tsx`:** Carga directa de `CRM_FasesOportunidad` desde Supabase, eliminando `useLiveQuery` y `db.phases`.
+  7. **`lib/hooks/useNotifications.ts`:** Consulta puntual a `CRM_Actividades` en Supabase para los `entity_id` de notificaciones `ACTIVITY_OVERDUE`, eliminando `useLiveQuery` y `db.activities`.
+  8. **Pruebas y Verificación:**
+     - Se amplió [`tests/supabaseDirectHooks.test.ts`](file:///c:/Users/analista2.desarrollo/Desktop/apps/CRM/tests/supabaseDirectHooks.test.ts) (7/7 pasadas, ciclo RED $\rightarrow$ GREEN).
+     - Se ejecutaron 54 pruebas relacionadas (`lib/actividadesUi.test.ts`, `lib/serverHydration.test.ts`, `tests/userValidation.test.ts`, `tests/opportunityTableFilters.test.ts`, `tests/opportunityIdFilter.test.ts`) en GREEN.
+- **Páginas afectadas:** `wiki/pages/sincronizacion-offline.md`, `wiki/LOG.md`.
+
+## 2026-11-19 - Fase 3 Desmontaje de Base de Datos Local: Páginas de Detalle y Gestión Directas desde Supabase
+
+- **Requerimiento:** Continuar con la Fase 3 asegurando que las páginas de detalle de Oportunidad, Cotización, Pedidos, Sucursales de Cuenta y Actividades carguen sus registros y relaciones directamente desde Supabase (sin subir a `main`).
+- **Cambios Implementados:**
+  1. **Cargadores de Detalle y Módulos en `lib/supabaseDirect.ts`:**
+     - `hydrateOpportunityDetailFromSupabase(opportunityId)`: carga directamente de Supabase la oportunidad (`CRM_Oportunidades`), su cuenta (`CRM_Cuentas`), contactos (`CRM_Contactos`), colaboradores (`CRM_Oportunidades_Colaboradores`), cotizaciones (`CRM_Cotizaciones`) e ítems (`CRM_CotizacionItems`).
+     - `hydrateQuoteDetailFromSupabase(opportunityId, quoteId)`: carga directamente la cotización, sus ítems, pedidos e ítems de pedido asociados, además de la oportunidad y cuenta padre.
+     - `hydratePedidosModuleFromSupabase()`: carga directamente `CRM_Pedidos`, `CRM_PedidoItems` y sus cotizaciones y oportunidades vinculadas para la vista `/pedidos`.
+  2. **Páginas y Componentes Conectados:**
+     - `app/oportunidades/[id]/page.tsx`: invoca `hydrateOpportunityDetailFromSupabase(id)` siempre al montar o cambiar de `id`.
+     - `app/oportunidades/[id]/cotizaciones/[quoteId]/page.tsx`: invoca `hydrateQuoteDetailFromSupabase(oppId, quoteId)` al montar o cambiar de cotización.
+     - `app/pedidos/page.tsx`: invoca `hydratePedidosModuleFromSupabase()` al montar la vista.
+     - `components/cuentas/AccountBranchesTab.tsx`: migrado a consulta directa de `CRM_Cuentas` (`eq('id_cuenta_principal', accountId)`) en Supabase con `useState` + `useEffect`, eliminando por completo `dexie-react-hooks` y `@/lib/db`.
+     - `app/actividades/page.tsx`: carga directa de `CRM_Actividades` al filtrar por asesor (`filterUser`) y resolución de cuentas de oportunidades vinculadas.
+  3. **Pruebas y Verificación:**
+     - Se amplió [`tests/supabaseDirectHooks.test.ts`](file:///c:/Users/analista2.desarrollo/Desktop/apps/CRM/tests/supabaseDirectHooks.test.ts) (6/6 pasadas, ciclo RED $\rightarrow$ GREEN).
+     - Se ejecutaron 53 pruebas relacionadas (`lib/actividadesUi.test.ts`, `lib/serverHydration.test.ts`, `pruebas unitarias/pedidoFormalization.test.ts`, `tests/opportunityTableFilters.test.ts`, `tests/opportunityIdFilter.test.ts`) en GREEN.
+- **Páginas afectadas:** `wiki/pages/sincronizacion-offline.md`, `wiki/LOG.md`.
+
+## 2026-11-19 - Fase 2 Desmontaje de Base de Datos Local: Desconexión de SyncEngine en AppLayout, Modales, Comboboxes y Pestañas
+
+- **Requerimiento:** Continuar con la Fase 2 del desmontaje de la base de datos local desconectando `syncEngine` de los formularios, comboboxes, pestañas de detalle y el bucle periódico de `AppLayout.tsx` (sin subir a `main`).
+- **Cambios Implementados:**
+  1. **Hidratación Directa de Catálogos (`lib/supabaseDirect.ts`):**
+     - Se agregaron `hydrateActivityCatalogsFromSupabase()` y `hydrateReferenceCatalogsFromSupabase()` para cargar catálogos de referencia (`CRM_FasesOportunidad`, `CRM_Subclasificacion`, `CRM_Segmentos`, `CRM_Paises`, `CRM_Departamentos`, `CRM_Ciudades`, `CRM_RazonesPerdida`, `CRM_ClasificacionesActividad` y `CRM_SubclasificacionesActividad`) directamente desde Supabase sin disparar `syncEngine.triggerSync()`.
+  2. **Apagado del Bucle de Sincronización en `components/layout/AppLayout.tsx`:**
+     - Se eliminaron `syncEngine.initializeForUser` y el bucle de polling (`app-mount`, `periodic-5m`, `visibility`). Al iniciar sesión, solo se activa el contexto del usuario y se hidratan los catálogos de referencia directamente desde Supabase.
+  3. **Formularios, Modales, Comboboxes y Pestañas Migrados a Supabase Directo:**
+     - `components/oportunidades/CollaboratorsTab.tsx`: carga directa de `CRM_Oportunidades_Colaboradores` desde Supabase y guardado con `executeDirectMutations`.
+     - `components/quotes/PedidosEditor.tsx`: `persistQuotePedidoFields` persiste directamente en `CRM_Cotizaciones` mediante `executeDirectMutations` y `fetchRecordDirect`.
+     - `components/opportunities/OpportunityCombobox.tsx` y `components/accounts/AccountCombobox.tsx`: resolución directa por ID contra `CRM_Oportunidades` y `CRM_Cuentas` en Supabase (eliminada dependencia de `@/lib/db` en `OpportunityCombobox`).
+     - `components/activities/CreateActivityModal.tsx`, `app/oportunidades/[id]/page.tsx` y `app/actividades/page.tsx`: reemplazado `syncEngine.triggerSync()` por `hydrateActivityCatalogsFromSupabase()`.
+     - `components/dashboard/SalesFunnelTile.tsx`, `lib/hooks/useCommissionDashboard.ts`, `lib/hooks/useCommissionLedger.ts`, `lib/hooks/useAccountsServer.ts` y `lib/hooks/useActivitiesServer.ts`: eliminadas todas las referencias a `syncEngine`.
+  4. **Pruebas y Verificación:**
+     - Se amplió [`tests/supabaseDirectHooks.test.ts`](file:///c:/Users/analista2.desarrollo/Desktop/apps/CRM/tests/supabaseDirectHooks.test.ts) (5/5 pasadas, ciclo RED $\rightarrow$ GREEN).
+     - Se ejecutaron 48 pruebas relacionadas (`lib/actividadesUi.test.ts`, `lib/serverHydration.test.ts`, `pruebas unitarias/pedidoFormalization.test.ts`, `tests/opportunityTableFilters.test.ts`) en GREEN.
+- **Páginas afectadas:** `wiki/pages/sincronizacion-offline.md`, `wiki/LOG.md`.
+
+## 2026-11-19 - Fase 1 Desmontaje de Base de Datos Local: Hooks de Lectura y Escritura Directa a Supabase
+
+- **Requerimiento:** Iniciar la eliminación de la dependencia en la base de datos local (IndexedDB / Outbox) migrando los hooks principales de lectura y escritura para que operen directamente contra Supabase (sin subir a `main` todavía).
+- **Cambios Implementados:**
+  1. **Módulo de Ejecución Directa (`lib/supabaseDirect.ts`):**
+     - `TABLE_COLUMNS`: lista blanca exacta de columnas escribibles en PostgreSQL para `CRM_Actividades`, `CRM_Cotizaciones`, `CRM_CotizacionItems`, `CRM_Oportunidades`, `CRM_Oportunidades_Colaboradores`, `CRM_Contactos`, `CRM_Cuentas`, `CRM_Pedidos`, `CRM_PedidoItems` y `CRM_SapIntegrationQueue`.
+     - `sanitizeTablePayload`: filtra columnas generadas (`subtotal` en `CRM_CotizacionItems`), llaves seriales (`id` en `CRM_Pedidos`) y banderas solo-UI (`is_winner`, `is_child`), y convierte fechas vacías `""` en `null`.
+     - `executeDirectMutations` y `fetchRecordDirect`: persisten y consultan directamente en Supabase sin pasar por `db.outbox` ni `syncEngine.commitLocalChanges`.
+  2. **Hooks Migrados a Supabase Directo:**
+     - `lib/hooks/useActivities.ts`: consulta `CRM_Actividades` directo de Supabase según el filtro activo y persiste `createActivity`, `updateActivity`, `toggleComplete` y `deleteActivity` directamente en Supabase.
+     - `lib/hooks/useOpportunities.ts` (`useOpportunities`, `useQuotes`, `useQuoteItems`): carga directa desde `CRM_Cotizaciones` y `CRM_CotizacionItems`, y guardado directo en Supabase para oportunidades, cotizaciones, ítems y cola SAP.
+     - `lib/hooks/useContacts.ts`: carga directa desde `CRM_Contactos` por `account_id` y CRUD directo en Supabase.
+     - `lib/hooks/usePedidos.ts`: carga directa desde `CRM_Pedidos` y `CRM_PedidoItems` por `cotizacion_id` y CRUD directo en Supabase.
+     - `lib/hooks/useAccounts.ts`: CRUD y borrado en cascada directo contra Supabase.
+  3. **Pruebas y Verificación:**
+     - Se creó [`tests/supabaseDirectHooks.test.ts`](file:///c:/Users/analista2.desarrollo/Desktop/apps/CRM/tests/supabaseDirectHooks.test.ts) (4/4 pasadas, verificadas en ciclo RED $\rightarrow$ GREEN).
+     - Se ejecutaron 49 pruebas relacionadas (`lib/actividadesUi.test.ts`, `lib/serverHydration.test.ts`, `tests/opportunityTableFilters.test.ts`, `tests/opportunityIdFilter.test.ts`) en GREEN.
+- **Páginas afectadas:** `wiki/pages/sincronizacion-offline.md`, `wiki/LOG.md`.
+
 ## 2026-11-18 - Lista Desplegable de Asignación de Usuario al Programar Actividad
 
 - **Requerimiento:** Agregar en el modal «Programar Actividad» (`CreateActivityModal.tsx`) una lista desplegable con los usuarios activos de la plataforma para elegir a qué usuario se le asignará la actividad, apareciendo seleccionado por defecto el usuario logueado.

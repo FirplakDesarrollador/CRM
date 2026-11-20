@@ -3,7 +3,6 @@
 import * as React from "react";
 import { Check, ChevronsUpDown, Loader2, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { db } from "@/lib/db";
 import { supabase } from "@/lib/supabase";
 import { useOpportunitiesServer } from "@/lib/hooks/useOpportunitiesServer";
 import {
@@ -101,18 +100,11 @@ export function OpportunityCombobox({
             return;
         }
 
-        // 3. Fallback to Dexie local DB
+        // 3. Direct Supabase lookup by ID
         let isCancelled = false;
         (async () => {
             try {
-                const local = await db.opportunities.get(currentId);
-                if (isCancelled) return;
-                if (local?.nombre) {
-                    setResolvedName(local.nombre);
-                    return;
-                }
                 if (typeof navigator !== 'undefined' && navigator.onLine) {
-                    // 4. Fallback to Supabase JIT query
                     const { data } = await supabase
                         .from('CRM_Oportunidades')
                         .select('id, nombre')
@@ -122,7 +114,7 @@ export function OpportunityCombobox({
                         setResolvedName(data.nombre);
                     }
                 }
-            } catch (e: any) {
+            } catch (e: unknown) {
                 console.warn('[OpportunityCombobox] Failed lookup for opp', e);
             }
         })();

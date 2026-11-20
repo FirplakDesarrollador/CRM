@@ -1,6 +1,7 @@
+import { useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, getActiveLocalUserId, useActiveLocalUserId, useActiveDatabaseVersion, LocalActivity } from '../db';
-import { syncEngine } from '../sync';
+import { executeDirectMutations, fetchRecordDirect } from '../supabaseDirect';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../supabase';
 import { useCurrentUser } from './useCurrentUser';
@@ -53,6 +54,48 @@ export function useActivities(filters?: { opportunity_id?: string, account_id?: 
     const { user: currentUser, role: viewerRole } = useCurrentUser();
     const viewerId = currentUser?.id || null;
 
+    // Direct Supabase fetch for the active filter scope
+    useEffect(() => {
+        if (typeof window === 'undefined' || !navigator.onLine) return;
+        if (process.env.NODE_ENV !== 'production' && window.location?.pathname?.startsWith('/e2e/')) return;
+        if (!filters?.opportunity_id && !filters?.account_id && !filters?.advisor_id && !viewerId) return;
+
+        let cancelled = false;
+        const loadFromSupabase = async () => {
+            try {
+                let query = supabase
+                    .from('CRM_Actividades')
+                    .select('*')
+                    .eq('is_deleted', false);
+
+                if (filters?.opportunity_id) {
+                    query = query.eq('opportunity_id', filters.opportunity_id);
+                } else if (filters?.account_id) {
+                    query = query.eq('account_id', filters.account_id);
+                } else if (filters?.advisor_id && !isSellerRole(viewerRole)) {
+                    query = query.eq('user_id', filters.advisor_id);
+                } else if (isSellerRole(viewerRole) && viewerId) {
+                    query = query.eq('user_id', viewerId);
+                }
+
+                const { data, error } = await query
+                    .order('updated_at', { ascending: false })
+                    .limit(1000);
+
+                if (!cancelled && !error && Array.isArray(data) && data.length > 0) {
+                    await db.activities.bulkPut(data as LocalActivity[]);
+                }
+            } catch (err) {
+                console.warn('[useActivities] Direct Supabase load warning:', err);
+            }
+        };
+
+        void loadFromSupabase();
+        return () => {
+            cancelled = true;
+        };
+    }, [viewerRole, viewerId, filters?.opportunity_id, filters?.account_id, filters?.advisor_id]);
+
     const activities = useLiveQuery(
         async () => {
             const collection = filters?.opportunity_id
@@ -80,15 +123,14 @@ export function useActivities(filters?: { opportunity_id?: string, account_id?: 
     ]);
 
     const createActivity = async (data: Partial<LocalActivity>) => {
-        const userId = getActiveLocalUserId();
-        if (!userId) throw new Error('Los datos locales todavía no están asociados a una sesión.');
-
+        let userId = getActiveLocalUserId() || viewerId;
         if (navigator.onLine) {
             const { data: { user } } = await supabase.auth.getUser();
-            if (user && user.id !== userId) {
-                throw new Error('La sesión cambió; vuelva a intentar cuando sus datos terminen de prepararse.');
+            if (user) {
+                userId = user.id;
             }
         }
+        if (!userId) throw new Error('Los datos locales todavía no están asociados a una sesión.');
 
         // Debounce / Prevención de duplicación por clics rápidos
         const now = Date.now();
@@ -144,11 +186,12 @@ export function useActivities(filters?: { opportunity_id?: string, account_id?: 
             delete cleanActivity._sync_metadata;
         }
 
-        await syncEngine.commitLocalChanges([db.activities], async () => {
-            await db.activities.add(cleanActivity as LocalActivity);
+        await executeDirectMutations(async () => {
+            await db.activities.put(cleanActivity as LocalActivity);
             return [{
-                entityTable: 'CRM_Actividades', entityId: id, changes: cleanActivity,
-                options: { isSnapshot: true }
+                entityTable: 'CRM_Actividades',
+                entityId: id,
+                changes: { ...cleanActivity, created_by: userId, updated_by: userId } as Record<string, unknown>,
             }];
         });
         lastCreatedActivity = {
@@ -194,9 +237,20 @@ export function useActivities(filters?: { opportunity_id?: string, account_id?: 
 
         console.log("[useActivities] Sanitized changes for sync:", changes);
 
-        await syncEngine.commitLocalChanges([db.activities], async () => {
-            const current = await db.activities.get(id);
-            if (!current) return [];
+        let current = await db.activities.get(id);
+        if (!current) {
+            current = (await fetchRecordDirect<LocalActivity>('CRM_Actividades', id)) ?? undefined;
+        }
+
+        await executeDirectMutations(async () => {
+            if (!current) {
+                return [{
+                    entityTable: 'CRM_Actividades',
+                    entityId: id,
+                    changes,
+                    mode: 'update',
+                }];
+            }
             const fullActivity = { ...current, ...changes };
             if ('opportunity_id' in fullActivity) {
                 fullActivity.opportunity_id = (typeof fullActivity.opportunity_id === 'string' && fullActivity.opportunity_id.trim() && fullActivity.opportunity_id.trim() !== 'null') ? fullActivity.opportunity_id.trim() : null;
@@ -206,32 +260,42 @@ export function useActivities(filters?: { opportunity_id?: string, account_id?: 
             }
             await db.activities.put(fullActivity);
             return [{
-                entityTable: 'CRM_Actividades', entityId: id, changes: fullActivity,
-                options: { isSnapshot: true }
+                entityTable: 'CRM_Actividades',
+                entityId: id,
+                changes: fullActivity as Record<string, unknown>,
             }];
         });
     };
 
     const toggleComplete = async (id: string, isCompleted: boolean) => {
         const updated_at = new Date().toISOString();
-        await syncEngine.commitLocalChanges([db.activities], async () => {
-            const current = await db.activities.get(id);
-            if (!current) return [];
-            // Marca de tiempo por campo: evita que un pull posterior (LWW por campo)
-            // revierta el check con el valor anterior del servidor.
+        let current = await db.activities.get(id);
+        if (!current) {
+            current = (await fetchRecordDirect<LocalActivity>('CRM_Actividades', id)) ?? undefined;
+        }
+
+        await executeDirectMutations(async () => {
+            if (!current) {
+                return [{
+                    entityTable: 'CRM_Actividades',
+                    entityId: id,
+                    changes: { is_completed: isCompleted, updated_at },
+                    mode: 'update',
+                }];
+            }
             const syncMetadata = {
                 ...((current as { _sync_metadata?: Record<string, unknown> })._sync_metadata || {}),
                 is_completed: Date.now()
             };
             const merged: Record<string, unknown> = { ...current, is_completed: isCompleted, updated_at, _sync_metadata: syncMetadata };
-            // Igual que updateActivity: solo columnas reales de CRM_Actividades.
             const fullActivity = Object.fromEntries(
                 Object.entries(merged).filter(([key]) => DB_COLUMNS.has(key))
             ) as unknown as LocalActivity;
             await db.activities.put({ ...current, ...fullActivity });
             return [{
-                entityTable: 'CRM_Actividades', entityId: id, changes: fullActivity,
-                options: { isSnapshot: true }
+                entityTable: 'CRM_Actividades',
+                entityId: id,
+                changes: fullActivity as unknown as Record<string, unknown>,
             }];
         });
 
@@ -249,14 +313,18 @@ export function useActivities(filters?: { opportunity_id?: string, account_id?: 
     };
 
     const deleteActivity = async (id: string) => {
-        const current = await db.activities.get(id);
+        let current = await db.activities.get(id);
+        if (!current) {
+            current = (await fetchRecordDirect<LocalActivity>('CRM_Actividades', id)) ?? undefined;
+        }
         if (!current) return;
 
-        await syncEngine.commitLocalChanges([db.activities], async () => {
+        await executeDirectMutations(async () => {
             await db.activities.delete(id);
             return [{
-                entityTable: 'CRM_Actividades', entityId: id,
-                changes: { ...current, is_deleted: true }, options: { isSnapshot: true }
+                entityTable: 'CRM_Actividades',
+                entityId: id,
+                changes: { ...current, is_deleted: true, updated_at: new Date().toISOString() } as Record<string, unknown>,
             }];
         });
     };
