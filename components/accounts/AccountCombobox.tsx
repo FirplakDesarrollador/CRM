@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Check, ChevronsUpDown, Loader2, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/lib/supabase";
 import { useAccountsServer } from "@/lib/hooks/useAccountsServer";
 import {
     Popover,
@@ -77,11 +78,32 @@ export function AccountCombobox({
         const found = accounts.find(a => String(a.id) === currentId);
         if (found) {
             setSelectedAccountName(found.nombre);
-        } else if (initialLabel) {
-            setSelectedAccountName(initialLabel);
-        } else {
-            setSelectedAccountName("");
+            return;
         }
+        if (initialLabel) {
+            setSelectedAccountName(initialLabel);
+            return;
+        }
+
+        let isCancelled = false;
+        (async () => {
+            try {
+                if (typeof navigator !== 'undefined' && navigator.onLine) {
+                    const { data } = await supabase
+                        .from('CRM_Cuentas')
+                        .select('id, nombre')
+                        .eq('id', currentId)
+                        .maybeSingle();
+                    if (!isCancelled && data?.nombre) {
+                        setSelectedAccountName(data.nombre);
+                    }
+                }
+            } catch {
+                // Ignorar error de red al resolver etiqueta
+            }
+        })();
+
+        return () => { isCancelled = true; };
     }, [value, accounts, initialLabel]);
 
     return (

@@ -72,8 +72,8 @@ describe("Validación de Navegación, Desacople de Estado y Restricciones de Acc
             const hrefs = visible.map(i => i.href);
 
             expect(hrefs).not.toContain("/inventarios");
-            expect(hrefs).not.toContain("/informes");
             expect(hrefs).not.toContain("/usuarios");
+            expect(hrefs).toContain("/informes");
             expect(hrefs).toContain("/cuentas");
             expect(hrefs).toContain("/oportunidades");
             expect(hrefs).toContain("/contactos");
@@ -85,7 +85,6 @@ describe("Validación de Navegación, Desacople de Estado y Restricciones de Acc
             const hrefs = visible.map(i => i.href);
 
             expect(hrefs).not.toContain("/inventarios");
-            expect(hrefs).not.toContain("/informes");
             expect(hrefs).not.toContain("/usuarios");
         });
     });

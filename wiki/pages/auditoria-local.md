@@ -36,14 +36,24 @@ export interface AuditLogItem {
 }
 ```
 
-## Interfaz Gráfica
+## Auditoría Persistente en Base de Datos (`CRM_HistorialModificaciones`)
 
-El historial se muestra de forma premium al final de la vista de Configuración (`/configuracion`):
-- **Diseño responsivo:** Tarjeta premium con scroll interno para un máximo de 10 elementos visibles a la vez (de un total de 50 en memoria).
-- **Indicadores Visuales:** Iconos temáticos de Lucide-React y badges coloreados según la entidad y tipo de acción (Creación en verde, Modificación en azul).
-- **Mantenimiento:** Botón para limpiar de forma segura el historial en el dispositivo.
+Para garantizar trazabilidad legal, operativa y corporativa permanente en la nube:
+- **Tabla append-only:** `CRM_HistorialModificaciones` almacena cronológicamente cada cambio sobre oportunidades, cuentas y contactos.
+- **Campos registrados:** `entity_type` ('OPORTUNIDAD' | 'CUENTA' | 'CONTACTO'), `entity_id`, `field_name`, `field_label`, `old_value`, `new_value`, `changed_by` (UUID), `changed_by_name` (nombre del usuario resuelto vía `get_audit_user_name`), `changed_at`.
+- **Triggers automáticos en PostgreSQL:**
+  - `trg_audit_opportunity_changes`: Audita cambios en fase, estado, vendedor asignado, monto/importe, motivo y comentarios de pérdida, fecha estimada de cierre y borrado suave.
+  - `trg_audit_account_changes_full`: Audita cambios en nombre, NIT, canal, teléfono, correo, dirección, ciudad, propietario y borrado suave.
+  - `trg_audit_contact_changes_full`: Audita cambios en nombre, cargo, teléfono, correo, cuenta asignada, contacto principal y borrado suave.
+- **Visualización en UI:** Componente reutilizable `EntityAuditHistoryTab` integrado en:
+  - Detalle de Oportunidad (`app/oportunidades/[id]/page.tsx`): pestaña *Historial*.
+  - Detalle/Edición de Cuenta (`components/cuentas/AccountForm.tsx`): pestaña *Historial*.
+  - Edición de Contacto (`components/contactos/ContactForm.tsx`): pestaña *Historial de Cambios*.
 
 ## Fuentes
-- `lib/stores/useAuditLogStore.ts` (Persistencia Zustand)
+- `lib/stores/useAuditLogStore.ts` (Persistencia Zustand en navegador)
 - `lib/sync.ts` (Interceptación en `queueMutation`)
-- `app/configuracion/page.tsx` (Componente de interfaz gráfica)
+- `app/configuracion/page.tsx` (Componente de log local)
+- `lib/hooks/useEntityAuditHistory.ts` (Hook de lectura de auditoría en Supabase)
+- `components/shared/EntityAuditHistoryTab.tsx` (Componente visual de trazabilidad)
+- `supabase/migrations/20261023100000_audit_history_log.sql` (Migración de BD)

@@ -3,7 +3,9 @@ import { supabase } from '@/lib/supabase';
 import { db } from '@/lib/db';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useSyncStore } from '@/lib/stores/useSyncStore';
-import { matchesSearchTokens, getSearchTokens } from '@/lib/utils';
+import { matchesSearchTokens, getSearchTokens, getPhoneIlikePatterns } from '@/lib/utils';
+import { getCellphoneSearchDigits, phoneMatchesDigits } from '@/lib/phoneSearch';
+import { shouldRestrictContactsByAccountOwner, filterContactsForUser } from '@/lib/contactVisibility';
 
 export type ContactServer = {
     id: string;
@@ -37,7 +39,7 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
     const [searchTerm, setSearchTerm] = useState<string>("");
     const [accountFilter, setAccountFilter] = useState<string | null>(null);
     const [principalFilter, setPrincipalFilter] = useState<'all' | 'principal' | 'secondary'>('all');
-    const [sortField, setSortField] = useState<'updated_at' | 'nombre' | 'email'>('updated_at');
+    const [sortField, setSortField] = useState<'updated_at' | 'created_at' | 'nombre' | 'email'>('updated_at');
     const [sortAsc, setSortAsc] = useState(false);
 
     // User Context
@@ -68,13 +70,15 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
         const currentPage = isLoadMore ? pageRef.current + 1 : 1;
         const from = (currentPage - 1) * pageSize;
         const to = from + pageSize - 1;
+        // Búsqueda por celular: el número completo (aunque tenga espacios o guiones) se compara por dígitos
+        const phoneDigits = getCellphoneSearchDigits(searchTerm);
 
         const fetchOffline = async () => {
             console.log("[useContactsServer] Device is offline or server query failed. Falling back to local Dexie database...");
             let localContacts = (await db.contacts.toArray()).filter(c => !c.is_deleted);
             
-            // Seller restriction for offline
-            if ((isVendedor || userRole === 'COORDINADOR') && currentUserId) {
+            // Contact visibility policy
+            if (shouldRestrictContactsByAccountOwner(userRole) && currentUserId) {
                 const idsToMatch = isVendedor ? [currentUserId] : [currentUserId, ...subordinateIds];
 
                 // Get my accounts: Owner OR (No owner and I am creator)
@@ -94,7 +98,7 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
                 collabOpps.filter(o => !o.is_deleted && o.account_id).forEach(o => myAccountIds.add(o.account_id));
                 
                 // Filter contacts: MUST belong to my accounts
-                localContacts = localContacts.filter(c => myAccountIds.has(c.account_id));
+                localContacts = filterContactsForUser(localContacts, { role: userRole, userAccountIds: myAccountIds });
             }
 
             if (accountId) {
@@ -104,6 +108,7 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
             // Filtering
             if (searchTerm && searchTerm.trim()) {
                 localContacts = localContacts.filter(c => 
+                    phoneMatchesDigits(c.telefono, phoneDigits) ||
                     matchesSearchTokens([c.nombre, c.email, c.telefono, c.cargo], searchTerm)
                 );
             }
@@ -114,8 +119,11 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
 
             // Sorting
             localContacts.sort((a, b) => {
-                const valueA = sortField === 'updated_at' ? (a.updated_at ? new Date(a.updated_at).getTime() : 0) : ((a as any)[sortField] || '').toLocaleLowerCase();
-                const valueB = sortField === 'updated_at' ? (b.updated_at ? new Date(b.updated_at).getTime() : 0) : ((b as any)[sortField] || '').toLocaleLowerCase();
+                const isDateField = sortField === 'updated_at' || sortField === 'created_at';
+                const rawA = (a as unknown as Record<string, unknown>)[sortField];
+                const rawB = (b as unknown as Record<string, unknown>)[sortField];
+                const valueA = isDateField ? (rawA ? new Date(String(rawA)).getTime() : 0) : String(rawA || '').toLocaleLowerCase();
+                const valueB = isDateField ? (rawB ? new Date(String(rawB)).getTime() : 0) : String(rawB || '').toLocaleLowerCase();
                 if (valueA < valueB) return sortAsc ? -1 : 1;
                 if (valueA > valueB) return sortAsc ? 1 : -1;
                 return 0;
@@ -148,8 +156,7 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
             }
 
             // Build query
-            // Use !inner join when filtering by account owner to enforce security
-            const needsAccountFilter = isVendedor || userRole === 'COORDINADOR';
+            const needsAccountFilter = shouldRestrictContactsByAccountOwner(userRole);
             const accountSelect = needsAccountFilter ? 'account:CRM_Cuentas!inner(nombre, owner_user_id)' : 'account:CRM_Cuentas(nombre)';
             
             const selectFields = `
@@ -171,7 +178,7 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
                 .select(selectFields, { count: 'exact' })
                 .eq('is_deleted', false);
 
-            if ((isVendedor || userRole === 'COORDINADOR') && currentUserId) {
+            if (needsAccountFilter && currentUserId) {
                 const idsToMatch = isVendedor ? [currentUserId] : [currentUserId, ...subordinateIds].filter(Boolean);
                 const idsString = idsToMatch.join(',');
 
@@ -221,9 +228,10 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
             if (principalFilter === 'secondary') query = query.eq('es_principal', false);
 
             if (searchTerm && searchTerm.trim()) {
-                const tokens = getSearchTokens(searchTerm);
+                const tokens = phoneDigits ? [phoneDigits] : getSearchTokens(searchTerm);
                 for (const token of tokens) {
-                    query = query.or(`nombre.ilike.%${token}%,email.ilike.%${token}%,telefono.ilike.%${token}%,cargo.ilike.%${token}%`);
+                    const phoneParts = getPhoneIlikePatterns(token).map(pattern => `,telefono.ilike.${pattern}`).join('');
+                    query = query.or(`nombre.ilike.%${token}%,email.ilike.%${token}%,telefono.ilike.%${token}%,cargo.ilike.%${token}%${phoneParts}`);
                 }
             }
 
@@ -275,7 +283,7 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
                         // Basic filtering for searchTerm if applicable
                         if (searchTerm) {
                             const term = searchTerm.toLowerCase();
-                            if (!newItem.nombre?.toLowerCase().includes(term) && !newItem.email?.toLowerCase().includes(term)) {
+                            if (!phoneMatchesDigits(newItem.telefono, phoneDigits) && !newItem.nombre?.toLowerCase().includes(term) && !newItem.email?.toLowerCase().includes(term)) {
                                 continue;
                             }
                         }
@@ -325,6 +333,7 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
             let finalData = [...itemsToAdd, ...flattenedResults];
             if (searchTerm && searchTerm.trim()) {
                 finalData = finalData.filter(c =>
+                    phoneMatchesDigits(c.telefono, phoneDigits) ||
                     matchesSearchTokens([c.nombre, c.email, c.telefono, c.cargo, c.account_name, c.account?.nombre], searchTerm)
                 );
             }

@@ -3,6 +3,7 @@ import {
     MAX_SYNC_RETRIES,
     buildFailureUpdate,
     getSyncBackoffDelay,
+    isCatalogVersionNewer,
     isRetryDue,
     isSyncLeaseExpired,
     resolveSaveStatus,
@@ -52,6 +53,16 @@ describe('sync runtime policy', () => {
         expect(shouldRefreshCatalogs('invalid', now)).toBe(true);
         expect(shouldRefreshCatalogs('2026-08-21T11:00:00.000Z', now)).toBe(false);
         expect(shouldRefreshCatalogs('2026-08-20T11:00:00.000Z', now)).toBe(true);
+    });
+
+    it('forces a catalog refresh only when the server catalog is newer', () => {
+        expect(isCatalogVersionNewer(null, '2026-10-28T10:00:00+00:00')).toBe(false);
+        expect(isCatalogVersionNewer('invalid', null)).toBe(false);
+        expect(isCatalogVersionNewer('2026-10-29T08:51:11.350549-05:00', null)).toBe(true);
+        expect(isCatalogVersionNewer('2026-10-29T08:51:11.350549-05:00', 'invalid')).toBe(true);
+        expect(isCatalogVersionNewer('2026-10-29T13:51:11.350549+00:00', '2026-02-11T22:41:03.874538-05:00')).toBe(true);
+        expect(isCatalogVersionNewer('2026-10-29T13:51:11.350549+00:00', '2026-10-29T13:51:11.350549+00:00')).toBe(false);
+        expect(isCatalogVersionNewer('2026-10-29T08:00:00-05:00', '2026-10-29T13:51:11+00:00')).toBe(false);
     });
 
     it('exposes only the three discreet save states', () => {

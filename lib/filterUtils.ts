@@ -1,4 +1,5 @@
 import { matchesSearchTokens } from "@/lib/utils";
+import { sellerCanSeeAccount, sellerCanSeeOpportunity } from "@/lib/sellerVisibility";
 
 // ---------------------------------------------------------------------------
 // OPORTUNIDADES
@@ -29,7 +30,7 @@ export interface FilterOpportunitiesOptions {
     wonPhaseIds?: number[];
     lostPhaseIds?: number[];
     closedPhaseIds?: number[];
-    accountsMap?: Map<string, { canal_id?: string | null; subclasificacion_id?: number | null; nombre?: string | null }>;
+    accountsMap?: Map<string, { canal_id?: string | null; subclasificacion_id?: number | null; nombre?: string | null; telefono?: string | null }>;
 }
 
 export function filterOpportunities<T extends {
@@ -38,7 +39,6 @@ export function filterOpportunities<T extends {
     account_id?: string | null;
     amount?: number | null;
     fase_id?: number | string | null;
-    estado_id?: number | null;
     owner_user_id?: string | null;
     created_by?: string | null;
     created_at?: string | null;
@@ -47,7 +47,7 @@ export function filterOpportunities<T extends {
     origen_oportunidad?: string | null;
     url_origen?: string | null;
     vendedor?: { full_name?: string | null } | null;
-    account?: { nombre?: string | null; canal_id?: string | null; subclasificacion_id?: number | null } | null;
+    account?: { nombre?: string | null; canal_id?: string | null; subclasificacion_id?: number | null; telefono?: string | null } | null;
 }>(
     opportunities: T[],
     filters: FilterOpportunitiesParams,
@@ -87,10 +87,9 @@ export function filterOpportunities<T extends {
         const acc = accountsMap ? accountsMap.get(o.account_id || "") : o.account;
 
         // Role restriction for sellers
-        if (isVendedor && currentUserId && userFilter !== "unrestricted") {
-            const isOwnerOrCreator = o.owner_user_id === currentUserId || o.created_by === currentUserId;
-            const isCollab = collabOppIds.has(o.id);
-            if (!isOwnerOrCreator && !isCollab) {
+        // Asesor: solo dueño o colaborador, en cualquier pestaña (incluida "unrestricted").
+        if (isVendedor && currentUserId) {
+            if (!sellerCanSeeOpportunity(o, currentUserId, collabOppIds)) {
                 return false;
             }
         }
@@ -101,7 +100,8 @@ export function filterOpportunities<T extends {
                 o.nombre,
                 acc?.nombre,
                 o.vendedor?.full_name,
-                o.origen_oportunidad
+                o.origen_oportunidad,
+                acc?.telefono
             ], searchTerm);
             if (!match) return false;
         }
@@ -128,23 +128,14 @@ export function filterOpportunities<T extends {
             return false;
         }
 
-        // Status filter: won, lost, open
-        const faseNum = Number(o.fase_id);
+        // Status filter (won / lost / open): SOLO por la fase.
+        const faseNum = o.fase_id === null || o.fase_id === undefined || o.fase_id === "" ? NaN : Number(o.fase_id);
         if (statusFilter === "won") {
-            const isWonPhase = wonPhaseIds.length > 0 && wonPhaseIds.includes(faseNum);
-            const isWonState = [2, 11].includes(o.estado_id as number);
-            if (!isWonPhase && !isWonState) return false;
+            if (!wonPhaseIds.includes(faseNum)) return false;
         } else if (statusFilter === "lost") {
-            const isLostPhase = lostPhaseIds.length > 0 && lostPhaseIds.includes(faseNum);
-            const isLostState = [3, 4, 14].includes(o.estado_id as number);
-            if (!isLostPhase && !isLostState) return false;
+            if (!lostPhaseIds.includes(faseNum)) return false;
         } else if (statusFilter === "open") {
-            if (closedPhaseIds.length > 0 && closedPhaseIds.includes(faseNum)) {
-                return false;
-            }
-            if ([2, 3, 4, 11, 14].includes(o.estado_id as number)) {
-                return false;
-            }
+            if (closedPhaseIds.includes(faseNum)) return false;
         }
 
         // Origin filter
@@ -292,9 +283,7 @@ export function filterAccounts<T extends {
     return accounts.filter(a => {
         // Role permissions
         if (isVendedor && currentUserId) {
-            const isOwner = a.owner_user_id === currentUserId || a.created_by === currentUserId;
-            const isCollab = collabAccountIds.has(a.id);
-            if (!isOwner && !isCollab) return false;
+            if (!sellerCanSeeAccount(a, currentUserId, collabAccountIds)) return false;
         } else if (userRole === "COORDINADOR" && currentUserId) {
             const isOwner = a.owner_user_id === currentUserId || a.created_by === currentUserId;
             const isTeam = (a.owner_user_id && subordinateIds.includes(a.owner_user_id)) ||
@@ -369,6 +358,10 @@ export interface FilterActivitiesParams {
     filterChannel?: string;
     filterDateFrom?: string;
     filterDateTo?: string;
+    selectedDate?: Date | string;
+    agendaDateMode?: "up_to" | "exact";
+    view?: "agenda" | "month" | "all";
+    omitCompleted?: boolean;
 }
 
 export interface FilterActivitiesOptions {
@@ -407,7 +400,11 @@ export function filterActivities<T extends {
         filterStatus = "all",
         filterChannel = "",
         filterDateFrom = "",
-        filterDateTo = ""
+        filterDateTo = "",
+        selectedDate,
+        agendaDateMode = "up_to",
+        view,
+        omitCompleted = false
     } = filters;
 
     const {
@@ -455,6 +452,11 @@ export function filterActivities<T extends {
         // User
         if (filterUser && act.user_id !== filterUser) return false;
 
+        // Omitir terminadas
+        if (omitCompleted && filterStatus !== "completed" && act.is_completed) {
+            return false;
+        }
+
         // Status (completed, pending, overdue)
         if (filterStatus === "completed" && !act.is_completed) return false;
         if (filterStatus === "pending" && act.is_completed) return false;
@@ -480,6 +482,23 @@ export function filterActivities<T extends {
         }
         if (filterDateTo) {
             if (new Date(act.fecha_inicio) > new Date(`${filterDateTo}T23:59:59`)) return false;
+        }
+
+        // Agenda View Date Filter: 'up_to' (hasta la fecha seleccionada) o 'exact' (solo este día)
+        if (view === "agenda" && selectedDate) {
+            const dateObj = typeof selectedDate === "string" ? new Date(selectedDate) : selectedDate;
+            const endOfDay = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate(), 23, 59, 59, 999);
+            const actDate = new Date(act.fecha_inicio);
+
+            if (agendaDateMode === "exact") {
+                const sameDay = actDate.getDate() === dateObj.getDate() &&
+                                actDate.getMonth() === dateObj.getMonth() &&
+                                actDate.getFullYear() === dateObj.getFullYear();
+                if (!sameDay) return false;
+            } else {
+                // Default 'up_to': all activities scheduled up to the selected date
+                if (actDate > endOfDay) return false;
+            }
         }
 
         return true;

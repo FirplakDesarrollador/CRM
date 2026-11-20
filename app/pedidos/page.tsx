@@ -2,6 +2,7 @@
 
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/db";
+import { hydratePedidosModuleFromSupabase } from "@/lib/supabaseDirect";
 import { Truck, Search, Calendar, FileText, ChevronRight, Briefcase, Receipt } from "lucide-react";
 import Link from "next/link";
 import { useState, useEffect, Suspense } from "react";
@@ -47,6 +48,11 @@ function PedidosContent() {
             });
         }
     }, [isCoordinador, user?.id]);
+
+    useEffect(() => {
+        if (!user?.id) return;
+        void hydratePedidosModuleFromSupabase();
+    }, [user?.id]);
 
     // Fetch data from CRM_Pedidos
     const data = useLiveQuery(async () => {

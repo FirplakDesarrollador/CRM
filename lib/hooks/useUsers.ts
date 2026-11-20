@@ -6,6 +6,7 @@ export interface User {
     id: string;
     email: string;
     full_name: string | null;
+    telefono?: string | null;
     role: UserRole;
     is_active: boolean;
     allowed_modules?: string[] | null;
@@ -23,6 +24,7 @@ export interface CreateUserData {
     email: string;
     password: string;
     full_name: string;
+    telefono?: string | null;
     role: UserRole;
     allowed_modules?: string[];
     coordinadores?: string[];
@@ -35,6 +37,7 @@ export interface CreateUserData {
 
 export interface UpdateUserData {
     full_name?: string;
+    telefono?: string | null;
     role?: UserRole;
     is_active?: boolean;
     allowed_modules?: string[] | null;
@@ -128,6 +131,7 @@ export function useUsers() {
             // But we need to update the role, allowed_modules AND coordinadores
             // We'll prepare the update object
             const updates: any = { full_name: userData.full_name };
+            if (userData.telefono !== undefined) updates.telefono = userData.telefono;
             if (userData.role) updates.role = userData.role;
             if (userData.allowed_modules) updates.allowed_modules = userData.allowed_modules;
             if (userData.coordinadores) updates.coordinadores = userData.coordinadores;
@@ -219,6 +223,24 @@ export function useUsers() {
         return updateUser(userId, { role: newRole });
     };
 
+    // Update user password via RPC (requires Admin)
+    const updateUserPassword = async (userId: string, newPassword: string): Promise<{ success: boolean; error?: string }> => {
+        try {
+            const { error } = await supabase.rpc('admin_change_password', {
+                target_user_id: userId,
+                new_password: newPassword
+            });
+
+            if (error) {
+                throw new Error(error.message || 'Error al cambiar contraseña');
+            }
+            return { success: true };
+        } catch (err: any) {
+            console.error('[useUsers] Error updating password:', err);
+            return { success: false, error: err.message || 'Error al cambiar contraseña' };
+        }
+    };
+
     // Toggle user active status
     const toggleUserStatus = async (userId: string, isActive: boolean): Promise<{ success: boolean; error?: string }> => {
         return updateUser(userId, { is_active: isActive });
@@ -242,6 +264,7 @@ export function useUsers() {
         createUser,
         updateUser,
         updateUserRole,
+        updateUserPassword,
         toggleUserStatus,
         deleteUser,
     };

@@ -1,9 +1,18 @@
 "use client";
 
-import { db } from "@/lib/db";
-import { useLiveQuery } from "dexie-react-hooks";
+import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabase";
 import { Building, MapPin, ChevronRight, Hash } from "lucide-react";
 import { cn } from "@/components/ui/utils";
+
+interface BranchAccount {
+    id: string;
+    nombre: string;
+    nit?: string | null;
+    nit_base?: string | null;
+    ciudad?: string | null;
+    [key: string]: unknown;
+}
 
 interface AccountBranchesTabProps {
     accountId: string;
@@ -11,11 +20,34 @@ interface AccountBranchesTabProps {
 }
 
 export default function AccountBranchesTab({ accountId, onSelectAccount }: AccountBranchesTabProps) {
-    // Buscar cuentas que tengan id_cuenta_principal igual al accountId actual
-    const branches = useLiveQuery(
-        () => db.accounts.where('id_cuenta_principal').equals(accountId).toArray(),
-        [accountId]
-    );
+    const [branches, setBranches] = useState<BranchAccount[] | null>(null);
+
+    useEffect(() => {
+        if (!accountId) {
+            setBranches([]);
+            return;
+        }
+        let cancelled = false;
+        const loadBranches = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('CRM_Cuentas')
+                    .select('*')
+                    .eq('id_cuenta_principal', accountId)
+                    .eq('is_deleted', false)
+                    .order('nombre', { ascending: true });
+                if (!cancelled) {
+                    setBranches(!error && Array.isArray(data) ? (data as BranchAccount[]) : []);
+                }
+            } catch {
+                if (!cancelled) setBranches([]);
+            }
+        };
+        void loadBranches();
+        return () => {
+            cancelled = true;
+        };
+    }, [accountId]);
 
     if (!branches) {
         return (

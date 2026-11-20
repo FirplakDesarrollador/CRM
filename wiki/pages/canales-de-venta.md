@@ -12,7 +12,9 @@ oportunidad** y la **subclasificación** de cada cuenta.
 | `OBRAS_INT` | Obras Internacional | `lista_base_exportaciones` |
 | `DIST_NAC` | Distribución Nacional | `lista_base_cop` |
 | `DIST_INT` | Distribución Internacional | `lista_base_exportaciones` |
-| `PROPIO` | Canal Propio (B2C) | `distribuidor_pvp_iva` |
+| `PROPIO` | Canal Propio (B2C) | `pvp_sin_iva` |
+
+> **Nota sobre Canal Propio (B2C):** Mapeado a `pvp_sin_iva` (migración `20261030122500_map_propio_to_pvp_sin_iva.sql`) para garantizar que la tarifa base sea neta sin IVA, evitando duplicar el 19% de IVA en la formalización de pedidos y cotizaciones en PDF (formato F-V-29).
 
 > **Nota sobre Ferias:** Una feria no es un canal estructural de venta, sino una modalidad / origen de oportunidad comercial (`origen_oportunidad = 'Feria'`). Se gestiona dentro del canal del cliente (típicamente `PROPIO`) aplicando la tarifa especial mediante la bandera de precio `venta_feria = true` (`precio_feria`).
 
@@ -37,6 +39,7 @@ oportunidad** y la **subclasificación** de cada cuenta.
 ## Fuentes
 
 - `supabase/migrations/20260108_sales_channels.sql`
+- `supabase/migrations/20261030122500_map_propio_to_pvp_sin_iva.sql`
 - `supabase/migrations/20260821_add_user_channels.sql`
 - `supabase/migrations/20260825_remove_feria_as_channel.sql`
 - `supabase/crm_lista_precios.sql`, `supabase/fix_lista_precios.sql`

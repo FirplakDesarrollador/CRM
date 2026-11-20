@@ -159,6 +159,62 @@ describe("Filtrado de Actividades", () => {
         const page2 = filtered.slice(pageSize, pageSize * 2);
         expect(page2).toHaveLength(50);
     });
+
+    it("en Vista Agenda con agendaDateMode 'up_to' filtra actividades hasta la fecha seleccionada", () => {
+        // fixedNow es 2026-09-02: act-1 (08-20), act-3 (08-15) son <= fixedNow; act-2 (09-10) es futura (> fixedNow)
+        const hastaHoy = filterActivities(mockActivities, {
+            view: "agenda",
+            selectedDate: fixedNow,
+            agendaDateMode: "up_to"
+        }, { canViewAll: true, now: fixedNow });
+
+        expect(hastaHoy.map(a => a.id)).toEqual(["act-1", "act-3"]);
+
+        // Con filtro overdue y agendaDateMode 'up_to' devuelve la vencida sin conflicto
+        const overdueHastaHoy = filterActivities(mockActivities, {
+            view: "agenda",
+            selectedDate: fixedNow,
+            agendaDateMode: "up_to",
+            filterStatus: "overdue"
+        }, { canViewAll: true, now: fixedNow });
+
+        expect(overdueHastaHoy).toHaveLength(1);
+        expect(overdueHastaHoy[0].id).toBe("act-1");
+    });
+
+    it("en Vista Agenda con agendaDateMode 'exact' filtra únicamente las actividades del día exacto", () => {
+        const diaExacto = filterActivities(mockActivities, {
+            view: "agenda",
+            selectedDate: new Date("2026-08-20T12:00:00Z"),
+            agendaDateMode: "exact"
+        }, { canViewAll: true, now: fixedNow });
+
+        expect(diaExacto).toHaveLength(1);
+        expect(diaExacto[0].id).toBe("act-1");
+    });
+
+    it("filtra u omite actividades terminadas cuando omitCompleted es true", () => {
+        // En mockActivities, act-1 es no completada, act-3 es completada (ambas <= fixedNow)
+        const conOmitir = filterActivities(mockActivities, {
+            view: "agenda",
+            selectedDate: fixedNow,
+            agendaDateMode: "up_to",
+            omitCompleted: true
+        }, { canViewAll: true, now: fixedNow });
+
+        // Debe incluir únicamente act-1 y omitir act-3 (terminada)
+        expect(conOmitir.map(a => a.id)).toEqual(["act-1"]);
+
+        const sinOmitir = filterActivities(mockActivities, {
+            view: "agenda",
+            selectedDate: fixedNow,
+            agendaDateMode: "up_to",
+            omitCompleted: false
+        }, { canViewAll: true, now: fixedNow });
+
+        // Sin omitir debe incluir ambas
+        expect(sinOmitir.map(a => a.id)).toEqual(["act-1", "act-3"]);
+    });
 });
 
 describe("Deep Link y Estado de Modal de Actividades", () => {
@@ -167,7 +223,7 @@ describe("Deep Link y Estado de Modal de Actividades", () => {
         let selectedActivityId: string | null = "act-1";
         let lastProcessedUrlId: string | null = "act-1";
 
-        const handleUrlChange = (urlId: string | null, currentActivities: any[]) => {
+        const handleUrlChange = (urlId: string | null, currentActivities: Array<{ id: string; asunto: string; fecha_inicio: string }>) => {
             if (!urlId) {
                 if (lastProcessedUrlId !== null) {
                     lastProcessedUrlId = null;
@@ -199,6 +255,54 @@ describe("Deep Link y Estado de Modal de Actividades", () => {
 
         expect(isModalOpen).toBe(true);
         expect(selectedActivityId).toBe("act-1");
+    });
+
+    it("detecta oportunidades y cuentas faltantes fuera de la ventana de sync local para hidratación JIT", () => {
+        const visibleActs = [
+            { id: "act-10", opportunity_id: "opp-in-cache", account_id: "acc-in-cache" },
+            { id: "act-11", opportunity_id: "opp-old-outside-cache", account_id: "acc-old-outside-cache" },
+            { id: "act-12", opportunity_id: null, account_id: "acc-in-cache" },
+            { id: "act-13", opportunity_id: "opp-old-outside-cache", account_id: null }
+        ];
+
+        const localCachedOpps = [{ id: "opp-in-cache", nombre: "POT Reciente" }];
+        const localCachedAccs = [{ id: "acc-in-cache", nombre: "Cuenta Reciente" }];
+
+        const knownOppIds = new Set(localCachedOpps.map(o => o.id));
+        const missingOppIds = Array.from(new Set(
+            visibleActs
+                .map(a => a.opportunity_id)
+                .filter((id): id is string => Boolean(id) && !knownOppIds.has(id as string))
+        ));
+
+        const knownAccIds = new Set(localCachedAccs.map(a => a.id));
+        const missingAccIds = Array.from(new Set(
+            visibleActs
+                .map(a => a.account_id)
+                .filter((id): id is string => Boolean(id) && !knownAccIds.has(id as string))
+        ));
+
+        expect(missingOppIds).toEqual(["opp-old-outside-cache"]);
+        expect(missingAccIds).toEqual(["acc-old-outside-cache"]);
+    });
+
+    it("OpportunityCombobox resuelve correctamente el nombre cuando la oportunidad viene por initialLabel o resolvedName", () => {
+        const resolveLabel = (value?: string, selectedOpp?: { nombre: string }, resolvedName?: string, initialLabel?: string) => {
+            if (!value) return "Seleccione una oportunidad...";
+            return selectedOpp?.nombre || resolvedName || initialLabel || "Cargando...";
+        };
+
+        // Caso 1: Oportunidad en la página inicial cargada
+        expect(resolveLabel("opp-1", { nombre: "POT123 - Cliente A" })).toBe("POT123 - Cliente A");
+
+        // Caso 2: Oportunidad no en página inicial pero provista por initialLabel (de la actividad o modal)
+        expect(resolveLabel("opp-old", undefined, undefined, "POT34293 - HERNAN SUAREZ")).toBe("POT34293 - HERNAN SUAREZ");
+
+        // Caso 3: Oportunidad resuelta asíncronamente desde Dexie/Supabase
+        expect(resolveLabel("opp-old", undefined, "POT34293 - HERNAN SUAREZ", undefined)).toBe("POT34293 - HERNAN SUAREZ");
+
+        // Caso 4: Sin valor seleccionado
+        expect(resolveLabel(undefined)).toBe("Seleccione una oportunidad...");
     });
 });
 

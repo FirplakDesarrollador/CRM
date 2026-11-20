@@ -10,6 +10,8 @@
 | :-- | :-- |
 | `bugs-knowhow-enforcer.md` | Antes/después de generar, modificar o refactorizar código (reforzado por la regla `always_on` en [`../rules/code-check.md`](../rules/code-check.md)) |
 | `debugging.md` | Cuando se agrega una feature, se corrige un bug o se modifica lógica del CRM (exige `data-testid`, tests E2E y Playwright) |
+| `reglas-migracion-mysql.md` | Al realizar migraciones, homologaciones, backfills o auditorías de datos desde MySQL / vTiger CRM hacia Supabase CRM |
+| `llm-wiki-maintainer.md` | Al actualizar o mantener la documentación funcional y el LLM Wiki en `wiki/` |
 
 ## Formato
 

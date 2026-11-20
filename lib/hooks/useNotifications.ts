@@ -1,9 +1,8 @@
 import { useMemo, useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { db } from '@/lib/db';
-import { useLiveQuery } from 'dexie-react-hooks';
 import { Notification as PersistedNotification } from '@/lib/types/notifications';
 import { useCurrentUser } from './useCurrentUser';
+import { shouldShowActivityNotification } from '@/lib/sellerVisibility';
 
 export type NotificationType =
     | 'INACTIVE_CLIENT'
@@ -24,11 +23,9 @@ export interface NotificationItem {
 }
 
 export function useNotifications() {
-    const { user } = useCurrentUser();
+    const { user, role } = useCurrentUser();
     const [persistedNotifications, setPersistedNotifications] = useState<PersistedNotification[]>([]);
-
-    // Fetch activities from local DB to check completion status
-    const activities = useLiveQuery(() => db.activities.toArray());
+    const [activities, setActivities] = useState<Array<{ id: string; is_completed?: boolean; user_id?: string }>>([]);
 
     // Fetch & Subscribe to Persisted Notifications
     useEffect(() => {
@@ -41,7 +38,30 @@ export function useNotifications() {
                 .eq('user_id', user.id)
                 .order('created_at', { ascending: false })
                 .limit(50);
-            if (data) setPersistedNotifications(data as any);
+            if (data) {
+                const list = data as PersistedNotification[];
+                setPersistedNotifications(list);
+
+                const activityIds = Array.from(
+                    new Set(
+                        list
+                            .filter((n) => n.type === 'ACTIVITY_OVERDUE' && n.entity_id)
+                            .map((n) => n.entity_id as string)
+                    )
+                );
+
+                if (activityIds.length > 0) {
+                    const { data: acts } = await supabase
+                        .from('CRM_Actividades')
+                        .select('id, is_completed, user_id')
+                        .in('id', activityIds);
+                    if (acts) {
+                        setActivities(acts as Array<{ id: string; is_completed?: boolean; user_id?: string }>);
+                    }
+                } else {
+                    setActivities([]);
+                }
+            }
         };
 
         fetchNotifications();
@@ -89,12 +109,15 @@ export function useNotifications() {
             });
         });
 
-        // Filter out activity notifications if the activity is already completed
+        // Filter out activity notifications if the activity is already completed or not assigned to the seller
         return items
             .filter(n => {
                 if (n.type === 'ACTIVITY_OVERDUE' && n.entityId) {
                     const activity = activities?.find(a => a.id === n.entityId);
                     if (activity?.is_completed) return false;
+                    if (!shouldShowActivityNotification(n.type, activity?.user_id, role, user?.id)) {
+                        return false;
+                    }
                 }
                 return true;
             })
@@ -107,7 +130,7 @@ export function useNotifications() {
                 const dateB = new Date(b.date || 0).getTime();
                 return dateB - dateA;
             });
-    }, [persistedNotifications, activities]);
+    }, [persistedNotifications, activities, role, user?.id]);
 
     const markAsRead = async (id: string) => {
         if (persistedNotifications.find(n => n.id === id)) {

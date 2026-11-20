@@ -59,6 +59,9 @@ export function UserPickerFilter({
         return [];
     }, [users, role, currentUser]);
 
+    // El asesor solo ve lo suyo: no se muestra el filtro por usuario.
+    if (role === 'VENDEDOR') return null;
+
     const filteredUsers = availableUsers.filter(u =>
         matchesSearchTokens([u.full_name, u.email], search)
     );

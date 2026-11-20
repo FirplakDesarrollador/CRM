@@ -48,4 +48,4 @@ if __name__ == "__main__":
 ```
 
 ## Scripts Disponibles
-_Esta sección se actualiza conforme se crean nuevos scripts._
+- `migrate_vtiger_opportunities.mjs`: Script determinístico de migración y homologación completa de oportunidades (fases, fechas ISO, cargo de contacto, subclasificación de cuenta, bitácora de comentarios, actividades históricas, categorías comerciales y propagación de correos). Directiva asociada: `directives/migracion_completa_oportunidades_vtiger.md`.

@@ -1,8 +1,12 @@
+import { useEffect } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { db, getActiveLocalUserId, LocalActivity } from '../db';
-import { syncEngine } from '../sync';
+import { db, getActiveLocalUserId, useActiveLocalUserId, useActiveDatabaseVersion, LocalActivity } from '../db';
+import { executeDirectMutations, fetchRecordDirect } from '../supabaseDirect';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../supabase';
+import { useCurrentUser } from './useCurrentUser';
+import { activitiesVisibleToViewer, isSellerRole } from '../sellerVisibility';
+import { resolveActivityUserId } from '../activityAssignee';
 
 /**
  * Converts a date input value to a proper ISO string.
@@ -43,18 +47,69 @@ interface RecentActivityCreation {
 }
 let lastCreatedActivity: RecentActivityCreation | null = null;
 
-export function useActivities(filters?: { opportunity_id?: string, advisor_id?: string | null }) {
+export function useActivities(filters?: { opportunity_id?: string, account_id?: string, advisor_id?: string | null }) {
+    const activeUserId = useActiveLocalUserId();
+    const dbVersion = useActiveDatabaseVersion();
+
+    const { user: currentUser, role: viewerRole } = useCurrentUser();
+    const viewerId = currentUser?.id || null;
+
+    // Direct Supabase fetch for the active filter scope
+    useEffect(() => {
+        if (typeof window === 'undefined' || !navigator.onLine) return;
+        if (process.env.NODE_ENV !== 'production' && window.location?.pathname?.startsWith('/e2e/')) return;
+        if (!filters?.opportunity_id && !filters?.account_id && !filters?.advisor_id && !viewerId) return;
+
+        let cancelled = false;
+        const loadFromSupabase = async () => {
+            try {
+                let query = supabase
+                    .from('CRM_Actividades')
+                    .select('*')
+                    .eq('is_deleted', false);
+
+                if (filters?.opportunity_id) {
+                    query = query.eq('opportunity_id', filters.opportunity_id);
+                } else if (filters?.account_id) {
+                    query = query.eq('account_id', filters.account_id);
+                } else if (filters?.advisor_id && !isSellerRole(viewerRole)) {
+                    query = query.eq('user_id', filters.advisor_id);
+                } else if (isSellerRole(viewerRole) && viewerId) {
+                    query = query.eq('user_id', viewerId);
+                }
+
+                const { data, error } = await query
+                    .order('updated_at', { ascending: false })
+                    .limit(1000);
+
+                if (!cancelled && !error && Array.isArray(data) && data.length > 0) {
+                    await db.activities.bulkPut(data as LocalActivity[]);
+                }
+            } catch (err) {
+                console.warn('[useActivities] Direct Supabase load warning:', err);
+            }
+        };
+
+        void loadFromSupabase();
+        return () => {
+            cancelled = true;
+        };
+    }, [viewerRole, viewerId, filters?.opportunity_id, filters?.account_id, filters?.advisor_id]);
+
     const activities = useLiveQuery(
-        () => {
-            if (filters?.opportunity_id) {
-                return db.activities.where('opportunity_id').equals(filters.opportunity_id).toArray();
-            }
-            if (filters?.advisor_id) {
-                return db.activities.where('user_id').equals(filters.advisor_id).toArray();
-            }
-            return db.activities.toArray();
+        async () => {
+            const collection = filters?.opportunity_id
+                ? db.activities.where('opportunity_id').equals(filters.opportunity_id)
+                : filters?.account_id
+                    ? db.activities.where('account_id').equals(filters.account_id)
+                    : (filters?.advisor_id && !isSellerRole(viewerRole))
+                        ? db.activities.where('user_id').equals(filters.advisor_id)
+                        : db.activities.toCollection();
+            const list = await collection.filter(a => !a.is_deleted).toArray();
+            // Asesor (VENDEDOR): solo las actividades asignadas a él.
+            return activitiesVisibleToViewer(list, viewerRole, viewerId);
         },
-        [filters?.opportunity_id, filters?.advisor_id]
+        [activeUserId, dbVersion, viewerRole, viewerId, filters?.opportunity_id, filters?.account_id, filters?.advisor_id]
     );
 
     // Allowlist of columns that actually exist in CRM_Actividades on Supabase.
@@ -63,29 +118,29 @@ export function useActivities(filters?: { opportunity_id?: string, advisor_id?: 
         'id', 'user_id', 'opportunity_id', 'account_id', 'tipo_actividad_id', 'asunto', 'descripcion',
         'fecha_inicio', 'fecha_fin', 'ms_planner_id', 'ms_event_id', 'created_at', 'updated_at',
         'is_completed', 'created_by', 'updated_by', 'is_deleted',
-        'tipo_actividad', 'clasificacion_id', 'subclasificacion_id', 'Tarea_planner',
-        'teams_meeting_url', 'microsoft_attendees', '_sync_metadata'
+        'tipo_actividad', 'clasificacion_id', 'subclasificacion_id', 'prioridad', 'Tarea_planner',
+        'teams_meeting_url', '_sync_metadata'
     ]);
 
     const createActivity = async (data: Partial<LocalActivity>) => {
-        const userId = getActiveLocalUserId();
-        if (!userId) throw new Error('Los datos locales todavía no están asociados a una sesión.');
-
+        let userId = getActiveLocalUserId() || viewerId;
         if (navigator.onLine) {
             const { data: { user } } = await supabase.auth.getUser();
-            if (user && user.id !== userId) {
-                throw new Error('La sesión cambió; vuelva a intentar cuando sus datos terminen de prepararse.');
+            if (user) {
+                userId = user.id;
             }
         }
+        if (!userId) throw new Error('Los datos locales todavía no están asociados a una sesión.');
 
         // Debounce / Prevención de duplicación por clics rápidos
         const now = Date.now();
         const startIso = toISODateString(data.fecha_inicio);
         const asuntoTrimmed = (data.asunto || 'Nueva Actividad').trim();
+        const assignedUserId = resolveActivityUserId(data.user_id, userId);
 
         if (
             lastCreatedActivity &&
-            lastCreatedActivity.userId === userId &&
+            lastCreatedActivity.userId === assignedUserId &&
             lastCreatedActivity.asunto === asuntoTrimmed &&
             lastCreatedActivity.accountId === data.account_id &&
             lastCreatedActivity.opportunityId === data.opportunity_id &&
@@ -100,15 +155,16 @@ export function useActivities(filters?: { opportunity_id?: string, advisor_id?: 
 
         const newActivity: LocalActivity = {
             id,
-            user_id: userId,
+            user_id: assignedUserId,
             tipo_actividad: data.tipo_actividad || 'EVENTO',
+            prioridad: data.prioridad || 'Media',
             asunto: asuntoTrimmed,
             descripcion: data.descripcion || undefined,
             fecha_inicio: toISODateString(data.fecha_inicio),
             fecha_fin: data.fecha_fin ? toISODateString(data.fecha_fin) : undefined,
             is_completed: !!data.is_completed,
-            opportunity_id: data.opportunity_id || undefined,
-            account_id: data.account_id || undefined,
+            opportunity_id: (typeof data.opportunity_id === 'string' && data.opportunity_id.trim() && data.opportunity_id.trim() !== 'null') ? data.opportunity_id.trim() : undefined,
+            account_id: (typeof data.account_id === 'string' && data.account_id.trim() && data.account_id.trim() !== 'null') ? data.account_id.trim() : undefined,
             clasificacion_id: data.clasificacion_id || null,
             subclasificacion_id: data.subclasificacion_id || null,
             // Microsoft integration fields
@@ -130,15 +186,16 @@ export function useActivities(filters?: { opportunity_id?: string, advisor_id?: 
             delete cleanActivity._sync_metadata;
         }
 
-        await syncEngine.commitLocalChanges([db.activities], async () => {
-            await db.activities.add(cleanActivity as LocalActivity);
+        await executeDirectMutations(async () => {
+            await db.activities.put(cleanActivity as LocalActivity);
             return [{
-                entityTable: 'CRM_Actividades', entityId: id, changes: cleanActivity,
-                options: { isSnapshot: true }
+                entityTable: 'CRM_Actividades',
+                entityId: id,
+                changes: { ...cleanActivity, created_by: userId, updated_by: userId } as Record<string, unknown>,
             }];
         });
         lastCreatedActivity = {
-            userId,
+            userId: assignedUserId,
             asunto: asuntoTrimmed,
             accountId: data.account_id,
             opportunityId: data.opportunity_id,
@@ -154,12 +211,19 @@ export function useActivities(filters?: { opportunity_id?: string, advisor_id?: 
         const updated_at = new Date().toISOString();
 
         // Process dates to handle timezone correctly
-        const rawChanges = {
+        const rawChanges: Record<string, unknown> = {
             ...data,
             updated_at,
             ...(data.fecha_inicio && { fecha_inicio: toISODateString(data.fecha_inicio) }),
             ...(data.fecha_fin && { fecha_fin: toISODateString(data.fecha_fin) })
         };
+
+        if ('opportunity_id' in data) {
+            rawChanges.opportunity_id = (typeof data.opportunity_id === 'string' && data.opportunity_id.trim() && data.opportunity_id.trim() !== 'null') ? data.opportunity_id.trim() : null;
+        }
+        if ('account_id' in data) {
+            rawChanges.account_id = (typeof data.account_id === 'string' && data.account_id.trim() && data.account_id.trim() !== 'null') ? data.account_id.trim() : null;
+        }
 
         // Strip any fields that don't exist in CRM_Actividades (e.g. microsoft_attendees)
         // to prevent sync errors when Supabase rejects unknown columns.
@@ -173,28 +237,65 @@ export function useActivities(filters?: { opportunity_id?: string, advisor_id?: 
 
         console.log("[useActivities] Sanitized changes for sync:", changes);
 
-        await syncEngine.commitLocalChanges([db.activities], async () => {
-            const current = await db.activities.get(id);
-            if (!current) return [];
+        let current = await db.activities.get(id);
+        if (!current) {
+            current = (await fetchRecordDirect<LocalActivity>('CRM_Actividades', id)) ?? undefined;
+        }
+
+        await executeDirectMutations(async () => {
+            if (!current) {
+                return [{
+                    entityTable: 'CRM_Actividades',
+                    entityId: id,
+                    changes,
+                    mode: 'update',
+                }];
+            }
             const fullActivity = { ...current, ...changes };
+            if ('opportunity_id' in fullActivity) {
+                fullActivity.opportunity_id = (typeof fullActivity.opportunity_id === 'string' && fullActivity.opportunity_id.trim() && fullActivity.opportunity_id.trim() !== 'null') ? fullActivity.opportunity_id.trim() : null;
+            }
+            if ('account_id' in fullActivity) {
+                fullActivity.account_id = (typeof fullActivity.account_id === 'string' && fullActivity.account_id.trim() && fullActivity.account_id.trim() !== 'null') ? fullActivity.account_id.trim() : null;
+            }
             await db.activities.put(fullActivity);
             return [{
-                entityTable: 'CRM_Actividades', entityId: id, changes: fullActivity,
-                options: { isSnapshot: true }
+                entityTable: 'CRM_Actividades',
+                entityId: id,
+                changes: fullActivity as Record<string, unknown>,
             }];
         });
     };
 
     const toggleComplete = async (id: string, isCompleted: boolean) => {
         const updated_at = new Date().toISOString();
-        await syncEngine.commitLocalChanges([db.activities], async () => {
-            const current = await db.activities.get(id);
-            if (!current) return [];
-            const fullActivity = { ...current, is_completed: isCompleted, updated_at };
-            await db.activities.put(fullActivity);
+        let current = await db.activities.get(id);
+        if (!current) {
+            current = (await fetchRecordDirect<LocalActivity>('CRM_Actividades', id)) ?? undefined;
+        }
+
+        await executeDirectMutations(async () => {
+            if (!current) {
+                return [{
+                    entityTable: 'CRM_Actividades',
+                    entityId: id,
+                    changes: { is_completed: isCompleted, updated_at },
+                    mode: 'update',
+                }];
+            }
+            const syncMetadata = {
+                ...((current as { _sync_metadata?: Record<string, unknown> })._sync_metadata || {}),
+                is_completed: Date.now()
+            };
+            const merged: Record<string, unknown> = { ...current, is_completed: isCompleted, updated_at, _sync_metadata: syncMetadata };
+            const fullActivity = Object.fromEntries(
+                Object.entries(merged).filter(([key]) => DB_COLUMNS.has(key))
+            ) as unknown as LocalActivity;
+            await db.activities.put({ ...current, ...fullActivity });
             return [{
-                entityTable: 'CRM_Actividades', entityId: id, changes: fullActivity,
-                options: { isSnapshot: true }
+                entityTable: 'CRM_Actividades',
+                entityId: id,
+                changes: fullActivity as unknown as Record<string, unknown>,
             }];
         });
 
@@ -212,14 +313,18 @@ export function useActivities(filters?: { opportunity_id?: string, advisor_id?: 
     };
 
     const deleteActivity = async (id: string) => {
-        const current = await db.activities.get(id);
+        let current = await db.activities.get(id);
+        if (!current) {
+            current = (await fetchRecordDirect<LocalActivity>('CRM_Actividades', id)) ?? undefined;
+        }
         if (!current) return;
 
-        await syncEngine.commitLocalChanges([db.activities], async () => {
+        await executeDirectMutations(async () => {
             await db.activities.delete(id);
             return [{
-                entityTable: 'CRM_Actividades', entityId: id,
-                changes: { ...current, is_deleted: true }, options: { isSnapshot: true }
+                entityTable: 'CRM_Actividades',
+                entityId: id,
+                changes: { ...current, is_deleted: true, updated_at: new Date().toISOString() } as Record<string, unknown>,
             }];
         });
     };

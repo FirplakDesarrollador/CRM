@@ -5,7 +5,7 @@ import { useUsers, User } from '@/lib/hooks/useUsers';
 import { UserRole } from '@/lib/hooks/useCurrentUser';
 import { UserForm } from '@/components/usuarios/UserForm';
 import { ConfirmationModal } from '@/components/ui/ConfirmationModal';
-import { Search, UserPlus, Edit, Power, Shield, Users as UsersIcon } from 'lucide-react';
+import { Search, UserPlus, Edit, Power, Shield, Users as UsersIcon, Phone } from 'lucide-react';
 import { cn } from '@/components/ui/utils';
 import { matchesSearchTokens } from '@/lib/utils';
 import { SALES_CHANNELS } from '@/lib/salesChannels';
@@ -138,6 +138,12 @@ export function UserList() {
                                             {user.full_name || 'Sin nombre'}
                                         </div>
                                         <div className="text-xs text-slate-500 truncate">{user.email}</div>
+                                        {user.telefono && (
+                                            <div className="text-xs text-slate-400 truncate flex items-center gap-1 mt-0.5">
+                                                <Phone className="w-3 h-3" />
+                                                <span>{user.telefono}</span>
+                                            </div>
+                                        )}
                                     </div>
                                     <div className="flex flex-col items-end gap-1 shrink-0">
                                         <span className={cn(
@@ -237,7 +243,14 @@ export function UserList() {
                                                 <span className="font-medium text-slate-900">
                                                     {user.full_name || 'Sin nombre'}
                                                 </span>
-                                                <span className="text-sm text-slate-500">{user.email}</span>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-sm text-slate-500">{user.email}</span>
+                                                    {user.telefono && (
+                                                        <span className="text-xs text-slate-400 flex items-center gap-1">
+                                                            • <Phone className="w-3 h-3 inline" /> {user.telefono}
+                                                        </span>
+                                                    )}
+                                                </div>
                                                 {user.canales && user.canales.length > 0 && (
                                                     <div className="flex flex-wrap gap-1 mt-1.5">
                                                         {user.canales.map(ch => (
