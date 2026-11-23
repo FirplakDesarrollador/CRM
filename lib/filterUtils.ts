@@ -1,5 +1,5 @@
 import { matchesSearchTokens } from "@/lib/utils";
-import { sellerCanSeeAccount, sellerCanSeeOpportunity } from "@/lib/sellerVisibility";
+import { canViewAllAccountsContactsOpportunities, sellerCanSeeAccount, sellerCanSeeOpportunity } from "@/lib/sellerVisibility";
 
 // ---------------------------------------------------------------------------
 // OPORTUNIDADES
@@ -24,6 +24,7 @@ export interface FilterOpportunitiesParams {
 
 export interface FilterOpportunitiesOptions {
     currentUserId?: string | null;
+    currentUserEmail?: string | null;
     userRole?: string | null;
     subordinateIds?: string[];
     collabOppIds?: Set<string>;
@@ -72,6 +73,7 @@ export function filterOpportunities<T extends {
 
     const {
         currentUserId,
+        currentUserEmail,
         userRole,
         subordinateIds = [],
         collabOppIds = new Set(),
@@ -82,13 +84,17 @@ export function filterOpportunities<T extends {
     } = options;
 
     const isVendedor = userRole === "VENDEDOR";
+    const seesAllPortfolio = canViewAllAccountsContactsOpportunities({
+        id: currentUserId,
+        email: currentUserEmail,
+    });
 
     return opportunities.filter(o => {
         const acc = accountsMap ? accountsMap.get(o.account_id || "") : o.account;
 
         // Role restriction for sellers
         // Asesor: solo dueño o colaborador, en cualquier pestaña (incluida "unrestricted").
-        if (isVendedor && currentUserId) {
+        if (isVendedor && currentUserId && !seesAllPortfolio) {
             if (!sellerCanSeeOpportunity(o, currentUserId, collabOppIds)) {
                 return false;
             }
@@ -191,7 +197,7 @@ export function filterOpportunities<T extends {
                 const isCollab = collabOppIds.has(o.id);
                 if (!isCollab) return false;
             } else if (userFilter === "all") {
-                if (userRole !== "ADMIN" && currentUserId) {
+                if (userRole !== "ADMIN" && currentUserId && !seesAllPortfolio) {
                     const isMine = o.owner_user_id === currentUserId || o.created_by === currentUserId;
                     const isCollab = collabOppIds.has(o.id);
                     const isTeam = userRole === "COORDINADOR" && o.owner_user_id && subordinateIds.includes(o.owner_user_id);
@@ -233,6 +239,7 @@ export interface FilterAccountsParams {
 
 export interface FilterAccountsOptions {
     currentUserId?: string | null;
+    currentUserEmail?: string | null;
     userRole?: string | null;
     subordinateIds?: string[];
     collabAccountIds?: Set<string>;
@@ -272,6 +279,7 @@ export function filterAccounts<T extends {
 
     const {
         currentUserId,
+        currentUserEmail,
         userRole,
         subordinateIds = [],
         collabAccountIds = new Set(),
@@ -279,12 +287,16 @@ export function filterAccounts<T extends {
     } = options;
 
     const isVendedor = userRole === "VENDEDOR";
+    const seesAllPortfolio = canViewAllAccountsContactsOpportunities({
+        id: currentUserId,
+        email: currentUserEmail,
+    });
 
     return accounts.filter(a => {
-        // Role permissions
-        if (isVendedor && currentUserId) {
+        // Role permissions. La excepción de cartera no recorta cuentas.
+        if (!seesAllPortfolio && isVendedor && currentUserId) {
             if (!sellerCanSeeAccount(a, currentUserId, collabAccountIds)) return false;
-        } else if (userRole === "COORDINADOR" && currentUserId) {
+        } else if (!seesAllPortfolio && userRole === "COORDINADOR" && currentUserId) {
             const isOwner = a.owner_user_id === currentUserId || a.created_by === currentUserId;
             const isTeam = (a.owner_user_id && subordinateIds.includes(a.owner_user_id)) ||
                 (!a.owner_user_id && a.created_by && subordinateIds.includes(a.created_by));
@@ -421,8 +433,9 @@ export function filterActivities<T extends {
     today.setHours(0, 0, 0, 0);
 
     return activities.filter(act => {
-        // Ownership / permissions
-        if (!canViewAll) {
+        // Ownership / permissions. La excepción de cartera ve todas las actividades.
+        const seesAllActivities = canViewAll || canViewAllAccountsContactsOpportunities(currentUserId);
+        if (!seesAllActivities) {
             if (!currentUserId) return false;
             const isOwner = act.user_id === currentUserId;
             const isCollab = act.opportunity_id ? collaborativeOppIds.has(act.opportunity_id) : false;
@@ -518,6 +531,7 @@ export interface FilterContactsParams {
 
 export interface FilterContactsOptions {
     currentUserId?: string | null;
+    currentUserEmail?: string | null;
     userRole?: string | null;
     allowedAccountIds?: Set<string>;
 }
@@ -544,15 +558,20 @@ export function filterContacts<T extends {
 
     const {
         currentUserId,
+        currentUserEmail,
         userRole,
         allowedAccountIds
     } = options;
 
     const isRestrictedRole = userRole === "VENDEDOR" || userRole === "COORDINADOR";
+    const seesAllPortfolio = canViewAllAccountsContactsOpportunities({
+        id: currentUserId,
+        email: currentUserEmail,
+    });
 
     return contacts.filter(c => {
         // Role-based account security (must belong to accounts user owns, created, or collaborates in)
-        if (isRestrictedRole && currentUserId && allowedAccountIds) {
+        if (!seesAllPortfolio && isRestrictedRole && currentUserId && allowedAccountIds) {
             if (!c.account_id || !allowedAccountIds.has(c.account_id)) {
                 return false;
             }

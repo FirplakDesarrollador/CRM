@@ -9,6 +9,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db, getActiveLocalUserId, useActiveDatabaseVersion } from '@/lib/db';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { hasPermission } from '@/lib/permissions';
+import { canViewAllAccountsContactsOpportunities } from '@/lib/sellerVisibility';
 import {
     Calendar as CalendarIcon,
     ChevronLeft,
@@ -72,7 +73,7 @@ function ActivitiesContent() {
     const router = useRouter();
     const { activities, createActivity, updateActivity, toggleComplete } = useActivities();
     const { user, role } = useCurrentUser();
-    const canViewAll = hasPermission(role, 'view_all_activities');
+    const canViewAll = hasPermission(role, 'view_all_activities') || canViewAllAccountsContactsOpportunities(user);
     const { requestFollowUp, resetFollowUp, followUpElement } = useActivityFollowUp({ createActivity });
 
     // Completing an activity: offer to schedule the next follow-up (B2C) right away

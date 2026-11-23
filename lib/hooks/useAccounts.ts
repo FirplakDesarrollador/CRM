@@ -6,17 +6,18 @@ import { supabase } from "@/lib/supabase";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { generateProvisionalNit, isProvisionalNit } from "@/lib/nitUtils";
 import { sanitizeOpportunityForSync } from "@/lib/hooks/useOpportunities";
-import { sellerCanSeeAccount } from "@/lib/sellerVisibility";
+import { canViewAllAccountsContactsOpportunities, sellerCanSeeAccount } from "@/lib/sellerVisibility";
 import { registrarEliminacionFallida } from "@/lib/eliminaciones";
 
 export function useAccounts(filters?: { advisor_id?: string | null, showAll?: boolean }) {
     const { user, isVendedor, isAdmin, isCoordinador } = useCurrentUser();
     const userId = user?.id;
+    const seesAllPortfolio = canViewAllAccountsContactsOpportunities(user);
 
     // Live Query from Local DB (Dexie)
     const accounts = useLiveQuery(async () => {
         // Priority 1: Vendedor role restriction (siempre gana: dashboard, asistente de oportunidad, etc.)
-        if (isVendedor && userId) {
+        if (isVendedor && userId && !seesAllPortfolio) {
             const collaborators = await db.opportunityCollaborators.where('usuario_id').equals(userId).toArray();
             const collabOppIds = collaborators.filter(c => !c.is_deleted).map(c => c.oportunidad_id);
             const collabOpps = collabOppIds.length > 0 ? await db.opportunities.where('id').anyOf(collabOppIds).toArray() : [];
@@ -35,7 +36,7 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
         }
 
         return db.accounts.toArray();
-    }, [isVendedor, userId, filters?.advisor_id, filters?.showAll]);
+    }, [isVendedor, userId, user?.email, seesAllPortfolio, filters?.advisor_id, filters?.showAll]);
     const isLoading = false; // Background sync handles loading
 
     const createAccount = async (data: Partial<LocalCuenta>, initialContactData?: {

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { isSellerRole, sellerCanSeeActivity } from '@/lib/sellerVisibility';
+import { canViewAllAccountsContactsOpportunities, isSellerRole, sellerCanSeeActivity } from '@/lib/sellerVisibility';
 import { supabase } from '@/lib/supabase';
 import { db } from '@/lib/db';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
@@ -45,6 +45,7 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
     // User Context
     const { user, role: userRole, isAdmin } = useCurrentUser();
     const currentUserId = user?.id;
+    const seesAllPortfolio = canViewAllAccountsContactsOpportunities(user);
 
     const [subordinateIds, setSubordinateIds] = useState<string[]>([]);
 
@@ -81,7 +82,7 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
                 const oppMap = new Map(allOpps.map(o => [o.id, o]));
 
                 // Asesor (VENDEDOR): solo actividades asignadas a él, en cualquier vista (lista, cuenta, oportunidad).
-                if (isSellerRole(userRole)) {
+                if (isSellerRole(userRole) && !seesAllPortfolio) {
                     localActivities = localActivities.filter(a => sellerCanSeeActivity(a, currentUserId));
                 }
 
@@ -174,7 +175,7 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
                 .eq('is_deleted', false);
 
             // Asesor (VENDEDOR): solo actividades asignadas a él, en cualquier vista.
-            if (isSellerRole(userRole)) {
+            if (isSellerRole(userRole) && !seesAllPortfolio) {
                 query = query.eq('user_id', currentUserId);
             }
 
@@ -257,7 +258,7 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
             setLoading(false);
             setIsLoadingData(false);
         }
-    }, [currentUserId, pageSize, searchTerm, typeFilter, showCompleted, opportunityId, accountId, page, isAdmin, userRole, subordinateIds]);
+    }, [currentUserId, seesAllPortfolio, pageSize, searchTerm, typeFilter, showCompleted, opportunityId, accountId, page, isAdmin, userRole, subordinateIds]);
 
     // Initial Fetch & Filter Fetch - Reset on filter change
     useEffect(() => {

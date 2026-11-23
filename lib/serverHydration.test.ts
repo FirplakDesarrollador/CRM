@@ -90,6 +90,18 @@ describe('serverHydration', () => {
         expect(ops).toContain('eq:user_id|seller-1');
     });
 
+    it('quien ve toda la cartera hidrata las actividades de todos', async () => {
+        responses.CRM_Actividades = [act('s1', { user_id: 'otro-asesor' })];
+        await hydrateOpportunityActivities(OPP, {
+            viewerId: '1870c27f-e901-41ed-97d4-7ecc89fd4935',
+            viewerEmail: 'cotizaciones@firplak.co',
+            viewerRole: 'VENDEDOR',
+        });
+        const ops = calls[0].ops.map(([op, args]) => `${op}:${args.join('|')}`);
+        expect(ops.some(op => op.startsWith('eq:user_id'))).toBe(false);
+        expect(await db.activities.get('s1')).toBeTruthy();
+    });
+
     it('search hydrates matching activities plus their opportunity and account', async () => {
         responses.CRM_Oportunidades = [{ id: OPP, nombre: 'POT42202 - Joswal', account_id: 'acc-1', is_deleted: false }];
         responses.CRM_Cuentas = [{ id: 'acc-1', nombre: 'Joswal', canal_id: 'PROPIO', is_deleted: false }];

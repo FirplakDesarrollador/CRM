@@ -10,7 +10,7 @@ import { PROSPECTO_PHASE_ID, getEquivalentPhaseIds, PhaseCatalogItem, calculateT
 import { toStartOfDayISO, toEndOfDayISO, toDateOnly, isDateOnlyInRange } from '@/lib/dateFilterHelpers';
 import { isClosedPhaseName, splitPhaseIdsByOutcome } from '@/lib/opportunityPhase';
 import { buildClosedStatusOrCondition, buildOpenPhaseOrCondition, matchesStatusFilter, matchesSetterFilter, normalizeSetterFilter, SetterFilter } from '@/lib/opportunityStatusFilter';
-import { activitiesVisibleToViewer, sellerCanSeeOpportunity, sellerOpportunityOrFilter } from '@/lib/sellerVisibility';
+import { activitiesVisibleToViewer, canViewAllAccountsContactsOpportunities, sellerCanSeeOpportunity, sellerOpportunityOrFilter } from '@/lib/sellerVisibility';
 import { FlatQuoteItemProduct, getOpportunityIdsByProductFilters } from '@/lib/opportunityProductFilterHelpers';
 import { fetchFullCatalog, PriceListProduct } from '@/lib/hooks/useProducts';
 
@@ -124,6 +124,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
     // User Context - uses useCurrentUser to respect viewMode
     const { user, role: userRole, isVendedor } = useCurrentUser();
     const currentUserId = user?.id || null;
+    const seesAllPortfolio = canViewAllAccountsContactsOpportunities(user);
     const [subordinateIds, setSubordinateIds] = useState<string[]>([]);
 
     // PERF FIX: Use ref for page to avoid including it in useCallback deps
@@ -214,7 +215,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
 
             // Asesor (VENDEDOR): solo sus oportunidades (dueño) y aquellas donde es colaborador,
             // sin importar la pestaña (Todas, Web, etc.).
-            if (isVendedor && currentUserId) {
+            if (!seesAllPortfolio && isVendedor && currentUserId) {
                 const sellerCollabs = await db.opportunityCollaborators.where('usuario_id').equals(currentUserId).toArray();
                 const sellerCollabIds = new Set(sellerCollabs.filter(c => !c.is_deleted).map(c => c.oportunidad_id));
                 localOpps = localOpps.filter(o => sellerCanSeeOpportunity(o, currentUserId, sellerCollabIds));
@@ -380,7 +381,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                     const collabOppIds = new Set(localCollabs.filter(c => !c.is_deleted).map(c => c.oportunidad_id));
                     localOpps = localOpps.filter(o => o.owner_user_id === currentUserId || collabOppIds.has(o.id));
                 } else if (userFilter === 'all') {
-                    if (userRole !== 'ADMIN' && currentUserId) {
+                    if (userRole !== 'ADMIN' && currentUserId && !seesAllPortfolio) {
                         const localCollabs = await db.opportunityCollaborators.where('usuario_id').equals(currentUserId || '').toArray();
                         const collabOppIds = new Set(localCollabs.filter(c => !c.is_deleted).map(c => c.oportunidad_id));
                         localOpps = localOpps.filter(o =>
@@ -747,7 +748,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                         }
                         q = q.or(ownershipConditions.join(','));
                     } else if (userFilter === 'all') {
-                        if (userRole !== 'ADMIN') {
+                        if (userRole !== 'ADMIN' && !seesAllPortfolio) {
                             const visibleConditions = [`owner_user_id.eq.${currentUserId}`];
                             // El asesor solo ve las suyas (dueño) y en las que colabora; no las que creó para otro.
                             if (!isVendedor) {
@@ -767,7 +768,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 }
 
                 // Asesor (VENDEDOR): restricción fija en cualquier pestaña/filtro (Todas, Web, cuenta, búsqueda).
-                if (isVendedor && currentUserId) {
+                if (!seesAllPortfolio && isVendedor && currentUserId) {
                     q = q.or(sellerOpportunityOrFilter(currentUserId, collabOppIds));
                 }
 
@@ -864,7 +865,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 const localOpps = await db.opportunities.where('id').anyOf(Array.from(missingPendingIds)).toArray();
                 const pendingCollabIds = new Set(collabOppIds);
                 pendingLocalOpps = localOpps.filter((o: any) => {
-                    if (isVendedor && currentUserId && !sellerCanSeeOpportunity(o, currentUserId, pendingCollabIds) && o.created_by !== currentUserId) return false;
+                    if (!seesAllPortfolio && isVendedor && currentUserId && !sellerCanSeeOpportunity(o, currentUserId, pendingCollabIds) && o.created_by !== currentUserId) return false;
                     if (accountIdFilter && o.account_id !== accountIdFilter) return false;
                     if (searchIsPhone && opportunityMatchesPhone(o, serverPhoneMatches)) return true;
                     if (searchTerm) {
@@ -934,7 +935,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
             setLoading(false);
             useSyncStore.getState().setIsLoadingData(false);
         }
-    }, [currentUserId, isVendedor, subordinateIds, pageSize, userFilter, searchTerm, accountIdFilter, idFilter, accountOwnerIds, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, originFilter, plantaFilter, familiaFilter, countryFilter, cityFilter, setterFilter, phasesReady, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc]);
+    }, [currentUserId, user?.email, seesAllPortfolio, isVendedor, subordinateIds, pageSize, userFilter, searchTerm, accountIdFilter, idFilter, accountOwnerIds, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, originFilter, plantaFilter, familiaFilter, countryFilter, cityFilter, setterFilter, phasesReady, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc]);
 
     useEffect(() => {
         fetchOpportunities(false);
