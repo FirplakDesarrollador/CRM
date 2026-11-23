@@ -1,4 +1,5 @@
 import type { OutboxItem } from './db';
+import { canViewAllAccountsContactsOpportunities, type PortfolioIdentity } from './sellerVisibility';
 
 export const MAX_SYNC_RETRIES = 5;
 export const CATALOG_REFRESH_TTL_MS = 24 * 60 * 60 * 1000;
@@ -88,6 +89,30 @@ export function buildFailureUpdate(
 
 export function syncCursorId(userId: string, tableName: string): string {
     return `${userId}:${tableName}`;
+}
+
+/** Tope de la carga inicial de cuentas, contactos y oportunidades para el resto de usuarios. */
+export const DEFAULT_PORTFOLIO_BOOTSTRAP_LIMIT = 3000;
+
+/** Marca que este usuario ya descargó una vez toda la cartera permitida. */
+export const FULL_PORTFOLIO_CURSOR = '__portfolio_full__';
+
+/** Tope de seguridad solo para quien ve toda la cartera. El resto sigue en 100.000. */
+export const FULL_PORTFOLIO_SYNC_SAFETY_LIMIT = 250_000;
+
+export function portfolioBootstrapLimit(
+    user: PortfolioIdentity | null | undefined,
+    defaultLimit = DEFAULT_PORTFOLIO_BOOTSTRAP_LIMIT
+): number {
+    return canViewAllAccountsContactsOpportunities(user) ? Number.POSITIVE_INFINITY : defaultLimit;
+}
+
+/** Una sola descarga completa; los sync siguientes siguen siendo incrementales. */
+export function needsFullPortfolioPull(
+    user: PortfolioIdentity | null | undefined,
+    fullPortfolioCursor: string | null | undefined
+): boolean {
+    return canViewAllAccountsContactsOpportunities(user) && !fullPortfolioCursor;
 }
 
 export function shouldRefreshCatalogs(

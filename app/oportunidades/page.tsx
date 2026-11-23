@@ -8,6 +8,7 @@ import { Plus, Search, Filter, Briefcase, ArrowUpDown, ChevronUp, ChevronDown, C
 import Link from "next/link";
 import { cn } from "@/components/ui/utils";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { canViewAllAccountsContactsOpportunities } from "@/lib/sellerVisibility";
 import { UserPickerFilter } from "@/components/cuentas/UserPickerFilter";
 import { OpportunityFilters } from "@/components/oportunidades/OpportunityFilters";
 import { QuickDateFilter, FloatingDateFilterPopover } from "@/components/oportunidades/QuickDateFilter";
@@ -39,7 +40,7 @@ import 'handsontable/styles/ht-theme-main.min.css';
 const HotTable = dynamic(() => import('@/components/HotTableWrapper'), { ssr: false });
 
 function OpportunitiesContent() {
-    const { role: userRole } = useCurrentUser();
+    const { user: currentUser, role: userRole } = useCurrentUser();
     const searchParams = useSearchParams();
     const router = useRouter();
 
@@ -992,8 +993,8 @@ function OpportunitiesContent() {
                         { id: 'mine', label: 'Mis Oportunidades' },
                         { id: 'collab', label: 'Colaboración' },
                         ...(userRole === 'ADMIN' ? [{ id: 'team', label: 'Equipo' }] : []),
-                        // El asesor no ve la pestaña Web (mostraría oportunidades de otros).
-                        ...(userRole === 'VENDEDOR' ? [] : [{ id: 'web', label: 'Web' }])
+                        // El asesor no ve la pestaña Web, salvo quien tiene visibilidad de toda la cartera.
+                        ...(userRole === 'VENDEDOR' && !canViewAllAccountsContactsOpportunities(currentUser) ? [] : [{ id: 'web', label: 'Web' }])
                     ].map(t => (
                         <button
                             key={t.id}

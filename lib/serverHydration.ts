@@ -12,11 +12,14 @@
  * - Nunca toca registros con cambios pendientes en el outbox (p. ej. una actividad borrada
  *   offline que aún no se ha subido no "revive").
  * - No escribe nada en Supabase: solo lecturas.
- * - Asesor (VENDEDOR): solo trae actividades asignadas a él (misma regla de sellerVisibility).
+ * - Asesor (VENDEDOR): solo trae actividades asignadas a él (misma regla de sellerVisibility),
+ *   salvo canViewAllAccountsContactsOpportunities, que hidrata las de todos.
+ * - Cuentas, contactos y oportunidades de referencia no se recortan por dueño.
+ *   La excepción de cartera se aplica en las vistas, no al guardar estas filas.
  */
 import { db } from '@/lib/db';
 import { supabase } from '@/lib/supabase';
-import { isSellerRole } from '@/lib/sellerVisibility';
+import { canViewAllAccountsContactsOpportunities, isSellerRole } from '@/lib/sellerVisibility';
 import { getSearchTokens, accentInsensitiveCondition, applyAccentInsensitiveFilter } from '@/lib/utils';
 import { getCellphoneSearchDigits } from '@/lib/phoneSearch';
 
@@ -28,7 +31,13 @@ const MAX_OPPORTUNITY_ACTIVITIES = 5000;
 const MAX_OWN_ACTIVITIES = 30000;
 const OWN_HISTORY_MONTHS = 12;
 
-type Viewer = { viewerId?: string | null; viewerRole?: string | null };
+type Viewer = { viewerId?: string | null; viewerRole?: string | null; viewerEmail?: string | null };
+
+/** Actividades hidratadas: el asesor solo trae las suyas, salvo la excepción de cartera completa. */
+function sellerActivitiesOnly(viewer: Viewer): boolean {
+    if (canViewAllAccountsContactsOpportunities({ id: viewer.viewerId, email: viewer.viewerEmail })) return false;
+    return isSellerRole(viewer.viewerRole);
+}
 type Row = { id: string; [key: string]: unknown };
 
 const isOnline = () => typeof navigator === 'undefined' || navigator.onLine;
@@ -133,7 +142,7 @@ async function hydrateReferences(activities: ReadonlyArray<Record<string, unknow
  */
 export async function hydrateOpportunityActivities(opportunityId: string, viewer: Viewer): Promise<number> {
     if (!opportunityId || !isOnline()) return 0;
-    if (isSellerRole(viewer.viewerRole) && !viewer.viewerId) return 0;
+    if (sellerActivitiesOnly(viewer) && !viewer.viewerId) return 0;
 
     const rows = await fetchPaged((from, to) => {
         let query = supabase
@@ -141,7 +150,7 @@ export async function hydrateOpportunityActivities(opportunityId: string, viewer
             .select('*')
             .eq('is_deleted', false)
             .eq('opportunity_id', opportunityId);
-        if (isSellerRole(viewer.viewerRole)) query = query.eq('user_id', viewer.viewerId as string);
+        if (sellerActivitiesOnly(viewer)) query = query.eq('user_id', viewer.viewerId as string);
         return query.order('fecha_inicio', { ascending: false }).order('id', { ascending: false }).range(from, to);
     }, MAX_OPPORTUNITY_ACTIVITIES);
 
@@ -158,7 +167,7 @@ export async function hydrateActivitiesForSearch(searchText: string, viewer: Vie
     const text = (searchText || '').trim();
     if (text.length < 3 || !isOnline()) return 0;
     if (getCellphoneSearchDigits(text)) return 0; // la búsqueda por celular tiene su propio flujo
-    if (isSellerRole(viewer.viewerRole) && !viewer.viewerId) return 0;
+    if (sellerActivitiesOnly(viewer) && !viewer.viewerId) return 0;
 
     const tokens = getSearchTokens(text).filter(t => /[\p{L}\p{N}]/u.test(t));
     if (tokens.length === 0) return 0;
@@ -188,7 +197,7 @@ export async function hydrateActivitiesForSearch(searchText: string, viewer: Vie
             .select('*')
             .eq('is_deleted', false)
             .or(conditions.join(','));
-        if (isSellerRole(viewer.viewerRole)) query = query.eq('user_id', viewer.viewerId as string);
+        if (sellerActivitiesOnly(viewer)) query = query.eq('user_id', viewer.viewerId as string);
         return query.order('fecha_inicio', { ascending: false }).order('id', { ascending: false }).range(from, to);
     }, MAX_SEARCH_ACTIVITIES);
 
@@ -228,14 +237,14 @@ export async function hydrateOwnActivities(userId: string, now: Date = new Date(
  */
 export async function hydrateActivityById(activityId: string, viewer: Viewer): Promise<number> {
     if (!activityId || !isOnline()) return 0;
-    if (isSellerRole(viewer.viewerRole) && !viewer.viewerId) return 0;
+    if (sellerActivitiesOnly(viewer) && !viewer.viewerId) return 0;
 
     let query = supabase
         .from('CRM_Actividades')
         .select('*')
         .eq('is_deleted', false)
         .eq('id', activityId);
-    if (isSellerRole(viewer.viewerRole)) query = query.eq('user_id', viewer.viewerId as string);
+    if (sellerActivitiesOnly(viewer)) query = query.eq('user_id', viewer.viewerId as string);
 
     const { data, error } = await query.limit(1);
     if (error) throw error;

@@ -6,6 +6,7 @@ import { useSyncStore } from '@/lib/stores/useSyncStore';
 import { matchesSearchTokens, getSearchTokens, getPhoneIlikePatterns } from '@/lib/utils';
 import { getCellphoneSearchDigits, phoneMatchesDigits } from '@/lib/phoneSearch';
 import { shouldRestrictContactsByAccountOwner, filterContactsForUser } from '@/lib/contactVisibility';
+import { canViewAllAccountsContactsOpportunities } from '@/lib/sellerVisibility';
 
 export type ContactServer = {
     id: string;
@@ -45,6 +46,7 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
     // User Context
     const { user, role: userRole, isVendedor } = useCurrentUser();
     const currentUserId = user?.id;
+    const seesAllPortfolio = canViewAllAccountsContactsOpportunities(user);
 
     const [subordinateIds, setSubordinateIds] = useState<string[]>([]);
 
@@ -78,7 +80,7 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
             let localContacts = (await db.contacts.toArray()).filter(c => !c.is_deleted);
             
             // Contact visibility policy
-            if (shouldRestrictContactsByAccountOwner(userRole) && currentUserId) {
+            if (!seesAllPortfolio && shouldRestrictContactsByAccountOwner(userRole) && currentUserId) {
                 const idsToMatch = isVendedor ? [currentUserId] : [currentUserId, ...subordinateIds];
 
                 // Get my accounts: Owner OR (No owner and I am creator)
@@ -156,7 +158,7 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
             }
 
             // Build query
-            const needsAccountFilter = shouldRestrictContactsByAccountOwner(userRole);
+            const needsAccountFilter = !seesAllPortfolio && shouldRestrictContactsByAccountOwner(userRole);
             const accountSelect = needsAccountFilter ? 'account:CRM_Cuentas!inner(nombre, owner_user_id)' : 'account:CRM_Cuentas(nombre)';
             
             const selectFields = `
@@ -368,7 +370,7 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
             setLoading(false);
             useSyncStore.getState().setIsLoadingData(false);
         }
-    }, [pageSize, searchTerm, accountId, accountFilter, principalFilter, sortField, sortAsc, isVendedor, userRole, currentUserId, subordinateIds]);
+    }, [pageSize, searchTerm, accountId, accountFilter, principalFilter, sortField, sortAsc, isVendedor, userRole, currentUserId, user?.email, seesAllPortfolio, subordinateIds]);
 
     // Initial Fetch & Filter Fetch
     useEffect(() => {

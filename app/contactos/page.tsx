@@ -22,6 +22,7 @@ import { DataListToolbar } from "@/components/ui/DataListToolbar";
 import { handleEntityLinkClick } from "@/lib/utils/navigation";
 import { formatColombiaDateTime } from "@/lib/date-utils";
 import { isToolbarOwnedTableColumn } from "@/lib/tableFilterPolicy";
+import { canViewAllAccountsContactsOpportunities } from "@/lib/sellerVisibility";
 
 const HotTable = dynamic(() => import('@/components/HotTableWrapper'), { ssr: false });
 
@@ -126,7 +127,7 @@ function ContactsContent() {
 
             // Asesor (VENDEDOR): solo contactos de sus cuentas visibles.
             const canOpen = (contact: { account_id?: string | null }) => {
-                if (!isVendedor) return true;
+                if (!isVendedor || canViewAllAccountsContactsOpportunities(user)) return true;
                 return !!contact.account_id && (accounts || []).some(a => a.id === contact.account_id);
             };
 
@@ -160,7 +161,7 @@ function ContactsContent() {
         };
 
         findAndOpen();
-    }, [searchParams, contacts, accounts, isVendedor]);
+    }, [searchParams, contacts, accounts, isVendedor, user]);
 
     // Restore state from sessionStorage if navigating from sidebar (empty query)
     useEffect(() => {

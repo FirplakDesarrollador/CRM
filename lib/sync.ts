@@ -13,7 +13,11 @@ import {
     isSyncLeaseExpired,
     shouldRefreshCatalogs,
     isCatalogVersionNewer,
-    syncCursorId
+    syncCursorId,
+    portfolioBootstrapLimit,
+    needsFullPortfolioPull,
+    FULL_PORTFOLIO_CURSOR,
+    FULL_PORTFOLIO_SYNC_SAFETY_LIMIT
 } from './sync-runtime';
 
 const TABLE_PRIORITY: Record<string, number> = {
@@ -1634,7 +1638,8 @@ export class SyncEngine {
         label: string,
         fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: any }>,
         maxRows = Number.POSITIVE_INFINITY,
-        pageSize = 1000
+        pageSize = 1000,
+        safetyLimit = 100_000
     ): Promise<T[]> {
         const rows: T[] = [];
         let from = 0;
@@ -1651,8 +1656,9 @@ export class SyncEngine {
             if (page.length < requested) break;
             from += page.length;
 
-            if (from >= 100_000) {
-                throw new Error(`${label} exceeded the 100,000-row synchronization safety limit.`);
+            if (from >= safetyLimit) {
+                const shown = safetyLimit === 100_000 ? '100,000' : String(safetyLimit);
+                throw new Error(`${label} exceeded the ${shown}-row synchronization safety limit.`);
             }
             await this.yield();
         }
@@ -1667,6 +1673,14 @@ export class SyncEngine {
         console.log('[Sync] Pulling data from server...');
         useSyncStore.getState().setIsLoadingData(true);
         const lastSync = await this.getSyncCursor(_user.id, '__global__');
+        const portfolioViewer = { id: _user?.id ?? null, email: _user?.email ?? null };
+        const fullPortfolioCursor = _user?.id
+            ? await this.getSyncCursor(_user.id, FULL_PORTFOLIO_CURSOR)
+            : null;
+        const pullEntirePortfolio = needsFullPortfolioPull(portfolioViewer, fullPortfolioCursor);
+        const portfolioLimit = portfolioBootstrapLimit(portfolioViewer);
+        const portfolioSafetyLimit = pullEntirePortfolio ? FULL_PORTFOLIO_SYNC_SAFETY_LIMIT : 100_000;
+        const incrementalPortfolio = Boolean(lastSync) && !pullEntirePortfolio;
         const pullErrors: string[] = [];
         const catalogErrors: string[] = [];
 
@@ -1693,7 +1707,7 @@ export class SyncEngine {
             // Pull Accounts (CRM_Cuentas)
             // PERF OPTIMIZATION: Incremental sync based on lastSyncTime + Segmented Advisor Priority
             let accounts: any[] = [];
-            if (lastSync) {
+            if (incrementalPortfolio && lastSync) {
                 accounts = await this.fetchAllPages<any>('CRM_Cuentas delta', (from, to) => supabase
                     .from('CRM_Cuentas')
                     .select('*')
@@ -1724,7 +1738,7 @@ export class SyncEngine {
                     .eq('is_deleted', false)
                     .order('updated_at', { ascending: false })
                     .order('id', { ascending: false })
-                    .range(from, to), 3000);
+                    .range(from, to), portfolioLimit, 1000, portfolioSafetyLimit);
 
                 // Merge and deduplicate by ID
                 const accMap = new Map<string, any>();
@@ -2096,11 +2110,11 @@ export class SyncEngine {
                     .from('CRM_Contactos')
                     .select('*')
                     .eq('is_deleted', false);
-                query = lastSync
-                    ? query.gte('updated_at', lastSync).lte('updated_at', upperBound).order('updated_at', { ascending: true })
+                query = incrementalPortfolio
+                    ? query.gte('updated_at', lastSync as string).lte('updated_at', upperBound).order('updated_at', { ascending: true })
                     : query.order('updated_at', { ascending: false });
-                return query.order('id', { ascending: Boolean(lastSync) }).range(from, to);
-            }, lastSync ? Number.POSITIVE_INFINITY : 3000);
+                return query.order('id', { ascending: incrementalPortfolio }).range(from, to);
+            }, incrementalPortfolio ? Number.POSITIVE_INFINITY : portfolioLimit, 1000, portfolioSafetyLimit);
 
             if (contacts && contacts.length > 0) {
                 const pendingContactIds = new Set(
@@ -2192,11 +2206,11 @@ export class SyncEngine {
                     .from('CRM_Oportunidades')
                     .select('*')
                     .eq('is_deleted', false);
-                query = lastSync
-                    ? query.gte('updated_at', lastSync).lte('updated_at', upperBound).order('updated_at', { ascending: true })
+                query = incrementalPortfolio
+                    ? query.gte('updated_at', lastSync as string).lte('updated_at', upperBound).order('updated_at', { ascending: true })
                     : query.order('updated_at', { ascending: false });
-                return query.order('id', { ascending: Boolean(lastSync) }).range(from, to);
-            }, lastSync ? Number.POSITIVE_INFINITY : 3000);
+                return query.order('id', { ascending: incrementalPortfolio }).range(from, to);
+            }, incrementalPortfolio ? Number.POSITIVE_INFINITY : portfolioLimit, 1000, portfolioSafetyLimit);
 
             console.log(`[Sync] Pulled ${opportunities?.length || 0} opportunities from server.`);
 
@@ -2489,16 +2503,17 @@ export class SyncEngine {
         // Pull Activities (CRM_Actividades) - SMART MERGE with incremental sync
             // Re-enabled to ensure activities persist across browser sessions
             try {
+                const activityIncremental = Boolean(lastSync) && !pullEntirePortfolio;
                 const activities = await this.fetchAllPages<any>('CRM_Actividades', (from, to) => {
                     let query = supabase
                         .from('CRM_Actividades')
                         .select('*')
                         .eq('is_deleted', false);
-                    query = lastSync
-                        ? query.gte('updated_at', lastSync).lte('updated_at', upperBound).order('updated_at', { ascending: true })
+                    query = activityIncremental
+                        ? query.gte('updated_at', lastSync as string).lte('updated_at', upperBound).order('updated_at', { ascending: true })
                         : query.order('updated_at', { ascending: false });
-                    return query.order('id', { ascending: Boolean(lastSync) }).range(from, to);
-                }, lastSync ? Number.POSITIVE_INFINITY : 3000);
+                    return query.order('id', { ascending: activityIncremental }).range(from, to);
+                }, activityIncremental ? Number.POSITIVE_INFINITY : (pullEntirePortfolio ? portfolioLimit : 3000), 1000, pullEntirePortfolio ? portfolioSafetyLimit : 100_000);
 
                 if (activities && activities.length > 0) {
                     // Smart merge: Apply Last-Write-Wins (LWW) locally
@@ -2563,6 +2578,11 @@ export class SyncEngine {
             } catch (actErr: any) {
                 console.error('[Sync] Failed to pull activities:', actErr.message);
                 pullErrors.push(`CRM_Actividades: ${actErr.message}`);
+            }
+
+            if (pullEntirePortfolio && _user?.id && !pullErrors.some(error => error.startsWith('CRM_Actividades'))) {
+                await this.setSyncCursor(_user.id, FULL_PORTFOLIO_CURSOR, upperBound);
+                console.log('[Sync] Full portfolio pull stored for accounts, contacts, opportunities and activities.');
             }
 
             // Actividades propias fuera del caché de 3.000 (una vez por copia local).

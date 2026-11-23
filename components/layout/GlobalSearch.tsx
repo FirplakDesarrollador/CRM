@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import { useOnClickOutside } from "@/lib/hooks/useOnClickOutside"; // Assuming this exists or I'll implement a simple ref check
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { db } from "@/lib/db";
-import { isSellerRole, sellerCanSeeAccount, sellerCanSeeOpportunity } from "@/lib/sellerVisibility";
+import { canViewAllAccountsContactsOpportunities, isSellerRole, sellerCanSeeAccount, sellerCanSeeOpportunity } from "@/lib/sellerVisibility";
 
 type SearchResult = {
     entity_type: 'opportunity' | 'account' | 'contact';
@@ -83,7 +83,8 @@ export function GlobalSearch() {
 
                 if (error) throw error;
                 const rows = (data || []) as SearchResult[];
-                setResults(isSellerRole(role) && currentUser?.id ? await filterResultsForSeller(rows, currentUser.id) : rows);
+                const restrictPortfolio = isSellerRole(role) && !!currentUser?.id && !canViewAllAccountsContactsOpportunities(currentUser);
+                setResults(restrictPortfolio && currentUser?.id ? await filterResultsForSeller(rows, currentUser.id) : rows);
             } catch (err) {
                 console.error("Global Search Error:", err);
             } finally {
@@ -92,7 +93,7 @@ export function GlobalSearch() {
         }, 300);
 
         return () => clearTimeout(timer);
-    }, [query, role, currentUser?.id]);
+    }, [query, role, currentUser]);
 
     const handleSelect = (result: SearchResult) => {
         setIsOpen(false);

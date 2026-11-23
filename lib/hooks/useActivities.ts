@@ -5,7 +5,7 @@ import { executeDirectMutations, fetchRecordDirect } from '../supabaseDirect';
 import { v4 as uuidv4 } from 'uuid';
 import { supabase } from '../supabase';
 import { useCurrentUser } from './useCurrentUser';
-import { activitiesVisibleToViewer, isSellerRole } from '../sellerVisibility';
+import { activitiesVisibleToViewer, canViewAllAccountsContactsOpportunities, isSellerRole } from '../sellerVisibility';
 import { resolveActivityUserId } from '../activityAssignee';
 
 /**
@@ -53,6 +53,8 @@ export function useActivities(filters?: { opportunity_id?: string, account_id?: 
 
     const { user: currentUser, role: viewerRole } = useCurrentUser();
     const viewerId = currentUser?.id || null;
+    const seesAllPortfolio = canViewAllAccountsContactsOpportunities(currentUser);
+    const sellerScoped = isSellerRole(viewerRole) && !seesAllPortfolio;
 
     // Direct Supabase fetch for the active filter scope
     useEffect(() => {
@@ -72,9 +74,9 @@ export function useActivities(filters?: { opportunity_id?: string, account_id?: 
                     query = query.eq('opportunity_id', filters.opportunity_id);
                 } else if (filters?.account_id) {
                     query = query.eq('account_id', filters.account_id);
-                } else if (filters?.advisor_id && !isSellerRole(viewerRole)) {
+                } else if (filters?.advisor_id && !sellerScoped) {
                     query = query.eq('user_id', filters.advisor_id);
-                } else if (isSellerRole(viewerRole) && viewerId) {
+                } else if (sellerScoped && viewerId) {
                     query = query.eq('user_id', viewerId);
                 }
 
@@ -94,7 +96,7 @@ export function useActivities(filters?: { opportunity_id?: string, account_id?: 
         return () => {
             cancelled = true;
         };
-    }, [viewerRole, viewerId, filters?.opportunity_id, filters?.account_id, filters?.advisor_id]);
+    }, [viewerRole, viewerId, seesAllPortfolio, sellerScoped, filters?.opportunity_id, filters?.account_id, filters?.advisor_id]);
 
     const activities = useLiveQuery(
         async () => {
@@ -102,14 +104,14 @@ export function useActivities(filters?: { opportunity_id?: string, account_id?: 
                 ? db.activities.where('opportunity_id').equals(filters.opportunity_id)
                 : filters?.account_id
                     ? db.activities.where('account_id').equals(filters.account_id)
-                    : (filters?.advisor_id && !isSellerRole(viewerRole))
+                    : (filters?.advisor_id && !sellerScoped)
                         ? db.activities.where('user_id').equals(filters.advisor_id)
                         : db.activities.toCollection();
             const list = await collection.filter(a => !a.is_deleted).toArray();
             // Asesor (VENDEDOR): solo las actividades asignadas a él.
             return activitiesVisibleToViewer(list, viewerRole, viewerId);
         },
-        [activeUserId, dbVersion, viewerRole, viewerId, filters?.opportunity_id, filters?.account_id, filters?.advisor_id]
+        [activeUserId, dbVersion, viewerRole, viewerId, seesAllPortfolio, sellerScoped, filters?.opportunity_id, filters?.account_id, filters?.advisor_id]
     );
 
     // Allowlist of columns that actually exist in CRM_Actividades on Supabase.

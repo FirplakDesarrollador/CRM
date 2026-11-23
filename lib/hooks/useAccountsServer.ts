@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { sellerCanSeeAccount } from '@/lib/sellerVisibility';
+import { canViewAllAccountsContactsOpportunities, sellerCanSeeAccount } from '@/lib/sellerVisibility';
 import { supabase } from '@/lib/supabase';
 import { db } from '@/lib/db';
 import { buildPhaseOutcomeMap, getPhaseOutcome } from '@/lib/opportunityPhase';
@@ -84,6 +84,7 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
     // User Context
     const { user, role: userRole, isVendedor } = useCurrentUser();
     const currentUserId = user?.id;
+    const seesAllPortfolio = canViewAllAccountsContactsOpportunities(user);
 
     const [subordinateIds, setSubordinateIds] = useState<string[]>([]);
 
@@ -129,10 +130,10 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                 const collabOpps = await db.opportunities.where('id').anyOf(collabOppIds).toArray();
                 const collabAccIds = collabOpps.filter(o => !o.is_deleted).map(o => o.account_id);
 
-                if (isVendedor && currentUserId) {
+                if (!seesAllPortfolio && isVendedor && currentUserId) {
                     const collabAccIdSet = new Set(collabAccIds);
                     localAccounts = localAccounts.filter(a => sellerCanSeeAccount(a, currentUserId, collabAccIdSet));
-                } else if (userRole === 'COORDINADOR' && currentUserId) {
+                } else if (!seesAllPortfolio && userRole === 'COORDINADOR' && currentUserId) {
                     localAccounts = localAccounts.filter((a: any) => 
                         a.owner_user_id === currentUserId || 
                         a.created_by === currentUserId ||
@@ -288,7 +289,7 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
             }
 
             // Role filtering
-            if ((isVendedor || userRole === 'COORDINADOR') && currentUserId) {
+            if (!seesAllPortfolio && (isVendedor || userRole === 'COORDINADOR') && currentUserId) {
                 // Fetch accounts where user is collaborator
                 const { data: collabData } = await supabase
                     .from('CRM_Oportunidades_Colaboradores')
@@ -490,7 +491,7 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
             setLoading(false);
             useSyncStore.getState().setIsLoadingData(false);
         }
-    }, [currentUserId, pageSize, searchTerm, assignedUserId, isVendedor, userRole, subordinateIds, channelFilter, subclassificationFilter, nivelPremiumFilter, startDate, endDate, sortField, sortAsc, webFilter]);
+    }, [currentUserId, user?.email, seesAllPortfolio, pageSize, searchTerm, assignedUserId, isVendedor, userRole, subordinateIds, channelFilter, subclassificationFilter, nivelPremiumFilter, startDate, endDate, sortField, sortAsc, webFilter]);
 
     // Initial Fetch & Filter Fetch
     useEffect(() => {

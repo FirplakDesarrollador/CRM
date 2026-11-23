@@ -8,7 +8,7 @@ import { supabase } from "@/lib/supabase";
 import { cn } from "@/components/ui/utils";
 import { formatNumberCO } from "@/lib/utils";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
-import { isSellerRole, sellerCanSeeOpportunity } from "@/lib/sellerVisibility";
+import { canViewAllAccountsContactsOpportunities, isSellerRole, sellerCanSeeOpportunity } from "@/lib/sellerVisibility";
 
 interface ContactOpportunitiesProps {
     contactId: string;
@@ -38,7 +38,9 @@ export function newOpportunityUrlForContact(accountId: string, contactId: string
 export function ContactOpportunities({ contactId, accountId }: ContactOpportunitiesProps) {
     const [rows, setRows] = useState<ContactOpportunityRow[] | null>(null);
     const { user: currentUser, role } = useCurrentUser();
-    const sellerId = isSellerRole(role) ? currentUser?.id || null : null;
+    const sellerId = isSellerRole(role) && !canViewAllAccountsContactsOpportunities(currentUser)
+        ? currentUser?.id || null
+        : null;
 
     useEffect(() => {
         let cancelled = false;

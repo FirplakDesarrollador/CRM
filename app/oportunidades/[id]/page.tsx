@@ -21,7 +21,7 @@ import {
     ListTodo,
 } from "lucide-react";
 import { useActivities, LocalActivity } from "@/lib/hooks/useActivities";
-import { activitiesVisibleToViewer } from "@/lib/sellerVisibility";
+import { activitiesVisibleToViewer, canViewAllAccountsContactsOpportunities } from "@/lib/sellerVisibility";
 import { hydrateOpportunityActivities } from "@/lib/serverHydration";
 import { CreateActivityModal } from "@/components/activities/CreateActivityModal";
 import { useActivityFollowUp } from "@/components/activities/ActivityFollowUp";
@@ -79,7 +79,7 @@ export default function OpportunityDetailPage() {
                     const isCollab = collaborators.some(
                         (c) => c.usuario_id === currentUser?.id && !c.is_deleted
                     );
-                    if (userRole === 'VENDEDOR' && currentUser?.id) {
+                    if (userRole === 'VENDEDOR' && currentUser?.id && !canViewAllAccountsContactsOpportunities(currentUser)) {
                         const isOwner = oppData.owner_user_id === currentUser.id;
                         if (!isOwner && !isCollab) {
                             setServerOpportunity('UNAUTHORIZED');

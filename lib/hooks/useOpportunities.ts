@@ -1,6 +1,6 @@
 import { useLiveQuery } from "dexie-react-hooks";
 import { estadoIdForPhaseName, ESTADO_ID_ABIERTA } from '@/lib/opportunityPhase';
-import { sellerCanSeeOpportunity } from '@/lib/sellerVisibility';
+import { canViewAllAccountsContactsOpportunities, sellerCanSeeOpportunity } from '@/lib/sellerVisibility';
 import { db, LocalOportunidad, LocalOpportunityCollaborator, LocalQuote, LocalQuoteItem } from "@/lib/db";
 import { executeDirectMutations, fetchRecordDirect } from "@/lib/supabaseDirect";
 import { useEffect } from "react";
@@ -98,11 +98,12 @@ export function sanitizeOpportunityForSync(opp: any) {
 export function useOpportunities(filters?: { advisor_id?: string | null }) {
     const { user, isVendedor, isAdmin, isCoordinador } = useCurrentUser();
     const userId = user?.id;
+    const seesAllPortfolio = canViewAllAccountsContactsOpportunities(user);
 
     const opportunities = useLiveQuery(
         async () => {
             // Priority 1: Vendedor role restriction (siempre gana, incluso con filtro de asesor del dashboard)
-            if (isVendedor && userId) {
+            if (isVendedor && userId && !seesAllPortfolio) {
                 // Get IDs of opportunities where user is a collaborator
                 const collaborators = await db.opportunityCollaborators
                     .where('usuario_id')
@@ -120,7 +121,7 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
 
             return db.opportunities.toArray();
         },
-        [isVendedor, userId, filters?.advisor_id]
+        [isVendedor, userId, user?.email, seesAllPortfolio, filters?.advisor_id]
     );
 
     const createOpportunity = async (data: any) => {
