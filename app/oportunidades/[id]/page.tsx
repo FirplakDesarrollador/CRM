@@ -10,7 +10,8 @@ import Link from "next/link";
 import { cn, formatNumberCO, formatOpportunityAmount } from "@/lib/utils";
 import { db, LocalCuenta } from "@/lib/db";
 import { ProbabilityDonut } from "@/components/ui/ProbabilityDonut";
-import { hydrateActivityCatalogsFromSupabase, hydrateOpportunityDetailFromSupabase } from "@/lib/supabaseDirect";
+import { hydrateActivityCatalogsFromSupabase, hydrateOpportunityDetailFromSupabase, refreshLossReasonsFromSupabase } from "@/lib/supabaseDirect";
+import { lossReasonOptionLabel, selectLossReasonsForPicker, type LossReasonCatalogItem } from "@/lib/lossReasonCatalog";
 import { useLiveQuery } from "dexie-react-hooks";
 import { formatColombiaDate, formatColombiaDateTime, isDateOverdue, toInputDate } from "@/lib/date-utils";
 import {
@@ -307,30 +308,6 @@ export default function OpportunityDetailPage() {
     );
 }
 
-const LOSS_REASONS = [
-    "N - No responde 1mer contacto",
-    "N- Sin información de contacto",
-    "N- Inadecuada Segmentación",
-    "N- No va a comprar",
-    "RED- MAC",
-    "RED- Firplak Home",
-    "RED- Ser. Tecnico",
-    "RED- Distribución",
-    "RED- Obras",
-    "INT - Abandona Conversación",
-    "INT - Precio Elevado",
-    "INT - Sin cobertura",
-    "INT - Tiempos de entrega",
-    "INT - No se fabrica",
-    "INT- No se tiene medida / Color",
-    "INT- Competencia diferente a precio",
-    "INT- Compro FIRPLAK",
-    "INT- Pago contraentrega",
-    "INT - Lo pospone",
-    "INT - Compra en Homcenter",
-    "Duplicado"
-];
-
 function SummaryTab({ opportunity }: { opportunity: any }) {
     const { updateOpportunity } = useOpportunities();
     // Usuario logueado: lo usa isB2COpportunity en handlePhaseChange.
@@ -361,6 +338,25 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     const [isSavingCategoria, setIsSavingCategoria] = useState(false);
     const [isSavingContactos, setIsSavingContactos] = useState(false);
     const [isSavingClientesAtendidos, setIsSavingClientesAtendidos] = useState(false);
+
+    // Loss reasons come from CRM_RazonesPerdida (active rows only). The remote
+    // read runs every time this tab mounts, so a reason added in Supabase shows
+    // up after a refresh without a code change. Dexie is the offline fallback.
+    const cachedLossReasons = useLiveQuery(() => db.lossReasons.toArray(), []);
+    const [remoteLossReasons, setRemoteLossReasons] = useState<LossReasonCatalogItem[] | null>(null);
+    useEffect(() => {
+        let cancelled = false;
+        void refreshLossReasonsFromSupabase().then(rows => {
+            if (!cancelled && rows && rows.length > 0) setRemoteLossReasons(rows);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+    const lossReasonOptions = useMemo(
+        () => selectLossReasonsForPicker(remoteLossReasons ?? cachedLossReasons ?? []),
+        [remoteLossReasons, cachedLossReasons],
+    );
 
     // Loss reason inline fields
     const [localRazonPerdida, setLocalRazonPerdida] = useState(opportunity.razon_perdida || "");
@@ -1354,11 +1350,11 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                         )}
                                     >
                                         <option value="">Seleccione una razón...</option>
-                                        {localRazonPerdida && !LOSS_REASONS.includes(localRazonPerdida) && (
-                                            <option value={localRazonPerdida}>{localRazonPerdida}</option>
+                                        {localRazonPerdida && !lossReasonOptions.some(reason => reason.descripcion === localRazonPerdida) && (
+                                            <option value={localRazonPerdida}>{lossReasonOptionLabel(localRazonPerdida)}</option>
                                         )}
-                                        {LOSS_REASONS.map(r => (
-                                            <option key={r} value={r}>{r}</option>
+                                        {lossReasonOptions.map(reason => (
+                                            <option key={reason.id} value={reason.descripcion}>{lossReasonOptionLabel(reason.descripcion)}</option>
                                         ))}
                                     </select>
                                     {isSavingLossReason && (

@@ -2,6 +2,7 @@ import { activateLocalDatabase, db, getActiveLocalUserId, OutboxItem } from './d
 import type { Table } from 'dexie';
 import { supabase } from './supabase';
 import { hydrateOwnActivities } from './serverHydration';
+import { applyLossReasonCatalog } from './supabaseDirect';
 import { v4 as uuidv4 } from 'uuid';
 import { useSyncStore } from './stores/useSyncStore';
 import { generateProvisionalNit } from './nitUtils';
@@ -1890,6 +1891,27 @@ export class SyncEngine {
             } catch (pErr: any) {
                 console.error('[Sync] Failed to pull phases:', pErr.message);
                 catalogErrors.push(`CRM_FasesOportunidad: ${pErr.message}`);
+            }
+            await this.yield();
+
+            // Pull loss reasons (CRM_RazonesPerdida). Small catalog, no channel column.
+            // Replace the local copy so a reason added or deactivated in Supabase
+            // shows up on the next catalog refresh instead of sticking in Dexie.
+            try {
+                const lossReasons = await this.fetchAllPages<{ id: number; descripcion: string | null; is_active: boolean | null }>('CRM_RazonesPerdida catalog', (from, to) => supabase
+                    .from('CRM_RazonesPerdida')
+                    .select('id, descripcion, is_active')
+                    .order('id', { ascending: true })
+                    .range(from, to));
+
+                if (lossReasons && lossReasons.length > 0) {
+                    await applyLossReasonCatalog(lossReasons);
+                    console.log(`[Sync] Pulled ${lossReasons.length} loss reasons.`);
+                }
+            } catch (lrErr: unknown) {
+                const message = lrErr instanceof Error ? lrErr.message : String(lrErr);
+                console.error('[Sync] Failed to pull loss reasons:', message);
+                catalogErrors.push(`CRM_RazonesPerdida: ${message}`);
             }
             await this.yield();
 

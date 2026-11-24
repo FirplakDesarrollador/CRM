@@ -2128,3 +2128,27 @@ Prevention Rule:
 
 Tags:
 [actividades] [modal] [deep-link] [filtros] [hasta-la-fecha] [dexie] [r6]
+
+---
+
+## [Bug ID: 20261124-01]
+
+Context:
+Desplegable «Razón de Pérdida» en el detalle de oportunidad (`app/oportunidades/[id]/page.tsx`), al marcar Cerrada Perdida. Catálogo `CRM_RazonesPerdida` en Supabase (`lnphhmowklqiomownurw`).
+
+Problem:
+«Cliente abandonado» (id 35, activa, creada 2026-11-24) no aparecía. Tampoco «INT - Cliente abandonado » (id 34, con espacio final). El desplegable mostraba una lista fija: N-, RED-, INT- y Duplicado. No mostraba Precio, Diseño ni el resto de ids 1-7.
+
+Root Cause:
+`LOSS_REASONS` estaba hardcodeado en el detalle. No era un filtro por canal ni un catálogo Dexie vencido. `CRM_RazonesPerdida` no tiene `canal_id`. Dexie sí recibe el catálogo en la hidratación, pero el select no lo leía. El sync de catálogos tampoco pedía esa tabla.
+
+Fix Applied:
+1. `lib/lossReasonCatalog.ts` elige filas con `is_active !== false` y descripción no vacía, ordenadas por id. El valor es el texto exacto; la etiqueta se recorta.
+2. El detalle consulta Supabase al abrir el resumen y usa Dexie si no hay red. La hidratación y el refresh de catálogos reemplazan la copia local.
+3. Prueba permanente `tests/lossReasonCatalog.test.ts`. Registro `INC-2026-021` (R3).
+
+Prevention Rule:
+**Las razones de pérdida del desplegable salen de `CRM_RazonesPerdida`.** No volver a copiar descripciones en un array. Ocultar una razón es `is_active = false` en el catálogo, no un cambio de código. El texto guardado en `razon_perdida` tiene que ser el `descripcion` exacto.
+
+Tags:
+[razon-perdida] [oportunidades] [catalogo] [dexie] [propio] [r3]

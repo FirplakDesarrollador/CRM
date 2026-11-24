@@ -273,6 +273,49 @@ export async function hydrateActivityCatalogsFromSupabase(): Promise<void> {
 }
 
 /**
+ * Replaces the local loss-reason catalog when Supabase returned rows.
+ * An empty payload is ignored so a glitch does not wipe the offline copy.
+ */
+export async function applyLossReasonCatalog(
+    remote: readonly { id?: number | string | null; descripcion?: string | null; is_active?: boolean | null }[] | null | undefined,
+): Promise<void> {
+    if (!Array.isArray(remote) || remote.length === 0) return;
+    const [{ db }, { planLossReasonCatalogWrite }] = await Promise.all([
+        import('./db'),
+        import('./lossReasonCatalog'),
+    ]);
+    const local = await db.lossReasons.toArray();
+    const plan = planLossReasonCatalogWrite(local, remote);
+    await db.transaction('rw', db.lossReasons, async () => {
+        if (plan.idsToDelete.length > 0) await db.lossReasons.bulkDelete(plan.idsToDelete);
+        if (plan.toStore.length > 0) await db.lossReasons.bulkPut(plan.toStore);
+    });
+}
+
+/**
+ * Reads CRM_RazonesPerdida and refreshes Dexie. Returns null when offline or
+ * the request fails, so the caller can keep the cached catalog.
+ */
+export async function refreshLossReasonsFromSupabase(): Promise<
+    { id: number; descripcion: string | null; is_active: boolean | null }[] | null
+> {
+    if (!canExecuteRemoteSupabase()) return null;
+    try {
+        const { supabase: supabaseClient } = await import('./supabase');
+        const { data, error } = await supabaseClient
+            .from('CRM_RazonesPerdida')
+            .select('id, descripcion, is_active')
+            .order('id', { ascending: true });
+        if (error || !Array.isArray(data)) return null;
+        await applyLossReasonCatalog(data);
+        return data;
+    } catch (err) {
+        console.warn('[supabaseDirect] Loss reason catalog refresh warning:', err);
+        return null;
+    }
+}
+
+/**
  * Loads lightweight reference catalogs (phases, subclassifications, segments, countries,
  * departments, cities, loss reasons, activity classifications) directly from Supabase
  * without running the background SyncEngine entity pull loop.
@@ -347,7 +390,7 @@ export async function hydrateReferenceCatalogsFromSupabase(): Promise<void> {
             await db.cities.bulkPut(citiesRes.data);
         }
         if (!lossReasonsRes.error && Array.isArray(lossReasonsRes.data) && lossReasonsRes.data.length > 0) {
-            await db.lossReasons.bulkPut(lossReasonsRes.data);
+            await applyLossReasonCatalog(lossReasonsRes.data);
         }
 
         await hydrateActivityCatalogsFromSupabase();

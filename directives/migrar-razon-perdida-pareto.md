@@ -7,8 +7,9 @@ Poblar el campo `razon_perdida` de las oportunidades cerradas-perdidas de un ase
 
 ### Campo correcto en la UI
 - La UI en `app/oportunidades/[id]/page.tsx` usa el campo **`razon_perdida`** (texto), NO `razon_perdida_id` (integer FK).
-- El dropdown "Razón de Pérdida" lee de `opportunity.razon_perdida` y compara con el array `LOSS_REASONS` hardcodeado.
-- El campo `razon_perdida_id` corresponde al modal legacy `LossReasonModal.tsx` (no es el que se muestra en la página de detalle).
+- Desde 2026-11-24 el dropdown ya no usa el array `LOSS_REASONS`. Lee las filas activas de `CRM_RazonesPerdida` (`lib/lossReasonCatalog.ts`) y guarda el `descripcion` exacto. Una razón nueva activa aparece al recargar el detalle, sin cambiar código. `is_active = false` no se ofrece. La tabla no tiene canal: N-, RED- e INT- no filtran el desplegable.
+- El texto migrado tiene que coincidir exactamente con `descripcion` (el id 34 trae un espacio final). Si no hay fila activa con ese texto, el valor histórico sigue viéndose como opción suelta, pero no se puede volver a elegir.
+- El campo `razon_perdida_id` corresponde al modal legacy `LossReasonModal.tsx` (no es el que se muestra en la página de detalle). Ese modal usa el mismo filtro de activas.
 
 ### Trigger de sincronización
 - **SIEMPRE actualizar `updated_at = NOW()`** cuando se hacen UPDATEs directos en Supabase vía MCP o SQL Editor.
@@ -26,14 +27,14 @@ node .tmp/check_razones.js  # Ver distribución Closed Lost en CSV
 ```
 
 ### 2. Mapear razones MySQL → texto exacto de la UI
-El campo `razon_perdida` en Supabase debe coincidir EXACTAMENTE con una de estas opciones de `LOSS_REASONS`:
+El campo `razon_perdida` en Supabase debe coincidir EXACTAMENTE con `CRM_RazonesPerdida.descripcion` de una fila activa. Referencia histórica (ya no es una lista fija en el código):
 - `"N- No responde 1mer contacto"` ← MySQL: `"N- No responde 1mer contacto"`
 - `"RED- Firplak Home"` ← MySQL: `"RED- Firplak Home"`
 - `"RED- Ser. Tecnico"` ← MySQL: `"RED- Ser. Tecnico"`
 - `"RED- Distribución"` ← MySQL: `"RED- Distribución"`
 - `"Precio"`, `"Diseño"`, `"Competencia"`, etc.
 
-Si la razón en MySQL no tiene equivalente, revisar el array `LOSS_REASONS` en el código.
+Si la razón en MySQL no tiene equivalente, hay que dar de alta una fila activa en `CRM_RazonesPerdida`. No se vuelve a añadir al código.
 
 ### 3. Generar y ejecutar SQL de actualización (vía MCP Supabase)
 ```sql

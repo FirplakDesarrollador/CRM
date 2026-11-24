@@ -5,6 +5,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Loader2 } from "lucide-react";
 import type { LocalLossReason } from "@/lib/db";
+import { selectLossReasonsForPicker } from "@/lib/lossReasonCatalog";
 import { supabase } from "@/lib/supabase";
 
 interface LossReasonModalProps {
@@ -30,9 +31,9 @@ export function LossReasonModal({ isOpen, onClose, onConfirm, isLoading = false 
                     .from('CRM_RazonesPerdida')
                     .select('*')
                     .eq('is_active', true)
-                    .not('descripcion', 'in', '("N/A","Otro")');
+                    .order('id', { ascending: true });
                 if (!cancelled && data && !error) {
-                    setReasons(data as LocalLossReason[]);
+                    setReasons(selectLossReasonsForPicker(data as LocalLossReason[]));
                 }
             } catch (e) {
                 console.error("Error fetching loss reasons:", e);

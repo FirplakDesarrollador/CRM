@@ -45,7 +45,7 @@ Garantizar que toda oportunidad migrada desde vTiger (u otro CRM anterior) hacia
 * **Comentarios de Pérdida (`comentarios_perdida`):**
   * Para negocios cerrados perdidos, poblar `comentarios_perdida` con el comentario final de pérdida.
 * **Razón Pareto:**
-  * Mapear a `razon_perdida` (texto exacto de `LOSS_REASONS`) y `razon_perdida_id`.
+  * Mapear a `razon_perdida` (texto exacto de `CRM_RazonesPerdida.descripcion` en una fila activa) y `razon_perdida_id`.
 
 ---
 
