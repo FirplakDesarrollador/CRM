@@ -345,7 +345,8 @@ export class CRMFirplakDB extends Dexie {
     quotes!: Table<LocalQuote, string>;
     quoteItems!: Table<LocalQuoteItem, string>;
     activities!: Table<any, string>; // We will stricter type this below
-    phases!: Table<LocalFase, number>; // Local table
+    phases!: Table<LocalFase, number>; // Local table: solo fases activas (selección)
+    phaseLabels!: Table<LocalFase, number>; // Catálogo completo, incluidas inactivas, solo para nombres
     subclasificaciones!: Table<LocalSubclasificacion, number>; // Local table
     segments!: Table<LocalSegmento, number>; // Local table
     countries!: Table<LocalPais, number>; // Local table
@@ -456,6 +457,41 @@ export class CRMFirplakDB extends Dexie {
             opportunityCollaborators: 'id, oportunidad_id, usuario_id',
             pedidos: 'uuid_generado, cotizacion_id, opportunity_id',
             pedidoItems: 'id, pedido_uuid'
+        });
+        // v16: las fases inactivas salen de `phases` (ahí se elige la fase) y quedan en
+        // `phaseLabels` para que el badge siga mostrando el nombre histórico.
+        this.version(16).stores({
+            outbox: 'id, entity_type, status, field_timestamp, field_name, user_id, next_attempt_at, [entity_type+entity_id+field_name]',
+            fileQueue: 'id, status',
+            syncCursors: 'id, user_id, table_name, updated_at',
+            syncRuns: 'id, kind, trigger, status, started_at',
+            localContext: 'id, user_id, status',
+            accounts: 'id, nit, nit_base, nombre, owner_user_id',
+            opportunities: 'id, account_id, owner_user_id',
+            contacts: 'id, account_id, email',
+            quotes: 'id, opportunity_id, status, es_pedido',
+            quoteItems: 'id, cotizacion_id',
+            activities: 'id, opportunity_id, account_id, user_id, fecha_inicio, tipo_actividad',
+            phases: 'id, canal_id, orden',
+            phaseLabels: 'id, canal_id, orden',
+            subclasificaciones: 'id, canal_id',
+            segments: '++id, subclasificacion_id',
+            countries: 'id',
+            departments: 'id, pais_id, nombre',
+            cities: 'id, departamento_id, nombre',
+            activityClassifications: 'id, tipo_actividad',
+            activitySubclassifications: 'id, clasificacion_id',
+            lossReasons: 'id',
+            opportunityCollaborators: 'id, oportunidad_id, usuario_id',
+            pedidos: 'uuid_generado, cotizacion_id, opportunity_id',
+            pedidoItems: 'id, pedido_uuid'
+        }).upgrade(async (tx) => {
+            const phaseTable = tx.table('phases');
+            const labelTable = tx.table('phaseLabels');
+            const rows = await phaseTable.toArray();
+            if (rows.length > 0) await labelTable.bulkPut(rows);
+            const inactiveIds = rows.filter((phase) => phase.is_active === false).map((phase) => phase.id);
+            if (inactiveIds.length > 0) await phaseTable.bulkDelete(inactiveIds);
         });
         registerAuditHooks(this);
     }

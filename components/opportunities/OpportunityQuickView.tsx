@@ -9,6 +9,7 @@ import { X, TrendingUp, Calendar, Hash, Percent } from "lucide-react";
 import { ProbabilityDonut } from "@/components/ui/ProbabilityDonut";
 import { formatNumberCO } from "@/lib/utils";
 import { estadoIdForPhaseName, getPhaseOutcomeByName, isClosedPhaseName } from "@/lib/opportunityPhase";
+import { resolveStepperPhaseId, selectPhasesForPicker, type PhaseCatalogItem } from "@/lib/opportunityPhaseCatalog";
 
 interface OpportunityQuickViewProps {
     opportunityId: string;
@@ -44,6 +45,7 @@ export function OpportunityQuickView({ opportunityId, isOpen, onClose, onUpdate 
 
     // Edit Stats
     const [phaseId, setPhaseId] = useState<number | null>(null);
+    const [phaseTouched, setPhaseTouched] = useState(false);
     const [phaseOptions, setPhaseOptions] = useState<PhaseOption[]>([]);
 
     const fetchOpportunity = useCallback(async () => {
@@ -67,20 +69,32 @@ export function OpportunityQuickView({ opportunityId, isOpen, onClose, onUpdate 
             if (canalId) {
                 const { data: phases, error: phasesError } = await supabase
                     .from('CRM_FasesOportunidad')
-                    .select('id, nombre, orden, probability')
+                    .select('id, nombre, orden, probability, canal_id, is_active')
                     .eq('canal_id', canalId)
                     .eq('is_active', true)
                     .order('orden')
                     .returns<PhaseOption[]>();
 
                 if (phasesError) throw phasesError;
-                channelPhases = phases || [];
+                channelPhases = selectPhasesForPicker(phases || [], canalId);
+            }
+
+            let displayedPhaseId = opp.fase_id ?? null;
+            if (opp.fase_id && !channelPhases.some(phase => Number(phase.id) === Number(opp.fase_id))) {
+                const { data: currentPhase } = await supabase
+                    .from('CRM_FasesOportunidad')
+                    .select('id, nombre, orden, probability, canal_id, is_active')
+                    .eq('id', opp.fase_id)
+                    .maybeSingle();
+                const catalog = currentPhase ? [...channelPhases, currentPhase as PhaseCatalogItem] : channelPhases;
+                displayedPhaseId = resolveStepperPhaseId(opp.fase_id, catalog, canalId);
             }
 
             // Map the probability from the joined phase if the opportunity probability is missing/zero
             const probability = opp.probability || opp.fase_detail?.probability || 0;
             setOpportunity({ ...opp, probability });
-            setPhaseId(opp.fase_id ?? null);
+            setPhaseId(displayedPhaseId);
+            setPhaseTouched(false);
             setPhaseOptions(channelPhases);
 
         } catch (err) {
@@ -98,6 +112,10 @@ export function OpportunityQuickView({ opportunityId, isOpen, onClose, onUpdate 
     }, [fetchOpportunity, isOpen, opportunityId]);
 
     const handleSave = async () => {
+        if (!phaseTouched) {
+            onClose();
+            return;
+        }
         setIsSaving(true);
         try {
             const targetPhase = phaseOptions.find(phase => phase.id === phaseId);
@@ -216,7 +234,10 @@ export function OpportunityQuickView({ opportunityId, isOpen, onClose, onUpdate 
                                 <select
                                     className="w-full p-2.5 rounded-xl border border-slate-200 bg-slate-50 font-medium text-slate-900"
                                     value={phaseId ?? ""}
-                                    onChange={(e) => setPhaseId(e.target.value ? parseInt(e.target.value) : null)}
+                                    onChange={(e) => {
+                                        setPhaseTouched(true);
+                                        setPhaseId(e.target.value ? parseInt(e.target.value) : null);
+                                    }}
                                     disabled={phaseOptions.length === 0}
                                 >
                                     {phaseId == null && <option value="">Sin fase</option>}

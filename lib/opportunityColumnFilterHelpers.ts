@@ -3,6 +3,8 @@
  * Permiten que las opciones se consulten desde catálogos maestros de la BD sin cargar todas las filas en memoria.
  */
 
+import { equivalentPhaseIds, selectPhasesForPicker } from './opportunityPhaseCatalog';
+
 export const DEFAULT_OPPORTUNITIES_PAGE_SIZE = 100;
 
 export interface OpportunityFilterState {
@@ -50,62 +52,31 @@ export interface PhaseCatalogItem {
     nombre: string;
     canal_id?: string | null;
     orden?: number;
+    is_active?: boolean | null;
 }
 
 /**
- * Filtra las fases según el canal seleccionado, incluyendo todas las etapas
- * del ciclo comercial (también Cerrada ganada y Cerrada perdida)
- * y deduplicando por nombre para que cada etapa única aparezca una sola vez.
+ * Filtra las fases según el canal seleccionado, incluyendo las etapas cerradas
+ * que siguen activas (Cerrada ganada y Cerrada perdida) y descartando inactivas
+ * antes de deduplicar por orden.
  */
 export function getAvailablePhasesForChannel(
     phases: PhaseCatalogItem[],
     selectedChannel: string | null
 ): PhaseCatalogItem[] {
     if (!selectedChannel) return [];
-
-    // 1. Filtrar por canal
-    const channelPhases = phases.filter(p =>
-        p.canal_id === selectedChannel
-    );
-
-    // 2. Ordenar por 'orden' si existe
-    channelPhases.sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
-
-    // 3. Deduplicar por nombre (si hay múltiples IDs para el mismo nombre en el mismo canal)
-    const seenNames = new Set<string>();
-    const deduplicated: PhaseCatalogItem[] = [];
-
-    for (const ph of channelPhases) {
-        const cleanName = ph.nombre.trim().toLowerCase();
-        if (!seenNames.has(cleanName)) {
-            seenNames.add(cleanName);
-            deduplicated.push(ph);
-        }
-    }
-
-    return deduplicated;
+    return selectPhasesForPicker(phases, selectedChannel);
 }
 
 /**
- * Obtiene todos los IDs equivalentes (duplicados de BD) para una fase dada dentro de su canal
+ * Obtiene todos los IDs equivalentes (mismo canal y mismo orden o nombre)
+ * para que un filtro por la fase activa siga encontrando oportunidades históricas.
  */
 export function getEquivalentPhaseIds(
     phases: PhaseCatalogItem[],
     targetPhaseId: number
 ): number[] {
-    if (targetPhaseId <= 0) return [targetPhaseId];
-    const target = phases.find(p => p.id === targetPhaseId);
-    if (!target) return [targetPhaseId];
-
-    const targetName = target.nombre?.trim().toLowerCase();
-    const targetChannel = target.canal_id;
-
-    const matches = phases.filter(p =>
-        p.nombre?.trim().toLowerCase() === targetName &&
-        (!targetChannel || p.canal_id === targetChannel)
-    );
-
-    return matches.length > 0 ? matches.map(p => p.id) : [targetPhaseId];
+    return equivalentPhaseIds(phases, targetPhaseId);
 }
 
 export const ACTIVITY_STATUS_OPTIONS = [

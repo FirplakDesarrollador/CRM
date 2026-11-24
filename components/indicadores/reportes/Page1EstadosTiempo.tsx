@@ -22,6 +22,7 @@ import type { PhaseOutcome } from "@/lib/opportunityPhase";
 import { EChartsCallbackParams } from "./echartsTypes";
 import { isPlausibleYear } from "./dateUtils";
 import { getZonaByDepartamentoId, ZONA_OPTIONS } from "./zonas";
+import { expandSelectedPhaseIds, selectPhasesForPicker } from "@/lib/opportunityPhaseCatalog";
 
 const MONTH_LABELS = [
     "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -178,9 +179,7 @@ export function Page1EstadosTiempo() {
 
     const faseOptions: Option[] = useMemo(() => {
         if (!filters.canalId) return [];
-        return phases
-            .filter(p => p.canal_id === filters.canalId)
-            .sort((a, b) => a.orden - b.orden)
+        return selectPhasesForPicker(phases, filters.canalId)
             .map(p => ({ value: String(p.id), label: p.nombre }));
     }, [phases, filters.canalId]);
 
@@ -202,7 +201,7 @@ export function Page1EstadosTiempo() {
 
         const yearNum = filters.year ? Number(filters.year) : null;
         const monthNum = filters.month !== "" ? Number(filters.month) : null;
-        const faseIdSet = filters.faseIds.length > 0 ? new Set(filters.faseIds.map(Number)) : null;
+        const faseIdSet = filters.faseIds.length > 0 ? new Set(expandSelectedPhaseIds(filters.faseIds, phases)) : null;
 
         return base.filter(o => {
             if (o.is_deleted) return false;
@@ -219,7 +218,7 @@ export function Page1EstadosTiempo() {
             }
             return true;
         });
-    }, [opportunities, filters, accountsMap]);
+    }, [opportunities, filters, accountsMap, phases]);
 
     const filtered = useMemo(() => {
         if (filters.estados.length === 0) return filteredWithoutEstado;

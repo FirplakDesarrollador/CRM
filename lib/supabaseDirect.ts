@@ -280,13 +280,15 @@ export async function hydrateActivityCatalogsFromSupabase(): Promise<void> {
 export async function hydrateReferenceCatalogsFromSupabase(): Promise<void> {
     if (!canExecuteRemoteSupabase()) return;
     try {
-        const [{ supabase: supabaseClient }, { db }] = await Promise.all([
+        const [{ supabase: supabaseClient }, { db }, { mergePhaseCatalog, planPhaseCatalogWrite }] = await Promise.all([
             import('./supabase'),
             import('./db'),
+            import('./opportunityPhaseCatalog'),
         ]);
 
         const [
             phasesRes,
+            phaseLabelsRes,
             subclassRes,
             segmentsRes,
             countriesRes,
@@ -294,7 +296,8 @@ export async function hydrateReferenceCatalogsFromSupabase(): Promise<void> {
             citiesRes,
             lossReasonsRes,
         ] = await Promise.all([
-            supabaseClient.from('CRM_FasesOportunidad').select('*'),
+            supabaseClient.from('CRM_FasesOportunidad').select('*').eq('is_active', true),
+            supabaseClient.from('CRM_FasesOportunidad').select('id, nombre, orden, canal_id, is_active, probability'),
             supabaseClient.from('CRM_Subclasificacion').select('*'),
             supabaseClient.from('CRM_Segmentos').select('*'),
             supabaseClient.from('CRM_Paises').select('*'),
@@ -303,8 +306,30 @@ export async function hydrateReferenceCatalogsFromSupabase(): Promise<void> {
             supabaseClient.from('CRM_RazonesPerdida').select('*'),
         ]);
 
-        if (!phasesRes.error && Array.isArray(phasesRes.data) && phasesRes.data.length > 0) {
-            await db.phases.bulkPut(phasesRes.data);
+        if (!phasesRes.error && Array.isArray(phasesRes.data)) {
+            const remoteLabels = !phaseLabelsRes.error && Array.isArray(phaseLabelsRes.data) ? phaseLabelsRes.data : [];
+            const [localPhases, localLabels] = await Promise.all([
+                db.phases.toArray(),
+                db.phaseLabels.toArray(),
+            ]);
+            const plan = planPhaseCatalogWrite(
+                localPhases,
+                phasesRes.data,
+                mergePhaseCatalog(localLabels, localPhases, remoteLabels),
+            );
+            const toStoredPhase = (phase: { id: number | string; nombre?: string | null; orden?: number | string | null; canal_id?: string | null; is_active?: boolean | null; probability?: number | null }) => ({
+                id: Number(phase.id),
+                nombre: String(phase.nombre ?? ''),
+                orden: phase.orden === null || phase.orden === undefined || !Number.isFinite(Number(phase.orden)) ? 0 : Number(phase.orden),
+                is_active: phase.is_active !== false,
+                canal_id: String(phase.canal_id ?? ''),
+                probability: Number(phase.probability ?? 0),
+            });
+            await db.transaction('rw', db.phases, db.phaseLabels, async () => {
+                if (plan.phaseIdsToDelete.length > 0) await db.phases.bulkDelete(plan.phaseIdsToDelete);
+                if (plan.phasesToStore.length > 0) await db.phases.bulkPut(plan.phasesToStore.map(toStoredPhase));
+                if (plan.labels.length > 0) await db.phaseLabels.bulkPut(plan.labels.map(toStoredPhase));
+            });
         }
         if (!subclassRes.error && Array.isArray(subclassRes.data) && subclassRes.data.length > 0) {
             await db.subclasificaciones.bulkPut(subclassRes.data);

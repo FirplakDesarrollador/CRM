@@ -26,6 +26,8 @@ import { DraftPromptModal } from "@/components/ui/DraftPromptModal";
 import { AutoSaveIndicator } from "@/components/ui/AutoSaveIndicator";
 import { SearchableSelect } from "@/components/ui/SearchableSelect";
 import { OPPORTUNITY_CATEGORIES, formatOpportunityCategories, parseOpportunityCategories } from "@/lib/opportunityCategories";
+import { selectPhasesForPicker } from "@/lib/opportunityPhaseCatalog";
+import { readFullPhaseCatalog } from "@/lib/phaseCatalogStore";
 
 // Eschema de validación combinado
 const storeSaleSchema = z.object({
@@ -582,7 +584,7 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
 
     const selectedChannel = watch("canal_id") || "PROPIO";
     const phasesQuery = useLiveQuery(
-        () => db.phases.where("canal_id").equals(selectedChannel).sortBy("orden"),
+        async () => selectPhasesForPicker(await readFullPhaseCatalog(), selectedChannel),
         [selectedChannel],
     );
     const phasesList = useMemo(() => phasesQuery || [], [phasesQuery]);

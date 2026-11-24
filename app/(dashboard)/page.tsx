@@ -7,7 +7,7 @@ import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { useState, useMemo, useCallback, useRef } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { db } from "@/lib/db";
+import { readFullPhaseCatalog } from "@/lib/phaseCatalogStore";
 import { buildPhaseOutcomeMap, getPhaseOutcome } from "@/lib/opportunityPhase";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -144,7 +144,7 @@ export default function Home() {
   const savedOrderRef = useRef<string[]>(DEFAULT_TILES.map((t) => t.id));
 
   // Abierta / ganada / perdida se calcula SOLO por la fase.
-  const phases = useLiveQuery(() => db.phases.toArray());
+  const phases = useLiveQuery(() => readFullPhaseCatalog());
   const outcomeMap = useMemo(() => buildPhaseOutcomeMap(phases), [phases]);
 
   // Find the "Important" opportunity (Highest value open)

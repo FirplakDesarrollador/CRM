@@ -60,7 +60,7 @@ async function fetchPricing(productId: string, channelId: string, qty: number) {
 async function backgroundEstadoIdForPhase(faseId: number | string | null | undefined, fallback: number): Promise<number> {
     if (faseId === null || faseId === undefined || faseId === '') return fallback;
     try {
-        const phase = await db.phases.get(Number(faseId));
+        const phase = await db.phaseLabels.get(Number(faseId)) ?? await db.phases.get(Number(faseId));
         if (phase) return estadoIdForPhaseName(phase.nombre);
     } catch {
         // Sin caché de fases: se consulta el servidor.

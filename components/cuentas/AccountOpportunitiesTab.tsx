@@ -3,7 +3,7 @@
 import { useOpportunitiesServer } from "@/lib/hooks/useOpportunitiesServer";
 import { useOpportunities } from "@/lib/hooks/useOpportunities";
 import { useEffect, useState } from "react";
-import { db } from "@/lib/db";
+import { readFullPhaseCatalog } from "@/lib/phaseCatalogStore";
 import { useLiveQuery } from "dexie-react-hooks";
 import Link from "next/link";
 import { Briefcase, ChevronRight, Filter, Trash2, Loader2 } from "lucide-react";
@@ -96,7 +96,7 @@ export default function AccountOpportunitiesTab({ accountId }: { accountId: stri
         setStatusFilter(currentStatus);
     }, [currentStatus, setStatusFilter]);
 
-    const phases = useLiveQuery(() => db.phases.toArray());
+    const phases = useLiveQuery(() => readFullPhaseCatalog());
     const phaseMap = new Map(phases?.map(p => [p.id, p.nombre]));
 
     const handleDeleteOpportunity = async () => {
