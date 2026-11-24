@@ -2,6 +2,7 @@ import { saveAs } from 'file-saver';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { format } from 'date-fns';
+import { formatQuoteAdvisorEmailLine } from './corporateEmail';
 import { FIRPLAK_LOGO_BASE64 } from './firplakLogoBase64';
 
 export interface PdfItemRowData {
@@ -719,8 +720,7 @@ export async function buildQuotePdfDoc(
     doc.setTextColor(...textMuted);
     const phoneToDisplay = displayAdvisorPhone ? `Contacto Asesor / Tel: ${displayAdvisorPhone} • PBX: (604) 444 17 71` : `Contacto Asesor / PBX: (604) 444 17 71`;
     doc.text(phoneToDisplay, signRightX + 6, finalY + 33);
-    const emailToDisplay = displayAdvisorEmail || 'cartera@firplak.com';
-    doc.text(`Email: ${emailToDisplay} • www.firplak.com`, signRightX + 6, finalY + 41);
+    doc.text(formatQuoteAdvisorEmailLine(displayAdvisorEmail), signRightX + 6, finalY + 41);
 
     // ─────────────────────────────────────────────────────────────
     // 8. TEXTO LEGAL Y PIE DE PÁGINA

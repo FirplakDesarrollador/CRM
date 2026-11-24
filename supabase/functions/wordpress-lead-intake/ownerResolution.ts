@@ -10,6 +10,8 @@ export const REASIGNACIONES_VALIDAS: Record<string, string> = {
 };
 
 export const ALIAS_CORREO_ASESOR: Record<string, string> = {
+  // Clave de búsqueda contra CRM_Usuarios.email. Hernando sigue guardado
+  // como @behome.com.co; no es el correo que se imprime en la cotización.
   "comercialcali@firplak.com": "comercialcali@behome.com.co", // Hernando Tovar
 };
 
