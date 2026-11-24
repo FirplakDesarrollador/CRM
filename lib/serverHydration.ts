@@ -74,7 +74,7 @@ async function pendingEntityIds(entityType: string): Promise<Set<string>> {
 
 /** Inserta en Dexie solo las filas que no existen localmente y no tienen cambios pendientes. */
 async function addMissing(
-    table: 'activities' | 'opportunities' | 'accounts',
+    table: 'activities' | 'opportunities' | 'accounts' | 'contacts',
     entityType: string,
     rows: Row[]
 ): Promise<number> {
@@ -260,4 +260,54 @@ export async function hydrateActivityReferences(activity: { opportunity_id?: str
     if (!isOnline()) return;
     if (!activity.opportunity_id && !activity.account_id) return;
     await hydrateReferences([activity]);
+}
+
+/**
+ * Trae contactos que el modal de actividad necesita para "Ir al contacto" y que
+ * no están en la copia local (la sync inicial solo guarda los 3.000 más recientes).
+ * Solo lee Supabase. No pisa filas locales ni cambios pendientes.
+ * Si la cuenta ya tiene un contacto principal local, no vuelve a bajar toda la cuenta.
+ */
+export async function hydrateActivityContacts(input: {
+    accountId?: string | null;
+    contactIds?: Array<string | null> | null;
+}): Promise<number> {
+    if (!isOnline()) return 0;
+    const accountId = (input.accountId || '').trim();
+    const contactIds = Array.from(new Set(
+        (input.contactIds || []).map(id => (typeof id === 'string' ? id.trim() : '')).filter(Boolean)
+    ));
+    if (!accountId && contactIds.length === 0) return 0;
+
+    const rows: Row[] = [];
+    if (accountId) {
+        const local = await db.contacts.where('account_id').equals(accountId).toArray();
+        const hasPrincipal = local.some(contact => !contact.is_deleted && contact.es_principal);
+        if (!hasPrincipal) {
+            const { data, error } = await supabase
+                .from('CRM_Contactos')
+                .select('*')
+                .eq('account_id', accountId)
+                .eq('is_deleted', false);
+            if (error) throw error;
+            rows.push(...((data || []) as Row[]));
+        }
+    }
+
+    const missingIds: string[] = [];
+    for (const id of contactIds) {
+        const local = await db.contacts.get(id);
+        if (!local) missingIds.push(id);
+    }
+    if (missingIds.length > 0) {
+        const { data, error } = await supabase
+            .from('CRM_Contactos')
+            .select('*')
+            .in('id', missingIds)
+            .eq('is_deleted', false);
+        if (error) throw error;
+        rows.push(...((data || []) as Row[]));
+    }
+
+    return addMissing('contacts', 'CRM_Contactos', rows);
 }
