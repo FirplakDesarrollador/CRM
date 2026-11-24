@@ -41,6 +41,7 @@ import { MultiSelect } from "@/components/ui/MultiSelect";
 import { OPPORTUNITY_CATEGORIES, parseOpportunityCategories, formatOpportunityCategories } from "@/lib/opportunityCategories";
 import { isB2COpportunity, userHasB2CAccess } from "@/lib/b2c";
 import { AccountModal } from "@/components/cuentas/AccountModal";
+import { AccountNivelBadge } from "@/components/cuentas/AccountNivelBadge";
 import { EntityAuditHistoryTab } from "@/components/shared/EntityAuditHistoryTab";
 import { History } from "lucide-react";
 import { getPhaseOutcomeByName, ESTADO_ID_ABIERTA, ESTADO_ID_GANADA, ESTADO_ID_PERDIDA } from "@/lib/opportunityPhase";
@@ -1119,7 +1120,10 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                             <div className="space-y-3">
                                 <div>
                                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Nombre / Razón Social</label>
-                                    <p className="text-slate-900 font-medium">{effectiveAccount.nombre}</p>
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <p className="text-slate-900 font-medium">{effectiveAccount.nombre}</p>
+                                        {account ? <AccountNivelBadge nivel={account.nivel_premium} /> : null}
+                                    </div>
                                 </div>
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
