@@ -21,9 +21,9 @@ import { AutoSaveIndicator } from "@/components/ui/AutoSaveIndicator";
 import { SearchableSelect } from "@/components/ui/SearchableSelect";
 import { isB2COnlyActivityClassification, userHasB2CAccess } from "@/lib/b2c";
 import { getRecentSubjects, rememberSubject, nextNumberedSubjects, uniqueSubjects } from "@/lib/activitySubjects";
-import { activityEntityHrefs } from "@/lib/activityModalLinks";
+import { activityContactIdFrom, activityEntityHrefs, resolveActivityContactId } from "@/lib/activityModalLinks";
 import { buildActivityUserOptions, resolveDefaultActivityUserId } from "@/lib/activityAssignee";
-import { hydrateActivityReferences } from "@/lib/serverHydration";
+import { hydrateActivityContacts, hydrateActivityReferences } from "@/lib/serverHydration";
 
 interface CreateActivityModalProps {
     onClose: () => void;
@@ -129,10 +129,28 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         [relatedOpportunity?.account_id, watchedAccountId]
     );
 
-    const relatedContact = useLiveQuery(
-        () => relatedAccount?.id ? db.contacts.where('account_id').equals(relatedAccount.id).first() : undefined,
-        [relatedAccount?.id]
+    const contactAccountId = relatedOpportunity?.account_id || watchedAccountId || '';
+    const activityContactId = activityContactIdFrom(initialData);
+    const accountContacts = useLiveQuery(
+        async () => {
+            if (!contactAccountId) return [];
+            const rows = await db.contacts.where('account_id').equals(contactAccountId).toArray();
+            return rows.filter(contact => !contact.is_deleted);
+        },
+        [contactAccountId]
+    ) || [];
+    const resolvedContactId = resolveActivityContactId({
+        activityContactId,
+        opportunityContactIds: relatedOpportunity?.contactos_ids,
+        accountContacts,
+    });
+    const resolvedContactRecord = useLiveQuery(
+        () => resolvedContactId ? db.contacts.get(resolvedContactId) : undefined,
+        [resolvedContactId]
     );
+    const relatedContact = resolvedContactRecord && !resolvedContactRecord.is_deleted
+        ? resolvedContactRecord
+        : accountContacts.find(contact => contact.id === resolvedContactId);
 
     const [resolvedAccountName, setResolvedAccountName] = useState<string>("");
     const opportunityAccountRef = useRef<string | null>(null);
@@ -298,6 +316,30 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
             });
         return () => { cancelled = true; };
     }, [initialData?.opportunity_id, initialData?.account_id, initialOpportunityId, initialAccountId]);
+
+    const opportunityContactIds = relatedOpportunity?.contactos_ids;
+
+    useEffect(() => {
+        const accountId = relatedOpportunity?.account_id || watchedAccountId || initialData?.account_id || initialAccountId || '';
+        const contactIds = [
+            activityContactId,
+            ...(Array.isArray(opportunityContactIds) ? opportunityContactIds : []),
+        ];
+        if (!accountId && !contactIds.some(id => typeof id === 'string' && id.trim())) return;
+        let cancelled = false;
+        hydrateActivityContacts({ accountId, contactIds })
+            .catch(error => {
+                if (!cancelled) console.warn('[CreateActivityModal] no se pudieron traer los contactos', error);
+            });
+        return () => { cancelled = true; };
+    }, [
+        relatedOpportunity?.account_id,
+        opportunityContactIds,
+        watchedAccountId,
+        activityContactId,
+        initialData?.account_id,
+        initialAccountId,
+    ]);
 
     // Pre-resolve initial account name
     useEffect(() => {
@@ -1562,6 +1604,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
     const entityHrefs = activityEntityHrefs({
         opportunityId: watchedOpportunityId || initialOpportunityId || initialData?.opportunity_id,
         accountId: watchedAccountId || initialAccountId || initialData?.account_id || relatedOpportunity?.account_id || opportunityAccountRef.current,
+        contactId: resolvedContactId,
     });
 
     return (
@@ -1570,7 +1613,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                 <div className="p-6 border-b border-slate-100 flex justify-between items-center shrink-0">
                     <div>
                         <h2 className="text-xl font-bold text-slate-900">{isEditing ? 'Editar Actividad' : 'Programar Actividad'}</h2>
-                        {(entityHrefs.accountHref || entityHrefs.opportunityHref) && (
+                        {(entityHrefs.accountHref || entityHrefs.opportunityHref || entityHrefs.contactHref) && (
                             <div className="flex flex-wrap items-center gap-2 mt-2" data-testid="activity-entity-links">
                                 {entityHrefs.accountHref && (
                                     <Link
@@ -1590,6 +1633,15 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                         Ir a la oportunidad
                                     </Link>
                                 )}
+                                {entityHrefs.contactHref && (
+                                    <Link
+                                        href={entityHrefs.contactHref}
+                                        data-testid="activity-go-contact"
+                                        className="inline-flex items-center rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700 hover:bg-blue-100 transition-colors"
+                                    >
+                                        Ir al contacto
+                                    </Link>
+                                )}
                             </div>
                         )}
                         {relatedOpportunity && relatedAccount && (
@@ -1598,9 +1650,9 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                     {relatedAccount.nombre}
                                 </Link>
                                 <span className="text-slate-400 font-medium">-</span>
-                                {relatedContact ? (
+                                {relatedContact && entityHrefs.contactHref ? (
                                     <div className="flex items-center gap-1">
-                                        <Link href={`/contactos?id=${relatedContact.id}`} className="text-blue-600 hover:underline font-semibold transition-colors">
+                                        <Link href={entityHrefs.contactHref} data-testid="activity-contact-name" className="text-blue-600 hover:underline font-semibold transition-colors">
                                             {relatedContact.nombre}
                                         </Link>
                                         {relatedContact.telefono && (

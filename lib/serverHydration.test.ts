@@ -35,7 +35,7 @@ vi.mock('./supabase', () => ({
 }));
 
 import { db } from './db';
-import { hydrateOpportunityActivities, hydrateActivitiesForSearch, hydrateOwnActivities, hydrateActivityById, hydrateActivityReferences } from './serverHydration';
+import { hydrateOpportunityActivities, hydrateActivitiesForSearch, hydrateOwnActivities, hydrateActivityById, hydrateActivityReferences, hydrateActivityContacts } from './serverHydration';
 import { accentInsensitiveRegex, accentInsensitiveCondition } from './utils';
 
 const OPP = 'opp-1';
@@ -64,7 +64,7 @@ describe('serverHydration', () => {
         calls.length = 0;
         responses = {};
         if (!db.isOpen()) await db.open();
-        await Promise.all([db.activities.clear(), db.outbox.clear(), db.opportunities.clear(), db.accounts.clear()]);
+        await Promise.all([db.activities.clear(), db.outbox.clear(), db.opportunities.clear(), db.accounts.clear(), db.contacts.clear()]);
     });
 
     it('adds every missing activity of the opportunity without overwriting local or pending ones', async () => {
@@ -184,5 +184,39 @@ describe('serverHydration', () => {
         expect((await db.opportunities.get(OPP))?.account_id).toBe('acc-9');
         expect((await db.accounts.get('acc-9'))?.nombre).toBe('Cuenta 9');
         expect(await db.activities.count()).toBe(0);
+    });
+
+    it('trae el contacto principal que falta y no pisa el contacto local', async () => {
+        responses.CRM_Contactos = [
+            { id: 'c-pri', account_id: 'acc-1', nombre: 'Vanessa', es_principal: true, is_deleted: false },
+            { id: 'c-local', account_id: 'acc-1', nombre: 'Servidor', es_principal: false, is_deleted: false },
+        ];
+        await db.contacts.add({ id: 'c-local', account_id: 'acc-1', nombre: 'Editado', es_principal: false });
+
+        const added = await hydrateActivityContacts({ accountId: 'acc-1', contactIds: [] });
+
+        expect(added).toBe(1);
+        expect((await db.contacts.get('c-pri'))?.nombre).toBe('Vanessa');
+        expect((await db.contacts.get('c-local'))?.nombre).toBe('Editado');
+        const contactCall = calls.find(call => call.table === 'CRM_Contactos')!;
+        const ops = contactCall.ops.map(([op, args]) => `${op}:${args.join('|')}`);
+        expect(ops).toContain('eq:account_id|acc-1');
+    });
+
+    it('si la cuenta ya tiene principal local, solo completa el contacto de la oportunidad que falta', async () => {
+        responses.CRM_Contactos = [
+            { id: 'c-opp', account_id: 'acc-1', nombre: 'Contacto opp', es_principal: false, is_deleted: false },
+        ];
+        await db.contacts.add({ id: 'c-pri', account_id: 'acc-1', nombre: 'Principal', es_principal: true });
+
+        const added = await hydrateActivityContacts({ accountId: 'acc-1', contactIds: ['c-opp', 'c-pri'] });
+
+        expect(added).toBe(1);
+        expect((await db.contacts.get('c-opp'))?.nombre).toBe('Contacto opp');
+        expect((await db.contacts.get('c-pri'))?.nombre).toBe('Principal');
+        const contactCalls = calls.filter(call => call.table === 'CRM_Contactos');
+        expect(contactCalls.some(call => call.ops.some(([op]) => op === 'eq' && call.ops.some(([, args]) => args[0] === 'account_id')))).toBe(false);
+        const idCall = contactCalls.find(call => call.ops.some(([op]) => op === 'in'));
+        expect(idCall?.ops.find(([op]) => op === 'in')?.[1][1]).toEqual(['c-opp']);
     });
 });

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { activityEntityHrefs } from './activityModalLinks';
+import { activityContactIdFrom, activityEntityHrefs, resolveActivityContactId } from './activityModalLinks';
 import {
     buildActivityUserOptions,
     resolveActivityUserId,
@@ -190,21 +190,71 @@ describe('Accesos del modal de actividad', () => {
         expect(activityEntityHrefs({
             accountId: 'acc-1',
             opportunityId: 'opp-1',
+            contactId: 'con-1',
         })).toEqual({
             accountHref: '/cuentas?id=acc-1',
             opportunityHref: '/oportunidades/opp-1',
+            contactHref: '/contactos?id=con-1',
         });
     });
 
     it('muestra solo el acceso cuyo id existe', () => {
-        expect(activityEntityHrefs({ accountId: '', opportunityId: 'opp-1' })).toEqual({
+        expect(activityEntityHrefs({ accountId: '', opportunityId: 'opp-1', contactId: '  ' })).toEqual({
             accountHref: null,
             opportunityHref: '/oportunidades/opp-1',
+            contactHref: null,
         });
         expect(activityEntityHrefs({ accountId: null, opportunityId: null })).toEqual({
             accountHref: null,
             opportunityHref: null,
+            contactHref: null,
         });
+    });
+
+    it('elige el contacto de la actividad, si no el de la oportunidad y si no el principal de la cuenta', () => {
+        const accountContacts = [
+            { id: 'sec', es_principal: false, nombre: 'Secundario' },
+            { id: 'pri', es_principal: true, nombre: 'Vanessa' },
+            { id: 'gone', es_principal: true, is_deleted: true },
+        ];
+
+        expect(activityContactIdFrom({ contact_id: ' act-contact ' })).toBe('act-contact');
+        expect(activityContactIdFrom({ contacto_id: 'legacy-contact' })).toBe('legacy-contact');
+        expect(activityContactIdFrom({})).toBeNull();
+
+        expect(resolveActivityContactId({
+            activityContactId: 'act-contact',
+            opportunityContactIds: ['opp-contact'],
+            accountContacts,
+        })).toBe('act-contact');
+
+        expect(resolveActivityContactId({
+            activityContactId: null,
+            opportunityContactIds: ['sec', 'pri'],
+            accountContacts,
+        })).toBe('pri');
+
+        expect(resolveActivityContactId({
+            opportunityContactIds: ['opp-1'],
+            accountContacts,
+        })).toBe('opp-1');
+
+        expect(resolveActivityContactId({
+            opportunityContactIds: [],
+            accountContacts,
+        })).toBe('pri');
+
+        expect(resolveActivityContactId({
+            activityContactId: 'gone',
+            opportunityContactIds: ['gone'],
+            accountContacts,
+        })).toBe('pri');
+
+        expect(resolveActivityContactId({
+            activityContactId: '  ',
+            opportunityContactIds: [''],
+            accountContacts: [{ id: 'sec', es_principal: false }],
+        })).toBeNull();
     });
 
     it('la página y el modal usan esos helpers y ya no dependen de un href pelado', () => {
@@ -214,8 +264,12 @@ describe('Accesos del modal de actividad', () => {
         expect(page).not.toContain('href={`/actividades?id=${act.id}`}');
         expect(page).toContain('splitUpToDateSections');
         expect(modal).toContain('activityEntityHrefs');
+        expect(modal).toContain('resolveActivityContactId');
         expect(modal).toContain('Ir a la cuenta');
         expect(modal).toContain('Ir a la oportunidad');
+        expect(modal).toContain('Ir al contacto');
+        expect(modal).toContain('data-testid="activity-go-contact"');
+        expect(modal).toContain('data-testid="activity-contact-name"');
     });
 });
 
