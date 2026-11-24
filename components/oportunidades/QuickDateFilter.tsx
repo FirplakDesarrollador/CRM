@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { CalendarDays, ChevronDown, Check, X, Sparkles, CalendarRange } from "lucide-react";
 import { cn } from "@/components/ui/utils";
 import { DATE_FILTER_PRESETS, DateRangePreset } from "@/lib/dateFilterHelpers";
+import { listDateFilterTitle, listDateTodayLabel } from "@/lib/opportunityListDateFilter";
 
 export interface DateFilterChangePayload {
     startDate: string | null;
@@ -285,7 +286,7 @@ export function QuickDateFilter({
     if (isUpToToday) {
         currentLabel = "Hasta hoy (Todo)";
     } else if (isToday) {
-        currentLabel = "Creadas hoy";
+        currentLabel = listDateTodayLabel(statusFilter);
     } else if (startDate && endDate) {
         currentLabel = `${startDate} a ${endDate}`;
     } else if (startDate) {
@@ -314,7 +315,7 @@ export function QuickDateFilter({
                         ? "bg-blue-600 text-white border-blue-600 shadow-blue-500/20 ring-2 ring-blue-500/20"
                         : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300"
                 )}
-                title="Filtrar oportunidades por fecha"
+                title={listDateFilterTitle(statusFilter)}
             >
                 <CalendarDays className={cn("w-4 h-4 shrink-0", hasFilter ? "text-white" : "text-blue-600")} />
                 <span className="whitespace-nowrap max-w-[170px] truncate">{currentLabel}</span>
@@ -335,7 +336,7 @@ export function QuickDateFilter({
             {isOpen && (
                 <div className="absolute left-0 sm:left-auto sm:right-0 top-full mt-2 z-50">
                     <DateFilterPanel
-                        title="Fecha de Creación"
+                        title={listDateFilterTitle(statusFilter)}
                         startDate={startDate}
                         endDate={endDate}
                         statusFilter={statusFilter}
