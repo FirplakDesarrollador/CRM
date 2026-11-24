@@ -45,7 +45,8 @@ import { AccountNivelBadge } from "@/components/cuentas/AccountNivelBadge";
 import { EntityAuditHistoryTab } from "@/components/shared/EntityAuditHistoryTab";
 import { History } from "lucide-react";
 import { getPhaseOutcomeByName, ESTADO_ID_ABIERTA, ESTADO_ID_GANADA, ESTADO_ID_PERDIDA } from "@/lib/opportunityPhase";
-import { phaseLabelForId, resolveStepperPhaseId, selectPhasesForPicker } from "@/lib/opportunityPhaseCatalog";
+import { phaseLabelForId, resolveShownPhaseId, selectPhasesForPicker } from "@/lib/opportunityPhaseCatalog";
+import { buildClosedLostPhaseUpdate, planLossReasonSelection, WON_TO_LOST_CONFIRM_MESSAGE } from "@/lib/opportunityLossClose";
 import { readFullPhaseCatalog } from "@/lib/phaseCatalogStore";
 
 export default function OpportunityDetailPage() {
@@ -56,9 +57,13 @@ export default function OpportunityDetailPage() {
     const { user: currentUser, role: userRole, isAdmin } = useCurrentUser();
     const setIsLoadingData = useSyncStore(state => state.setIsLoadingData);
     const phases = useLiveQuery(() => readFullPhaseCatalog());
-    const phaseMap = new Map(phases?.map(p => [p.id, p.nombre]));
 
     const opportunity = opportunities?.find(o => o.id === id);
+    const accountCanalId = useLiveQuery(async () => {
+        if (!opportunity?.account_id) return null;
+        const account = await db.accounts.get(opportunity.account_id);
+        return account?.canal_id ?? null;
+    }, [opportunity?.account_id]);
     const [serverOpportunity, setServerOpportunity] = useState<any>(null);
     const [isFetchingServer, setIsFetchingServer] = useState(false);
 
@@ -202,8 +207,12 @@ export default function OpportunityDetailPage() {
                 title={opportunity.nombre}
                 subtitle={formatOpportunityAmount(opportunity.amount, opportunity.currency_id || 'COP')}
                 status={
-                    // Solo la fase (el estado ya no se muestra).
-                    phaseMap.get(opportunity.fase_id) || opportunity.fase || 'Prospecto'
+                    // Misma fase que el stepper (activa equivalente). El estado no se muestra.
+                    phaseLabelForId(
+                        resolveShownPhaseId(opportunity.fase_id, phases, accountCanalId, opportunity.fase),
+                        phases,
+                        opportunity.fase || 'Prospecto',
+                    )
                 }
                 backHref="/oportunidades?view=list"
                 onTitleSave={async (nombre) => {
@@ -520,7 +529,12 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
         () => effectiveAccount?.canal_id ? selectPhasesForPicker(phaseCatalog ?? [], effectiveAccount.canal_id) : [],
         [phaseCatalog, effectiveAccount?.canal_id]
     );
-    const highlightedPhaseId = resolveStepperPhaseId(opportunity.fase_id, phaseCatalog ?? [], effectiveAccount?.canal_id);
+    const highlightedPhaseId = resolveShownPhaseId(
+        opportunity.fase_id,
+        phaseCatalog ?? [],
+        effectiveAccount?.canal_id,
+        opportunity.fase,
+    );
 
     // Fetch contacts for account to allow linking contacts to opportunity
     const localAccountContacts = useLiveQuery(
@@ -538,8 +552,26 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     // Computed: both loss reason fields are filled
     const lossFieldsComplete = localRazonPerdida.trim() !== "" && localComentariosPerdida.trim() !== "";
 
-    // Resultado actual (abierta / ganada / perdida) calculado SOLO por la fase.
-    const currentPhaseOutcome = getPhaseOutcomeByName(phaseLabelForId(opportunity.fase_id, phaseCatalog ?? [], ''));
+    // Resultado actual (abierta / ganada / perdida) de la misma fase que pintan el badge y el stepper.
+    const currentPhaseOutcome = getPhaseOutcomeByName(
+        phaseLabelForId(highlightedPhaseId, phaseCatalog ?? [], opportunity.fase || ''),
+    );
+
+    const persistClosedLost = async (phaseId: number, reason: string) => {
+        const lostPhase = (phaseCatalog ?? []).find(phase => Number(phase.id) === Number(phaseId))
+            ?? phases?.find(phase => Number(phase.id) === Number(phaseId));
+        const isB2C = isB2COpportunity(effectiveAccount, opportunity, user, lostPhase);
+        const updates = buildClosedLostPhaseUpdate({
+            phaseId,
+            probability: lostPhase?.probability,
+            razonPerdida: reason,
+            comentariosPerdida: localComentariosPerdida,
+            isB2C,
+            today: toInputDate(new Date()),
+        });
+        if (updates.fecha_cierre_estimada) setLocalClosingDate(updates.fecha_cierre_estimada);
+        await updateOpportunity(opportunity.id, updates);
+    };
 
     const handlePhaseChange = async (phaseId: number) => {
         const targetPhase = phases?.find(p => p.id === phaseId);
@@ -554,25 +586,9 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
         const todayStr = toInputDate(new Date());
 
         if (isClosedLost) {
-            // Block if loss reason fields are not filled
+            // El botón sigue exigiendo razón y comentarios. El guardado es el mismo que la razón.
             if (!lossFieldsComplete) return;
-
-            const lostPhase = phases?.find(p => p.id === phaseId);
-            const updates: any = {
-                fase_id: phaseId,
-                razon_perdida: localRazonPerdida,
-                comentarios_perdida: localComentariosPerdida,
-                // estado_id se sigue guardando por dentro (comisiones / integraciones); no se muestra.
-                estado_id: ESTADO_ID_PERDIDA,
-                probability: lostPhase?.probability ?? 0
-            };
-
-            if (isB2C) {
-                updates.fecha_cierre_estimada = todayStr;
-                setLocalClosingDate(todayStr);
-            }
-
-            await updateOpportunity(opportunity.id, updates);
+            await persistClosedLost(phaseId, localRazonPerdida);
             return;
         }
 
@@ -1306,10 +1322,28 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                         data-testid="razon-perdida-select"
                                         value={localRazonPerdida}
                                         onChange={async (e) => {
-                                            setLocalRazonPerdida(e.target.value);
+                                            const nextReason = e.target.value;
+                                            setLocalRazonPerdida(nextReason);
                                             setIsSavingLossReason(true);
                                             try {
-                                                await updateOpportunity(opportunity.id, { razon_perdida: e.target.value || null });
+                                                const plan = planLossReasonSelection({
+                                                    nextReason,
+                                                    faseId: opportunity.fase_id,
+                                                    phases: phaseCatalog ?? [],
+                                                    canalId: effectiveAccount?.canal_id,
+                                                });
+                                                if (plan.action === 'reason-only') {
+                                                    await updateOpportunity(opportunity.id, { razon_perdida: plan.razonPerdida });
+                                                    return;
+                                                }
+                                                if (plan.action === 'confirm-won') {
+                                                    const accepted = window.confirm(WON_TO_LOST_CONFIRM_MESSAGE);
+                                                    if (!accepted) {
+                                                        setLocalRazonPerdida(opportunity.razon_perdida || '');
+                                                        return;
+                                                    }
+                                                }
+                                                await persistClosedLost(plan.faseId, plan.razonPerdida);
                                             } finally {
                                                 setIsSavingLossReason(false);
                                             }

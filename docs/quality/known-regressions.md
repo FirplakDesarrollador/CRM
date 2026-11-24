@@ -23,6 +23,7 @@ La memoria historica detallada continua en `bugs-knowhow.md`. Esta vista conecta
 | Selector de clasificación de actividades trabado en «Sincronizando...» por tablas inexistentes | `docs/failures/2026-11-24-INC-2026-017.md`; `lib/supabaseDirect.ts`; `tests/supabaseDirectHooks.test.ts` | R6 | `product-tests` | VERIFIED enfocado: 8/8. Sin sesión real del CRM |
 | Pestaña Ganadas filtraba el rango superior por created_at y omitía ventas cerradas en el rango | `docs/failures/2026-11-24-INC-2026-018.md`; `lib/opportunityListDateFilter.ts`; `tests/opportunityListDateFilter.test.ts` | R3 | `product-tests` | VERIFIED enfocado: 8/8. Consulta de solo lectura: 23 por cierre / $64.311.111, más 1 ganada de valor 0 sin fecha de cierre |
 | Stepper de fases en gris porque Dexie deduplicaba por orden y se quedaba con ids inactivos | `docs/failures/2026-11-24-INC-2026-019.md`; `lib/opportunityPhaseCatalog.ts`; `tests/opportunityPhaseCatalog.test.ts` | R3 | `product-tests` | VERIFIED enfocado: 60/60 con las pruebas relacionadas. Sin sesión real del CRM |
+| Elegir la razón de pérdida no movía la fase; el badge y el stepper podían mostrar etapas distintas | `docs/failures/2026-11-24-INC-2026-020.md`; `lib/opportunityLossClose.ts`; `tests/opportunityLossClose.test.ts` | R3 | `product-tests` | VERIFIED enfocado: 55/55 con las pruebas relacionadas. Sin sesión real del CRM |
 
 Una regresion nueva se registra con `npm run qa:incident`. La nota debe identificar la prueba RED, la etapa que la ejecuta y la evidencia GREEN.
 

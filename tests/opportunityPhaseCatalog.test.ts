@@ -143,8 +143,9 @@ describe('Las pantallas que escriben fase_id no vuelven a ofrecer ids inactivos'
     it('el stepper resuelve la fase activa equivalente y no se queda con el id menor', () => {
         const page = read('app', 'oportunidades', '[id]', 'page.tsx');
         expect(page).toContain('selectPhasesForPicker');
-        expect(page).toContain('resolveStepperPhaseId');
+        expect(page).toContain('resolveShownPhaseId');
         expect(page).toContain('phaseLabelForId');
+        expect(read('lib', 'opportunityPhaseCatalog.ts')).toContain('function resolveStepperPhaseId');
         expect(page).not.toContain('keeping the entry with the lowest id');
     });
 

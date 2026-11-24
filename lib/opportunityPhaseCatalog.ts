@@ -1,3 +1,5 @@
+import { getPhaseOutcomeByName, normalizePhaseName, type PhaseOutcome } from './opportunityPhase';
+
 /**
  * Catálogo de fases de oportunidad.
  *
@@ -98,6 +100,62 @@ export function resolveStepperPhaseId(
     if (orden === null) return null;
     const match = selectable.find(phase => numericOrden(phase) === orden);
     return match ? Number(match.id) : null;
+}
+
+/**
+ * Fase activa de un resultado cerrado (ganada o perdida) en el canal.
+ * Solo entran fases activas (`selectPhasesForPicker`). Si hay varias, gana el nombre
+ * exacto ("Cerrada ganada" / "Cerrada perdida") y, entre esas, la de menor orden.
+ */
+export function resolveActiveOutcomePhase<T extends PhaseCatalogItem>(
+    phases: readonly T[] | null | undefined,
+    canalId: string | null | undefined,
+    outcome: Extract<PhaseOutcome, 'won' | 'lost'>,
+): T | null {
+    if (!canalId) return null;
+    const exactName = outcome === 'lost' ? 'cerrada perdida' : 'cerrada ganada';
+    const matches = selectPhasesForPicker(phases, canalId)
+        .filter(phase => getPhaseOutcomeByName(phase.nombre) === outcome);
+    if (matches.length === 0) return null;
+    const exact = matches.filter(phase => normalizePhaseName(phase.nombre) === exactName);
+    return (exact.length > 0 ? exact : matches)[0];
+}
+
+/** Fase activa "Cerrada perdida" del canal. En PROPIO es la 122, no la inactiva 88. */
+export function resolveActiveLostPhase<T extends PhaseCatalogItem>(
+    phases: readonly T[] | null | undefined,
+    canalId?: string | null,
+): T | null {
+    return resolveActiveOutcomePhase(phases, canalId, 'lost');
+}
+
+/**
+ * Fase que deben pintar el badge y el stepper.
+ * Una fase abierta sigue el id activo del mismo orden. Una fase cerrada cuyo equivalente
+ * por orden ya no tiene el mismo resultado usa la fase activa de ese resultado (nombre y orden),
+ * para que el badge no diga "Cerrada Perdida" mientras el stepper marca otra etapa.
+ */
+export function resolveShownPhaseId(
+    faseId: number | string | null | undefined,
+    phases: readonly PhaseCatalogItem[] | null | undefined,
+    canalId?: string | null,
+    faseText?: string | null,
+): number | null {
+    const catalog = phases || [];
+    const storedLabel = phaseLabelForId(faseId, catalog, '');
+    const hintedOutcome = getPhaseOutcomeByName(storedLabel || faseText || '');
+    const stored = catalog.find(phase => Number(phase.id) === Number(faseId));
+    const canal = canalId || stored?.canal_id || null;
+    const byOrder = resolveStepperPhaseId(faseId, catalog, canal);
+    if (hintedOutcome === 'open') return byOrder;
+
+    const resolvedOutcome = getPhaseOutcomeByName(
+        byOrder == null ? '' : phaseLabelForId(byOrder, catalog, ''),
+    );
+    if (resolvedOutcome === hintedOutcome) return byOrder;
+
+    const active = resolveActiveOutcomePhase(catalog, canal, hintedOutcome);
+    return active ? Number(active.id) : byOrder;
 }
 
 /** Nombre para badges y listas. Usa el catálogo completo, incluidas las fases inactivas. */
