@@ -8,6 +8,7 @@ import { getCellphoneSearchDigits, findPhoneMatchesServer, findPhoneMatchesLocal
 import { computeOpportunityActivitySummary, OpportunityActivitySummary, ActivityItem } from '@/lib/opportunityActivities';
 import { PROSPECTO_PHASE_ID, getEquivalentPhaseIds, PhaseCatalogItem, calculateTotalAmount, DEFAULT_OPPORTUNITIES_PAGE_SIZE } from '@/lib/opportunityColumnFilterHelpers';
 import { toStartOfDayISO, toEndOfDayISO, toDateOnly, isDateOnlyInRange } from '@/lib/dateFilterHelpers';
+import { buildWonCloseDateOrFilter, matchesOpportunityListDateRange } from '@/lib/opportunityListDateFilter';
 import { isClosedPhaseName, splitPhaseIdsByOutcome } from '@/lib/opportunityPhase';
 import { buildClosedStatusOrCondition, buildOpenPhaseOrCondition, matchesStatusFilter, matchesSetterFilter, normalizeSetterFilter, SetterFilter } from '@/lib/opportunityStatusFilter';
 import { activitiesVisibleToViewer, canViewAllAccountsContactsOpportunities, sellerCanSeeOpportunity, sellerOpportunityOrFilter } from '@/lib/sellerVisibility';
@@ -358,13 +359,8 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 localOpps = localOpps.filter(o => matchingOppIds.has(o.id));
             }
 
-            if (startDate) {
-                const startISO = toStartOfDayISO(startDate);
-                localOpps = localOpps.filter(o => o.created_at && (!startISO || new Date(o.created_at) >= new Date(startISO)));
-            }
-            if (endDate) {
-                const endISO = toEndOfDayISO(endDate);
-                localOpps = localOpps.filter(o => o.created_at && (!endISO || new Date(o.created_at) <= new Date(endISO)));
+            if (startDate || endDate) {
+                localOpps = localOpps.filter(o => matchesOpportunityListDateRange(o, statusFilter, startDate, endDate));
             }
 
             // fecha_cierre_estimada es "solo día": se compara como YYYY-MM-DD, sin pasar a UTC (evita corrimiento de un día).
@@ -710,14 +706,21 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                     }
                 }
 
-                if (startDate) {
-                    const startISO = toStartOfDayISO(startDate);
-                    if (startISO) q = q.gte('created_at', startISO);
-                }
+                // Ganadas: el rango superior filtra fecha_cierre_estimada (o created_at si el cierre es null).
+                // Todas, Abiertas y Perdidas siguen en created_at. El conteo usa applyCommonFilters.
+                const wonDateOr = statusFilter === 'won' ? buildWonCloseDateOrFilter(startDate, endDate) : null;
+                if (wonDateOr) {
+                    q = q.or(wonDateOr);
+                } else {
+                    if (startDate) {
+                        const startISO = toStartOfDayISO(startDate);
+                        if (startISO) q = q.gte('created_at', startISO);
+                    }
 
-                if (endDate) {
-                    const endISO = toEndOfDayISO(endDate);
-                    if (endISO) q = q.lte('created_at', endISO);
+                    if (endDate) {
+                        const endISO = toEndOfDayISO(endDate);
+                        if (endISO) q = q.lte('created_at', endISO);
+                    }
                 }
 
                 // fecha_cierre_estimada es columna date: se filtra con YYYY-MM-DD (sin convertir a UTC).
@@ -868,6 +871,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 const localOpps = await db.opportunities.where('id').anyOf(Array.from(missingPendingIds)).toArray();
                 const pendingCollabIds = new Set(collabOppIds);
                 pendingLocalOpps = localOpps.filter((o: any) => {
+                    if (!matchesOpportunityListDateRange(o, statusFilter, startDate, endDate)) return false;
                     if (!seesAllPortfolio && isVendedor && currentUserId && !sellerCanSeeOpportunity(o, currentUserId, pendingCollabIds) && o.created_by !== currentUserId) return false;
                     if (accountIdFilter && o.account_id !== accountIdFilter) return false;
                     if (searchIsPhone && opportunityMatchesPhone(o, serverPhoneMatches)) return true;
