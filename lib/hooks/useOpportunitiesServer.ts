@@ -41,9 +41,11 @@ type StatusFilter = 'all' | 'open' | 'won' | 'lost';
 type UseOpportunitiesServerProps = {
     pageSize?: number;
     initialStatus?: string;
+    /** Ignora los filtros guardados del listado (URL y sessionStorage); para vistas embebidas. */
+    ignorePersistedFilters?: boolean;
 };
 
-export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_SIZE }: UseOpportunitiesServerProps = {}) {
+export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_SIZE, initialStatus, ignorePersistedFilters = false }: UseOpportunitiesServerProps = {}) {
     const [data, setData] = useState<OpportunityServer[]>([]);
     const [count, setCount] = useState<number>(0);
     const [loading, setLoading] = useState<boolean>(true);
@@ -53,6 +55,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
     // Helper to extract initial filter from URL or sessionStorage
     const getInitialParam = (key: string) => {
         if (typeof window === 'undefined') return null;
+        if (ignorePersistedFilters) return null;
         const urlParams = new URLSearchParams(window.location.search);
         const fromUrl = urlParams.get(key);
         if (fromUrl) return fromUrl;
@@ -83,7 +86,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
         const val = getInitialParam('phase');
         return val ? Number(val) : null;
     });
-    const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => (getInitialParam('status') as StatusFilter | null) || 'open');
+    const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => (getInitialParam('status') as StatusFilter | null) || (initialStatus as StatusFilter | undefined) || 'open');
     const [originFilter, setOriginFilter] = useState<string | null>(() => getInitialParam('origin'));
     const [plantaFilter, setPlantaFilter] = useState<string | null>(() => getInitialParam('planta'));
     const [familiaFilter, setFamiliaFilter] = useState<string | null>(() => getInitialParam('familia'));

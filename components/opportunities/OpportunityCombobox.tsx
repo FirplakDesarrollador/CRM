@@ -46,7 +46,7 @@ export function OpportunityCombobox({
         setSearchTerm,
         setUserFilter,
         setAccountIdFilter
-    } = useOpportunitiesServer({ pageSize: 20 });
+    } = useOpportunitiesServer({ pageSize: 20, ignorePersistedFilters: true });
 
     const observer = React.useRef<IntersectionObserver | null>(null);
     const lastElementRef = React.useCallback((node: HTMLDivElement | null) => {
