@@ -72,10 +72,9 @@ export const VentasGanadasTile = () => {
                 // fecha_cierre_estimada must be in the selected month/year
                 if (!opp.fecha_cierre_estimada) return false;
 
-                const fechaCierre = new Date(opp.fecha_cierre_estimada);
-                // Adjust for timezone differences if necessary
-                const isCorrectDate = fechaCierre.getFullYear() === selectedYear &&
-                                      fechaCierre.getMonth() === selectedMonth;
+                // fecha_cierre_estimada es 'YYYY-MM-DD': se leen año y mes del texto (evita desfase UTC).
+                const [y, m] = String(opp.fecha_cierre_estimada).slice(0, 10).split('-').map(Number);
+                const isCorrectDate = y === selectedYear && (m - 1) === selectedMonth;
                 if (!isCorrectDate) return false;
 
                 if (selectedChannel === "ALL") {

@@ -57,4 +57,15 @@ describe('Resultado de la oportunidad SOLO por fase', () => {
         expect(detail).toContain('estado_id: ESTADO_ID_GANADA');
         expect(detail).not.toMatch(/opportunity\.estado_id/);
     });
+
+    it('si la fase no está en Dexie, estado_id se resuelve en el servidor (no queda en 1)', () => {
+        const hook = readFileSync(path.join(process.cwd(), 'lib', 'hooks', 'useOpportunities.ts'), 'utf8');
+        const fn = hook.slice(hook.indexOf('async function backgroundEstadoIdForPhase'));
+        const body = fn.slice(0, fn.indexOf('\nexport function'));
+        expect(body).toContain(".from('CRM_FasesOportunidad')");
+        expect(body).toContain(".select('nombre')");
+        expect(body).toContain('estadoIdForPhaseName(data.nombre)');
+        expect(body).toContain('navigator.onLine');
+        expect(hook).toContain('import { supabase } from "@/lib/supabase"');
+    });
 });

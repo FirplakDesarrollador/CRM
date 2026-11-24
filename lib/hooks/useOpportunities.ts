@@ -55,7 +55,7 @@ async function fetchPricing(productId: string, channelId: string, qty: number) {
 // Helper to sanitize opportunity data before syncing
 /**
  * estado_id que se guarda por dentro para una fase (1 Abierta / 2 Ganada / 3 Perdida, por el nombre de la fase).
- * Si la fase no está en caché local, deja el valor de respaldo.
+ * Si la fase no está en caché local, se consulta el servidor; sin conexión se deja el respaldo.
  */
 async function backgroundEstadoIdForPhase(faseId: number | string | null | undefined, fallback: number): Promise<number> {
     if (faseId === null || faseId === undefined || faseId === '') return fallback;
@@ -63,7 +63,20 @@ async function backgroundEstadoIdForPhase(faseId: number | string | null | undef
         const phase = await db.phases.get(Number(faseId));
         if (phase) return estadoIdForPhaseName(phase.nombre);
     } catch {
-        // Sin caché de fases: se deja el respaldo.
+        // Sin caché de fases: se consulta el servidor.
+    }
+    // La fase no está en la caché local: sin esto la oportunidad creada como ganada quedaba con estado_id=1.
+    try {
+        if (typeof navigator === 'undefined' || navigator.onLine) {
+            const { data } = await supabase
+                .from('CRM_FasesOportunidad')
+                .select('nombre')
+                .eq('id', Number(faseId))
+                .maybeSingle();
+            if (data?.nombre) return estadoIdForPhaseName(data.nombre);
+        }
+    } catch {
+        // Sin conexión: se deja el respaldo.
     }
     return fallback;
 }

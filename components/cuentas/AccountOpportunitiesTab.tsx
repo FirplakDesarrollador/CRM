@@ -35,8 +35,18 @@ export default function AccountOpportunitiesTab({ accountId }: { accountId: stri
         setPhaseFilter,
         setOriginFilter,
         setAccountOwnerIds,
+        setIdFilter,
+        setPlantaFilter,
+        setFamiliaFilter,
+        setCountryFilter,
+        setCityFilter,
+        setSetterFilter,
+        setStartDate,
+        setEndDate,
+        setStartClosingDate,
+        setEndClosingDate,
         refresh
-    } = useOpportunitiesServer({ pageSize: 100, initialStatus: 'all' });
+    } = useOpportunitiesServer({ pageSize: 100, initialStatus: 'all', ignorePersistedFilters: true });
 
     useEffect(() => {
         setAccountIdFilter(accountId);
@@ -48,6 +58,17 @@ export default function AccountOpportunitiesTab({ accountId }: { accountId: stri
         setPhaseFilter(null);
         setOriginFilter(null);
         setAccountOwnerIds([]);
+        // Filtros que antes se heredaban del listado de Oportunidades y dejaban la pestaña vacía
+        setIdFilter(null);
+        setPlantaFilter(null);
+        setFamiliaFilter(null);
+        setCountryFilter(null);
+        setCityFilter(null);
+        setSetterFilter(null);
+        setStartDate(null);
+        setEndDate(null);
+        setStartClosingDate(null);
+        setEndClosingDate(null);
     }, [
         accountId, 
         setAccountIdFilter, 
@@ -58,7 +79,17 @@ export default function AccountOpportunitiesTab({ accountId }: { accountId: stri
         setSegmentFilter, 
         setPhaseFilter, 
         setOriginFilter, 
-        setAccountOwnerIds
+        setAccountOwnerIds,
+        setIdFilter,
+        setPlantaFilter,
+        setFamiliaFilter,
+        setCountryFilter,
+        setCityFilter,
+        setSetterFilter,
+        setStartDate,
+        setEndDate,
+        setStartClosingDate,
+        setEndClosingDate
     ]);
 
     useEffect(() => {
