@@ -258,8 +258,8 @@ export async function hydrateActivityCatalogsFromSupabase(): Promise<void> {
             import('./db'),
         ]);
         const [classRes, subRes] = await Promise.all([
-            supabaseClient.from('CRM_ClasificacionesActividad').select('*').eq('is_deleted', false),
-            supabaseClient.from('CRM_SubclasificacionesActividad').select('*').eq('is_deleted', false),
+            supabaseClient.from('CRM_Activity_Clasificacion').select('*').eq('is_deleted', false),
+            supabaseClient.from('CRM_Activity_Subclasificacion').select('*').eq('is_deleted', false),
         ]);
         if (!classRes.error && Array.isArray(classRes.data) && classRes.data.length > 0) {
             await db.activityClassifications.bulkPut(classRes.data);

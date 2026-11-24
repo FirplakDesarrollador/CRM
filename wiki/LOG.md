@@ -11,7 +11,7 @@
   2. **`components/contactos/ContactForm.tsx`:** Consulta directa a `CRM_Cuentas` para verificar permisos de eliminación (`owner_user_id`, `created_by`) y verificación de duplicados directa contra `CRM_Contactos` en Supabase, eliminando `useLiveQuery` y `db`.
   3. **`components/contactos/CreateContactWizard.tsx`:** Carga directa del nombre de la cuenta (`CRM_Cuentas`) desde Supabase por `accountId`, eliminando `useLiveQuery` y `db.accounts`.
   4. **`components/usuarios/UserForm.tsx`:** Carga directa de `CRM_Paises` y `CRM_Departamentos` desde Supabase, eliminando `useLiveQuery` y `db.countries` / `db.departments`.
-  5. **`lib/hooks/useIndicadoresLookups.ts`:** Carga directa de `CRM_Canales`, `CRM_FasesOportunidad`, `CRM_Subclasificacion`, `CRM_Segmentos`, `CRM_ClasificacionesActividad` y `CRM_Cuentas` desde Supabase, eliminando `useLiveQuery` y `db`.
+  5. **`lib/hooks/useIndicadoresLookups.ts`:** Carga directa de `CRM_Canales`, `CRM_FasesOportunidad`, `CRM_Subclasificacion`, `CRM_Segmentos`, `CRM_Activity_Clasificacion` y `CRM_Cuentas` desde Supabase, eliminando `useLiveQuery` y `db`.
   6. **`components/indicadores/VentasGanadasTile.tsx`:** Carga directa de `CRM_FasesOportunidad` desde Supabase, eliminando `useLiveQuery` y `db.phases`.
   7. **`lib/hooks/useNotifications.ts`:** Consulta puntual a `CRM_Actividades` en Supabase para los `entity_id` de notificaciones `ACTIVITY_OVERDUE`, eliminando `useLiveQuery` y `db.activities`.
   8. **Pruebas y Verificación:**
@@ -43,7 +43,7 @@
 - **Requerimiento:** Continuar con la Fase 2 del desmontaje de la base de datos local desconectando `syncEngine` de los formularios, comboboxes, pestañas de detalle y el bucle periódico de `AppLayout.tsx` (sin subir a `main`).
 - **Cambios Implementados:**
   1. **Hidratación Directa de Catálogos (`lib/supabaseDirect.ts`):**
-     - Se agregaron `hydrateActivityCatalogsFromSupabase()` y `hydrateReferenceCatalogsFromSupabase()` para cargar catálogos de referencia (`CRM_FasesOportunidad`, `CRM_Subclasificacion`, `CRM_Segmentos`, `CRM_Paises`, `CRM_Departamentos`, `CRM_Ciudades`, `CRM_RazonesPerdida`, `CRM_ClasificacionesActividad` y `CRM_SubclasificacionesActividad`) directamente desde Supabase sin disparar `syncEngine.triggerSync()`.
+     - Se agregaron `hydrateActivityCatalogsFromSupabase()` y `hydrateReferenceCatalogsFromSupabase()` para cargar catálogos de referencia (`CRM_FasesOportunidad`, `CRM_Subclasificacion`, `CRM_Segmentos`, `CRM_Paises`, `CRM_Departamentos`, `CRM_Ciudades`, `CRM_RazonesPerdida`, `CRM_Activity_Clasificacion` y `CRM_Activity_Subclasificacion`) directamente desde Supabase sin disparar `syncEngine.triggerSync()`.
   2. **Apagado del Bucle de Sincronización en `components/layout/AppLayout.tsx`:**
      - Se eliminaron `syncEngine.initializeForUser` y el bucle de polling (`app-mount`, `periodic-5m`, `visibility`). Al iniciar sesión, solo se activa el contexto del usuario y se hidratan los catálogos de referencia directamente desde Supabase.
   3. **Formularios, Modales, Comboboxes y Pestañas Migrados a Supabase Directo:**

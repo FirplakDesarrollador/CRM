@@ -20,6 +20,7 @@ La memoria historica detallada continua en `bugs-knowhow.md`. Esta vista conecta
 | Leads web guardados como Consumidor Final aunque vTiger trae apellido/nombre | `docs/failures/2026-11-03-INC-2026-013.md`; `lib/leadDeduplication.ts`; `supabase/functions/wordpress-lead-intake/leadNaming.ts`; `tests/leadDeduplication.test.ts` | R7 | `product-tests` | VERIFIED enfocado: 10/10; falta redespliegue de la Edge Function para cubrimiento en producción |
 | Popup de actividades que se cierra, pierde filtros o no abre por deep link; "Hasta la fecha" esconde las de hoy | `docs/failures/2026-11-10-INC-2026-015.md`; `bugs-knowhow.md` Bug 20261110-01; `lib/actividadesUi.test.ts`; `lib/serverHydration.test.ts` | R6 | `product-tests` | VERIFIED enfocado: 40/40. Sin sesion real del CRM para el pantallazo |
 | Pestaña de oportunidades de la cuenta vacía por filtros heredados; ganada creada con estado_id=1; venta del día 1 en el mes anterior | `docs/failures/2026-11-24-INC-2026-016.md`; `tests/cuentaOportunidadesFiltros.test.ts`; `tests/opportunityPhase.test.ts` | R3 | `product-tests` | VERIFIED enfocado: 17/17. Sin sesión real del asesor |
+| Selector de clasificación de actividades trabado en «Sincronizando...» por tablas inexistentes | `docs/failures/2026-11-24-INC-2026-017.md`; `lib/supabaseDirect.ts`; `tests/supabaseDirectHooks.test.ts` | R6 | `product-tests` | VERIFIED enfocado: 8/8. Sin sesión real del CRM |
 
 Una regresion nueva se registra con `npm run qa:incident`. La nota debe identificar la prueba RED, la etapa que la ejecuta y la evidencia GREEN.
 

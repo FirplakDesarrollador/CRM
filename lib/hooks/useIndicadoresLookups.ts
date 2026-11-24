@@ -44,7 +44,7 @@ export function useIndicadoresLookups() {
             supabase.from("CRM_FasesOportunidad").select("*"),
             supabase.from("CRM_Subclasificacion").select("*"),
             supabase.from("CRM_Segmentos").select("*"),
-            supabase.from("CRM_ClasificacionesActividad").select("*"),
+            supabase.from("CRM_Activity_Clasificacion").select("*"),
             supabase
                 .from("CRM_Cuentas")
                 .select("id, canal_id, subclasificacion_id, departamento_id, owner_user_id, nombre")

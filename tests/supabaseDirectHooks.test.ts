@@ -156,4 +156,19 @@ describe('Fase 1: Escritura y lectura directa a Supabase en hooks principales', 
             expect(source, `${relPath} no debe usar db. de Dexie`).not.toMatch(/\bdb\./);
         }
     });
+
+    it('los catálogos de actividad consultan CRM_Activity_Clasificacion y CRM_Activity_Subclasificacion', () => {
+        const root = process.cwd();
+        const direct = readFileSync(path.join(root, 'lib/supabaseDirect.ts'), 'utf8');
+        const indicadores = readFileSync(path.join(root, 'lib/hooks/useIndicadoresLookups.ts'), 'utf8');
+
+        expect(direct).toContain("from('CRM_Activity_Clasificacion')");
+        expect(direct).toContain("from('CRM_Activity_Subclasificacion')");
+        expect(direct).not.toContain('CRM_ClasificacionesActividad');
+        expect(direct).not.toContain('CRM_SubclasificacionesActividad');
+
+        expect(indicadores).toContain('from("CRM_Activity_Clasificacion")');
+        expect(indicadores).not.toContain('CRM_ClasificacionesActividad');
+        expect(indicadores).not.toContain('CRM_SubclasificacionesActividad');
+    });
 });
