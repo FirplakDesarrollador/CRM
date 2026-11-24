@@ -44,6 +44,8 @@ import { AccountModal } from "@/components/cuentas/AccountModal";
 import { EntityAuditHistoryTab } from "@/components/shared/EntityAuditHistoryTab";
 import { History } from "lucide-react";
 import { getPhaseOutcomeByName, ESTADO_ID_ABIERTA, ESTADO_ID_GANADA, ESTADO_ID_PERDIDA } from "@/lib/opportunityPhase";
+import { phaseLabelForId, resolveStepperPhaseId, selectPhasesForPicker } from "@/lib/opportunityPhaseCatalog";
+import { readFullPhaseCatalog } from "@/lib/phaseCatalogStore";
 
 export default function OpportunityDetailPage() {
     const params = useParams();
@@ -52,7 +54,7 @@ export default function OpportunityDetailPage() {
     const { opportunities, deleteOpportunity, updateOpportunity } = useOpportunities();
     const { user: currentUser, role: userRole, isAdmin } = useCurrentUser();
     const setIsLoadingData = useSyncStore(state => state.setIsLoadingData);
-    const phases = useLiveQuery(() => db.phases.toArray());
+    const phases = useLiveQuery(() => readFullPhaseCatalog());
     const phaseMap = new Map(phases?.map(p => [p.id, p.nombre]));
 
     const opportunity = opportunities?.find(o => o.id === id);
@@ -511,22 +513,13 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
         ciudad: ""
     } : null);
 
-    // Fetch Phases for Channel (with deduplication by orden in case of DB integrity issues)
-    const phases = useLiveQuery(
-        async () => {
-            if (!effectiveAccount?.canal_id) return [];
-            const raw = await db.phases.where('canal_id').equals(effectiveAccount.canal_id).sortBy('orden');
-            // Deduplicate by orden, keeping the entry with the lowest id
-            const seen = new Map<number, typeof raw[0]>();
-            for (const phase of raw) {
-                if (!seen.has(phase.orden)) {
-                    seen.set(phase.orden, phase);
-                }
-            }
-            return Array.from(seen.values()).sort((a, b) => a.orden - b.orden);
-        },
-        [account?.canal_id]
+    // Catálogo completo (incluye inactivas) para el nombre; el stepper solo ofrece activas.
+    const phaseCatalog = useLiveQuery(() => readFullPhaseCatalog(), [effectiveAccount?.canal_id]);
+    const phases = useMemo(
+        () => effectiveAccount?.canal_id ? selectPhasesForPicker(phaseCatalog ?? [], effectiveAccount.canal_id) : [],
+        [phaseCatalog, effectiveAccount?.canal_id]
     );
+    const highlightedPhaseId = resolveStepperPhaseId(opportunity.fase_id, phaseCatalog ?? [], effectiveAccount?.canal_id);
 
     // Fetch contacts for account to allow linking contacts to opportunity
     const localAccountContacts = useLiveQuery(
@@ -545,7 +538,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     const lossFieldsComplete = localRazonPerdida.trim() !== "" && localComentariosPerdida.trim() !== "";
 
     // Resultado actual (abierta / ganada / perdida) calculado SOLO por la fase.
-    const currentPhaseOutcome = getPhaseOutcomeByName(phases?.find(p => p.id === opportunity.fase_id)?.nombre);
+    const currentPhaseOutcome = getPhaseOutcomeByName(phaseLabelForId(opportunity.fase_id, phaseCatalog ?? [], ''));
 
     const handlePhaseChange = async (phaseId: number) => {
         const targetPhase = phases?.find(p => p.id === phaseId);
@@ -632,7 +625,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
         );
     }
 
-    const currentPhaseIndex = phases?.findIndex(p => Number(p.id) === Number(opportunity.fase_id)) ?? -1;
+    const currentPhaseIndex = phases?.findIndex(p => Number(p.id) === Number(highlightedPhaseId)) ?? -1;
 
     return (
         <div className="space-y-6 animate-in fade-in duration-500">
@@ -719,7 +712,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                         return normalized.includes('cerrada') || normalized.includes('ganada') || normalized.includes('perdida');
                                     }).map((phase) => {
                                         const isWon = phase.nombre.toLowerCase().includes('ganada');
-                                        const isActive = Number(opportunity.fase_id) === Number(phase.id);
+                                        const isActive = Number(highlightedPhaseId) === Number(phase.id);
 
                                         const isLostPhase = phase.nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes('perdida');
                                         const isBlocked = isLostPhase && !lossFieldsComplete;

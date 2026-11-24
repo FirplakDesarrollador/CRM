@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Briefcase, ChevronRight, Plus } from "lucide-react";
 import { db } from "@/lib/db";
+import { readFullPhaseCatalog } from "@/lib/phaseCatalogStore";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/components/ui/utils";
 import { formatNumberCO } from "@/lib/utils";
@@ -85,7 +86,7 @@ export function ContactOpportunities({ contactId, accountId }: ContactOpportunit
             if (!result) {
                 const [local, phases] = await Promise.all([
                     db.opportunities.where('account_id').equals(accountId).filter(o => !o.is_deleted).toArray(),
-                    db.phases.toArray()
+                    readFullPhaseCatalog()
                 ]);
                 const phaseMap = new Map(phases.map(p => [p.id, p.nombre]));
                 result = local.map(o => ({

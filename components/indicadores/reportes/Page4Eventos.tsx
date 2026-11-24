@@ -16,6 +16,7 @@ import { currentWeekMarkLine, getISOWeek, getWeekKey, withCurrentWeekMarker } fr
 import { EChartsCallbackParams } from "./echartsTypes";
 import { isPlausibleYear } from "./dateUtils";
 import { getZonaByDepartamentoId, ZONA_OPTIONS } from "./zonas";
+import { expandSelectedPhaseIds, selectPhasesForPicker } from "@/lib/opportunityPhaseCatalog";
 
 const MONTH_LABELS = [
     "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -137,9 +138,7 @@ export function Page4Eventos() {
     // Fases, igual que en Cohort (Page1): dependen del canal elegido.
     const faseOptions: Option[] = useMemo(() => {
         if (!filters.canalId) return [];
-        return phases
-            .filter(p => p.canal_id === filters.canalId)
-            .sort((a, b) => a.orden - b.orden)
+        return selectPhasesForPicker(phases, filters.canalId)
             .map(p => ({ value: String(p.id), label: p.nombre }));
     }, [phases, filters.canalId]);
 
@@ -247,7 +246,7 @@ export function Page4Eventos() {
         const asesorSet = filters.asesorIds.length > 0 ? new Set(filters.asesorIds) : null;
         const clasifSet = filters.clasificacionIds.length > 0 ? new Set(filters.clasificacionIds.map(Number)) : null;
         const subclasId = filters.subclasificacionId ? Number(filters.subclasificacionId) : null;
-        const faseIdSet = filters.faseIds.length > 0 ? new Set(filters.faseIds.map(Number)) : null;
+        const faseIdSet = filters.faseIds.length > 0 ? new Set(expandSelectedPhaseIds(filters.faseIds, phases)) : null;
         return (activities || []).filter(a => {
             if (a.is_deleted) return false;
             const assignedId = resolveAssignedAdvisor(a);
@@ -277,7 +276,7 @@ export function Page4Eventos() {
             }
             return true;
         });
-    }, [activities, filters, isCanalPropio, resolveAccount, resolveAssignedAdvisor, oppFaseMap, tipoByVendedor]);
+    }, [activities, filters, isCanalPropio, resolveAccount, resolveAssignedAdvisor, oppFaseMap, tipoByVendedor, phases]);
 
     const completados = useMemo(() => eventos.filter(a => a.is_completed), [eventos]);
 

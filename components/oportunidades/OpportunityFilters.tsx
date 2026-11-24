@@ -3,6 +3,7 @@ import { supabase } from "@/lib/supabase";
 import { Filter, X, CircleDot, Trophy, XCircle } from "lucide-react";
 import { cn } from "@/components/ui/utils";
 import { useFullCatalog } from "@/lib/hooks/useProducts";
+import { selectPhasesForPicker } from "@/lib/opportunityPhaseCatalog";
 
 type Channel = {
     id: string;
@@ -25,6 +26,8 @@ type Phase = {
     id: number;
     nombre: string;
     canal_id: string;
+    orden?: number | null;
+    is_active?: boolean | null;
     probability?: number;
 };
 
@@ -168,7 +171,7 @@ export function OpportunityFilters({
         const loadMetadata = async () => {
             try {
                 const [phasesRes, chanRes, subRes, segRes, origRes] = await Promise.all([
-                    supabase.from('CRM_FasesOportunidad').select('id, nombre, canal_id, probability').eq('is_active', true),
+                    supabase.from('CRM_FasesOportunidad').select('id, nombre, canal_id, orden, probability, is_active').eq('is_active', true),
                     supabase.from('CRM_Canales').select('id, nombre').order('nombre'),
                     supabase.from('CRM_Subclasificacion').select('*'),
                     supabase.from('CRM_Segmentos').select('*'),
@@ -235,17 +238,9 @@ export function OpportunityFilters({
         return segments.filter(seg => seg.subclasificacion_id === selectedSubclass);
     }, [selectedSubclass, segments]);
 
-    // Get phases for selected channel, excluding closed phases for the phase dropdown
-    // (closed phases are handled via statusFilter)
     const availablePhases = useMemo(() => {
         if (!selectedChannel) return [];
-        return phases
-            .filter(p => p.canal_id === selectedChannel)
-            .filter(p => {
-                const nombre = p.nombre.toLowerCase();
-                // Exclude closed phases from the phase dropdown
-                return true;
-            });
+        return selectPhasesForPicker(phases, selectedChannel);
     }, [selectedChannel, phases]);
 
     const availablePlants = useMemo(() => {

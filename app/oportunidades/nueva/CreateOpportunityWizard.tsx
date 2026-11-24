@@ -27,6 +27,8 @@ import { useUsers } from "@/lib/hooks/useUsers";
 import { useFormDraft } from "@/lib/hooks/useFormDraft";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { OPPORTUNITY_CATEGORIES, parseOpportunityCategories, formatOpportunityCategories } from "@/lib/opportunityCategories";
+import { selectPhasesForPicker } from "@/lib/opportunityPhaseCatalog";
+import { readFullPhaseCatalog } from "@/lib/phaseCatalogStore";
 
 const STEP_LABELS = ["Cuenta", "Datos del Negocio", "Productos", "Equipo"];
 const LAST_STEP_INDEX = STEP_LABELS.length - 1;
@@ -409,7 +411,7 @@ export default function CreateOpportunityWizard() {
 
         console.log('[Phases] Filtering phases for canal_id:', channelId, 'Account:', selectedAccount?.nombre || selectedAccountId);
 
-        const phases = await db.phases.where('canal_id').equals(channelId).sortBy('orden');
+        const phases = selectPhasesForPicker(await readFullPhaseCatalog(), channelId);
         console.log('[Phases] Filtered phases count:', phases.length, 'for channel:', channelId);
 
         if (phases.length === 0) {

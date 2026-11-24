@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabase";
 import { DollarSign, Calendar as CalendarIcon, TrendingUp, Filter, Check, ChevronDown } from "lucide-react";
 import { cn } from "@/components/ui/utils";
 import { buildPhaseOutcomeMap, getPhaseOutcome } from "@/lib/opportunityPhase";
+import { expandSelectedPhaseIds, selectPhasesForPicker } from "@/lib/opportunityPhaseCatalog";
 
 
 export const VentasGanadasTile = () => {
@@ -52,6 +53,11 @@ export const VentasGanadasTile = () => {
         return phases.filter(p => p.canal_id === selectedChannel).sort((a, b) => a.orden - b.orden);
     }, [phases, selectedChannel]);
 
+    const phasePickerOptions = useMemo(
+        () => selectPhasesForPicker(phasesForSelectedChannel, selectedChannel === "ALL" ? null : selectedChannel),
+        [phasesForSelectedChannel, selectedChannel]
+    );
+
     // Close popover when clicking outside
     useEffect(() => {
         const handleClickOutside = (event: MouseEvent) => {
@@ -83,7 +89,8 @@ export const VentasGanadasTile = () => {
                 } else {
                     // Filter by specific channel's phases
                     if (selectedPhases.length > 0) {
-                        return selectedPhases.includes(opp.fase_id);
+                        const expanded = expandSelectedPhaseIds(selectedPhases, phases || []);
+                        return expanded.includes(Number(opp.fase_id));
                     } else if (phasesForSelectedChannel.length > 0) {
                         // if channel selected but no specific phases, include all phases of that channel
                         const channelPhaseIds = phasesForSelectedChannel.map(p => p.id);
@@ -94,7 +101,7 @@ export const VentasGanadasTile = () => {
             })
             .reduce((sum, opp) => sum + (Number(opp.amount || opp.valor) || 0), 0);
 
-    }, [opportunities, selectedYear, selectedMonth, selectedChannel, selectedPhases, phasesForSelectedChannel, outcomeMap]);
+    }, [opportunities, selectedYear, selectedMonth, selectedChannel, selectedPhases, phases, phasesForSelectedChannel, outcomeMap]);
 
     const formatCurrency = (amount: number) => {
         return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(amount);
@@ -134,7 +141,7 @@ export const VentasGanadasTile = () => {
     };
 
     const selectAllPhases = () => {
-        setSelectedPhases(phasesForSelectedChannel.map(p => p.id));
+        setSelectedPhases(phasePickerOptions.map(p => p.id));
     };
 
     const clearPhaseSelection = () => {
@@ -269,7 +276,7 @@ export const VentasGanadasTile = () => {
                                                         background: #cbd5e1;
                                                     }
                                                 `}</style>
-                                                {phasesForSelectedChannel.map(phase => {
+                                                {phasePickerOptions.map(phase => {
                                                     const isSelected = selectedPhases.includes(phase.id);
                                                     return (
                                                         <label 

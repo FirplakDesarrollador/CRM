@@ -3,6 +3,7 @@ import { canViewAllAccountsContactsOpportunities, sellerCanSeeAccount } from '@/
 import { supabase } from '@/lib/supabase';
 import { db } from '@/lib/db';
 import { buildPhaseOutcomeMap, getPhaseOutcome } from '@/lib/opportunityPhase';
+import { readFullPhaseCatalog } from '@/lib/phaseCatalogStore';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useSyncStore } from '@/lib/stores/useSyncStore';
 import { matchesSearchTokens, getSearchTokens, getPhoneIlikePatterns } from '@/lib/utils';
@@ -118,7 +119,7 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                 let localAccounts = await db.accounts.toArray();
                 const allOpps = await db.opportunities.toArray();
                 // Potencial = oportunidades ABIERTAS por fase (el estado ya no se usa).
-                const phaseOutcomeMap = buildPhaseOutcomeMap(await db.phases.toArray());
+                const phaseOutcomeMap = buildPhaseOutcomeMap(await readFullPhaseCatalog());
 
                 // Role filtering
                 const localCollabs = await db.opportunityCollaborators

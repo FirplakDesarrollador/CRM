@@ -14,6 +14,7 @@ import { buildClosedStatusOrCondition, buildOpenPhaseOrCondition, matchesStatusF
 import { activitiesVisibleToViewer, canViewAllAccountsContactsOpportunities, sellerCanSeeOpportunity, sellerOpportunityOrFilter } from '@/lib/sellerVisibility';
 import { FlatQuoteItemProduct, getOpportunityIdsByProductFilters } from '@/lib/opportunityProductFilterHelpers';
 import { fetchFullCatalog, PriceListProduct } from '@/lib/hooks/useProducts';
+import { readFullPhaseCatalog } from '@/lib/phaseCatalogStore';
 
 export type OpportunityServer = {
     id: string;
@@ -158,7 +159,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
             let phases: PhaseCatalogItem[] = [];
 
             if (!navigator.onLine) {
-                const localPhases = await db.phases.toArray();
+                const localPhases = await readFullPhaseCatalog();
                 phases = localPhases;
             } else {
                 try {
@@ -168,10 +169,10 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                     if (!error && data && data.length > 0) {
                         phases = data;
                     } else {
-                        phases = await db.phases.toArray();
+                        phases = await readFullPhaseCatalog();
                     }
                 } catch {
-                    phases = await db.phases.toArray();
+                    phases = await readFullPhaseCatalog();
                 }
             }
 
@@ -210,7 +211,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
             console.log("[useOpportunitiesServer] Falling back to local Dexie database...");
             let localOpps = await db.opportunities.toArray();
             const allAccounts = await db.accounts.toArray();
-            const allPhases = await db.phases.toArray();
+            const allPhases = await readFullPhaseCatalog();
             const { data: usersData } = await supabase.from('CRM_Usuarios').select('id, full_name, email');
 
             const accMap = new Map(allAccounts.map(a => [a.id, a]));
