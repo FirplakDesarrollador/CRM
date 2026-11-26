@@ -10,6 +10,7 @@ import { db, getActiveLocalUserId, useActiveDatabaseVersion } from '@/lib/db';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { hasPermission } from '@/lib/permissions';
 import { canViewAllAccountsContactsOpportunities } from '@/lib/sellerVisibility';
+import { isTiendaUser } from '@/lib/tiendaVisibility';
 import {
     Calendar as CalendarIcon,
     ChevronLeft,
@@ -50,17 +51,20 @@ type ActivityStatus = 'all' | 'completed' | 'pending' | 'overdue';
 
 async function loadDeepLinkedActivity(
     id: string,
-    viewer: { viewerId: string | null; viewerRole: string | null }
+    viewer: { viewerId: string | null; viewerRole: string | null; esTienda?: boolean }
 ): Promise<LocalActivity | null> {
     try {
         const local = await db.activities.get(id);
-        if (local) return local;
+        if (local) {
+            if (viewer.esTienda && viewer.viewerId && local.user_id !== viewer.viewerId) return null;
+            return local;
+        }
     } catch (error) {
         console.warn('[ActivitiesPage] local DB fetch failed', error);
     }
     if (!viewer.viewerRole) return null;
     try {
-        await hydrateActivityById(id, viewer);
+        await hydrateActivityById(id, { viewerId: viewer.viewerId, viewerRole: viewer.viewerRole, esTienda: viewer.esTienda });
         return (await db.activities.get(id)) || null;
     } catch (error) {
         console.warn('[ActivitiesPage] no se pudo traer la actividad del servidor', error);
@@ -73,7 +77,8 @@ function ActivitiesContent() {
     const router = useRouter();
     const { activities, createActivity, updateActivity, toggleComplete } = useActivities();
     const { user, role } = useCurrentUser();
-    const canViewAll = hasPermission(role, 'view_all_activities') || canViewAllAccountsContactsOpportunities(user);
+    const tiendaScoped = isTiendaUser(user);
+    const canViewAll = (hasPermission(role, 'view_all_activities') || canViewAllAccountsContactsOpportunities(user)) && !tiendaScoped;
     const { requestFollowUp, resetFollowUp, followUpElement } = useActivityFollowUp({ createActivity });
 
     // Completing an activity: offer to schedule the next follow-up (B2C) right away
@@ -382,12 +387,12 @@ function ActivitiesContent() {
             .then(() => {
                 if (cancelled) return 0;
                 setIsSearchingServer(true);
-                return hydrateActivitiesForSearch(text, { viewerId: user?.id || null, viewerRole: role });
+                return hydrateActivitiesForSearch(text, { viewerId: user?.id || null, viewerRole: role, esTienda: tiendaScoped });
             })
             .catch(err => console.warn('[ActivitiesPage] server search failed', err))
             .finally(() => { if (!cancelled) setIsSearchingServer(false); });
         return () => { cancelled = true; };
-    }, [debouncedSearchQuery, role, user?.id]);
+    }, [debouncedSearchQuery, role, user?.id, tiendaScoped]);
 
 
     const lastProcessedUrlIdRef = useRef<string | null>(null);
@@ -637,6 +642,7 @@ function ActivitiesContent() {
             const promise = loadDeepLinkedActivity(requestedId, {
                 viewerId: user?.id || activeUserId || null,
                 viewerRole: role,
+                esTienda: tiendaScoped,
             }).then(act => {
                 if (!act && deepLinkTaskRef.current?.id === requestedId) deepLinkTaskRef.current = null;
                 return act;
@@ -654,7 +660,7 @@ function ActivitiesContent() {
         });
 
         return () => { active = false; };
-    }, [searchParams, activities, isModalOpen, role, user?.id, activeUserId]);
+    }, [searchParams, activities, isModalOpen, role, user?.id, activeUserId, tiendaScoped]);
 
     // For agenda/all views: filter by selected date + sort
     const filteredActivities = useMemo(() => {

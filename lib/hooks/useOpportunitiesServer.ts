@@ -12,6 +12,7 @@ import { buildWonCloseDateOrFilter, matchesOpportunityListDateRange } from '@/li
 import { isClosedPhaseName, splitPhaseIdsByOutcome } from '@/lib/opportunityPhase';
 import { buildClosedStatusOrCondition, buildOpenPhaseOrCondition, matchesStatusFilter, matchesSetterFilter, normalizeSetterFilter, SetterFilter } from '@/lib/opportunityStatusFilter';
 import { activitiesVisibleToViewer, canViewAllAccountsContactsOpportunities, sellerCanSeeOpportunity, sellerOpportunityOrFilter } from '@/lib/sellerVisibility';
+import { isTiendaUser } from '@/lib/tiendaVisibility';
 import { FlatQuoteItemProduct, getOpportunityIdsByProductFilters } from '@/lib/opportunityProductFilterHelpers';
 import { fetchFullCatalog, PriceListProduct } from '@/lib/hooks/useProducts';
 import { readFullPhaseCatalog } from '@/lib/phaseCatalogStore';
@@ -139,6 +140,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
     const { user, role: userRole, isVendedor } = useCurrentUser();
     const currentUserId = user?.id || null;
     const seesAllPortfolio = canViewAllAccountsContactsOpportunities(user);
+    const tiendaScoped = isTiendaUser(user);
     const [subordinateIds, setSubordinateIds] = useState<string[]>([]);
 
     // PERF FIX: Use ref for page to avoid including it in useCallback deps
@@ -219,6 +221,9 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
         const fetchOffline = async () => {
             console.log("[useOpportunitiesServer] Falling back to local Dexie database...");
             let localOpps = await db.opportunities.toArray();
+            if (tiendaScoped && currentUserId) {
+                localOpps = localOpps.filter(o => o.owner_user_id === currentUserId);
+            }
             const allAccounts = await db.accounts.toArray();
             const allPhases = await readFullPhaseCatalog();
             const { data: usersData } = await supabase.from('CRM_Usuarios').select('id, full_name, email');
@@ -372,7 +377,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 localOpps = localOpps.filter(o => isDateOnlyInRange(o.fecha_cierre_estimada, startClosingDate, endClosingDate));
             }
 
-            if (accountOwnerIds && accountOwnerIds.length > 0) {
+            if (!tiendaScoped && accountOwnerIds && accountOwnerIds.length > 0) {
                 localOpps = localOpps.filter(o => o.owner_user_id && accountOwnerIds.includes(o.owner_user_id));
             }
 
@@ -450,7 +455,8 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
             const localActs = activitiesVisibleToViewer(
                 await db.activities.where('opportunity_id').anyOf(oppIds).toArray(),
                 userRole,
-                currentUserId
+                currentUserId,
+                user
             );
             const actsByOpp = new Map<string, any[]>();
             localActs.forEach(act => {
@@ -465,7 +471,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 const acc = accMap.get(item.account_id);
                 const ph = phaseMap.get(item.fase_id as number);
                 const itemActs = actsByOpp.get(item.id) || [];
-                const visibleActs = activitiesVisibleToViewer(itemActs, userRole, currentUserId);
+                const visibleActs = activitiesVisibleToViewer(itemActs, userRole, currentUserId, user);
                 const usr = userMap.get(item.owner_user_id || '');
                 return {
                     ...item,
@@ -740,7 +746,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                     if (endCloseDay) q = q.lte('fecha_cierre_estimada', endCloseDay);
                 }
 
-                if (accountOwnerIds && accountOwnerIds.length > 0) {
+                if (!tiendaScoped && accountOwnerIds && accountOwnerIds.length > 0) {
                     q = q.in('owner_user_id', accountOwnerIds);
                 }
 
@@ -782,6 +788,11 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 // Asesor (VENDEDOR): restricción fija en cualquier pestaña/filtro (Todas, Web, cuenta, búsqueda).
                 if (!seesAllPortfolio && isVendedor && currentUserId) {
                     q = q.or(sellerOpportunityOrFilter(currentUserId, collabOppIds));
+                }
+
+                // Tienda: solo oportunidades que posee, en cualquier pestaña (Todas, Web, equipo, colaboración).
+                if (tiendaScoped && currentUserId) {
+                    q = q.eq('owner_user_id', currentUserId);
                 }
 
                 return q;
@@ -878,6 +889,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 const pendingCollabIds = new Set(collabOppIds);
                 pendingLocalOpps = localOpps.filter((o: any) => {
                     if (!matchesOpportunityListDateRange(o, statusFilter, startDate, endDate)) return false;
+                    if (tiendaScoped && currentUserId && o.owner_user_id !== currentUserId) return false;
                     if (!seesAllPortfolio && isVendedor && currentUserId && !sellerCanSeeOpportunity(o, currentUserId, pendingCollabIds) && o.created_by !== currentUserId) return false;
                     if (accountIdFilter && o.account_id !== accountIdFilter) return false;
                     if (searchIsPhone && opportunityMatchesPhone(o, serverPhoneMatches)) return true;
@@ -896,7 +908,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
             }
 
             let combinedResults = [...pendingLocalOpps, ...(result as any[])].map((o: any) => {
-                const visibleActs = activitiesVisibleToViewer<ActivityItem>(o.actividades, userRole, currentUserId);
+                const visibleActs = activitiesVisibleToViewer<ActivityItem>(o.actividades, userRole, currentUserId, user);
                 return {
                     ...o,
                     actividades: visibleActs,
@@ -948,7 +960,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
             setLoading(false);
             useSyncStore.getState().setIsLoadingData(false);
         }
-    }, [currentUserId, user?.email, seesAllPortfolio, isVendedor, subordinateIds, pageSize, userFilter, searchTerm, accountIdFilter, idFilter, accountOwnerIds, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, originFilter, plantaFilter, familiaFilter, countryFilter, cityFilter, setterFilter, phasesReady, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc]);
+    }, [currentUserId, user, user?.email, user?.es_tienda, seesAllPortfolio, tiendaScoped, isVendedor, subordinateIds, pageSize, userFilter, searchTerm, accountIdFilter, idFilter, accountOwnerIds, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, originFilter, plantaFilter, familiaFilter, countryFilter, cityFilter, setterFilter, phasesReady, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc]);
 
     useEffect(() => {
         fetchOpportunities(false);

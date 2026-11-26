@@ -2,6 +2,7 @@ import { activateLocalDatabase, db, getActiveLocalUserId, OutboxItem } from './d
 import type { Table } from 'dexie';
 import { supabase } from './supabase';
 import { hydrateOwnActivities } from './serverHydration';
+import { localIdsOutsideTiendaScope, readEsTiendaFlag } from './tiendaVisibility';
 import { applyLossReasonCatalog } from './supabaseDirect';
 import { v4 as uuidv4 } from 'uuid';
 import { useSyncStore } from './stores/useSyncStore';
@@ -1667,6 +1668,32 @@ export class SyncEngine {
         return rows;
     }
     /**
+     * Quita de la copia local oportunidades o actividades que un usuario de tienda
+     * no debe conservar (por ejemplo, las bajadas antes de marcar es_tienda).
+     * No toca filas con cambios pendientes ni las cuentas.
+     */
+    private async purgeTiendaLocal(
+        table: 'opportunities' | 'activities',
+        entityType: string,
+        field: 'owner_user_id' | 'user_id',
+        userId: string
+    ) {
+        const pendingIds = new Set(
+            (await db.outbox
+                .where('entity_type').equals(entityType)
+                .and(item => item.status === 'PENDING' || item.status === 'SYNCING')
+                .toArray()
+            ).map(item => item.entity_id)
+        );
+        const rows = await db[table].toArray();
+        const dropIds = localIdsOutsideTiendaScope(rows, field, userId, pendingIds);
+        if (dropIds.length > 0) {
+            await db[table].bulkDelete(dropIds);
+            console.log(`[Sync] Tienda: se quitaron ${dropIds.length} filas locales de ${entityType} que no son del usuario.`);
+        }
+    }
+
+    /**
      * PULL: Download server data to local IndexedDB
      * Called on app initialization to ensure all browsers have the same data
      */
@@ -1675,6 +1702,18 @@ export class SyncEngine {
         useSyncStore.getState().setIsLoadingData(true);
         const lastSync = await this.getSyncCursor(_user.id, '__global__');
         const portfolioViewer = { id: _user?.id ?? null, email: _user?.email ?? null };
+        const tiendaUserId = _user?.id
+            ? (await readEsTiendaFlag(async () => {
+                const { data, error } = await supabase
+                    .from('CRM_Usuarios')
+                    .select('es_tienda')
+                    .eq('id', _user.id)
+                    .maybeSingle();
+                return { data, error };
+            }))
+                ? _user.id as string
+                : null
+            : null;
         const fullPortfolioCursor = _user?.id
             ? await this.getSyncCursor(_user.id, FULL_PORTFOLIO_CURSOR)
             : null;
@@ -2228,6 +2267,7 @@ export class SyncEngine {
                     .from('CRM_Oportunidades')
                     .select('*')
                     .eq('is_deleted', false);
+                if (tiendaUserId) query = query.eq('owner_user_id', tiendaUserId);
                 query = incrementalPortfolio
                     ? query.gte('updated_at', lastSync as string).lte('updated_at', upperBound).order('updated_at', { ascending: true })
                     : query.order('updated_at', { ascending: false });
@@ -2267,6 +2307,10 @@ export class SyncEngine {
                 console.log(`[Sync] Merged ${mergedCount} opportunities (${skippedCount} with pending changes skipped).`);
             } else {
                 console.warn('[Sync] No opportunities returned from server (Length is 0 or undefined). Check RLS policies?');
+            }
+
+            if (tiendaUserId) {
+                await this.purgeTiendaLocal('opportunities', 'CRM_Oportunidades', 'owner_user_id', tiendaUserId);
             }
 
             // CLEANUP: Remove locally cached opportunities that were deleted on server
@@ -2531,6 +2575,7 @@ export class SyncEngine {
                         .from('CRM_Actividades')
                         .select('*')
                         .eq('is_deleted', false);
+                    if (tiendaUserId) query = query.eq('user_id', tiendaUserId);
                     query = activityIncremental
                         ? query.gte('updated_at', lastSync as string).lte('updated_at', upperBound).order('updated_at', { ascending: true })
                         : query.order('updated_at', { ascending: false });
@@ -2597,6 +2642,9 @@ export class SyncEngine {
 
                     console.log(`[Sync] Merged ${activitiesToPut.length} activities (LWW field-level merge).`);
                 }
+                if (tiendaUserId) {
+                    await this.purgeTiendaLocal('activities', 'CRM_Actividades', 'user_id', tiendaUserId);
+                }
             } catch (actErr: any) {
                 console.error('[Sync] Failed to pull activities:', actErr.message);
                 pullErrors.push(`CRM_Actividades: ${actErr.message}`);
@@ -2612,7 +2660,10 @@ export class SyncEngine {
             const ownActivitiesKey = '__own_activities_v1__';
             if (_user?.id && !(await this.getSyncCursor(_user.id, ownActivitiesKey))) {
                 try {
-                    const added = await hydrateOwnActivities(_user.id);
+                    const added = await hydrateOwnActivities(_user.id, new Date(upperBound), {
+                        viewerId: _user.id,
+                        esTienda: Boolean(tiendaUserId)
+                    });
                     await this.setSyncCursor(_user.id, ownActivitiesKey, upperBound);
                     console.log(`[Sync] Own activities backfill: ${added} added.`);
                 } catch (ownErr: unknown) {

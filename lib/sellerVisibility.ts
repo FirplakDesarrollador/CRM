@@ -7,8 +7,10 @@
  *   o la cuenta tiene una oportunidad donde el asesor es colaborador.
  * - Contacto: pertenece a una cuenta visible para el asesor.
  * - Actividad: está asignada al asesor (user_id), salvo la excepción de cartera completa.
- * ADMIN y COORDINADOR no cambian.
+ * ADMIN y COORDINADOR no cambian, salvo la bandera es_tienda (lib/tiendaVisibility).
  */
+
+import { isTiendaUser } from '@/lib/tiendaVisibility';
 
 export const SELLER_ROLE = 'VENDEDOR';
 
@@ -94,9 +96,13 @@ export function shouldShowActivityNotification(
     notificationType: string,
     activityUserId: string | null | undefined,
     userRole: string | null | undefined,
-    currentUserId: string | null | undefined
+    currentUserId: string | null | undefined,
+    viewer?: { es_tienda?: boolean | null } | null
 ): boolean {
     if (notificationType !== 'ACTIVITY_OVERDUE') return true;
+    if (isTiendaUser(viewer)) {
+        return Boolean(currentUserId) && activityUserId === currentUserId;
+    }
     if (canViewAllAccountsContactsOpportunities(currentUserId)) return true;
     if (isSellerRole(userRole) && currentUserId) {
         return activityUserId === currentUserId;
@@ -111,9 +117,14 @@ export function shouldShowActivityNotification(
 export function activitiesVisibleToViewer<T extends AssignedActivity>(
     activities: T[] | null | undefined,
     role: string | null | undefined,
-    userId: string | null | undefined
+    userId: string | null | undefined,
+    viewer?: { es_tienda?: boolean | null } | null
 ): T[] {
     const list = Array.isArray(activities) ? activities : [];
+    if (isTiendaUser(viewer)) {
+        if (!userId) return [];
+        return list.filter(a => sellerCanSeeActivity(a, userId));
+    }
     if (!isSellerRole(role) || !userId) return list;
     if (canViewAllAccountsContactsOpportunities(userId)) return list;
     return list.filter(a => sellerCanSeeActivity(a, userId));

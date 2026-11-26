@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { supabase } from '@/lib/supabase';
+import { CRM_USUARIO_SELECT_BASE, CRM_USUARIO_SELECT_WITH_TIENDA, isMissingTiendaColumnError } from '@/lib/tiendaVisibility';
 
 export type UserRole = 'VENDEDOR' | 'COORDINADOR' | 'ADMIN';
 
@@ -13,6 +14,8 @@ export interface CurrentUser {
     allowed_modules?: string[] | null;
     coordinadores?: string[] | null;
     canales?: string[] | null;
+    /** Ausente o false mientras la migración de tienda no esté aplicada o el usuario no sea de tienda. */
+    es_tienda?: boolean;
 }
 
 interface UserState {
@@ -69,12 +72,27 @@ export const useUserStore = create<UserState>((set, get) => ({
                 return;
             }
 
-            // Fetch user details from CRM_Usuarios table
-            const { data: crmUser, error: crmError } = await supabase
+            // Fetch user details from CRM_Usuarios table.
+            // es_tienda puede no existir todavía: en ese caso se reintenta sin la columna
+            // y el usuario conserva la visibilidad de su rol.
+            const withFlag = await supabase
                 .from('CRM_Usuarios')
-                .select('id, email, full_name, role, is_active, coordinadores, allowed_modules, canales')
+                .select(CRM_USUARIO_SELECT_WITH_TIENDA)
                 .eq('id', authUser.id)
                 .single();
+
+            let crmUser = withFlag.data as (CurrentUser & { es_tienda?: boolean | null }) | null;
+            let crmError = withFlag.error;
+            if (crmError && isMissingTiendaColumnError(crmError)) {
+                const base = await supabase
+                    .from('CRM_Usuarios')
+                    .select(CRM_USUARIO_SELECT_BASE)
+                    .eq('id', authUser.id)
+                    .single();
+                crmUser = base.data as CurrentUser | null;
+                crmError = base.error;
+                if (crmUser) crmUser = { ...crmUser, es_tienda: false };
+            }
 
             if (crmError) throw crmError;
 
@@ -89,6 +107,7 @@ export const useUserStore = create<UserState>((set, get) => ({
                         allowed_modules: crmUser.allowed_modules,
                         coordinadores: crmUser.coordinadores,
                         canales: crmUser.canales,
+                        es_tienda: crmUser.es_tienda === true,
                     },
                     initialized: true
                 });

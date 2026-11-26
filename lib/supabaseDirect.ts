@@ -404,8 +404,9 @@ export async function hydrateReferenceCatalogsFromSupabase(): Promise<void> {
  * from Supabase when viewing /oportunidades/[id].
  */
 export async function hydrateOpportunityDetailFromSupabase(
-    opportunityId: string
-): Promise<{ oppData: Record<string, unknown> | null; collaborators: Record<string, unknown>[] }> {
+    opportunityId: string,
+    options?: { requireOwnerId?: string | null }
+): Promise<{ oppData: Record<string, unknown> | null; collaborators: Record<string, unknown>[]; forbidden?: boolean }> {
     if (!canExecuteRemoteSupabase() || !opportunityId) {
         return { oppData: null, collaborators: [] };
     }
@@ -422,6 +423,13 @@ export async function hydrateOpportunityDetailFromSupabase(
         ]);
 
         const oppData = (oppRes.data as Record<string, unknown> | null) ?? null;
+        if (
+            oppData
+            && options?.requireOwnerId
+            && oppData.owner_user_id !== options.requireOwnerId
+        ) {
+            return { oppData: null, collaborators: [], forbidden: true };
+        }
         if (oppData) {
             await db.opportunities.put(oppData as never);
             const accountId = typeof oppData.account_id === 'string' ? oppData.account_id : '';

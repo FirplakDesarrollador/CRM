@@ -14,6 +14,8 @@
  * - No escribe nada en Supabase: solo lecturas.
  * - Asesor (VENDEDOR): solo trae actividades asignadas a él (misma regla de sellerVisibility),
  *   salvo canViewAllAccountsContactsOpportunities, que hidrata las de todos.
+ * - Usuario de tienda (es_tienda): igual que el asesor en actividades (user_id) y no guarda
+ *   oportunidades de las que no es dueño. Las cuentas sí se guardan.
  * - Cuentas, contactos y oportunidades de referencia no se recortan por dueño.
  *   La excepción de cartera se aplica en las vistas, no al guardar estas filas.
  */
@@ -31,10 +33,11 @@ const MAX_OPPORTUNITY_ACTIVITIES = 5000;
 const MAX_OWN_ACTIVITIES = 30000;
 const OWN_HISTORY_MONTHS = 12;
 
-type Viewer = { viewerId?: string | null; viewerRole?: string | null; viewerEmail?: string | null };
+type Viewer = { viewerId?: string | null; viewerRole?: string | null; viewerEmail?: string | null; esTienda?: boolean | null };
 
-/** Actividades hidratadas: el asesor solo trae las suyas, salvo la excepción de cartera completa. */
+/** Actividades hidratadas: asesor o tienda solo traen las suyas, salvo la excepción de cartera completa. */
 function sellerActivitiesOnly(viewer: Viewer): boolean {
+    if (viewer.esTienda === true) return true;
     if (canViewAllAccountsContactsOpportunities({ id: viewer.viewerId, email: viewer.viewerEmail })) return false;
     return isSellerRole(viewer.viewerRole);
 }
@@ -104,7 +107,7 @@ async function addMissing(
 }
 
 /** Trae del servidor las oportunidades/cuentas referenciadas que no están localmente. */
-async function hydrateReferences(activities: ReadonlyArray<Record<string, unknown>>): Promise<void> {
+async function hydrateReferences(activities: ReadonlyArray<Record<string, unknown>>, viewer?: Viewer): Promise<void> {
     const oppIds = new Set<string>();
     for (const a of activities) if (typeof a.opportunity_id === 'string' && a.opportunity_id) oppIds.add(a.opportunity_id);
     const localOpps = await db.opportunities.bulkGet(Array.from(oppIds));
@@ -118,7 +121,13 @@ async function hydrateReferences(activities: ReadonlyArray<Record<string, unknow
     }
     // La visibilidad (asesor: dueño/colaborador) la siguen aplicando las vistas sobre la copia local,
     // igual que con lo que trae la sincronización normal.
-    const oppsToAdd = fetchedOpps;
+    // Tienda: la cuenta sí se guarda; la oportunidad ajena no entra a la copia local.
+    const tiendaOwnerId = viewer?.esTienda === true && viewer.viewerId
+        ? viewer.viewerId
+        : null;
+    const oppsToAdd = tiendaOwnerId
+        ? fetchedOpps.filter(opp => opp.owner_user_id === tiendaOwnerId)
+        : fetchedOpps;
     await addMissing('opportunities', 'CRM_Oportunidades', oppsToAdd);
 
     const accountIds = new Set<string>();
@@ -173,6 +182,9 @@ export async function hydrateActivitiesForSearch(searchText: string, viewer: Vie
     if (tokens.length === 0) return 0;
 
     let oppQuery = supabase.from('CRM_Oportunidades').select('id').eq('is_deleted', false);
+    if (viewer.esTienda === true && viewer.viewerId) {
+        oppQuery = oppQuery.eq('owner_user_id', viewer.viewerId);
+    }
     let accQuery = supabase.from('CRM_Cuentas').select('id').eq('is_deleted', false);
     for (const token of tokens) {
         oppQuery = applyAccentInsensitiveFilter(oppQuery, 'nombre', token);
@@ -201,7 +213,7 @@ export async function hydrateActivitiesForSearch(searchText: string, viewer: Vie
         return query.order('fecha_inicio', { ascending: false }).order('id', { ascending: false }).range(from, to);
     }, MAX_SEARCH_ACTIVITIES);
 
-    await hydrateReferences(rows);
+    await hydrateReferences(rows, viewer);
     return addMissing('activities', 'CRM_Actividades', rows);
 }
 
@@ -211,7 +223,7 @@ export async function hydrateActivitiesForSearch(searchText: string, viewer: Vie
  * la empresa, así que a un asesor le faltaban casi todas las suyas en /actividades.
  * Se ejecuta una vez por copia local (ver syncEngine.pullChanges). Devuelve cuántas agregó.
  */
-export async function hydrateOwnActivities(userId: string, now: Date = new Date()): Promise<number> {
+export async function hydrateOwnActivities(userId: string, now: Date = new Date(), viewer?: Viewer): Promise<number> {
     if (!userId || !isOnline()) return 0;
     const since = new Date(now);
     since.setMonth(since.getMonth() - OWN_HISTORY_MONTHS);
@@ -226,7 +238,7 @@ export async function hydrateOwnActivities(userId: string, now: Date = new Date(
         .order('id', { ascending: false })
         .range(from, to), MAX_OWN_ACTIVITIES);
 
-    await hydrateReferences(rows);
+    await hydrateReferences(rows, viewer ? { ...viewer, viewerId: viewer.viewerId || userId } : undefined);
     return addMissing('activities', 'CRM_Actividades', rows);
 }
 
@@ -251,15 +263,18 @@ export async function hydrateActivityById(activityId: string, viewer: Viewer): P
     const rows = ((data || []) as Row[]).filter(row => row && row.id);
     if (rows.length === 0) return 0;
 
-    await hydrateReferences(rows);
+    await hydrateReferences(rows, viewer);
     return addMissing('activities', 'CRM_Actividades', rows);
 }
 
 /** Guarda en Dexie la oportunidad y la cuenta de una actividad cuando todavía no están en la copia local. */
-export async function hydrateActivityReferences(activity: { opportunity_id?: string | null; account_id?: string | null }): Promise<void> {
+export async function hydrateActivityReferences(
+    activity: { opportunity_id?: string | null; account_id?: string | null },
+    viewer?: Viewer
+): Promise<void> {
     if (!isOnline()) return;
     if (!activity.opportunity_id && !activity.account_id) return;
-    await hydrateReferences([activity]);
+    await hydrateReferences([activity], viewer);
 }
 
 /**

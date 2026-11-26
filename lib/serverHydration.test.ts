@@ -90,6 +90,25 @@ describe('serverHydration', () => {
         expect(ops).toContain('eq:user_id|seller-1');
     });
 
+    it('un coordinador de tienda solo hidrata sus actividades y no guarda oportunidades ajenas', async () => {
+        responses.CRM_Actividades = [act('t1', { user_id: 'tienda-1' })];
+        responses.CRM_Oportunidades = [{ id: OPP, nombre: 'Ajena', account_id: 'acc-1', owner_user_id: 'otro', is_deleted: false }];
+        responses.CRM_Cuentas = [{ id: 'acc-1', nombre: 'Cuenta visible', is_deleted: false }];
+
+        await hydrateOpportunityActivities(OPP, { viewerId: 'tienda-1', viewerRole: 'COORDINADOR', esTienda: true });
+        const listOps = calls.find(call => call.table === 'CRM_Actividades')!.ops.map(([op, args]) => `${op}:${args.join('|')}`);
+        expect(listOps).toContain('eq:user_id|tienda-1');
+
+        await db.activities.clear();
+        calls.length = 0;
+        const added = await hydrateActivityById('t1', { viewerId: 'tienda-1', viewerRole: 'COORDINADOR', esTienda: true });
+        expect(added).toBe(1);
+        const deepOps = calls.find(call => call.table === 'CRM_Actividades')!.ops.map(([op, args]) => `${op}:${args.join('|')}`);
+        expect(deepOps).toContain('eq:user_id|tienda-1');
+        expect(await db.accounts.get('acc-1')).toBeTruthy();
+        expect(await db.opportunities.get(OPP)).toBeUndefined();
+    });
+
     it('quien ve toda la cartera hidrata las actividades de todos', async () => {
         responses.CRM_Actividades = [act('s1', { user_id: 'otro-asesor' })];
         await hydrateOpportunityActivities(OPP, {

@@ -9,6 +9,7 @@ import Link from "next/link";
 import { cn } from "@/components/ui/utils";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { canViewAllAccountsContactsOpportunities } from "@/lib/sellerVisibility";
+import { canChooseOtherPortfolioUsers, isTiendaUser } from "@/lib/tiendaVisibility";
 import { UserPickerFilter } from "@/components/cuentas/UserPickerFilter";
 import { OpportunityFilters } from "@/components/oportunidades/OpportunityFilters";
 import { QuickDateFilter, FloatingDateFilterPopover } from "@/components/oportunidades/QuickDateFilter";
@@ -335,7 +336,9 @@ function OpportunitiesContent() {
 
         setSearchTerm(initialSearch);
         setInputValue(initialSearch);
-        const ownerList = initialOwner ? initialOwner.split(',').filter(Boolean) : [];
+        const ownerList = isTiendaUser(currentUser)
+            ? []
+            : (initialOwner ? initialOwner.split(',').filter(Boolean) : []);
         setAccountOwnerIds(ownerList);
         setSelectedAccountOwnerIds(ownerList);
         setChannelFilter(initialChannel);
@@ -375,7 +378,7 @@ function OpportunitiesContent() {
         setSortAsc(initialDirection === 'asc');
         setUserFilter(initialTab as any);
         setTab(initialTab as any);
-    }, [searchParams]);
+    }, [searchParams, currentUser]);
 
     // Restore state from sessionStorage if navigating from sidebar (empty query)
     useEffect(() => {
@@ -1009,6 +1012,7 @@ function OpportunitiesContent() {
                 </div>
 
                 <div className="flex flex-wrap sm:flex-nowrap gap-2 items-center w-full 2xl:w-auto">
+                    {canChooseOtherPortfolioUsers(currentUser) && (
                     <div className="hidden sm:block shrink-0">
                         <UserPickerFilter
                             multiple={true}
@@ -1016,6 +1020,7 @@ function OpportunitiesContent() {
                             onUsersSelect={handleUsersSelect}
                         />
                     </div>
+                    )}
                     <div className="shrink-0">
                         <QuickDateFilter
                             idleLabel="Fecha de creación"
@@ -1567,6 +1572,9 @@ function OpportunitiesContent() {
                                                 title: colKey === 'creada' ? 'Fecha de Creación' : 'Fecha de Cierre',
                                                 colKey: colKey as 'creada' | 'cierre'
                                             });
+                                        } else if (colKey === 'vendedor' && !canChooseOtherPortfolioUsers(currentUser)) {
+                                            e.preventDefault();
+                                            e.stopPropagation();
                                         } else if (isToolbarOwnedTableColumn('oportunidades', colKey) && colKey !== 'creada' && colKey !== 'cierre') {
                                             e.preventDefault();
                                             e.stopPropagation();

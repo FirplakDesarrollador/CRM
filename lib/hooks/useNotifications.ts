@@ -115,7 +115,7 @@ export function useNotifications() {
                 if (n.type === 'ACTIVITY_OVERDUE' && n.entityId) {
                     const activity = activities?.find(a => a.id === n.entityId);
                     if (activity?.is_completed) return false;
-                    if (!shouldShowActivityNotification(n.type, activity?.user_id, role, user?.id)) {
+                    if (!shouldShowActivityNotification(n.type, activity?.user_id, role, user?.id, user)) {
                         return false;
                     }
                 }
@@ -130,7 +130,7 @@ export function useNotifications() {
                 const dateB = new Date(b.date || 0).getTime();
                 return dateB - dateA;
             });
-    }, [persistedNotifications, activities, role, user?.id]);
+    }, [persistedNotifications, activities, role, user?.id, user?.es_tienda]);
 
     const markAsRead = async (id: string) => {
         if (persistedNotifications.find(n => n.id === id)) {

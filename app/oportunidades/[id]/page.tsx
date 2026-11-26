@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { useActivities, LocalActivity } from "@/lib/hooks/useActivities";
 import { activitiesVisibleToViewer, canViewAllAccountsContactsOpportunities } from "@/lib/sellerVisibility";
+import { isTiendaUser } from "@/lib/tiendaVisibility";
 import { hydrateOpportunityActivities } from "@/lib/serverHydration";
 import { CreateActivityModal } from "@/components/activities/CreateActivityModal";
 import { useActivityFollowUp } from "@/components/activities/ActivityFollowUp";
@@ -81,8 +82,17 @@ export default function OpportunityDetailPage() {
             setIsFetchingServer(true);
             setIsLoadingData(true);
             try {
-                const { oppData, collaborators } = await hydrateOpportunityDetailFromSupabase(id);
+                const { oppData, collaborators, forbidden } = await hydrateOpportunityDetailFromSupabase(
+                    id,
+                    isTiendaUser(currentUser) && currentUser?.id ? { requireOwnerId: currentUser.id } : undefined
+                );
                 if (cancelled) return;
+
+                if (forbidden) {
+                    await db.opportunities.delete(id);
+                    setServerOpportunity('UNAUTHORIZED');
+                    return;
+                }
 
                 if (oppData) {
                     const isCollab = collaborators.some(
@@ -114,7 +124,7 @@ export default function OpportunityDetailPage() {
         return () => {
             cancelled = true;
         };
-    }, [id, currentUser?.id, userRole]);
+    }, [id, currentUser, userRole]);
 
     const searchParams = useSearchParams();
     const initialTab = searchParams.get('tab') as any;
@@ -1902,9 +1912,9 @@ function ActivitiesTab({ opportunityId, accountId }: { opportunityId: string, ac
     // tiene las 3.000 más recientes). Sin conexión se muestra lo que haya en la copia local.
     useEffect(() => {
         if (!opportunityId || !viewerRole || typeof navigator === 'undefined' || !navigator.onLine) return;
-        hydrateOpportunityActivities(opportunityId, { viewerId, viewerRole })
+        hydrateOpportunityActivities(opportunityId, { viewerId, viewerRole, esTienda: isTiendaUser(viewerUser) })
             .catch(err => console.warn('[ActivitiesTab] No se pudieron traer las actividades del servidor:', err));
-    }, [opportunityId, viewerId, viewerRole]);
+    }, [opportunityId, viewerId, viewerRole, viewerUser?.es_tienda]);
     const [selectedActivity, setSelectedActivity] = useState<LocalActivity | null>(null);
     const { opportunities } = useOpportunities();
 
@@ -1930,7 +1940,7 @@ function ActivitiesTab({ opportunityId, accountId }: { opportunityId: string, ac
         else resetFollowUp(act.id);
     };
 
-    const visibleActivities = activitiesVisibleToViewer(activities, viewerRole, viewerId);
+    const visibleActivities = activitiesVisibleToViewer(activities, viewerRole, viewerId, viewerUser);
     const sortedActivities = visibleActivities.slice().sort((a, b) => new Date(b.fecha_inicio).getTime() - new Date(a.fecha_inicio).getTime());
 
     // Catalogs

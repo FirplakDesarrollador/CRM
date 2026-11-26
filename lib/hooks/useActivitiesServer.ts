@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { canViewAllAccountsContactsOpportunities, isSellerRole, sellerCanSeeActivity } from '@/lib/sellerVisibility';
+import { isTiendaUser } from '@/lib/tiendaVisibility';
 import { supabase } from '@/lib/supabase';
 import { db } from '@/lib/db';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
@@ -46,6 +47,7 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
     const { user, role: userRole, isAdmin } = useCurrentUser();
     const currentUserId = user?.id;
     const seesAllPortfolio = canViewAllAccountsContactsOpportunities(user);
+    const tiendaScoped = isTiendaUser(user);
 
     const [subordinateIds, setSubordinateIds] = useState<string[]>([]);
 
@@ -81,8 +83,8 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
                 const allOpps = await db.opportunities.toArray();
                 const oppMap = new Map(allOpps.map(o => [o.id, o]));
 
-                // Asesor (VENDEDOR): solo actividades asignadas a él, en cualquier vista (lista, cuenta, oportunidad).
-                if (isSellerRole(userRole) && !seesAllPortfolio) {
+                // Asesor (VENDEDOR) y tienda: solo actividades asignadas a él, en cualquier vista.
+                if ((tiendaScoped || (isSellerRole(userRole) && !seesAllPortfolio)) && currentUserId) {
                     localActivities = localActivities.filter(a => sellerCanSeeActivity(a, currentUserId));
                 }
 
@@ -174,8 +176,8 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
                 `, { count: 'exact' })
                 .eq('is_deleted', false);
 
-            // Asesor (VENDEDOR): solo actividades asignadas a él, en cualquier vista.
-            if (isSellerRole(userRole) && !seesAllPortfolio) {
+            // Asesor (VENDEDOR) y tienda: solo actividades asignadas a él, en cualquier vista.
+            if ((tiendaScoped || (isSellerRole(userRole) && !seesAllPortfolio)) && currentUserId) {
                 query = query.eq('user_id', currentUserId);
             }
 
@@ -258,7 +260,7 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
             setLoading(false);
             setIsLoadingData(false);
         }
-    }, [currentUserId, seesAllPortfolio, pageSize, searchTerm, typeFilter, showCompleted, opportunityId, accountId, page, isAdmin, userRole, subordinateIds]);
+    }, [currentUserId, seesAllPortfolio, tiendaScoped, pageSize, searchTerm, typeFilter, showCompleted, opportunityId, accountId, page, isAdmin, userRole, subordinateIds]);
 
     // Initial Fetch & Filter Fetch - Reset on filter change
     useEffect(() => {

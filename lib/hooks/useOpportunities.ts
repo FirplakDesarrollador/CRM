@@ -1,6 +1,7 @@
 import { useLiveQuery } from "dexie-react-hooks";
 import { estadoIdForPhaseName, ESTADO_ID_ABIERTA } from '@/lib/opportunityPhase';
 import { canViewAllAccountsContactsOpportunities, sellerCanSeeOpportunity } from '@/lib/sellerVisibility';
+import { isTiendaUser } from '@/lib/tiendaVisibility';
 import { db, LocalOportunidad, LocalOpportunityCollaborator, LocalQuote, LocalQuoteItem } from "@/lib/db";
 import { executeDirectMutations, fetchRecordDirect } from "@/lib/supabaseDirect";
 import { useEffect } from "react";
@@ -115,6 +116,11 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
 
     const opportunities = useLiveQuery(
         async () => {
+            // Priority 0: tienda solo ve oportunidades que posee, aunque el rol sea coordinador.
+            if (isTiendaUser(user) && userId) {
+                return db.opportunities.where('owner_user_id').equals(userId).toArray();
+            }
+
             // Priority 1: Vendedor role restriction (siempre gana, incluso con filtro de asesor del dashboard)
             if (isVendedor && userId && !seesAllPortfolio) {
                 // Get IDs of opportunities where user is a collaborator
@@ -134,7 +140,7 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
 
             return db.opportunities.toArray();
         },
-        [isVendedor, userId, user?.email, seesAllPortfolio, filters?.advisor_id]
+        [isVendedor, userId, user, user?.email, user?.es_tienda, seesAllPortfolio, filters?.advisor_id]
     );
 
     const createOpportunity = async (data: any) => {

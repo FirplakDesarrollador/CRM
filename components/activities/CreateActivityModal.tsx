@@ -13,6 +13,7 @@ import { supabase } from "@/lib/supabase";
 import { DateTimePicker } from "@/components/ui/DateTimePicker";
 import { useActivities } from "@/lib/hooks/useActivities";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { useUserStore } from "@/lib/stores/useUserStore";
 import { OpportunityCombobox } from "@/components/opportunities/OpportunityCombobox";
 import { AccountCombobox } from "@/components/accounts/AccountCombobox";
 import { useFormAutoSave } from "@/lib/hooks/useFormAutoSave";
@@ -310,7 +311,11 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         const accountId = initialData?.account_id || initialAccountId || '';
         if (!opportunityId && !accountId) return;
         let cancelled = false;
-        hydrateActivityReferences({ opportunity_id: opportunityId, account_id: accountId })
+        const profile = useUserStore.getState().user;
+        hydrateActivityReferences(
+            { opportunity_id: opportunityId, account_id: accountId },
+            { viewerId: profile?.id, esTienda: profile?.es_tienda === true }
+        )
             .catch(error => {
                 if (!cancelled) console.warn('[CreateActivityModal] no se pudo traer la cuenta o la oportunidad', error);
             });
