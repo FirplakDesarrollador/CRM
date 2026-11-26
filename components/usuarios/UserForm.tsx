@@ -8,6 +8,7 @@ import { useUsers, User, CreateUserData, UpdateUserData } from '@/lib/hooks/useU
 import { useZones } from '@/lib/hooks/useZones';
 import { X, Loader2 } from 'lucide-react';
 import { MultiSelect } from '@/components/ui/MultiSelect';
+import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { SALES_CHANNELS } from '@/lib/salesChannels';
 
 import { useLiveQuery } from 'dexie-react-hooks';
@@ -263,14 +264,26 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
                         <label className="block text-sm font-semibold text-slate-700 mb-2">
                             Rol
                         </label>
-                        <select
-                            {...register('role')}
-                            className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#254153] focus:border-transparent"
-                        >
-                            <option value="VENDEDOR">Vendedor</option>
-                            <option value="COORDINADOR">Coordinador</option>
-                            <option value="ADMIN">Administrador</option>
-                        </select>
+                        <Controller
+                            control={control}
+                            name="role"
+                            render={({ field }) => (
+                                <SearchableSelect
+                                    value={field.value || 'VENDEDOR'}
+                                    allowClear={false}
+                                    onChange={(val) => {
+                                        if (val) field.onChange(val as 'ADMIN' | 'COORDINADOR' | 'VENDEDOR');
+                                    }}
+                                    placeholder="Seleccionar rol..."
+                                    searchPlaceholder="Buscar rol..."
+                                    options={[
+                                        { value: 'VENDEDOR', label: 'Vendedor' },
+                                        { value: 'COORDINADOR', label: 'Coordinador' },
+                                        { value: 'ADMIN', label: 'Administrador' },
+                                    ]}
+                                />
+                            )}
+                        />
                         {errors.role && (
                             <p className="mt-1 text-sm text-red-600">{errors.role.message}</p>
                         )}
@@ -284,15 +297,22 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
                         <label className="block text-sm font-semibold text-slate-700 mb-2">
                             Zona Comercial
                         </label>
-                        <select
-                            {...register('zona_id')}
-                            className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#254153] focus:border-transparent bg-white"
-                        >
-                            <option value="">Sin zona asignada</option>
-                            {zones.map(z => (
-                                <option key={z.id} value={z.id}>{z.nombre}</option>
-                            ))}
-                        </select>
+                        <Controller
+                            control={control}
+                            name="zona_id"
+                            render={({ field }) => (
+                                <SearchableSelect
+                                    value={field.value || ''}
+                                    onChange={(val) => field.onChange(val || '')}
+                                    placeholder="Sin zona asignada"
+                                    searchPlaceholder="Buscar zona comercial..."
+                                    options={zones.map(z => ({
+                                        value: z.id,
+                                        label: z.nombre,
+                                    }))}
+                                />
+                            )}
+                        />
                         <p className="mt-1 text-xs text-slate-500">
                             Se usa automáticamente al crear sucursales de cuentas existentes (ej. Nombre Matriz - Zona). Administrable en Configuración.
                         </p>

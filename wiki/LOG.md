@@ -3,6 +3,17 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-11-26 - UX/UI: Cobertura integral de búsqueda en todos los desplegables del CRM
+
+- **Requerimiento:** Garantizar que todos los desplegables del CRM cuenten con función de búsqueda operativa (insensible a tildes y multi-token), eliminando la selección manual con scroll (en particular **Cuenta Principal (Padre)** al crear o editar cuentas).
+- **Cambios Realizados:**
+  - `components/ui/SearchableSelect.tsx` y `components/ui/MultiSelect.tsx`: Filtrado controlado (`shouldFilter={false}`) con `matchesSearchTokens`, reset de búsqueda al cerrar, `z-[110]`, soporte de scroll con rueda dentro de modales Radix, prevención de submit accidental con `Enter` y props `compact`, `dataTestId`, `ariaLabel`, `id`, `fallbackLabel`.
+  - `components/accounts/ParentAccountCombobox.tsx`: Nuevo selector con búsqueda en servidor en `CRM_Cuentas` (por nombre o NIT, solo cuentas raíz activas, paginado de 30 en 30 con botón "Cargar más", resolución de cuenta ya vinculada y fallback offline en Dexie).
+  - `components/dashboard/FilterCombobox.tsx`, `components/accounts/AccountCombobox.tsx`, `components/opportunities/OpportunityCombobox.tsx` y `components/oportunidades/FloatingColumnFilterPopover.tsx`: Normalización de búsqueda sin tildes y compatibilidad con scroll/z-index en modales.
+  - Migrados los 80 `<select>` nativos en 28 archivos activos (Cuentas, Oportunidades, Cotizaciones, Actividades, Pedidos, Tiendas, Catálogo, Inventario, Comisiones, Metas, Carga Masiva, Indicadores, Auditoría y Usuarios).
+  - `tests/searchableDropdowns.test.ts`: Prueba permanente (RED→GREEN) que verifica 0 `<select>` nativos sin buscador en toda la UI activa y valida el filtrado multi-token/sin tildes. Actualizados specs E2E `e2e/create_activity_wizard.spec.ts` y `tests/e2e/opportunity_detail.spec.ts`.
+- **Páginas actualizadas:** `wiki/pages/arquitectura-general.md`, `wiki/pages/cuentas.md`, `wiki/LOG.md`.
+
 ## 2026-11-26 - Feature: Detección en vivo de cuentas similares, sucursales por zona y NIT estricto
 
 - **Requerimiento:** Evitar cuentas duplicadas en el formulario de nueva cuenta mostrando coincidencias en tiempo real por nombre y NIT con botón para crear sucursal en la zona del asesor, tabla configurable de zonas en usuarios y validación estricta de NIT colombiano (solo números y máximo un guion con dígito de verificación opcional).
@@ -10,7 +21,8 @@
   - `supabase/migrations/20261126152500_account_similarity_zones_and_branches.sql`: Tabla `CRM_Zonas` (RLS + semilla inicial), `CRM_Usuarios.zona_id`, ajuste de `unique_active_nit` solo para cuentas raíz, funciones/índices `pg_trgm` + `unaccent` y RPC `SECURITY DEFINER` `search_similar_accounts`.
   - `lib/hooks/useZones.ts`, `components/config/ZonesManager.tsx`, `app/configuracion/page.tsx`: Gestor configurable de zonas comerciales para `ADMIN`.
   - `lib/stores/useUserStore.ts`, `lib/hooks/useUsers.ts`, `components/usuarios/UserForm.tsx`, `components/usuarios/UserList.tsx`: Asignación y visualización de zona comercial por usuario.
-  - `lib/nitUtils.ts` y `lib/accountSimilarity.ts`: Sanitización en vivo de NIT (`sanitizeNitInput`, `extractNitRoot`, `validateColombianNit`), normalización de nombres, generación `{Matriz} - {Zona}` y evaluación de alertas anti-evasión.
+  - `supabase/migrations/20261126175000_branch_nit_hash_suffix.sql`: Actualizado `crm_extract_nit_root` para sufijos `#N` y creado RPC `get_next_branch_nit` para autogenerar `<NIT_PADRE>#2` (y consecutivos) en sucursales.
+  - `lib/nitUtils.ts` y `lib/accountSimilarity.ts`: Sanitización en vivo de NIT (`sanitizeNitInput` con soporte `#N` para sucursales, `extractNitRoot`, `validateColombianNit`, `buildBranchNit`), normalización de nombres, generación `{Matriz} - {Zona}` y evaluación de alertas anti-evasión.
   - `app/cuentas/nueva/CreateAccountWizard.tsx`, `components/cuentas/AccountForm.tsx`, `components/cuentas/DuplicateAccountModal.tsx`, `lib/hooks/useAccounts.ts`: Sugerencias en vivo con botón **Crear cuenta nueva en mi sucursal**, tags de alerta de alta coincidencia, confirmación explícita advirtiendo y enviando notificación (`SIMILAR_ACCOUNT_CREATED` en `CRM_Notifications`) a la coordinación comercial si se insiste en crear la cuenta, y validación estricta de NIT.
   - `tests/nitUtils.test.ts`, `tests/accountSimilarity.test.ts`, `tests/duplicateAccountModal.test.ts`: Pruebas unitarias permanentes verificadas en GREEN (17/17 junto a `tests/accountFormReset.test.ts`).
 - **Páginas actualizadas:** `wiki/pages/cuentas.md`, `wiki/pages/roles-y-permisos.md`, `wiki/pages/modelo-de-datos.md`, `wiki/LOG.md`.

@@ -34,6 +34,11 @@ trabajar sin conexión y sincronizar después.
    `/oportunidades/...`, `/actividades?id=...`) y se maquetan con enlaces `<a>`/`<Link>` gestionados por
    `lib/utils/navigation.ts`. Esto permite abrirlos en pestañas nuevas con clic derecho nativo,
    rueda del mouse o Ctrl+Clic, manteniendo la edición modal ágil en SPA con clic izquierdo.
+6. **Desplegables con búsqueda obligatoria:** toda la UI activa reemplaza `<select>` nativos por
+   `components/ui/SearchableSelect.tsx`, `components/ui/MultiSelect.tsx` y comboboxes con búsqueda en
+   servidor (`AccountCombobox`, `ParentAccountCombobox`, `OpportunityCombobox`), todos con filtrado
+   insensible a tildes y multi-token (`matchesSearchTokens`). La prueba permanente
+   `tests/searchableDropdowns.test.ts` garantiza que no se reintroduzcan `<select>` nativos sin buscador.
 
 ## Módulos principales (navegación del sidebar)
 

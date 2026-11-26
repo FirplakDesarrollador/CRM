@@ -9,6 +9,7 @@ import { Search, UserPlus, Edit, Power, Shield, Users as UsersIcon, MapPin } fro
 import { cn } from '@/components/ui/utils';
 import { matchesSearchTokens } from '@/lib/utils';
 import { SALES_CHANNELS } from '@/lib/salesChannels';
+import { SearchableSelect } from '@/components/ui/SearchableSelect';
 
 const ROLE_LABELS: Record<UserRole, string> = {
     ADMIN: 'Administrador',
@@ -104,16 +105,21 @@ export function UserList() {
                         className="w-full pl-10 pr-4 py-2.5 bg-slate-50 hover:bg-slate-100 focus:bg-white border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#254153]/10 focus:border-[#254153] transition-all"
                     />
                 </div>
-                <select
-                    value={roleFilter}
-                    onChange={(e) => setRoleFilter(e.target.value as UserRole | 'ALL')}
-                    className="px-3.5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-[#254153]/10 focus:border-[#254153] transition-all text-slate-700"
-                >
-                    <option value="ALL">Todos los roles</option>
-                    <option value="ADMIN">Administrador</option>
-                    <option value="COORDINADOR">Coordinador</option>
-                    <option value="VENDEDOR">Vendedor</option>
-                </select>
+                <div className="sm:w-[200px]">
+                    <SearchableSelect
+                        allowClear={false}
+                        value={roleFilter}
+                        onChange={(val) => setRoleFilter((val || 'ALL') as UserRole | 'ALL')}
+                        searchPlaceholder="Buscar rol..."
+                        triggerClassName="border-slate-200 rounded-xl text-slate-700 font-medium"
+                        options={[
+                            { value: 'ALL', label: 'Todos los roles' },
+                            { value: 'ADMIN', label: 'Administrador' },
+                            { value: 'COORDINADOR', label: 'Coordinador' },
+                            { value: 'VENDEDOR', label: 'Vendedor' },
+                        ]}
+                    />
+                </div>
             </div>
 
             {/* User Count */}

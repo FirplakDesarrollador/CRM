@@ -24,6 +24,7 @@ import { ProductAdminModal } from "@/components/catalogo/ProductAdminModal";
 import { useInventorySummary } from "@/lib/hooks/useInventory";
 import { matchesSearchTokens } from "@/lib/utils";
 import { groupProductsByColor } from "@/lib/productGrouping";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 const money = new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 });
 
@@ -246,20 +247,28 @@ export default function CatalogPage() {
                     />
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-                    <label className="space-y-1 text-xs font-bold text-slate-500">
+                    <div className="space-y-1 text-xs font-bold text-slate-500">
                         <span>FAMILIA</span>
-                        <select value={family} onChange={event => setFamily(event.target.value)} className="w-full p-2.5 border rounded-lg bg-white text-sm text-slate-800">
-                            <option value="">Todas</option>
-                            {families.map(item => <option key={item} value={item}>{item}</option>)}
-                        </select>
-                    </label>
-                    <label className="space-y-1 text-xs font-bold text-slate-500">
+                        <SearchableSelect
+                            value={family}
+                            onChange={setFamily}
+                            placeholder="Todas"
+                            searchPlaceholder="Buscar familia..."
+                            triggerClassName="border-slate-300 text-slate-800 font-normal"
+                            options={families.map(item => ({ value: item, label: item }))}
+                        />
+                    </div>
+                    <div className="space-y-1 text-xs font-bold text-slate-500">
                         <span>PLANTA</span>
-                        <select value={plant} onChange={event => setPlant(event.target.value)} className="w-full p-2.5 border rounded-lg bg-white text-sm text-slate-800">
-                            <option value="">Todas</option>
-                            {plants.map(item => <option key={item} value={item}>{item}</option>)}
-                        </select>
-                    </label>
+                        <SearchableSelect
+                            value={plant}
+                            onChange={setPlant}
+                            placeholder="Todas"
+                            searchPlaceholder="Buscar planta..."
+                            triggerClassName="border-slate-300 text-slate-800 font-normal"
+                            options={plants.map(item => ({ value: item, label: item }))}
+                        />
+                    </div>
                     <label className="flex items-center gap-2 mt-5 text-sm font-semibold text-slate-700 cursor-pointer select-none">
                         <input type="checkbox" checked={onlyAvailable} onChange={event => setOnlyAvailable(event.target.checked)} className="w-4 h-4 rounded text-cyan-600 focus:ring-cyan-500" /> 
                         Solo disponibles
@@ -582,17 +591,26 @@ export default function CatalogPage() {
                         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-2 py-1 text-sm text-slate-600">
                             <div className="flex items-center gap-2">
                                 <span>Filas por página:</span>
-                                <select 
-                                    value={pageSize} 
-                                    onChange={e => setPageSize(Number(e.target.value))}
-                                    className="border border-slate-300 rounded-lg px-2 py-1 bg-white text-slate-700 font-medium outline-none focus:ring-1 focus:ring-cyan-500"
-                                >
-                                    <option value={25}>25</option>
-                                    <option value={50}>50</option>
-                                    <option value={100}>100</option>
-                                    <option value={250}>250</option>
-                                    <option value={0}>Todos ({totalItems})</option>
-                                </select>
+                                <div className="w-[130px]">
+                                    <SearchableSelect
+                                        compact
+                                        allowClear={false}
+                                        ariaLabel="Filas por página"
+                                        value={String(pageSize)}
+                                        onChange={(val) => {
+                                            if (val !== "") setPageSize(Number(val));
+                                        }}
+                                        searchPlaceholder="Buscar cantidad..."
+                                        triggerClassName="min-h-0 h-8 border-slate-300 text-slate-700 font-medium"
+                                        options={[
+                                            { value: "25", label: "25" },
+                                            { value: "50", label: "50" },
+                                            { value: "100", label: "100" },
+                                            { value: "250", label: "250" },
+                                            { value: "0", label: `Todos (${totalItems})` },
+                                        ]}
+                                    />
+                                </div>
                                 <span className="text-slate-400">|</span>
                                 <span>
                                     Mostrando {pageSize === 0 ? 1 : Math.min((page - 1) * pageSize + 1, totalItems)} a {pageSize === 0 ? totalItems : Math.min(page * pageSize, totalItems)} de {totalItems}

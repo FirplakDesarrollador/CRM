@@ -103,7 +103,7 @@ export function AccountCombobox({
                 </button>
             </PopoverTrigger>
             <PopoverContent
-                className="w-[--radix-popover-trigger-width] p-0"
+                className="w-[var(--radix-popover-trigger-width)] min-w-[260px] p-0 z-[110]"
                 align="start"
                 side="bottom"
                 sideOffset={4}
@@ -119,7 +119,11 @@ export function AccountCombobox({
                             onChange={(e) => setSearch(e.target.value)}
                         />
                     </div>
-                    <CommandList className="max-h-[300px] overflow-y-auto overflow-x-hidden p-1">
+                    <CommandList
+                        className="max-h-[300px] overflow-y-auto overflow-x-hidden p-1 overscroll-contain"
+                        onWheel={(e) => e.stopPropagation()}
+                        onTouchMove={(e) => e.stopPropagation()}
+                    >
                         <CommandEmpty>
                             {loading ? (
                                 <div className="flex justify-center p-4">

@@ -1453,151 +1453,156 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 rounded-xl border border-blue-100 bg-blue-50/50">
                                 <div>
-                                    <label className="text-sm font-medium text-slate-700">
+                                    <label className="text-sm font-medium text-slate-700 block mb-1">
                                         Canal de Venta
                                     </label>
-                                    <select 
-                                        {...register("canal_id")}
+                                    <SearchableSelect
                                         value={watch("canal_id") || "PROPIO"}
-                                        className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none"
-                                        onChange={(e) => {
-                                            const newChannel = e.target.value;
-                                            register("canal_id").onChange(e);
-                                            setValue("subclasificacion_id", "");
-                                            
+                                        allowClear={false}
+                                        placeholder="Seleccione canal..."
+                                        searchPlaceholder="Buscar canal de venta..."
+                                        onChange={(newChannel) => {
+                                            if (!newChannel) return;
+                                            setValue("canal_id", newChannel, { shouldDirty: true, shouldValidate: true });
+                                            setValue("subclasificacion_id", "", { shouldDirty: true });
+
                                             // Si el asesor actual no tiene este nuevo canal y no es cuenta existente asignada, resetear asesor
                                             const currentAsesorId = watch("asesor_id");
                                             if (currentAsesorId && !selectedAccount?.owner_user_id) {
                                                 const currentAsesor = users?.find(u => u.id === currentAsesorId);
                                                 if (currentAsesor && (!currentAsesor.canales || !currentAsesor.canales.includes(newChannel))) {
-                                                    setValue("asesor_id", "");
+                                                    setValue("asesor_id", "", { shouldDirty: true });
                                                 }
                                             }
 
                                             const firstPhase = phasesList.find(p => p.canal_id === newChannel);
                                             if (firstPhase) {
-                                                setValue("fase_id", String(firstPhase.id));
+                                                setValue("fase_id", String(firstPhase.id), { shouldDirty: true });
                                             }
                                         }}
-                                    >
-                                        {SALES_CHANNELS.map(channel => <option key={channel.id} value={channel.id}>{channel.nombre}</option>)}
-                                    </select>
+                                        options={SALES_CHANNELS.map(channel => ({
+                                            value: channel.id,
+                                            label: channel.nombre,
+                                            searchValue: channel.id,
+                                        }))}
+                                    />
                                     <p className="text-[11px] text-slate-500 mt-1">El canal o tipo de cuenta define la lista de precios aplicada.</p>
                                 </div>
                                 <div>
-                                    <label className="text-sm font-medium text-slate-700 flex items-center justify-between">
+                                    <label className="text-sm font-medium text-slate-700 flex items-center justify-between mb-1">
                                         <span>Subclasificación</span>
                                         <span className="text-[11px] text-slate-400 font-normal">(Opcional)</span>
                                     </label>
-                                    <select 
-                                        {...register("subclasificacion_id")}
+                                    <SearchableSelect
                                         value={watch("subclasificacion_id") || ""}
-                                        className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none"
-                                    >
-                                        <option value="">Seleccionar (Opcional)...</option>
-                                        {selectedAccount && selectedAccount.subclasificacion_id && !channelSubclassifications.some(item => String(item.id) === String(selectedAccount.subclasificacion_id)) && (
-                                            <option value={String(selectedAccount.subclasificacion_id)}>
-                                                {subclassifications.find(s => String(s.id) === String(selectedAccount.subclasificacion_id))?.nombre || "Subclasificación Asignada"}
-                                            </option>
-                                        )}
-                                        {channelSubclassifications.map(item => <option key={item.id} value={String(item.id)}>{item.nombre}</option>)}
-                                    </select>
+                                        onChange={(val) => setValue("subclasificacion_id", val, { shouldDirty: true, shouldValidate: true })}
+                                        placeholder="Seleccionar (Opcional)..."
+                                        searchPlaceholder="Buscar subclasificación..."
+                                        options={[
+                                            ...(selectedAccount && selectedAccount.subclasificacion_id && !channelSubclassifications.some(item => String(item.id) === String(selectedAccount.subclasificacion_id))
+                                                ? [{
+                                                    value: String(selectedAccount.subclasificacion_id),
+                                                    label: subclassifications.find(s => String(s.id) === String(selectedAccount.subclasificacion_id))?.nombre || "Subclasificación Asignada",
+                                                }]
+                                                : []),
+                                            ...channelSubclassifications.map(item => ({
+                                                value: String(item.id),
+                                                label: item.nombre,
+                                            })),
+                                        ]}
+                                    />
                                 </div>
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                 <div>
-                                    <label className="text-sm font-medium text-slate-700 flex items-center justify-between">
+                                    <label className="text-sm font-medium text-slate-700 flex items-center justify-between mb-1">
                                         <span>País</span>
                                         {selectedAccount && !isAdmin && !!selectedAccount.pais_id && <Lock className="w-3 h-3 text-slate-400" />}
                                     </label>
-                                    <select
-                                        {...register("pais_id")}
+                                    <SearchableSelect
                                         value={watch("pais_id") || ""}
                                         disabled={!isAdmin && !!selectedAccount && !!selectedAccount.pais_id}
-                                        className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
-                                        onChange={(e) => {
-                                            const newPais = e.target.value;
-                                            register("pais_id").onChange(e);
-                                            setValue("departamento_id", "");
-                                            setValue("ciudad_id", "");
+                                        placeholder="Seleccione..."
+                                        searchPlaceholder="Buscar país..."
+                                        onChange={(newPais) => {
+                                            setValue("pais_id", newPais, { shouldDirty: true, shouldValidate: true });
+                                            setValue("departamento_id", "", { shouldDirty: true });
+                                            setValue("ciudad_id", "", { shouldDirty: true });
 
                                             const currentAsesorId = watch("asesor_id");
                                             if (currentAsesorId && !selectedAccount?.owner_user_id) {
                                                 const currentAsesor = users?.find(u => u.id === currentAsesorId);
                                                 if (currentAsesor && newPais) {
-                                                    const userPaises = currentAsesor.paises && currentAsesor.paises.length > 0 
-                                                        ? currentAsesor.paises 
+                                                    const userPaises = currentAsesor.paises && currentAsesor.paises.length > 0
+                                                        ? currentAsesor.paises
                                                         : (currentAsesor.pais ? [String(currentAsesor.pais)] : ["1"]);
                                                     if (!userPaises.includes(String(newPais))) {
-                                                        setValue("asesor_id", "");
+                                                        setValue("asesor_id", "", { shouldDirty: true });
                                                     }
                                                 }
                                             }
                                         }}
-                                    >
-                                        <option value="">Seleccione...</option>
-                                        {displayCountries.map(p => (
-                                            <option key={p.id} value={String(p.id)}>{p.nombre}</option>
-                                        ))}
-                                    </select>
+                                        options={displayCountries.map(p => ({
+                                            value: String(p.id),
+                                            label: p.nombre,
+                                        }))}
+                                    />
                                 </div>
                                 <div>
-                                    <label className="text-sm font-medium text-slate-700 flex items-center justify-between">
+                                    <label className="text-sm font-medium text-slate-700 flex items-center justify-between mb-1">
                                         <span>Departamento</span>
                                         {selectedAccount && !isAdmin && !!selectedAccount.departamento_id && <Lock className="w-3 h-3 text-slate-400" />}
                                     </label>
-                                    <select
-                                        {...register("departamento_id")}
+                                    <SearchableSelect
                                         value={watch("departamento_id") || ""}
-                                        className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                                         disabled={(!isAdmin && !!selectedAccount && !!selectedAccount.departamento_id) || !watch("pais_id")}
-                                        onChange={(e) => {
-                                            const newDept = e.target.value;
-                                            register("departamento_id").onChange(e);
-                                            setValue("ciudad_id", "");
+                                        placeholder="Seleccione..."
+                                        searchPlaceholder="Buscar departamento..."
+                                        onChange={(newDept) => {
+                                            setValue("departamento_id", newDept, { shouldDirty: true, shouldValidate: true });
+                                            setValue("ciudad_id", "", { shouldDirty: true });
 
                                             const currentAsesorId = watch("asesor_id");
                                             if (currentAsesorId && !selectedAccount?.owner_user_id) {
                                                 const currentAsesor = users?.find(u => u.id === currentAsesorId);
                                                 if (currentAsesor) {
-                                                    const userDepts = currentAsesor.departamentos && currentAsesor.departamentos.length > 0 
-                                                        ? currentAsesor.departamentos 
+                                                    const userDepts = currentAsesor.departamentos && currentAsesor.departamentos.length > 0
+                                                        ? currentAsesor.departamentos
                                                         : (currentAsesor.departamento ? [String(currentAsesor.departamento)] : []);
                                                     const isPropioGeneral = selectedChannel === "PROPIO" && userDepts.length === 0;
                                                     if (newDept && !isPropioGeneral && !userDepts.includes(String(newDept))) {
-                                                        setValue("asesor_id", "");
+                                                        setValue("asesor_id", "", { shouldDirty: true });
                                                     }
                                                 }
                                             }
                                         }}
-                                    >
-                                        <option value="">Seleccione...</option>
-                                        {displayDepartments
+                                        options={displayDepartments
                                             .filter(dep => String(dep.pais_id) === watch("pais_id") || (!dep.pais_id && watch("pais_id") === "1"))
-                                            .map(dep => (
-                                                <option key={dep.id} value={String(dep.id)}>{dep.nombre}</option>
-                                            ))}
-                                    </select>
+                                            .map(dep => ({
+                                                value: String(dep.id),
+                                                label: dep.nombre,
+                                            }))}
+                                    />
                                 </div>
                                 <div>
-                                    <label className="text-sm font-medium text-slate-700 flex items-center justify-between">
+                                    <label className="text-sm font-medium text-slate-700 flex items-center justify-between mb-1">
                                         <span>Ciudad</span>
                                         {selectedAccount && !isAdmin && !!selectedAccount.ciudad_id && <Lock className="w-3 h-3 text-slate-400" />}
                                     </label>
-                                    <select
-                                        {...register("ciudad_id")}
+                                    <SearchableSelect
                                         value={watch("ciudad_id") || ""}
-                                        className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                                         disabled={(!isAdmin && !!selectedAccount && !!selectedAccount.ciudad_id) || !watch("departamento_id")}
-                                    >
-                                        <option value="">Seleccione...</option>
-                                        {displayCities
+                                        placeholder="Seleccione..."
+                                        searchPlaceholder="Buscar ciudad..."
+                                        onChange={(val) => setValue("ciudad_id", val, { shouldDirty: true, shouldValidate: true })}
+                                        options={displayCities
                                             .filter(c => String(c.departamento_id) === watch("departamento_id"))
-                                            .map(city => (
-                                                <option key={city.id} value={String(city.id)}>{city.nombre}</option>
-                                            ))}
-                                    </select>
+                                            .map(city => ({
+                                                value: String(city.id),
+                                                label: city.nombre,
+                                            }))}
+                                    />
                                 </div>
                             </div>
                             
@@ -1840,35 +1845,40 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                                         </div>
 
                                         <div>
-                                            <label className="text-sm font-medium text-slate-700">Fase de Oportunidad *</label>
-                                            <select 
-                                                {...register("fase_id")} 
-                                                className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-emerald-500 outline-none"
-                                            >
-                                                <option value="">Seleccione fase...</option>
-                                                {phasesList.map(fase => (
-                                                    <option key={fase.id} value={String(fase.id)}>{fase.nombre}</option>
-                                                ))}
-                                            </select>
+                                            <label className="text-sm font-medium text-slate-700 block mb-1">Fase de Oportunidad *</label>
+                                            <SearchableSelect
+                                                value={watch("fase_id") || ""}
+                                                onChange={(val) => setValue("fase_id", val, { shouldDirty: true, shouldValidate: true })}
+                                                placeholder="Seleccione fase..."
+                                                searchPlaceholder="Buscar fase..."
+                                                options={phasesList.map(fase => ({
+                                                    value: String(fase.id),
+                                                    label: fase.nombre,
+                                                }))}
+                                            />
                                             {errors.fase_id && <p className="text-red-500 text-xs mt-1">{errors.fase_id.message}</p>}
                                         </div>
-                                        
+
                                         <div>
-                                            <label className="text-sm font-medium text-slate-700">Origen de Oportunidad *</label>
-                                            <select 
-                                                {...register("origen_oportunidad")} 
-                                                className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-emerald-500 outline-none"
-                                            >
-                                                {isLoadingOrigins && <option value="">Cargando...</option>}
-                                                {!isLoadingOrigins && origins.length === 0 && (
-                                                    <>
-                                                        <option value="feria">Feria</option>
-                                                        <option value="visita">Visita</option>
-                                                        <option value="wp">WhatsApp</option>
-                                                    </>
-                                                )}
-                                                {origins.map(origin => <option key={origin.id} value={origin.codigo}>{origin.nombre}</option>)}
-                                            </select>
+                                            <label className="text-sm font-medium text-slate-700 block mb-1">Origen de Oportunidad *</label>
+                                            <SearchableSelect
+                                                value={watch("origen_oportunidad") || ""}
+                                                onChange={(val) => setValue("origen_oportunidad", val, { shouldDirty: true, shouldValidate: true })}
+                                                disabled={isLoadingOrigins}
+                                                placeholder={isLoadingOrigins ? "Cargando..." : "Seleccione origen..."}
+                                                searchPlaceholder="Buscar origen..."
+                                                options={!isLoadingOrigins && origins.length === 0
+                                                    ? [
+                                                        { value: "feria", label: "Feria" },
+                                                        { value: "visita", label: "Visita" },
+                                                        { value: "wp", label: "WhatsApp" },
+                                                    ]
+                                                    : origins.map(origin => ({
+                                                        value: origin.codigo,
+                                                        label: origin.nombre,
+                                                        searchValue: origin.codigo,
+                                                    }))}
+                                            />
                                             {errors.origen_oportunidad && <p className="text-red-500 text-xs mt-1">{errors.origen_oportunidad.message}</p>}
                                         </div>
                                     </div>
@@ -2054,29 +2064,34 @@ export function CreateStoreSaleForm({ onSuccess }: CreateStoreSaleFormProps) {
                             {isActivityExpanded && (
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3 border-t border-slate-200/60">
                                     <div>
-                                        <label className="text-sm font-medium text-slate-700">Clasificación *</label>
-                                        <select 
-                                            {...register("clasificacion_id")} 
-                                            className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-orange-500 outline-none"
-                                        >
-                                            <option value="">Seleccione...</option>
-                                            {(eventClassifications.length > 0 ? eventClassifications : classifications).map(c => (
-                                                <option key={c.id} value={String(c.id)}>{c.nombre}</option>
-                                            ))}
-                                        </select>
+                                        <label className="text-sm font-medium text-slate-700 block mb-1">Clasificación *</label>
+                                        <SearchableSelect
+                                            value={watch("clasificacion_id") || ""}
+                                            onChange={(val) => setValue("clasificacion_id", val, { shouldDirty: true, shouldValidate: true })}
+                                            placeholder="Seleccione..."
+                                            searchPlaceholder="Buscar clasificación..."
+                                            options={(eventClassifications.length > 0 ? eventClassifications : classifications).map(c => ({
+                                                value: String(c.id),
+                                                label: c.nombre,
+                                            }))}
+                                        />
                                         {errors.clasificacion_id && <p className="text-red-500 text-xs mt-1">{errors.clasificacion_id.message}</p>}
                                     </div>
-                                    
+
                                     <div>
-                                        <label className="text-sm font-medium text-slate-700">Prioridad *</label>
-                                        <select 
-                                            {...register("prioridad")} 
-                                            className="w-full mt-1 border p-2 rounded-lg bg-white border-slate-300 focus:ring-2 focus:ring-orange-500 outline-none"
-                                        >
-                                            <option value="Alta">Alta</option>
-                                            <option value="Media">Media</option>
-                                            <option value="Baja">Baja</option>
-                                        </select>
+                                        <label className="text-sm font-medium text-slate-700 block mb-1">Prioridad *</label>
+                                        <SearchableSelect
+                                            value={watch("prioridad") || "Media"}
+                                            allowClear={false}
+                                            onChange={(val) => setValue("prioridad", val as "Alta" | "Media" | "Baja", { shouldDirty: true, shouldValidate: true })}
+                                            placeholder="Seleccione prioridad..."
+                                            searchPlaceholder="Buscar prioridad..."
+                                            options={[
+                                                { value: "Alta", label: "Alta" },
+                                                { value: "Media", label: "Media" },
+                                                { value: "Baja", label: "Baja" },
+                                            ]}
+                                        />
                                         {errors.prioridad && <p className="text-red-500 text-xs mt-1">{errors.prioridad.message}</p>}
                                     </div>
                                     

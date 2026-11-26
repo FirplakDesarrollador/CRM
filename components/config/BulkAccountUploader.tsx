@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/components/ui/utils';
 import { supabase } from '@/lib/supabase';
+import { SearchableSelect } from '@/components/ui/SearchableSelect';
 
 // ── Types ─────────────────────────────────
 interface RowData {
@@ -302,16 +303,20 @@ function SuggestionSelect<T extends { id: number | string; nombre?: string }>({ 
 }) {
     if (options.length === 0) return null;
     return (
-        <select
-            value={value ?? ''}
-            onChange={e => onSelect(e.target.value ? (typeof options[0].id === 'number' ? Number(e.target.value) : e.target.value) : null)}
-            className="text-[10px] bg-amber-50 border border-amber-200 rounded px-1 py-0.5 text-amber-800 font-medium max-w-[140px]"
-        >
-            <option value="">— {label} —</option>
-            {options.map(o => (
-                <option key={o.id} value={o.id}>{o.nombre || String(o.id)}</option>
-            ))}
-        </select>
+        <div className="max-w-[160px]">
+            <SearchableSelect
+                compact
+                value={value !== null && value !== undefined ? String(value) : ''}
+                onChange={(val) => onSelect(val ? (typeof options[0].id === 'number' ? Number(val) : val) : null)}
+                placeholder={`— ${label} —`}
+                searchPlaceholder={`Buscar ${label.toLowerCase()}...`}
+                triggerClassName="min-h-0 h-6 text-[10px] bg-amber-50 border-amber-200 rounded px-1.5 py-0.5 text-amber-800 font-medium"
+                options={options.map(o => ({
+                    value: String(o.id),
+                    label: o.nombre || String(o.id),
+                }))}
+            />
+        </div>
     );
 }
 
@@ -642,16 +647,17 @@ export function BulkAccountUploader() {
 
                                     <div className="w-full space-y-2 text-left">
                                         <label className="text-xs font-bold text-slate-400 uppercase tracking-wider ml-1">Vendedor Responsable</label>
-                                        <select
+                                        <SearchableSelect
                                             value={selectedVendedorId}
-                                            onChange={(e) => setSelectedVendedorId(e.target.value)}
-                                            className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-5 py-4 text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all appearance-none cursor-pointer text-lg font-medium"
-                                        >
-                                            <option value="">— Seleccionar Vendedor —</option>
-                                            {catalog?.vendedores.map(v => (
-                                                <option key={v.id} value={v.id}>{v.full_name || 'Sin nombre'}</option>
-                                            ))}
-                                        </select>
+                                            onChange={setSelectedVendedorId}
+                                            placeholder="— Seleccionar Vendedor —"
+                                            searchPlaceholder="Buscar vendedor..."
+                                            triggerClassName="bg-slate-50 border-slate-200 rounded-2xl px-5 py-3.5 text-slate-900 text-base font-medium"
+                                            options={(catalog?.vendedores || []).map(v => ({
+                                                value: v.id,
+                                                label: v.full_name || 'Sin nombre',
+                                            }))}
+                                        />
                                     </div>
 
                                     {!selectedVendedorId && (

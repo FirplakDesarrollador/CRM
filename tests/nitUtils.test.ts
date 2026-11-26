@@ -3,6 +3,7 @@ import {
     sanitizeNitInput,
     extractNitRoot,
     validateColombianNit,
+    buildBranchNit,
     isProvisionalNit,
     isValidRealNit,
 } from "@/lib/nitUtils";
@@ -66,6 +67,41 @@ describe("NIT colombiano estricto (lib/nitUtils)", () => {
             expect(validateColombianNit("900123456-78")).toBe(false);
             expect(validateColombianNit("1234")).toBe(false);
             expect(validateColombianNit("ABC900123")).toBe(false);
+            expect(validateColombianNit("900510728-6#2")).toBe(false);
+        });
+    });
+
+    describe("NIT de sucursales con indicativo #", () => {
+        it("permite un único # seguido de número de sucursal solo cuando allowBranchSuffix=true", () => {
+            expect(sanitizeNitInput("900.510.728-6#2", { allowBranchSuffix: true })).toBe("900510728-6#2");
+            expect(sanitizeNitInput("900510728-6#2#3", { allowBranchSuffix: true })).toBe("900510728-6#2");
+            expect(sanitizeNitInput("900510728#2", { allowBranchSuffix: true })).toBe("900510728#2");
+            expect(sanitizeNitInput("#900510728-6", { allowBranchSuffix: true })).toBe("900510728-6");
+            // En cuentas normales (no sucursal) elimina #
+            expect(sanitizeNitInput("900510728-6#2")).toBe("900510728-6");
+        });
+
+        it("extrae la raíz numérica correctamente ignorando tanto -DV como #sucursal", () => {
+            expect(extractNitRoot("900510728-6#2")).toBe("900510728");
+            expect(extractNitRoot("900510728#2")).toBe("900510728");
+            expect(extractNitRoot("PROV-A1B2C3D4#2")).toBe("");
+            expect(isProvisionalNit("PROV-A1B2C3D4#2")).toBe(true);
+        });
+
+        it("valida NIT de sucursal con # y permite formalizar pedidos con ese NIT", () => {
+            expect(validateColombianNit("900510728-6#2", { allowBranchSuffix: true })).toBe(true);
+            expect(validateColombianNit("900510728#2", { allowBranchSuffix: true })).toBe(true);
+            expect(validateColombianNit("900510728-6#", { allowBranchSuffix: true })).toBe(false);
+            expect(validateColombianNit("900510728-6#2#3", { allowBranchSuffix: true })).toBe(false);
+            expect(isValidRealNit("900510728-6#2")).toBe(true);
+        });
+
+        it("autogenera el NIT de la sucursal como NIT padre + #2, #3, etc.", () => {
+            expect(buildBranchNit("900510728-6", [])).toBe("900510728-6#2");
+            expect(buildBranchNit("900510728", [])).toBe("900510728#2");
+            expect(buildBranchNit("900510728-6", ["900510728-6#2"])).toBe("900510728-6#3");
+            expect(buildBranchNit("900510728-6", ["900510728-6#2", "900510728-6#4"])).toBe("900510728-6#5");
+            expect(buildBranchNit("900510728-6#2", [])).toBe("900510728-6#2");
         });
     });
 });

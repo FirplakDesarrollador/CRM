@@ -37,6 +37,7 @@ import { DollarSign } from "lucide-react";
 import { useSyncStore } from "@/lib/stores/useSyncStore";
 import { useOpportunityOrigins } from "@/lib/hooks/useOpportunityOrigins";
 import { MultiSelect } from "@/components/ui/MultiSelect";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 import { OPPORTUNITY_CATEGORIES, parseOpportunityCategories, formatOpportunityCategories } from "@/lib/opportunityCategories";
 import { AccountModal } from "@/components/cuentas/AccountModal";
 import { EntityAuditHistoryTab } from "@/components/shared/EntityAuditHistoryTab";
@@ -959,24 +960,23 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                 Segmento (Subclasificación)
                             </label>
                             <div className="relative group">
-                                <select
-                                    className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 font-bold text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none disabled:opacity-50"
+                                <SearchableSelect
+                                    compact
                                     value={localSegmentId}
-                                    onChange={(e) => handleSegmentChange(e.target.value)}
+                                    onChange={(val) => handleSegmentChange(val)}
                                     disabled={!effectiveAccount.subclasificacion_id || segments.length === 0}
-                                >
-                                    <option value="">Seleccione un segmento...</option>
-                                    {segments
+                                    placeholder="Seleccione un segmento..."
+                                    searchPlaceholder="Buscar segmento..."
+                                    triggerClassName="bg-slate-50 border-slate-200 text-slate-700 font-bold"
+                                    options={segments
                                         .filter(seg => effectiveAccount.subclasificacion_id && seg.subclasificacion_id === Number(effectiveAccount.subclasificacion_id))
-                                        .map(seg => (
-                                            <option key={seg.id} value={String(seg.id)}>
-                                                {seg.nombre}
-                                            </option>
-                                        ))
-                                    }
-                                </select>
+                                        .map(seg => ({
+                                            value: String(seg.id),
+                                            label: seg.nombre,
+                                        }))}
+                                />
                                 {isSavingSegment && (
-                                    <div className="absolute right-8 top-1/2 -translate-y-1/2">
+                                    <div className="absolute right-8 top-1/2 -translate-y-1/2 pointer-events-none">
                                         <Loader2 className="w-3 h-3 text-blue-600 animate-spin" />
                                     </div>
                                 )}
@@ -1301,33 +1301,34 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                     {!localRazonPerdida && <span className="text-red-400 ml-1">*</span>}
                                 </label>
                                 <div className="relative group">
-                                    <select
-                                        data-testid="razon-perdida-select"
+                                    <SearchableSelect
+                                        compact
+                                        dataTestId="razon-perdida-select"
                                         value={localRazonPerdida}
-                                        onChange={async (e) => {
-                                            setLocalRazonPerdida(e.target.value);
+                                        onChange={async (val) => {
+                                            setLocalRazonPerdida(val);
                                             setIsSavingLossReason(true);
                                             try {
-                                                await updateOpportunity(opportunity.id, { razon_perdida: e.target.value || null });
+                                                await updateOpportunity(opportunity.id, { razon_perdida: val || null });
                                             } finally {
                                                 setIsSavingLossReason(false);
                                             }
                                         }}
-                                        className={cn(
-                                            "w-full px-3 py-1.5 bg-slate-50 border rounded-lg text-slate-700 font-medium text-sm focus:ring-2 focus:ring-red-400 focus:bg-white transition-all outline-none",
+                                        placeholder="Seleccione una razón..."
+                                        searchPlaceholder="Buscar razón de pérdida..."
+                                        triggerClassName={cn(
+                                            "bg-slate-50 text-slate-700 font-medium",
                                             localRazonPerdida ? "border-slate-200" : "border-red-200 bg-red-50"
                                         )}
-                                    >
-                                        <option value="">Seleccione una razón...</option>
-                                        {localRazonPerdida && !LOSS_REASONS.includes(localRazonPerdida) && (
-                                            <option value={localRazonPerdida}>{localRazonPerdida}</option>
-                                        )}
-                                        {LOSS_REASONS.map(r => (
-                                            <option key={r} value={r}>{r}</option>
-                                        ))}
-                                    </select>
+                                        options={[
+                                            ...(localRazonPerdida && !LOSS_REASONS.includes(localRazonPerdida)
+                                                ? [{ value: localRazonPerdida, label: localRazonPerdida }]
+                                                : []),
+                                            ...LOSS_REASONS.map(r => ({ value: r, label: r })),
+                                        ]}
+                                    />
                                     {isSavingLossReason && (
-                                        <div className="absolute right-8 top-1/2 -translate-y-1/2">
+                                        <div className="absolute right-8 top-1/2 -translate-y-1/2 pointer-events-none">
                                             <Loader2 className="w-3 h-3 text-red-400 animate-spin" />
                                         </div>
                                     )}
@@ -1598,25 +1599,29 @@ function ProductsTab({ opportunityId }: { opportunityId: string }) {
                             <span className="text-xs text-slate-500">Viendo cotización:</span>
                             {/* Quote Selector Dropdown */}
                             {quotes && quotes.length > 0 ? (
-                                <select
-                                    className="text-xs font-bold text-blue-600 bg-blue-50 border-none rounded-md py-1 pl-2 pr-8 cursor-pointer focus:ring-2 focus:ring-blue-500"
-                                    value={effectiveQuote?.id || ''}
-                                    onChange={async (e) => {
-                                        const qId = e.target.value;
-                                        setSelectedQuoteId(qId);
-                                        const selected = quotes?.find(q => q.id === qId);
-                                        if (selected && opportunity) {
-                                            await updateOpportunity(opportunityId, { amount: selected.total_amount });
-                                            await updateQuote(selected.id, { updated_at: new Date().toISOString() });
-                                        }
-                                    }}
-                                >
-                                    {sortedQuotes.map(q => (
-                                        <option key={q.id} value={q.id}>
-                                            {q.numero_cotizacion} {q.status === 'WINNER' ? '(Ganadora)' : ''} - {new Date(q.updated_at || 0).toLocaleDateString()}
-                                        </option>
-                                    ))}
-                                </select>
+                                <div className="min-w-[210px] max-w-[300px]">
+                                    <SearchableSelect
+                                        compact
+                                        allowClear={false}
+                                        value={effectiveQuote?.id || ''}
+                                        onChange={async (qId) => {
+                                            if (!qId) return;
+                                            setSelectedQuoteId(qId);
+                                            const selected = quotes?.find(q => q.id === qId);
+                                            if (selected && opportunity) {
+                                                await updateOpportunity(opportunityId, { amount: selected.total_amount });
+                                                await updateQuote(selected.id, { updated_at: new Date().toISOString() });
+                                            }
+                                        }}
+                                        placeholder="Seleccionar cotización..."
+                                        searchPlaceholder="Buscar cotización..."
+                                        triggerClassName="min-h-0 h-7 text-xs font-bold text-blue-600 bg-blue-50 border-blue-100 rounded-md px-2 py-1"
+                                        options={sortedQuotes.map(q => ({
+                                            value: q.id,
+                                            label: `${q.numero_cotizacion} ${q.status === 'WINNER' ? '(Ganadora)' : ''} - ${new Date(q.updated_at || 0).toLocaleDateString()}`.trim(),
+                                        }))}
+                                    />
+                                </div>
                             ) : (
                                 <span className="text-xs text-slate-400 font-medium">Borrador Original</span>
                             )}

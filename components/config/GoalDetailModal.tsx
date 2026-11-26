@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { X, Save, Trash2, Target, TrendingUp, BarChart3, Calendar, Users, Flag, AlertCircle } from "lucide-react";
 import { cn } from "@/components/ui/utils";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 interface GoalDetailModalProps {
     isOpen: boolean;
@@ -162,15 +163,19 @@ export function GoalDetailModal({ isOpen, onClose, goalId, onUpdate, canDelete =
                                 </div>
                                 <div>
                                     <label className="block text-xs font-bold text-slate-500 mb-1.5">Estado</label>
-                                    <select
-                                        className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 font-medium text-slate-900"
+                                    <SearchableSelect
                                         value={status}
-                                        onChange={(e) => setStatus(e.target.value)}
-                                    >
-                                        <option value="En Proceso">En Proceso</option>
-                                        <option value="Terminado">Terminado</option>
-                                        <option value="Fracasada">Fracasada</option>
-                                    </select>
+                                        allowClear={false}
+                                        onChange={(val) => { if (val) setStatus(val); }}
+                                        placeholder="Seleccionar estado..."
+                                        searchPlaceholder="Buscar estado..."
+                                        triggerClassName="rounded-xl border-slate-200 bg-slate-50 font-medium text-slate-900"
+                                        options={[
+                                            { value: "En Proceso", label: "En Proceso" },
+                                            { value: "Terminado", label: "Terminado" },
+                                            { value: "Fracasada", label: "Fracasada" },
+                                        ]}
+                                    />
                                 </div>
                             </div>
 

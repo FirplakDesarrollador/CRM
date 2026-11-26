@@ -25,12 +25,15 @@ import { cn } from "@/components/ui/utils";
 import { useRouter } from "next/navigation";
 import { DuplicateAccountModal, type DuplicateAccountInfo } from "@/components/cuentas/DuplicateAccountModal";
 import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
+import { ParentAccountCombobox, type ParentAccountOption } from "@/components/accounts/ParentAccountCombobox";
 import {
     isProvisionalNit,
     generateProvisionalNit,
     sanitizeNitInput,
     validateColombianNit,
     extractNitRoot,
+    buildBranchNit,
 } from "@/lib/nitUtils";
 import {
     buildBranchAccountName,
@@ -79,6 +82,18 @@ const accountSchema = z
                     code: z.ZodIssueCode.custom,
                     path: ["id_cuenta_principal"],
                     message: "Seleccione la cuenta principal",
+                });
+            }
+            if (
+                data.nit_base &&
+                data.nit_base.trim() !== "" &&
+                !isProvisionalNit(data.nit_base) &&
+                !validateColombianNit(data.nit_base, { allowBranchSuffix: true })
+            ) {
+                ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    path: ["nit_base"],
+                    message: "NIT de sucursal inválido (ej. 900510728-6#2)",
                 });
             }
             return;
@@ -298,6 +313,34 @@ export default function CreateAccountWizard() {
         [watchedNombre, watchedNit, similarAccounts, isChild, watchedParentId]
     );
 
+    const populateNextBranchNit = (parentId: string, parentNit?: string | null) => {
+        const sanitizedParent = isProvisionalNit(parentNit)
+            ? String(parentNit || "").trim()
+            : sanitizeNitInput(parentNit, { allowBranchSuffix: false });
+        const optimisticBranchNit = buildBranchNit(sanitizedParent || parentNit, []);
+        if (optimisticBranchNit) {
+            setValue("nit_base", optimisticBranchNit, { shouldDirty: true, shouldValidate: false });
+        } else {
+            setValue("nit_base", "", { shouldDirty: true, shouldValidate: false });
+        }
+
+        void (async () => {
+            try {
+                const { data: nextNit, error } = await supabase.rpc("get_next_branch_nit", {
+                    p_parent_id: parentId,
+                });
+                if (!error && typeof nextNit === "string" && nextNit.trim() !== "") {
+                    const normalizedNext = isProvisionalNit(nextNit)
+                        ? nextNit.trim()
+                        : sanitizeNitInput(nextNit, { allowBranchSuffix: true });
+                    setValue("nit_base", normalizedNext || nextNit.trim(), { shouldDirty: true, shouldValidate: true });
+                }
+            } catch {
+                // Keep optimistic branch NIT when offline
+            }
+        })();
+    };
+
     const activateBranchMode = (target: {
         id: string;
         nombre: string;
@@ -321,7 +364,7 @@ export default function CreateAccountWizard() {
         });
         setValue("is_child", true, { shouldDirty: true, shouldValidate: true });
         setValue("id_cuenta_principal", target.id, { shouldDirty: true, shouldValidate: true });
-        setValue("nit_base", target.nit_base || "", { shouldDirty: true, shouldValidate: false });
+        populateNextBranchNit(target.id, target.nit_base);
         setValue("nombre", branchName, { shouldDirty: true, shouldValidate: true });
         if (target.canal_id) {
             setValue("canal_id", target.canal_id, { shouldDirty: true });
@@ -357,12 +400,15 @@ export default function CreateAccountWizard() {
         setValue("nit_base", "", { shouldDirty: true });
     };
 
-    const handleParentChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        const parentId = e.target.value;
+    const handleParentSelect = (parentId: string, parent: ParentAccountOption | null) => {
         setValue("id_cuenta_principal", parentId, { shouldDirty: true, shouldValidate: true });
-        const parent = parents.find((a) => a.id === parentId);
         if (parent) {
-            setValue("nit_base", parent.nit_base || "");
+            setParents((prev) =>
+                prev.some((p) => p.id === parent.id)
+                    ? prev
+                    : [{ id: parent.id, nombre: parent.nombre, nit_base: parent.nit_base || "" }, ...prev]
+            );
+            populateNextBranchNit(parent.id, parent.nit_base);
             setSelectedBranchParent({
                 id: parent.id,
                 nombre: parent.nombre,
@@ -370,14 +416,14 @@ export default function CreateAccountWizard() {
             });
         } else {
             setSelectedBranchParent(null);
+            setValue("nit_base", "", { shouldDirty: true });
         }
     };
 
     const handleNext = async () => {
         let fieldsToValidate: FieldPath<AccountFormInput>[] = [];
         if (step === 0) {
-            fieldsToValidate = ["nombre", "canal_id"];
-            if (!isChild) fieldsToValidate.push("nit_base");
+            fieldsToValidate = ["nombre", "canal_id", "nit_base"];
             if (isChild) fieldsToValidate.push("id_cuenta_principal");
         } else if (step === 1) {
             fieldsToValidate = ["email", "telefono", "direccion"];
@@ -459,7 +505,10 @@ export default function CreateAccountWizard() {
                     selectedBranchParent?.id === data.id_cuenta_principal
                         ? selectedBranchParent
                         : parents.find((a) => a.id === data.id_cuenta_principal);
-                if (parent) inheritedNit = parent.nit_base || "";
+                if (!inheritedNit || !inheritedNit.includes("#")) {
+                    const fallbackParentNit = parent?.nit_base || inheritedNit;
+                    inheritedNit = buildBranchNit(fallbackParentNit, []);
+                }
             }
 
             const finalNit =
@@ -915,23 +964,44 @@ export default function CreateAccountWizard() {
                             </div>
 
                             {isChild ? (
-                                <div className="space-y-1 bg-blue-50/50 p-4 rounded-xl border border-blue-100">
-                                    <label className="text-sm font-bold text-blue-800 block">Cuenta Principal (Padre) *</label>
-                                    <select
-                                        {...register("id_cuenta_principal")}
-                                        onChange={handleParentChange}
-                                        className="w-full border p-3 rounded-xl bg-white border-blue-200 text-slate-900 outline-none focus:ring-2 focus:ring-blue-500"
-                                    >
-                                        <option value="">Seleccione cuenta principal...</option>
-                                        {parents.map((p) => (
-                                            <option key={p.id} value={p.id}>
-                                                {p.nombre} ({p.nit_base})
-                                            </option>
-                                        ))}
-                                    </select>
-                                    {errors.id_cuenta_principal && (
-                                        <p className="text-red-500 text-xs font-bold">{errors.id_cuenta_principal.message}</p>
-                                    )}
+                                <div className="space-y-3 bg-blue-50/50 p-4 rounded-xl border border-blue-100">
+                                    <div className="space-y-1">
+                                        <label className="text-sm font-bold text-blue-800 block">Cuenta Principal (Padre) *</label>
+                                        <ParentAccountCombobox
+                                            value={watchedParentId}
+                                            onChange={handleParentSelect}
+                                            initialParent={selectedBranchParent}
+                                            placeholder="Seleccione cuenta principal..."
+                                            searchPlaceholder="Buscar cuenta principal por nombre o NIT..."
+                                            triggerClassName="border-blue-200 rounded-xl py-2.5 text-slate-900"
+                                            dataTestId="wizard-parent-account-combobox"
+                                        />
+                                        {errors.id_cuenta_principal && (
+                                            <p className="text-red-500 text-xs font-bold">{errors.id_cuenta_principal.message}</p>
+                                        )}
+                                    </div>
+
+                                    <div className="space-y-1">
+                                        <label className="text-sm font-bold text-blue-800 block">
+                                            NIT de Sucursal (Automático con #)
+                                        </label>
+                                        <input
+                                            {...register("nit_base")}
+                                            onChange={(e) => {
+                                                const sanitized = sanitizeNitInput(e.target.value, { allowBranchSuffix: true });
+                                                e.target.value = sanitized;
+                                                setValue("nit_base", sanitized, { shouldDirty: true, shouldValidate: true });
+                                            }}
+                                            className="w-full border p-3 rounded-xl bg-white border-blue-200 text-slate-900 font-mono font-medium outline-none focus:ring-2 focus:ring-blue-500"
+                                            placeholder="Ej. 900510728-6#2"
+                                        />
+                                        <p className="text-xs text-blue-700/80">
+                                            Se asigna automáticamente como el NIT de la cuenta padre + <strong>#2</strong> (o siguiente consecutivo).
+                                        </p>
+                                        {errors.nit_base && (
+                                            <p className="text-red-500 text-xs font-bold">{errors.nit_base.message}</p>
+                                        )}
+                                    </div>
                                 </div>
                             ) : (
                                 <div className="space-y-1.5">
@@ -994,34 +1064,42 @@ export default function CreateAccountWizard() {
 
                             <div className="space-y-1">
                                 <label className="text-sm font-bold text-slate-700 block">Canal de Venta *</label>
-                                <select
-                                    {...register("canal_id")}
-                                    className="w-full border p-3 rounded-xl bg-white border-slate-200 outline-none focus:ring-2 focus:ring-blue-500 font-medium"
-                                >
-                                    <option value="DIST_NAC">Distribución Nacional</option>
-                                    <option value="OBRAS_NAC">Obras Nacional</option>
-                                    <option value="DIST_INT">Distribución Internacional</option>
-                                    <option value="OBRAS_INT">Obras Internacional</option>
-                                    <option value="PROPIO">Canal Propio</option>
-                                </select>
+                                <SearchableSelect
+                                    value={selectedChannel || ""}
+                                    onChange={(val) => {
+                                        setValue("canal_id", val, { shouldDirty: true, shouldValidate: true });
+                                        setValue("subclasificacion_id", "", { shouldDirty: true });
+                                    }}
+                                    allowClear={false}
+                                    placeholder="Seleccione canal de venta..."
+                                    searchPlaceholder="Buscar canal de venta..."
+                                    triggerClassName="rounded-xl border-slate-200 font-medium"
+                                    options={[
+                                        { value: "DIST_NAC", label: "Distribución Nacional", searchValue: "DIST_NAC" },
+                                        { value: "OBRAS_NAC", label: "Obras Nacional", searchValue: "OBRAS_NAC" },
+                                        { value: "DIST_INT", label: "Distribución Internacional", searchValue: "DIST_INT" },
+                                        { value: "OBRAS_INT", label: "Obras Internacional", searchValue: "OBRAS_INT" },
+                                        { value: "PROPIO", label: "Canal Propio", searchValue: "PROPIO" },
+                                    ]}
+                                />
                             </div>
 
                             <div className="space-y-1">
                                 <label className="text-sm font-medium text-slate-700">Subclasificación</label>
-                                <select
-                                    {...register("subclasificacion_id")}
-                                    className="w-full border p-3 rounded-xl bg-white border-slate-200 outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                                <SearchableSelect
+                                    value={watch("subclasificacion_id") || ""}
                                     disabled={!selectedChannel}
-                                >
-                                    <option value="">Seleccione subclasificación...</option>
-                                    {displaySubclassifications
+                                    onChange={(val) => setValue("subclasificacion_id", val, { shouldDirty: true, shouldValidate: true })}
+                                    placeholder="Seleccione subclasificación..."
+                                    searchPlaceholder="Buscar subclasificación..."
+                                    triggerClassName="rounded-xl border-slate-200 font-medium"
+                                    options={displaySubclassifications
                                         .filter((sub) => sub.canal_id === selectedChannel)
-                                        .map((sub) => (
-                                            <option key={sub.id} value={String(sub.id)}>
-                                                {sub.nombre}
-                                            </option>
-                                        ))}
-                                </select>
+                                        .map((sub) => ({
+                                            value: String(sub.id),
+                                            label: sub.nombre,
+                                        }))}
+                                />
                             </div>
                         </div>
                     )}
@@ -1032,64 +1110,62 @@ export default function CreateAccountWizard() {
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                 <div>
                                     <label className="text-sm font-bold text-slate-700 block mb-1">País</label>
-                                    <select
-                                        {...register("pais_id")}
-                                        className="w-full border p-3 rounded-xl bg-white border-slate-200 outline-none"
-                                        onChange={(e) => {
-                                            register("pais_id").onChange(e);
-                                            setValue("departamento_id", "");
-                                            setValue("ciudad_id", "");
+                                    <SearchableSelect
+                                        value={watch("pais_id") || ""}
+                                        onChange={(val) => {
+                                            setValue("pais_id", val, { shouldDirty: true, shouldValidate: true });
+                                            setValue("departamento_id", "", { shouldDirty: true });
+                                            setValue("ciudad_id", "", { shouldDirty: true });
                                         }}
-                                    >
-                                        <option value="">Seleccione País...</option>
-                                        {displayCountries.map((p) => (
-                                            <option key={p.id} value={String(p.id)}>
-                                                {p.nombre}
-                                            </option>
-                                        ))}
-                                    </select>
+                                        placeholder="Seleccione País..."
+                                        searchPlaceholder="Buscar país..."
+                                        triggerClassName="rounded-xl border-slate-200"
+                                        options={displayCountries.map((p) => ({
+                                            value: String(p.id),
+                                            label: p.nombre,
+                                        }))}
+                                    />
                                 </div>
                                 <div>
                                     <label className="text-sm font-bold text-slate-700 block mb-1">Departamento</label>
-                                    <select
-                                        {...register("departamento_id")}
-                                        className="w-full border p-3 rounded-xl bg-white border-slate-200 outline-none disabled:opacity-50"
+                                    <SearchableSelect
+                                        value={watch("departamento_id") || ""}
                                         disabled={!watch("pais_id")}
-                                        onChange={(e) => {
-                                            register("departamento_id").onChange(e);
-                                            setValue("ciudad_id", "");
+                                        onChange={(val) => {
+                                            setValue("departamento_id", val, { shouldDirty: true, shouldValidate: true });
+                                            setValue("ciudad_id", "", { shouldDirty: true });
                                         }}
-                                    >
-                                        <option value="">Seleccione Departamento...</option>
-                                        {displayDepartments
+                                        placeholder="Seleccione Departamento..."
+                                        searchPlaceholder="Buscar departamento..."
+                                        triggerClassName="rounded-xl border-slate-200"
+                                        options={displayDepartments
                                             .filter(
                                                 (dep) =>
                                                     String(dep.pais_id) === watch("pais_id") ||
                                                     (!dep.pais_id && watch("pais_id") === "1")
                                             )
-                                            .map((dep) => (
-                                                <option key={dep.id} value={String(dep.id)}>
-                                                    {dep.nombre}
-                                                </option>
-                                            ))}
-                                    </select>
+                                            .map((dep) => ({
+                                                value: String(dep.id),
+                                                label: dep.nombre,
+                                            }))}
+                                    />
                                 </div>
                                 <div>
                                     <label className="text-sm font-bold text-slate-700 block mb-1">Ciudad</label>
-                                    <select
-                                        {...register("ciudad_id")}
-                                        className="w-full border p-3 rounded-xl bg-white border-slate-200 outline-none disabled:opacity-50"
+                                    <SearchableSelect
+                                        value={watch("ciudad_id") || ""}
                                         disabled={!watch("departamento_id")}
-                                    >
-                                        <option value="">Seleccione Ciudad...</option>
-                                        {displayCities
+                                        onChange={(val) => setValue("ciudad_id", val, { shouldDirty: true, shouldValidate: true })}
+                                        placeholder="Seleccione Ciudad..."
+                                        searchPlaceholder="Buscar ciudad..."
+                                        triggerClassName="rounded-xl border-slate-200"
+                                        options={displayCities
                                             .filter((c) => String(c.departamento_id) === watch("departamento_id"))
-                                            .map((city) => (
-                                                <option key={city.id} value={String(city.id)}>
-                                                    {city.nombre}
-                                                </option>
-                                            ))}
-                                    </select>
+                                            .map((city) => ({
+                                                value: String(city.id),
+                                                label: city.nombre,
+                                            }))}
+                                    />
                                 </div>
                             </div>
 

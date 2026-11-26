@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { X, TrendingUp, Calendar, Hash, Percent } from "lucide-react";
 import { ProbabilityDonut } from "@/components/ui/ProbabilityDonut";
 import { formatNumberCO } from "@/lib/utils";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 interface OpportunityQuickViewProps {
     opportunityId: string;
@@ -229,15 +230,21 @@ export function OpportunityQuickView({ opportunityId, isOpen, onClose, onUpdate 
                             {/* Status Edit */}
                             <div>
                                 <label className="block text-sm font-bold text-slate-700 mb-2">Estado</label>
-                                <select
-                                    className="w-full p-2.5 rounded-xl border border-slate-200 bg-slate-50 font-medium text-slate-900"
-                                    value={statusId || 0}
-                                    onChange={(e) => handleStatusChange(parseInt(e.target.value))}
-                                >
-                                    <option value={1}>Abierta</option>
-                                    <option value={2}>Ganada</option>
-                                    <option value={3}>Perdida</option>
-                                </select>
+                                <SearchableSelect
+                                    value={statusId ? String(statusId) : ""}
+                                    onChange={(val) => {
+                                        if (val) handleStatusChange(parseInt(val, 10));
+                                    }}
+                                    allowClear={false}
+                                    placeholder="Seleccionar estado..."
+                                    searchPlaceholder="Buscar estado..."
+                                    triggerClassName="rounded-xl border-slate-200 bg-slate-50 font-medium text-slate-900"
+                                    options={[
+                                        { value: "1", label: "Abierta" },
+                                        { value: "2", label: "Ganada" },
+                                        { value: "3", label: "Perdida" },
+                                    ]}
+                                />
                             </div>
                         </>
                     )}

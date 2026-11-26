@@ -17,6 +17,7 @@ import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { cn } from "@/components/ui/utils";
 import { AccountDeleteModal } from "@/components/cuentas/AccountDeleteModal";
 import { DataListToolbar } from "@/components/ui/DataListToolbar";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 import { handleEntityLinkClick } from "@/lib/utils/navigation";
 import { formatColombiaDateTime } from "@/lib/date-utils";
 import dynamic from 'next/dynamic';
@@ -551,7 +552,7 @@ function AccountsContent() {
                         <button onClick={() => setWebFilter(true)} className={cn("rounded-md px-2.5 py-1.5 text-xs font-semibold", webFilter ? "bg-white text-blue-700 shadow-sm" : "text-slate-500")}>Web{webFilter && !loading ? ` (${count})` : ''}</button>
                     </div>
                 </>}
-                sortControl={<select value={`${sortField}:${sortAsc ? 'asc' : 'desc'}`} onChange={(e) => { const [field, direction] = e.target.value.split(':'); setSortField(field); setSortAsc(direction === 'asc'); }} className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-600 outline-none focus:border-blue-500" aria-label="Ordenar cuentas"><option value="updated_at:desc">Actualizadas</option><option value="nombre:asc">Nombre A–Z</option><option value="potencial_venta:desc">Mayor potencial</option></select>}
+                sortControl={<SearchableSelect value={`${sortField}:${sortAsc ? 'asc' : 'desc'}`} onChange={(val) => { if (!val) return; const [field, direction] = val.split(':'); setSortField(field); setSortAsc(direction === 'asc'); }} allowClear={false} compact ariaLabel="Ordenar cuentas" searchPlaceholder="Buscar orden..." triggerClassName="h-10 min-w-[165px] rounded-xl border-slate-200 font-semibold text-slate-600" options={[{ value: "updated_at:desc", label: "Actualizadas" }, { value: "nombre:asc", label: "Nombre A–Z" }, { value: "potencial_venta:desc", label: "Mayor potencial" }]} />}
                 onClear={() => { setInputValue(''); handleUserSelect(null); setWebFilter(false); handleFilterChange({ channelId: null, subclassificationId: null, nivelPremium: null, startDate: null, endDate: null }); }}
                 filters={<AccountFilters
                     onFilterChange={handleFilterChange}

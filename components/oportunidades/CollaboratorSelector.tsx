@@ -8,6 +8,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { v4 as uuidv4 } from 'uuid';
+import { SearchableSelect } from '@/components/ui/SearchableSelect';
 
 export interface CollaboratorEntry {
     usuario_id: string;
@@ -97,25 +98,30 @@ export function CollaboratorSelector({ value = [], onChange, ownerId, disabled }
                     <CardContent className="p-0 flex items-end gap-3">
                         <div className="flex-1 space-y-1">
                             <Label className="text-xs">Usuario</Label>
-                            <select
-                                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                            <SearchableSelect
+                                compact
                                 value={collab.usuario_id}
-                                onChange={(e) => handleUpdateCollaborator(index, 'usuario_id', e.target.value)}
+                                onChange={(val) => handleUpdateCollaborator(index, 'usuario_id', val)}
                                 disabled={collab.isLocked || disabled}
-                            >
-                                <option value="" disabled>Seleccionar usuario</option>
-                                {/* Include current value even if not in availableUsers (to allow viewing current selection) */}
-                                {collab.usuario_id && !availableUsers.some(u => u.id === collab.usuario_id) && (
-                                    <option value={collab.usuario_id}>
-                                        {users.find(u => u.id === collab.usuario_id)?.full_name || 'Desconocido'}
-                                    </option>
-                                )}
-                                {availableUsers.map(user => (
-                                    <option key={user.id} value={user.id}>
-                                        {user.full_name || user.email}
-                                    </option>
-                                ))}
-                            </select>
+                                allowClear={false}
+                                placeholder="Seleccionar usuario"
+                                searchPlaceholder="Buscar usuario por nombre o correo..."
+                                triggerClassName="h-9 min-h-[36px] rounded-md border-input"
+                                options={[
+                                    ...(collab.usuario_id && !availableUsers.some(u => u.id === collab.usuario_id)
+                                        ? [{
+                                            value: collab.usuario_id,
+                                            label: users.find(u => u.id === collab.usuario_id)?.full_name || 'Desconocido',
+                                            searchValue: users.find(u => u.id === collab.usuario_id)?.email || '',
+                                        }]
+                                        : []),
+                                    ...availableUsers.map(user => ({
+                                        value: user.id,
+                                        label: user.full_name || user.email,
+                                        searchValue: `${user.full_name || ''} ${user.email || ''}`,
+                                    })),
+                                ]}
+                            />
                         </div>
 
                         <div className="w-24 space-y-1">

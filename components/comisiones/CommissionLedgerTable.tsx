@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { LedgerEntry } from '@/lib/hooks/useCommissionLedger';
 import { Loader2, ChevronDown, ChevronUp, Search } from 'lucide-react';
+import { SearchableSelect } from '@/components/ui/SearchableSelect';
 
 type LedgerTableProps = {
     data: LedgerEntry[];
@@ -55,17 +56,22 @@ export function CommissionLedgerTable({
         <div className="space-y-4">
             {/* Filters */}
             <div className="flex flex-wrap items-center gap-3 bg-white border border-slate-200 rounded-xl p-3">
-                <select
-                    value={localTipo}
-                    onChange={e => { setLocalTipo(e.target.value); onTipoFilter(e.target.value || null); }}
-                    className="px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                >
-                    <option value="">Todos los tipos</option>
-                    <option value="DEVENGADA">Devengada</option>
-                    <option value="PAGADA">Pagada</option>
-                    <option value="AJUSTE">Ajuste</option>
-                    <option value="REVERSO">Reverso</option>
-                </select>
+                <div className="w-[180px]">
+                    <SearchableSelect
+                        compact
+                        value={localTipo}
+                        onChange={(val) => { setLocalTipo(val); onTipoFilter(val || null); }}
+                        placeholder="Todos los tipos"
+                        searchPlaceholder="Buscar tipo..."
+                        triggerClassName="border-slate-200 rounded-xl"
+                        options={[
+                            { value: "DEVENGADA", label: "Devengada" },
+                            { value: "PAGADA", label: "Pagada" },
+                            { value: "AJUSTE", label: "Ajuste" },
+                            { value: "REVERSO", label: "Reverso" },
+                        ]}
+                    />
+                </div>
                 <input
                     type="date"
                     value={localDateFrom}
