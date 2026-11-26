@@ -2,6 +2,7 @@ import * as ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { formatOpportunityCategories } from '@/lib/opportunityCategories';
 import { resolveOpportunityCloseDate } from '@/lib/opportunityCloseDate';
+import { formatDateOnlyDMY } from '@/lib/dateFilterHelpers';
 
 /**
  * Interface parameter for columns
@@ -525,6 +526,8 @@ export function mapOpportunityReportRow(
     setter: item.setter || '-',
     fecha_actividad: activityInfo.fecha_actividad,
     estado_actividad: activityInfo.estado_actividad,
+    // Fecha estimada de cierre (columna date fecha_cierre_estimada), mismo formato DD/MM/AAAA del listado.
+    fecha_estimada: formatDateOnlyDMY(item.fecha_cierre_estimada) || '-',
     // Fecha real de cierre: solo para Cerrada Ganada / Cerrada Perdida
     fecha_cierre: resolveOpportunityCloseDate(item) || '-'
   };

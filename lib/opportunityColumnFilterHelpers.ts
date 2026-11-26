@@ -9,7 +9,7 @@ export const DEFAULT_OPPORTUNITIES_PAGE_SIZE = 100;
 
 export interface OpportunityFilterState {
     channel?: string | null;
-    phase?: number | null;
+    phase?: number | number[] | null;
     ownerIds?: string[] | null;
     status?: 'all' | 'open' | 'won' | 'lost' | null;
     origin?: string | null;
@@ -96,6 +96,7 @@ export function isColumnFilterActive(colKey: string, state: OpportunityFilterSta
         case 'canal':
             return Boolean(state.channel);
         case 'fase':
+            if (Array.isArray(state.phase)) return state.phase.length > 0;
             return Boolean(state.phase);
         case 'vendedor':
             return Boolean(state.ownerIds && state.ownerIds.length > 0);

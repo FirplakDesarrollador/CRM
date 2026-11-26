@@ -14,6 +14,7 @@ import { OpportunityFilters } from "@/components/oportunidades/OpportunityFilter
 import { QuickDateFilter, FloatingDateFilterPopover } from "@/components/oportunidades/QuickDateFilter";
 import { FloatingColumnFilterPopover, FloatingColumnFilterAnchor } from "@/components/oportunidades/FloatingColumnFilterPopover";
 import { isColumnFilterActive, formatColumnHeaderTitle } from "@/lib/opportunityColumnFilterHelpers";
+import { readPersistedPhaseIds, withoutOpportunityStatusParam } from "@/lib/opportunityPhaseListFilter";
 import { isToolbarOwnedTableColumn } from "@/lib/tableFilterPolicy";
 import { parseHandsontableDate } from "@/lib/dateFilterHelpers";
 import { computeOpportunityActivitySummary } from "@/lib/opportunityActivities";
@@ -100,7 +101,7 @@ function OpportunitiesContent() {
         sortAsc,
         idFilter,
         setIdFilter
-    } = useOpportunitiesServer({ pageSize: 100 });
+    } = useOpportunitiesServer({ pageSize: 100, initialStatus: 'all', ignorePersistedStatus: true });
 
     const { tableContainerRef, sentinelRef, triggerLoadMore } = useInfiniteScroll({
         loading,
@@ -188,15 +189,16 @@ function OpportunitiesContent() {
         }
         return null;
     });
-    const [selectedPhase, setSelectedPhase] = useState<number | null>(() => {
-        const fromUrl = searchParams.get('phase');
-        if (fromUrl) return Number(fromUrl);
+    const [selectedPhaseIds, setSelectedPhaseIds] = useState<number[]>(() => {
+        const fromUrl = readPersistedPhaseIds(searchParams.get('phases'), searchParams.get('phase'));
+        if (fromUrl.length > 0) return fromUrl;
         if (typeof window !== 'undefined') {
             const saved = sessionStorage.getItem('crm_oportunidades_state');
-            const value = saved ? new URLSearchParams(saved).get('phase') : null;
-            return value ? Number(value) : null;
+            if (!saved) return [];
+            const params = new URLSearchParams(saved);
+            return readPersistedPhaseIds(params.get('phases'), params.get('phase'));
         }
-        return null;
+        return [];
     });
     const [selectedOrigin, setSelectedOrigin] = useState<string | null>(() => {
         const fromUrl = searchParams.get('origin');
@@ -207,15 +209,7 @@ function OpportunitiesContent() {
         }
         return null;
     });
-    const [statusFilter, setStatusFilterState] = useState<'all' | 'open' | 'won' | 'lost'>(() => {
-        const fromUrl = searchParams.get('status');
-        if (fromUrl) return (fromUrl as any);
-        if (typeof window !== 'undefined') {
-            const saved = sessionStorage.getItem('crm_oportunidades_state');
-            if (saved) return (new URLSearchParams(saved).get('status') as any) || 'open';
-        }
-        return 'open';
-    });
+    const [statusFilter, setStatusFilterState] = useState<'all' | 'open' | 'won' | 'lost'>('all');
 
     const [startDate, setStartDateState] = useState<string | null>(() => {
         const fromUrl = searchParams.get('start');
@@ -321,8 +315,10 @@ function OpportunitiesContent() {
         const initialChannel = searchParams.get('channel') || saved.get('channel') || null;
         const initialSubclass = searchParams.get('subclass') || saved.get('subclass') || null;
         const initialSegment = searchParams.get('segment') || saved.get('segment') || null;
-        const initialPhase = searchParams.get('phase') || saved.get('phase') || null;
-        const initialStatus = searchParams.get('status') || saved.get('status') || 'open';
+        const initialPhaseIds = readPersistedPhaseIds(
+            searchParams.get('phases') || saved.get('phases'),
+            searchParams.get('phase') || saved.get('phase')
+        );
         const initialOrigin = searchParams.get('origin') || saved.get('origin') || null;
         const rawSort = searchParams.get('sort') || saved.get('sort');
         const initialSort = (rawSort && rawSort !== 'updated_at') ? rawSort : 'created_at';
@@ -350,16 +346,15 @@ function OpportunitiesContent() {
         const segmentNum = initialSegment ? Number(initialSegment) : null;
         setSegmentFilter(segmentNum);
         setSelectedSegment(segmentNum);
-        const phaseNum = initialPhase ? Number(initialPhase) : null;
-        setPhaseFilter(phaseNum);
-        setSelectedPhase(phaseNum);
+        setPhaseFilter(initialPhaseIds);
+        setSelectedPhaseIds(initialPhaseIds);
         const countryNum = initialCountry ? Number(initialCountry) : null;
         setCountryFilter(countryNum);
         setSelectedCountry(countryNum);
         setCityFilter(initialCity);
         setSelectedCity(initialCity);
-        setStatusFilter(initialStatus as any);
-        setStatusFilterState(initialStatus as any);
+        setStatusFilter('all');
+        setStatusFilterState('all');
         setOriginFilter(initialOrigin);
         setSelectedOrigin(initialOrigin);
         setPlantaFilter(initialPlanta);
@@ -390,7 +385,8 @@ function OpportunitiesContent() {
                 const savedParams = new URLSearchParams(savedState);
                 // Evitamos redireccionar al detalle por defecto para siempre mostrar la lista inicial
                 savedParams.delete('id');
-                const restoredState = savedParams.toString();
+                savedParams.delete('status');
+                const restoredState = withoutOpportunityStatusParam(savedParams.toString());
                 if (restoredState !== '') {
                     router.replace(`/oportunidades?${restoredState}`, { scroll: false });
                 }
@@ -411,6 +407,7 @@ function OpportunitiesContent() {
     useEffect(() => {
         const timer = setTimeout(() => {
             const params = new URLSearchParams(Array.from(searchParams.entries()));
+            params.delete('status');
             if (inputValue) params.set('search', inputValue);
             else params.delete('search');
             const next = new URLSearchParams(params.toString());
@@ -444,8 +441,9 @@ function OpportunitiesContent() {
         if (selectedSegment) params.set('segment', String(selectedSegment));
         else params.delete('segment');
 
-        if (selectedPhase) params.set('phase', String(selectedPhase));
-        else params.delete('phase');
+        if (selectedPhaseIds.length > 0) params.set('phases', selectedPhaseIds.join(','));
+        else params.delete('phases');
+        params.delete('phase');
 
         if (selectedOrigin) params.set('origin', selectedOrigin);
         else params.delete('origin');
@@ -459,8 +457,7 @@ function OpportunitiesContent() {
         if (selectedIdFilter && selectedIdFilter.trim() !== '') params.set('oppId', selectedIdFilter.trim());
         else params.delete('oppId');
 
-        if (statusFilter && statusFilter !== 'open') params.set('status', statusFilter);
-        else params.delete('status');
+        params.delete('status');
         
         if (startDate) params.set('start', startDate);
         else params.delete('start');
@@ -507,11 +504,11 @@ function OpportunitiesContent() {
         
         const query = queryString ? `?${queryString}` : window.location.pathname;
         router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
-    }, [tab, selectedAccountOwnerIds, selectedChannel, selectedSubclass, selectedSegment, selectedPhase, selectedOrigin, selectedPlanta, selectedFamilia, selectedIdFilter, selectedCountry, selectedCity, setterFilter, statusFilter, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc, searchParams, router]); // Search is handled by the debounced effect above.
+    }, [tab, selectedAccountOwnerIds, selectedChannel, selectedSubclass, selectedSegment, selectedPhaseIds, selectedOrigin, selectedPlanta, selectedFamilia, selectedIdFilter, selectedCountry, selectedCity, setterFilter, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc, searchParams, router]); // Search is handled by the debounced effect above.
 
 
     const handleFilterChange = useCallback(({ 
-        channelId, subclassificationId, segmentId, phaseId, statusFilter: newStatus,
+        channelId, subclassificationId, segmentId, phaseIds,
         startDate: sD, endDate: eD, startClosingDate: sCD, endClosingDate: eCD,
         origin: oG,
         planta: pL,
@@ -521,8 +518,7 @@ function OpportunitiesContent() {
         channelId: string | null;
         subclassificationId: number | null;
         segmentId: number | null;
-        phaseId: number | null;
-        statusFilter: 'all' | 'open' | 'won' | 'lost';
+        phaseIds: number[];
         startDate: string | null;
         endDate: string | null;
         startClosingDate: string | null;
@@ -535,8 +531,7 @@ function OpportunitiesContent() {
         setSelectedChannel(channelId);
         setSelectedSubclass(subclassificationId);
         setSelectedSegment(segmentId);
-        setSelectedPhase(phaseId);
-        setStatusFilterState(newStatus);
+        setSelectedPhaseIds(phaseIds);
         setStartDateState(sD);
         setEndDateState(eD);
         setStartClosingDateState(sCD);
@@ -549,8 +544,8 @@ function OpportunitiesContent() {
         setChannelFilter(channelId);
         setSubclassificationFilter(subclassificationId);
         setSegmentFilter(segmentId);
-        setPhaseFilter(phaseId);
-        setStatusFilter(newStatus);
+        setPhaseFilter(phaseIds);
+        setStatusFilter('all');
         setStartDate(sD);
         setEndDate(eD);
         setStartClosingDate(sCD);
@@ -947,14 +942,13 @@ function OpportunitiesContent() {
     const [showAdvancedFilters, setShowAdvancedFilters] = useState(() => Boolean(
         searchParams.get('oppId') || searchParams.get('id') ||
         searchParams.get('channel') || searchParams.get('subclass') || searchParams.get('segment') ||
-        searchParams.get('phase') || searchParams.get('origin') || searchParams.get('start') ||
-        searchParams.get('end') || searchParams.get('startClose') || searchParams.get('endClose') ||
-        (searchParams.get('status') && searchParams.get('status') !== 'open')
+        searchParams.get('phase') || searchParams.get('phases') || searchParams.get('origin') || searchParams.get('start') ||
+        searchParams.get('end') || searchParams.get('startClose') || searchParams.get('endClose')
     ));
     const [showColumnPicker, setShowColumnPicker] = useState(false);
     const activeFilterCount = (selectedIdFilter ? 1 : 0) + selectedAccountOwnerIds.length + (selectedChannel ? 1 : 0) + (selectedSubclass ? 1 : 0) +
-        (selectedSegment ? 1 : 0) + (selectedPhase ? 1 : 0) + (selectedOrigin ? 1 : 0) +
-        (statusFilter !== 'open' ? 1 : 0) + (startDate ? 1 : 0) + (endDate ? 1 : 0) +
+        (selectedSegment ? 1 : 0) + (selectedPhaseIds.length > 0 ? 1 : 0) + (selectedOrigin ? 1 : 0) +
+        (startDate ? 1 : 0) + (endDate ? 1 : 0) +
         (startClosingDate ? 1 : 0) + (endClosingDate ? 1 : 0) +
         (selectedCountry ? 1 : 0) + (selectedCity ? 1 : 0) + (setterFilter ? 1 : 0);
 
@@ -1027,15 +1021,11 @@ function OpportunitiesContent() {
                             startDate={startDate}
                             endDate={endDate}
                             statusFilter={statusFilter}
-                            onDateChange={({ startDate: sD, endDate: eD, statusFilter: newStatus }) => {
+                            onDateChange={({ startDate: sD, endDate: eD }) => {
                                 setStartDateState(sD);
                                 setStartDate(sD);
                                 setEndDateState(eD);
                                 setEndDate(eD);
-                                if (newStatus) {
-                                    setStatusFilterState(newStatus);
-                                    setStatusFilter(newStatus);
-                                }
                             }}
                         />
                     </div>
@@ -1217,8 +1207,7 @@ function OpportunitiesContent() {
                         initialChannelId={selectedChannel}
                         initialSubclassId={selectedSubclass}
                         initialSegmentId={selectedSegment}
-                        initialPhaseId={selectedPhase}
-                        initialStatusFilter={statusFilter}
+                        initialPhaseIds={selectedPhaseIds}
                         initialOrigin={selectedOrigin}
                         initialPlanta={selectedPlanta}
                         initialFamilia={selectedFamilia}
@@ -1736,7 +1725,7 @@ function OpportunitiesContent() {
                                             const sortKey = fieldSortMap[colDef.data];
                                             const isFiltered = isColumnFilterActive(colDef.data, {
                                                 channel: selectedChannel,
-                                                phase: selectedPhase,
+                                                phase: selectedPhaseIds,
                                                 ownerIds: selectedAccountOwnerIds,
                                                 status: statusFilter,
                                                 origin: selectedOrigin,
@@ -1770,15 +1759,11 @@ function OpportunitiesContent() {
                                     startDate={startDate}
                                     endDate={endDate}
                                     statusFilter={statusFilter}
-                                    onDateChange={({ startDate: sD, endDate: eD, statusFilter: newStatus }) => {
+                                    onDateChange={({ startDate: sD, endDate: eD }) => {
                                         setStartDateState(sD);
                                         setStartDate(sD);
                                         setEndDateState(eD);
                                         setEndDate(eD);
-                                        if (newStatus) {
-                                            setStatusFilterState(newStatus);
-                                            setStatusFilter(newStatus);
-                                        }
                                     }}
                                     onClose={() => setHeaderDateFilterAnchor(null)}
                                 />
@@ -1792,20 +1777,16 @@ function OpportunitiesContent() {
                                         setSelectedChannel(ch);
                                         setChannelFilter(ch);
                                     }}
-                                    selectedPhase={selectedPhase}
+                                    selectedPhaseIds={selectedPhaseIds}
                                     onSelectPhase={(ph) => {
-                                        setSelectedPhase(ph);
-                                        setPhaseFilter(ph);
+                                        const next = ph == null ? [] : [ph];
+                                        setSelectedPhaseIds(next);
+                                        setPhaseFilter(next);
                                     }}
                                     selectedAccountOwnerIds={selectedAccountOwnerIds}
                                     onSelectAccountOwners={(owners) => {
                                         setSelectedAccountOwnerIds(owners);
                                         setAccountOwnerIds(owners);
-                                    }}
-                                    statusFilter={statusFilter}
-                                    onSelectStatus={(st) => {
-                                        setStatusFilterState(st);
-                                        setStatusFilter(st);
                                     }}
                                     selectedOrigin={selectedOrigin}
                                     onSelectOrigin={(orig) => {

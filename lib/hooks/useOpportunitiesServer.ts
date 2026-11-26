@@ -6,7 +6,7 @@ import { useSyncStore } from '@/lib/stores/useSyncStore';
 import { matchesSearchTokens, getSearchTokens, getPhoneIlikePatterns, accentInsensitiveCondition, applyAccentInsensitiveFilter } from '@/lib/utils';
 import { getCellphoneSearchDigits, findPhoneMatchesServer, findPhoneMatchesLocal, opportunityMatchesPhone, PhoneSearchMatches } from '@/lib/phoneSearch';
 import { computeOpportunityActivitySummary, OpportunityActivitySummary, ActivityItem } from '@/lib/opportunityActivities';
-import { PROSPECTO_PHASE_ID, getEquivalentPhaseIds, PhaseCatalogItem, calculateTotalAmount, DEFAULT_OPPORTUNITIES_PAGE_SIZE } from '@/lib/opportunityColumnFilterHelpers';
+import { PhaseCatalogItem, calculateTotalAmount, DEFAULT_OPPORTUNITIES_PAGE_SIZE } from '@/lib/opportunityColumnFilterHelpers';
 import { toStartOfDayISO, toEndOfDayISO, toDateOnly, isDateOnlyInRange } from '@/lib/dateFilterHelpers';
 import { buildWonCloseDateOrFilter, matchesOpportunityListDateRange } from '@/lib/opportunityListDateFilter';
 import { isClosedPhaseName, splitPhaseIdsByOutcome } from '@/lib/opportunityPhase';
@@ -15,6 +15,7 @@ import { activitiesVisibleToViewer, canViewAllAccountsContactsOpportunities, sel
 import { FlatQuoteItemProduct, getOpportunityIdsByProductFilters } from '@/lib/opportunityProductFilterHelpers';
 import { fetchFullCatalog, PriceListProduct } from '@/lib/hooks/useProducts';
 import { readFullPhaseCatalog } from '@/lib/phaseCatalogStore';
+import { normalizePhaseFilterValue, opportunityMatchesPhaseIds, readPersistedPhaseIds, resolvePhaseIdQuery } from '@/lib/opportunityPhaseListFilter';
 
 export type OpportunityServer = {
     id: string;
@@ -45,9 +46,11 @@ type UseOpportunitiesServerProps = {
     initialStatus?: string;
     /** Ignora los filtros guardados del listado (URL y sessionStorage); para vistas embebidas. */
     ignorePersistedFilters?: boolean;
+    /** El home ya no filtra por estado: no relee `status` de la URL ni de la sesión. */
+    ignorePersistedStatus?: boolean;
 };
 
-export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_SIZE, initialStatus, ignorePersistedFilters = false }: UseOpportunitiesServerProps = {}) {
+export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_SIZE, initialStatus, ignorePersistedFilters = false, ignorePersistedStatus = false }: UseOpportunitiesServerProps = {}) {
     const [data, setData] = useState<OpportunityServer[]>([]);
     const [count, setCount] = useState<number>(0);
     const [loading, setLoading] = useState<boolean>(true);
@@ -84,11 +87,17 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
         const val = getInitialParam('segment');
         return val ? Number(val) : null;
     });
-    const [phaseFilter, setPhaseFilter] = useState<number | null>(() => {
-        const val = getInitialParam('phase');
-        return val ? Number(val) : null;
+    const [phaseFilter, setPhaseFilterState] = useState<number[]>(() => readPersistedPhaseIds(getInitialParam('phases'), getInitialParam('phase')));
+    const setPhaseFilter = useCallback((value: number | number[] | null) => {
+        setPhaseFilterState(normalizePhaseFilterValue(value));
+    }, []);
+    const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => {
+        if (!ignorePersistedStatus) {
+            const saved = getInitialParam('status') as StatusFilter | null;
+            if (saved) return saved;
+        }
+        return (initialStatus as StatusFilter | undefined) || 'open';
     });
-    const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => (getInitialParam('status') as StatusFilter | null) || (initialStatus as StatusFilter | undefined) || 'open');
     const [originFilter, setOriginFilter] = useState<string | null>(() => getInitialParam('origin'));
     const [plantaFilter, setPlantaFilter] = useState<string | null>(() => getInitialParam('planta'));
     const [familiaFilter, setFamiliaFilter] = useState<string | null>(() => getInitialParam('familia'));
@@ -273,18 +282,12 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 localOpps = localOpps.filter(o => o.segmento_id === segmentFilter);
             }
 
-            if (phaseFilter) {
-                if (phaseFilter === PROSPECTO_PHASE_ID) {
-                    localOpps = localOpps.filter(o => !o.fase_id);
-                } else {
-                    const equivalentIds = getEquivalentPhaseIds(allPhasesRef.current, phaseFilter);
-                    localOpps = localOpps.filter(o => o.fase_id && equivalentIds.includes(Number(o.fase_id)));
-                }
+            if (phaseFilter.length > 0) {
+                localOpps = localOpps.filter(o => opportunityMatchesPhaseIds(o.fase_id, phaseFilter, allPhasesRef.current));
             }
 
-            const isFilteringExplicitClosedPhase = Boolean(
-                phaseFilter &&
-                allPhasesRef.current.some(p => p.id === phaseFilter && isClosedPhaseName(p.nombre))
+            const isFilteringExplicitClosedPhase = phaseFilter.some(id =>
+                id > 0 && allPhasesRef.current.some(p => Number(p.id) === id && isClosedPhaseName(p.nombre))
             );
 
             if (!isFilteringExplicitClosedPhase && statusFilter !== 'all') {
@@ -641,9 +644,8 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                     q = q.eq('account.subclasificacion_id', subclassificationFilter);
                 }
 
-                const isFilteringExplicitClosedPhase = Boolean(
-                    phaseFilter &&
-                    allPhasesRef.current.some(p => p.id === phaseFilter && isClosedPhaseName(p.nombre))
+                const isFilteringExplicitClosedPhase = phaseFilter.some(id =>
+                    id > 0 && allPhasesRef.current.some(p => Number(p.id) === id && isClosedPhaseName(p.nombre))
                 );
 
                 if (!isFilteringExplicitClosedPhase) {
@@ -665,16 +667,18 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                     q = q.eq('segmento_id', segmentFilter);
                 }
 
-                if (phaseFilter) {
-                    if (phaseFilter === PROSPECTO_PHASE_ID) {
+                if (phaseFilter.length > 0) {
+                    const { includeUnassigned, faseIds } = resolvePhaseIdQuery(phaseFilter, allPhasesRef.current);
+                    if (includeUnassigned && faseIds.length === 0) {
                         q = q.is('fase_id', null);
+                    } else if (!includeUnassigned && faseIds.length === 1) {
+                        q = q.eq('fase_id', faseIds[0]);
+                    } else if (!includeUnassigned && faseIds.length > 1) {
+                        q = q.in('fase_id', faseIds);
+                    } else if (includeUnassigned && faseIds.length > 0) {
+                        q = q.or(`fase_id.is.null,fase_id.in.(${faseIds.join(',')})`);
                     } else {
-                        const equivalentIds = getEquivalentPhaseIds(allPhasesRef.current, phaseFilter);
-                        if (equivalentIds.length > 1) {
-                            q = q.in('fase_id', equivalentIds);
-                        } else {
-                            q = q.eq('fase_id', equivalentIds[0]);
-                        }
+                        q = q.eq('fase_id', -1);
                     }
                 }
 

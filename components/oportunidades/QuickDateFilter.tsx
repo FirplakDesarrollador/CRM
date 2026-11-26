@@ -16,7 +16,6 @@ interface DateFilterPanelProps {
     title?: string;
     startDate: string | null;
     endDate: string | null;
-    statusFilter?: string;
     onDateChange: (payload: DateFilterChangePayload) => void;
     onClose?: () => void;
 }
@@ -25,7 +24,6 @@ export function DateFilterPanel({
     title = "Fecha de Creación",
     startDate,
     endDate,
-    statusFilter,
     onDateChange,
     onClose
 }: DateFilterPanelProps) {
@@ -33,13 +31,11 @@ export function DateFilterPanel({
 
     const [customStart, setCustomStart] = useState<string>(startDate || "");
     const [customEnd, setCustomEnd] = useState<string>(endDate || "");
-    const [includeAllStatuses, setIncludeAllStatuses] = useState<boolean>(statusFilter === 'all');
 
     useEffect(() => {
         setCustomStart(startDate || "");
         setCustomEnd(endDate || "");
-        setIncludeAllStatuses(statusFilter === 'all');
-    }, [startDate, endDate, statusFilter]);
+    }, [startDate, endDate]);
 
     const isUpToToday = !startDate && endDate === todayStr;
     const isToday = startDate === todayStr && endDate === todayStr;
@@ -47,12 +43,9 @@ export function DateFilterPanel({
 
     const handleApplyPreset = (preset: DateRangePreset) => {
         const range = preset.getRange();
-        // If up_to_today, by default bring all statuses to bring all historical data as user requested
-        const shouldIncludeAll = preset.id === 'up_to_today' ? true : includeAllStatuses;
         onDateChange({
             startDate: range.startDate,
-            endDate: range.endDate,
-            ...(shouldIncludeAll ? { statusFilter: 'all' as const } : {})
+            endDate: range.endDate
         });
         onClose?.();
     };
@@ -61,8 +54,7 @@ export function DateFilterPanel({
         e.preventDefault();
         onDateChange({
             startDate: customStart || null,
-            endDate: customEnd || null,
-            ...(includeAllStatuses ? { statusFilter: 'all' as const } : {})
+            endDate: customEnd || null
         });
         onClose?.();
     };
@@ -210,19 +202,6 @@ export function DateFilterPanel({
                     </div>
                 </div>
 
-                {/* Traer todos los datos (ganadas, perdidas, abiertas) */}
-                <label className="flex items-start gap-2 pt-1 text-[11px] text-slate-600 cursor-pointer select-none">
-                    <input
-                        type="checkbox"
-                        checked={includeAllStatuses}
-                        onChange={(e) => setIncludeAllStatuses(e.target.checked)}
-                        className="mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                    />
-                    <span className="leading-tight">
-                        <strong className="text-slate-800 font-semibold">Traer todos los datos</strong> (incluir ganadas y perdidas del histórico)
-                    </span>
-                </label>
-
                 <div className="pt-1 flex gap-2">
                     <button
                         type="submit"
@@ -339,7 +318,6 @@ export function QuickDateFilter({
                         title={listDateFilterTitle(statusFilter)}
                         startDate={startDate}
                         endDate={endDate}
-                        statusFilter={statusFilter}
                         onDateChange={onDateChange}
                         onClose={() => setIsOpen(false)}
                     />
@@ -409,10 +387,9 @@ export function FloatingDateFilterPopover({
             onMouseDown={(e) => e.stopPropagation()}
         >
             <DateFilterPanel
-                title={anchor.title || "Fecha de Creación"}
+                title={anchor.title || listDateFilterTitle(statusFilter)}
                 startDate={startDate}
                 endDate={endDate}
-                statusFilter={statusFilter}
                 onDateChange={onDateChange}
                 onClose={onClose}
             />

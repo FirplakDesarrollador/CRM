@@ -726,7 +726,7 @@ export default function InformesPage() {
                     { header: 'VALOR', key: 'amount', width: 15 },
                     { header: 'MONEDA', key: 'currency_id', width: 10 },
                     { header: 'PROBABILIDAD (%)', key: 'probabilidad', width: 15 },
-                    { header: 'FECHA CIERRE EST.', key: 'fecha_cierre_estimada', width: 18 },
+                    { header: 'FECHA ESTIMADA', key: 'fecha_estimada', width: 18 },
                     // Fecha real de cierre (Cerrada Ganada / Cerrada Perdida) — B2C y admins
                     ...(canSeeB2CReportColumns ? [{ header: 'FECHA DE CIERRE', key: 'fecha_cierre', width: 18 }] : []),
                     { header: 'FECHA ENTREGA', key: 'fecha_entrega', width: 18 },

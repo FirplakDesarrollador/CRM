@@ -1,9 +1,9 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "@/lib/supabase";
-import { Filter, X, CircleDot, Trophy, XCircle } from "lucide-react";
+import { Filter, X, ChevronDown } from "lucide-react";
 import { cn } from "@/components/ui/utils";
 import { useFullCatalog } from "@/lib/hooks/useProducts";
-import { selectPhasesForPicker } from "@/lib/opportunityPhaseCatalog";
+import { buildPhaseFilterOptions } from "@/lib/opportunityPhaseListFilter";
 
 type Channel = {
     id: string;
@@ -39,16 +39,12 @@ type Origin = {
     is_active?: boolean;
 };
 
-// Status filter type - includes both open stages and closed states
-type StatusFilter = 'all' | 'open' | 'won' | 'lost';
-
 interface OpportunityFiltersProps {
     onFilterChange: (filters: {
         channelId: string | null;
         subclassificationId: number | null;
         segmentId: number | null;
-        phaseId: number | null;
-        statusFilter: StatusFilter;
+        phaseIds: number[];
         startDate: string | null;
         endDate: string | null;
         startClosingDate: string | null;
@@ -61,8 +57,7 @@ interface OpportunityFiltersProps {
     initialChannelId?: string | null;
     initialSubclassId?: number | null;
     initialSegmentId?: number | null;
-    initialPhaseId?: number | null;
-    initialStatusFilter?: StatusFilter;
+    initialPhaseIds?: number[];
     initialOrigin?: string | null;
     initialPlanta?: string | null;
     initialFamilia?: string | null;
@@ -80,8 +75,7 @@ export function OpportunityFilters({
     initialChannelId,
     initialSubclassId,
     initialSegmentId,
-    initialPhaseId,
-    initialStatusFilter,
+    initialPhaseIds,
     initialOrigin,
     initialPlanta,
     initialFamilia,
@@ -98,8 +92,10 @@ export function OpportunityFilters({
     const [selectedChannel, setSelectedChannel] = useState<string | null>(initialChannelId || null);
     const [selectedSubclass, setSelectedSubclass] = useState<number | null>(initialSubclassId || null);
     const [selectedSegment, setSelectedSegment] = useState<number | null>(initialSegmentId || null);
-    const [selectedPhase, setSelectedPhase] = useState<number | null>(initialPhaseId || null);
-    const [statusFilter, setStatusFilter] = useState<StatusFilter>(initialStatusFilter || 'open');
+    const [selectedPhaseIds, setSelectedPhaseIds] = useState<number[]>(initialPhaseIds || []);
+    const [phaseMenuOpen, setPhaseMenuOpen] = useState(false);
+    const [phaseSearch, setPhaseSearch] = useState("");
+    const phaseMenuRef = useRef<HTMLDivElement>(null);
     const [selectedOrigin, setSelectedOrigin] = useState<string | null>(initialOrigin || null);
     const [selectedPlanta, setSelectedPlanta] = useState<string | null>(initialPlanta || null);
     const [selectedFamilia, setSelectedFamilia] = useState<string | null>(initialFamilia || null);
@@ -150,14 +146,8 @@ export function OpportunityFilters({
     }, [initialSegmentId]);
 
     useEffect(() => {
-        setSelectedPhase(initialPhaseId || null);
-    }, [initialPhaseId]);
-
-    useEffect(() => {
-        if (initialStatusFilter) {
-            setStatusFilter(initialStatusFilter);
-        }
-    }, [initialStatusFilter]);
+        setSelectedPhaseIds(initialPhaseIds || []);
+    }, [initialPhaseIds]);
 
     useEffect(() => {
         setStartDate(initialDates?.startDate || null);
@@ -200,13 +190,12 @@ export function OpportunityFilters({
 
                 // If initial filters were set (e.g., from URL on back navigation),
                 // notify the parent so the hook fetches with correct filters
-                if (initialChannelId || initialSubclassId || initialSegmentId || initialPhaseId || initialOrigin || initialPlanta || initialFamilia || (initialStatusFilter && initialStatusFilter !== 'open') || initialDates) {
+                if (initialChannelId || initialSubclassId || initialSegmentId || (initialPhaseIds && initialPhaseIds.length > 0) || initialOrigin || initialPlanta || initialFamilia || initialDates) {
                     onFilterChange({
                         channelId: initialChannelId || null,
                         subclassificationId: initialSubclassId || null,
                         segmentId: initialSegmentId || null,
-                        phaseId: initialPhaseId || null,
-                        statusFilter: initialStatusFilter || 'open',
+                        phaseIds: initialPhaseIds || [],
                         startDate: initialDates?.startDate || null,
                         endDate: initialDates?.endDate || null,
                         startClosingDate: initialDates?.startClosingDate || null,
@@ -238,10 +227,35 @@ export function OpportunityFilters({
         return segments.filter(seg => seg.subclasificacion_id === selectedSubclass);
     }, [selectedSubclass, segments]);
 
-    const availablePhases = useMemo(() => {
-        if (!selectedChannel) return [];
-        return selectPhasesForPicker(phases, selectedChannel);
-    }, [selectedChannel, phases]);
+    const channelLabels = useMemo(() => {
+        const labels: Record<string, string> = {};
+        for (const channel of channels) {
+            if (channel.id) labels[channel.id] = channel.nombre || channel.id;
+        }
+        return labels;
+    }, [channels]);
+
+    const phaseOptions = useMemo(
+        () => buildPhaseFilterOptions(phases, selectedChannel, channelLabels),
+        [phases, selectedChannel, channelLabels]
+    );
+
+    const visiblePhaseOptions = useMemo(() => {
+        const term = phaseSearch.trim().toLowerCase();
+        if (!term) return phaseOptions;
+        return phaseOptions.filter(option => option.label.toLowerCase().includes(term));
+    }, [phaseOptions, phaseSearch]);
+
+    useEffect(() => {
+        if (!phaseMenuOpen) return;
+        const onPointerDown = (event: MouseEvent) => {
+            if (phaseMenuRef.current && !phaseMenuRef.current.contains(event.target as Node)) {
+                setPhaseMenuOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', onPointerDown);
+        return () => document.removeEventListener('mousedown', onPointerDown);
+    }, [phaseMenuOpen]);
 
     const availablePlants = useMemo(() => {
         const list = Array.from(new Set(products.map(p => p.planta).filter(Boolean))).sort() as string[];
@@ -255,19 +269,13 @@ export function OpportunityFilters({
         return Array.from(new Set(filtered.map(p => p.familia).filter(Boolean))).sort() as string[];
     }, [products, selectedPlanta]);
 
-    // Handle Status Filter Change
-    const handleStatusChange = (status: StatusFilter) => {
-        setStatusFilter(status);
-        // When changing status filter, reset phase selection if not compatible
-        if (status === 'won' || status === 'lost') {
-            setSelectedPhase(null);
-        }
+    const publishPhaseIds = (nextIds: number[]) => {
+        setSelectedPhaseIds(nextIds);
         onFilterChange({
             channelId: selectedChannel,
             subclassificationId: selectedSubclass,
             segmentId: selectedSegment,
-            phaseId: null,
-            statusFilter: status,
+            phaseIds: nextIds,
             startDate,
             endDate,
             startClosingDate,
@@ -279,20 +287,26 @@ export function OpportunityFilters({
         });
     };
 
+    const togglePhase = (phaseId: number) => {
+        const nextIds = selectedPhaseIds.includes(phaseId)
+            ? selectedPhaseIds.filter(id => id !== phaseId)
+            : [...selectedPhaseIds, phaseId];
+        publishPhaseIds(nextIds);
+    };
+
     // Handle Changes
     const handleChannelChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
         const val = e.target.value || null;
         setSelectedChannel(val);
         setSelectedSubclass(null);
         setSelectedSegment(null);
-        setSelectedPhase(null);
+        setSelectedPhaseIds([]);
 
         onFilterChange({
             channelId: val,
             subclassificationId: null,
             segmentId: null,
-            phaseId: null,
-            statusFilter,
+            phaseIds: [],
             startDate,
             endDate,
             startClosingDate,
@@ -313,8 +327,7 @@ export function OpportunityFilters({
             channelId: selectedChannel,
             subclassificationId: val,
             segmentId: null,
-            phaseId: selectedPhase,
-            statusFilter,
+            phaseIds: selectedPhaseIds,
             startDate,
             endDate,
             startClosingDate,
@@ -333,32 +346,7 @@ export function OpportunityFilters({
             channelId: selectedChannel,
             subclassificationId: selectedSubclass,
             segmentId: val,
-            phaseId: selectedPhase,
-            statusFilter,
-            startDate,
-            endDate,
-            startClosingDate,
-            endClosingDate,
-            origin: selectedOrigin,
-            planta: selectedPlanta,
-            familia: selectedFamilia,
-            idFilter
-        });
-    };
-
-    const handlePhaseChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        const val = e.target.value ? Number(e.target.value) : null;
-        setSelectedPhase(val);
-        // When selecting a specific phase, set status to all or open
-        if (val) {
-            setStatusFilter('open');
-        }
-        onFilterChange({
-            channelId: selectedChannel,
-            subclassificationId: selectedSubclass,
-            segmentId: selectedSegment,
-            phaseId: val,
-            statusFilter: val ? 'open' : statusFilter,
+            phaseIds: selectedPhaseIds,
             startDate,
             endDate,
             startClosingDate,
@@ -377,8 +365,7 @@ export function OpportunityFilters({
             channelId: selectedChannel,
             subclassificationId: selectedSubclass,
             segmentId: selectedSegment,
-            phaseId: selectedPhase,
-            statusFilter,
+            phaseIds: selectedPhaseIds,
             startDate,
             endDate,
             startClosingDate,
@@ -405,8 +392,7 @@ export function OpportunityFilters({
             channelId: selectedChannel,
             subclassificationId: selectedSubclass,
             segmentId: selectedSegment,
-            phaseId: selectedPhase,
-            statusFilter,
+            phaseIds: selectedPhaseIds,
             startDate,
             endDate,
             startClosingDate,
@@ -425,8 +411,7 @@ export function OpportunityFilters({
             channelId: selectedChannel,
             subclassificationId: selectedSubclass,
             segmentId: selectedSegment,
-            phaseId: selectedPhase,
-            statusFilter,
+            phaseIds: selectedPhaseIds,
             startDate,
             endDate,
             startClosingDate,
@@ -445,8 +430,7 @@ export function OpportunityFilters({
             channelId: selectedChannel,
             subclassificationId: selectedSubclass,
             segmentId: selectedSegment,
-            phaseId: selectedPhase,
-            statusFilter,
+            phaseIds: selectedPhaseIds,
             startDate,
             endDate,
             startClosingDate,
@@ -462,8 +446,7 @@ export function OpportunityFilters({
         setSelectedChannel(null);
         setSelectedSubclass(null);
         setSelectedSegment(null);
-        setSelectedPhase(null);
-        setStatusFilter('open');
+        setSelectedPhaseIds([]);
         setSelectedOrigin(null);
         setSelectedPlanta(null);
         setSelectedFamilia(null);
@@ -476,8 +459,7 @@ export function OpportunityFilters({
             channelId: null,
             subclassificationId: null,
             segmentId: null,
-            phaseId: null,
-            statusFilter: 'open',
+            phaseIds: [],
             startDate: null,
             endDate: null,
             startClosingDate: null,
@@ -489,67 +471,79 @@ export function OpportunityFilters({
         });
     };
 
-    const hasActiveFilters = selectedChannel || selectedSubclass || selectedSegment || selectedPhase || selectedOrigin || selectedPlanta || selectedFamilia || Boolean(idFilter) || statusFilter !== 'open' || startDate || endDate || startClosingDate || endClosingDate;
+    const hasActiveFilters = selectedChannel || selectedSubclass || selectedSegment || selectedPhaseIds.length > 0 || selectedOrigin || selectedPlanta || selectedFamilia || Boolean(idFilter) || startDate || endDate || startClosingDate || endClosingDate;
 
     if (loadingMetadata) return <div className="text-xs text-slate-400">Cargando filtros...</div>;
 
     return (
         <div data-testid="opportunities-filters" className="space-y-3">
             <div className="flex flex-wrap items-center gap-3">
-            {/* Status Filter Pills - Quick access to closed states */}
-            <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
+            <div ref={phaseMenuRef} data-testid="opportunities-filter-phases" className="relative flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 bg-white shadow-sm">
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-tight">Fase:</span>
                 <button
-                    data-testid="opportunities-filter-status-all"
-                    onClick={() => handleStatusChange('all')}
-                    className={cn(
-                        "px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5",
-                        statusFilter === 'all'
-                            ? "bg-white text-slate-800 shadow-sm"
-                            : "text-slate-500 hover:text-slate-700"
-                    )}
+                    type="button"
+                    data-testid="opportunities-filter-phase-trigger"
+                    onClick={() => setPhaseMenuOpen(open => !open)}
+                    className="text-sm font-medium text-slate-700 max-w-[220px] truncate flex items-center gap-1"
                 >
-                    <CircleDot className="w-3 h-3" />
-                    Todas
+                    <span className="truncate">
+                        {selectedPhaseIds.length === 0
+                            ? "Todas"
+                            : phaseOptions
+                                .filter(option => selectedPhaseIds.includes(option.id))
+                                .map(option => option.label)
+                                .join(", ") || `${selectedPhaseIds.length} fases`}
+                    </span>
+                    <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                 </button>
-                <button
-                    data-testid="opportunities-filter-status-open"
-                    onClick={() => handleStatusChange('open')}
-                    className={cn(
-                        "px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5",
-                        statusFilter === 'open'
-                            ? "bg-white text-blue-600 shadow-sm"
-                            : "text-slate-500 hover:text-slate-700"
-                    )}
-                >
-                    <CircleDot className="w-3 h-3" />
-                    Abiertas
-                </button>
-                <button
-                    data-testid="opportunities-filter-status-won"
-                    onClick={() => handleStatusChange('won')}
-                    className={cn(
-                        "px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5",
-                        statusFilter === 'won'
-                            ? "bg-emerald-500 text-white shadow-sm"
-                            : "text-slate-500 hover:text-emerald-600"
-                    )}
-                >
-                    <Trophy className="w-3 h-3" />
-                    Ganadas
-                </button>
-                <button
-                    data-testid="opportunities-filter-status-lost"
-                    onClick={() => handleStatusChange('lost')}
-                    className={cn(
-                        "px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5",
-                        statusFilter === 'lost'
-                            ? "bg-red-500 text-white shadow-sm"
-                            : "text-slate-500 hover:text-red-600"
-                    )}
-                >
-                    <XCircle className="w-3 h-3" />
-                    Perdidas
-                </button>
+                {phaseMenuOpen && (
+                    <div className="absolute left-0 top-full z-50 mt-1 w-72 rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
+                        <input
+                            type="text"
+                            value={phaseSearch}
+                            onChange={(e) => setPhaseSearch(e.target.value)}
+                            placeholder="Buscar fase..."
+                            className="mb-2 w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-700 outline-none focus:border-blue-500 focus:bg-white"
+                        />
+                        <div className="max-h-64 space-y-0.5 overflow-y-auto">
+                            <button
+                                type="button"
+                                data-testid="opportunities-filter-phase-all"
+                                onClick={() => publishPhaseIds([])}
+                                className={cn(
+                                    "flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-xs font-medium",
+                                    selectedPhaseIds.length === 0 ? "bg-blue-50 font-bold text-blue-700" : "text-slate-600 hover:bg-slate-50"
+                                )}
+                            >
+                                <span>Todas</span>
+                            </button>
+                            {visiblePhaseOptions.map(option => {
+                                const checked = selectedPhaseIds.includes(option.id);
+                                return (
+                                    <label
+                                        key={option.id}
+                                        className={cn(
+                                            "flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs",
+                                            checked ? "bg-blue-50 font-semibold text-blue-700" : "text-slate-700 hover:bg-slate-50"
+                                        )}
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            data-testid={`opportunities-filter-phase-${option.id}`}
+                                            checked={checked}
+                                            onChange={() => togglePhase(option.id)}
+                                            className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600"
+                                        />
+                                        <span className="truncate">{option.label}</span>
+                                    </label>
+                                );
+                            })}
+                            {visiblePhaseOptions.length === 0 && (
+                                <p className="px-2 py-3 text-center text-xs text-slate-400">No hay fases con ese nombre.</p>
+                            )}
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Hierarchical Filters */}
@@ -603,32 +597,6 @@ export function OpportunityFilters({
                                 ))}
                             </select>
 
-                            <span className="text-slate-300">|</span>
-
-                            {/* Phase Select - Only show when status is 'all' or 'open' */}
-                            {(statusFilter === 'all' || statusFilter === 'open') && (
-                                <select
-                                    data-testid="opportunities-filter-phase"
-                                    className="text-sm bg-transparent border-none focus:ring-0 cursor-pointer text-slate-700 max-w-[160px]"
-                                    value={selectedPhase || ""}
-                                    onChange={handlePhaseChange}
-                                >
-                                    <option value="">Todas las Etapas</option>
-                                    {availablePhases.map(p => (
-                                        <option key={p.id} value={p.id}>{p.nombre}</option>
-                                    ))}
-                                </select>
-                            )}
-
-                            {/* Show closed status badge when won/lost selected */}
-                            {(statusFilter === 'won' || statusFilter === 'lost') && (
-                                <span className={cn(
-                                    "px-2 py-0.5 rounded text-xs font-medium",
-                                    statusFilter === 'won' ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"
-                                )}>
-                                    {statusFilter === 'won' ? 'Cerrada Ganada' : 'Cerrada Perdida'}
-                                </span>
-                            )}
                         </>
                     )}
                 </div>
@@ -701,8 +669,7 @@ export function OpportunityFilters({
                                     channelId: selectedChannel,
                                     subclassificationId: selectedSubclass,
                                     segmentId: selectedSegment,
-                                    phaseId: selectedPhase,
-                                    statusFilter,
+                                    phaseIds: selectedPhaseIds,
                                     startDate,
                                     endDate,
                                     startClosingDate,
