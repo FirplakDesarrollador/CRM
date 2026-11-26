@@ -11,6 +11,7 @@ import { db, LocalPais } from "@/lib/db";
 import { Plus, Search, Building, User, Pencil, Medal, Trash2, ArrowUpDown, ChevronUp, ChevronDown, MapPin, Briefcase, DollarSign, Globe } from "lucide-react";
 import { UserPickerFilter } from "@/components/cuentas/UserPickerFilter";
 import { canViewAllAccountsContactsOpportunities, sellerCanSeeAccount } from "@/lib/sellerVisibility";
+import { isTiendaUser, shouldScopeAccountsByRole } from "@/lib/tiendaVisibility";
 import { AccountFilters } from "@/components/cuentas/AccountFilters";
 import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
@@ -249,7 +250,7 @@ function AccountsContent() {
 
                 if (account && !error) {
                     // Asesor (VENDEDOR): solo abre cuentas propias o donde colabora en alguna oportunidad.
-                    if (isVendedor && currentUser?.id && !canViewAllAccountsContactsOpportunities(currentUser) && !sellerCanSeeAccount(account, currentUser.id, new Set())) {
+                    if (shouldScopeAccountsByRole(currentUser, 'VENDEDOR', canViewAllAccountsContactsOpportunities(currentUser)) && isVendedor && currentUser?.id && !sellerCanSeeAccount(account, currentUser.id, new Set())) {
                         const { data: collabRows } = await supabase
                             .from('CRM_Oportunidades_Colaboradores')
                             .select('oportunidad_id, CRM_Oportunidades!inner(account_id)')
@@ -546,7 +547,7 @@ function AccountsContent() {
                 onFiltersOpenChange={setShowFilters}
                 activeFilterCount={(selectedUserId ? 1 : 0) + (webFilter ? 1 : 0) + (currentChannel ? 1 : 0) + (currentSubclass ? 1 : 0) + (currentNivel ? 1 : 0) + (currentStartDate ? 1 : 0) + (currentEndDate ? 1 : 0)}
                 quickFilters={<>
-                    {(hasCoordinatorAccess || canViewAllAccountsContactsOpportunities(currentUser)) && <UserPickerFilter selectedUserId={selectedUserId} onUserSelect={handleUserSelect} />}
+                    {(hasCoordinatorAccess || isTiendaUser(currentUser) || canViewAllAccountsContactsOpportunities(currentUser)) && <UserPickerFilter selectedUserId={selectedUserId} onUserSelect={handleUserSelect} />}
                     <div className="flex rounded-lg bg-slate-100 p-1">
                         <button onClick={() => setWebFilter(false)} className={cn("rounded-md px-2.5 py-1.5 text-xs font-semibold", !webFilter ? "bg-white text-blue-700 shadow-sm" : "text-slate-500")}>Todas</button>
                         <button onClick={() => setWebFilter(true)} className={cn("rounded-md px-2.5 py-1.5 text-xs font-semibold", webFilter ? "bg-white text-blue-700 shadow-sm" : "text-slate-500")}>Web{webFilter && !loading ? ` (${count})` : ''}</button>

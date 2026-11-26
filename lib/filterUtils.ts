@@ -1,5 +1,6 @@
 import { matchesSearchTokens } from "@/lib/utils";
 import { canViewAllAccountsContactsOpportunities, sellerCanSeeAccount, sellerCanSeeOpportunity } from "@/lib/sellerVisibility";
+import { shouldScopeAccountsByRole } from "@/lib/tiendaVisibility";
 
 // ---------------------------------------------------------------------------
 // OPORTUNIDADES
@@ -244,6 +245,7 @@ export interface FilterAccountsOptions {
     subordinateIds?: string[];
     collabAccountIds?: Set<string>;
     webAccountIds?: Set<string>;
+    esTienda?: boolean;
 }
 
 export function filterAccounts<T extends {
@@ -283,7 +285,8 @@ export function filterAccounts<T extends {
         userRole,
         subordinateIds = [],
         collabAccountIds = new Set(),
-        webAccountIds = new Set()
+        webAccountIds = new Set(),
+        esTienda = false
     } = options;
 
     const isVendedor = userRole === "VENDEDOR";
@@ -291,12 +294,17 @@ export function filterAccounts<T extends {
         id: currentUserId,
         email: currentUserEmail,
     });
+    const scopeAccounts = shouldScopeAccountsByRole(
+        { id: currentUserId, es_tienda: esTienda },
+        userRole,
+        seesAllPortfolio
+    );
 
     return accounts.filter(a => {
-        // Role permissions. La excepción de cartera no recorta cuentas.
-        if (!seesAllPortfolio && isVendedor && currentUserId) {
+        // Role permissions. La excepción de cartera y es_tienda no recortan cuentas.
+        if (scopeAccounts && isVendedor && currentUserId) {
             if (!sellerCanSeeAccount(a, currentUserId, collabAccountIds)) return false;
-        } else if (!seesAllPortfolio && userRole === "COORDINADOR" && currentUserId) {
+        } else if (scopeAccounts && userRole === "COORDINADOR" && currentUserId) {
             const isOwner = a.owner_user_id === currentUserId || a.created_by === currentUserId;
             const isTeam = (a.owner_user_id && subordinateIds.includes(a.owner_user_id)) ||
                 (!a.owner_user_id && a.created_by && subordinateIds.includes(a.created_by));

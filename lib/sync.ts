@@ -2,7 +2,8 @@ import { activateLocalDatabase, db, getActiveLocalUserId, OutboxItem } from './d
 import type { Table } from 'dexie';
 import { supabase } from './supabase';
 import { hydrateOwnActivities } from './serverHydration';
-import { localIdsOutsideTiendaScope, readEsTiendaFlag } from './tiendaVisibility';
+import { localIdsOutsideTiendaScope, needsTiendaFullAccountPull, readEsTiendaFlag, TIENDA_ACCOUNTS_FULL_CURSOR } from './tiendaVisibility';
+import { useUserStore } from './stores/useUserStore';
 import { applyLossReasonCatalog } from './supabaseDirect';
 import { v4 as uuidv4 } from 'uuid';
 import { useSyncStore } from './stores/useSyncStore';
@@ -1714,6 +1715,14 @@ export class SyncEngine {
                 ? _user.id as string
                 : null
             : null;
+        useUserStore.getState().applyTiendaFlag(Boolean(tiendaUserId));
+        const tiendaAccountsCursor = _user?.id
+            ? await this.getSyncCursor(_user.id, TIENDA_ACCOUNTS_FULL_CURSOR)
+            : null;
+        const pullAllTiendaAccounts = needsTiendaFullAccountPull(
+            { id: _user?.id ?? null, es_tienda: Boolean(tiendaUserId) },
+            tiendaAccountsCursor
+        );
         const fullPortfolioCursor = _user?.id
             ? await this.getSyncCursor(_user.id, FULL_PORTFOLIO_CURSOR)
             : null;
@@ -1747,7 +1756,16 @@ export class SyncEngine {
             // Pull Accounts (CRM_Cuentas)
             // PERF OPTIMIZATION: Incremental sync based on lastSyncTime + Segmented Advisor Priority
             let accounts: any[] = [];
-            if (incrementalPortfolio && lastSync) {
+            if (pullAllTiendaAccounts) {
+                // Una vez: todas las cuentas. El tope de 3.000 dejaba al vendedor de tienda sin el resto.
+                accounts = await this.fetchAllPages<any>('CRM_Cuentas tienda full', (from, to) => supabase
+                    .from('CRM_Cuentas')
+                    .select('*')
+                    .eq('is_deleted', false)
+                    .order('updated_at', { ascending: true })
+                    .order('id', { ascending: true })
+                    .range(from, to), Number.POSITIVE_INFINITY, 1000, FULL_PORTFOLIO_SYNC_SAFETY_LIMIT);
+            } else if (incrementalPortfolio && lastSync) {
                 accounts = await this.fetchAllPages<any>('CRM_Cuentas delta', (from, to) => supabase
                     .from('CRM_Cuentas')
                     .select('*')
@@ -1839,6 +1857,11 @@ export class SyncEngine {
                 }
 
                 console.log(`[Sync] Merged ${mergedCount} accounts (${skippedCount} with pending changes skipped).`);
+            }
+
+            if (pullAllTiendaAccounts && _user?.id) {
+                await this.setSyncCursor(_user.id, TIENDA_ACCOUNTS_FULL_CURSOR, upperBound);
+                console.log('[Sync] Tienda: descarga completa de cuentas guardada.');
             }
 
             // CLEANUP: Remove locally-cached accounts that were deleted on the server

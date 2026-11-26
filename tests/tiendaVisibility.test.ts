@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { activitiesVisibleToViewer, shouldShowActivityNotification } from '@/lib/sellerVisibility';
-import { filterOpportunities } from '@/lib/filterUtils';
+import { filterAccounts, filterOpportunities } from '@/lib/filterUtils';
 import {
     canChooseOtherPortfolioUsers,
     filterSearchResultsForTienda,
     isMissingTiendaColumnError,
     isTiendaUser,
     localIdsOutsideTiendaScope,
+    needsTiendaFullAccountPull,
+    shouldScopeAccountsByRole,
     readEsTiendaFlag,
     restrictActivitiesToTienda,
     restrictPortfolioToTienda,
@@ -95,6 +97,33 @@ describe('tiendaVisibility', () => {
         expect(shouldShowActivityNotification('ACTIVITY_OVERDUE', OTHER, 'COORDINADOR', ME, TIENDA)).toBe(false);
         expect(shouldShowActivityNotification('ACTIVITY_OVERDUE', ME, 'COORDINADOR', ME, TIENDA)).toBe(true);
         expect(shouldShowActivityNotification('ACTIVITY_OVERDUE', OTHER, 'COORDINADOR', OTHER)).toBe(true);
+    });
+
+    it('un vendedor de tienda ve todas las cuentas; un vendedor sin bandera no', () => {
+        const accounts = [
+            { id: 'propia', owner_user_id: ME },
+            { id: 'ajena', owner_user_id: OTHER },
+        ] as unknown as Parameters<typeof filterAccounts>[0];
+
+        expect(shouldScopeAccountsByRole({ id: ME, es_tienda: true }, 'VENDEDOR')).toBe(false);
+        expect(shouldScopeAccountsByRole({ id: ME, es_tienda: false }, 'VENDEDOR')).toBe(true);
+        expect(shouldScopeAccountsByRole({ id: OTHER }, 'COORDINADOR')).toBe(true);
+        expect(shouldScopeAccountsByRole({ id: OTHER, es_tienda: true }, 'COORDINADOR')).toBe(false);
+        expect(shouldScopeAccountsByRole({ id: 'admin-1' }, 'ADMIN')).toBe(false);
+
+        expect(filterAccounts(accounts, {}, {
+            currentUserId: ME,
+            userRole: 'VENDEDOR',
+            esTienda: true,
+        }).map(account => account.id).sort()).toEqual(['ajena', 'propia']);
+        expect(filterAccounts(accounts, {}, {
+            currentUserId: ME,
+            userRole: 'VENDEDOR',
+        }).map(account => account.id)).toEqual(['propia']);
+
+        expect(needsTiendaFullAccountPull({ es_tienda: true }, null)).toBe(true);
+        expect(needsTiendaFullAccountPull({ es_tienda: true }, '2026-11-26T00:00:00.000Z')).toBe(false);
+        expect(needsTiendaFullAccountPull({ es_tienda: false }, null)).toBe(false);
     });
 
     it('filterOpportunities de un coordinador sin bandera sigue viendo el equipo y la web ajena', () => {

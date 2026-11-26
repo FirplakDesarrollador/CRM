@@ -28,6 +28,31 @@ export function canChooseOtherPortfolioUsers(user: TiendaProfile | null | undefi
     return !isTiendaUser(user);
 }
 
+/**
+ * Cuentas: el vendedor y el coordinador se recortan por dueño/equipo.
+ * Con es_tienda ese recorte no aplica, aunque el rol siga siendo VENDEDOR.
+ * ADMIN y la lista de cartera completa tampoco se recortan.
+ */
+export function shouldScopeAccountsByRole(
+    user: TiendaProfile | null | undefined,
+    role: string | null | undefined,
+    seesAllowlist = false
+): boolean {
+    if (seesAllowlist || isTiendaUser(user)) return false;
+    return role === 'VENDEDOR' || role === 'COORDINADOR';
+}
+
+/** Cursor local: este usuario de tienda ya bajó una vez todas las cuentas. */
+export const TIENDA_ACCOUNTS_FULL_CURSOR = '__tienda_accounts_full__';
+
+/** Una sola descarga completa de CRM_Cuentas; después el sync sigue incremental. */
+export function needsTiendaFullAccountPull(
+    user: TiendaProfile | null | undefined,
+    fullAccountsCursor: string | null | undefined
+): boolean {
+    return isTiendaUser(user) && !fullAccountsCursor;
+}
+
 export function isMissingTiendaColumnError(
     error: { code?: string | null; message?: string | null } | null | undefined
 ): boolean {

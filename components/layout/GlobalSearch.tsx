@@ -95,7 +95,9 @@ export function GlobalSearch() {
                             .eq('owner_user_id', currentUser.id);
                         owned = new Set((ownedRows || []).map(row => row.id as string));
                     }
-                    rows = filterSearchResultsForTienda(rows, currentUser, owned);
+                    // Cuentas y contactos se quedan completos. Solo se recortan oportunidades.
+                    setResults(filterSearchResultsForTienda(rows, currentUser, owned));
+                    return;
                 }
                 const restrictPortfolio = isSellerRole(role) && !!currentUser?.id && !canViewAllAccountsContactsOpportunities(currentUser);
                 setResults(restrictPortfolio && currentUser?.id ? await filterResultsForSeller(rows, currentUser.id) : rows);

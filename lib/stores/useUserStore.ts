@@ -28,6 +28,9 @@ interface UserState {
     // Actions
     setViewMode: (mode: UserRole | null) => void;
     fetchUser: (force?: boolean) => Promise<void>;
+    /** Lee es_tienda de nuevo sin marcar toda la pantalla como cargando. */
+    refreshTiendaFlag: () => Promise<void>;
+    applyTiendaFlag: (esTienda: boolean) => void;
     initialize: () => () => void; // Returns unsubscribe function
 }
 
@@ -44,6 +47,33 @@ export const useUserStore = create<UserState>((set, get) => ({
             localStorage.setItem('crm_view_mode', mode);
         } else {
             localStorage.removeItem('crm_view_mode');
+        }
+    },
+
+    applyTiendaFlag: (esTienda) => {
+        const current = get().user;
+        if (!current || current.es_tienda === esTienda) return;
+        set({ user: { ...current, es_tienda: esTienda } });
+    },
+
+    refreshTiendaFlag: async () => {
+        const current = get().user;
+        if (!current?.id) return;
+        try {
+            const { data, error } = await supabase
+                .from('CRM_Usuarios')
+                .select('es_tienda')
+                .eq('id', current.id)
+                .maybeSingle();
+            if (error) {
+                if (isMissingTiendaColumnError(error)) {
+                    get().applyTiendaFlag(false);
+                }
+                return;
+            }
+            get().applyTiendaFlag(data?.es_tienda === true);
+        } catch (err) {
+            console.warn('[useUserStore] No se pudo refrescar es_tienda:', err);
         }
     },
 
@@ -137,6 +167,10 @@ export const useUserStore = create<UserState>((set, get) => ({
                 const currentUser = get().user;
                 if (!currentUser || currentUser.id !== session.user.id) {
                     get().fetchUser(true); // Force refetch if user changed or not loaded
+                } else {
+                    // La sesión sigue viva (volver a la pestaña). La bandera puede haber
+                    // cambiado en la base sin reinstalar ni borrar IndexedDB.
+                    void get().refreshTiendaFlag();
                 }
             }
         });
