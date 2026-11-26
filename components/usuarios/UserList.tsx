@@ -5,7 +5,7 @@ import { useUsers, User } from '@/lib/hooks/useUsers';
 import { UserRole } from '@/lib/hooks/useCurrentUser';
 import { UserForm } from '@/components/usuarios/UserForm';
 import { ConfirmationModal } from '@/components/ui/ConfirmationModal';
-import { Search, UserPlus, Edit, Power, Shield, Users as UsersIcon } from 'lucide-react';
+import { Search, UserPlus, Edit, Power, Shield, Users as UsersIcon, MapPin } from 'lucide-react';
 import { cn } from '@/components/ui/utils';
 import { matchesSearchTokens } from '@/lib/utils';
 import { SALES_CHANNELS } from '@/lib/salesChannels';
@@ -138,6 +138,12 @@ export function UserList() {
                                             {user.full_name || 'Sin nombre'}
                                         </div>
                                         <div className="text-xs text-slate-500 truncate">{user.email}</div>
+                                        {user.zona_nombre && (
+                                            <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 text-[10px] font-semibold bg-sky-50 text-sky-700 border border-sky-200 rounded-full">
+                                                <MapPin className="w-2.5 h-2.5" />
+                                                {user.zona_nombre}
+                                            </span>
+                                        )}
                                     </div>
                                     <div className="flex flex-col items-end gap-1 shrink-0">
                                         <span className={cn(
@@ -238,6 +244,14 @@ export function UserList() {
                                                     {user.full_name || 'Sin nombre'}
                                                 </span>
                                                 <span className="text-sm text-slate-500">{user.email}</span>
+                                                {user.zona_nombre && (
+                                                    <div className="mt-1">
+                                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold bg-sky-50 text-sky-700 border border-sky-200 rounded-full">
+                                                            <MapPin className="w-2.5 h-2.5" />
+                                                            Zona: {user.zona_nombre}
+                                                        </span>
+                                                    </div>
+                                                )}
                                                 {user.canales && user.canales.length > 0 && (
                                                     <div className="flex flex-wrap gap-1 mt-1.5">
                                                         {user.canales.map(ch => (

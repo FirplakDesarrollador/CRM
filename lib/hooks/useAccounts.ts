@@ -4,7 +4,7 @@ import { syncEngine } from "@/lib/sync";
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
-import { generateProvisionalNit, isProvisionalNit } from "@/lib/nitUtils";
+import { generateProvisionalNit, isProvisionalNit, extractNitRoot } from "@/lib/nitUtils";
 import { sanitizeOpportunityForSync } from "@/lib/hooks/useOpportunities";
 import { sellerCanSeeAccount } from "@/lib/sellerVisibility";
 
@@ -54,15 +54,18 @@ export function useAccounts(filters?: { advisor_id?: string | null, showAll?: bo
             ? String(data.nit_base).trim()
             : generateProvisionalNit();
 
-        // Local duplicate check before inserting (para NITs reales no provisionales)
-        if (finalNitBase && !isProvisionalNit(finalNitBase)) {
+        // Local duplicate check before inserting (para NITs reales no provisionales en cuentas raíz)
+        const isBranch = Boolean(data.id_cuenta_principal || data.is_child);
+        const targetNitRoot = extractNitRoot(finalNitBase);
+        if (finalNitBase && !isProvisionalNit(finalNitBase) && !isBranch && targetNitRoot) {
             const existingLocal = await db.accounts
-                .where('nit_base')
-                .equals(finalNitBase)
+                .filter((acc) => {
+                    if (acc.is_deleted || acc.id_cuenta_principal) return false;
+                    return extractNitRoot(acc.nit_base) === targetNitRoot;
+                })
                 .toArray();
-            
-            // Allow child accounts (sucursales) to share NIT
-            if (existingLocal.length > 0 && !data.is_child) {
+
+            if (existingLocal.length > 0) {
                 throw new Error(`Ya existe una cuenta localmente con el NIT ${finalNitBase}`);
             }
         }

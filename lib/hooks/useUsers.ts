@@ -15,6 +15,8 @@ export interface User {
     paises?: string[] | null;
     departamentos?: string[] | null;
     canales?: string[] | null;
+    zona_id?: string | null;
+    zona_nombre?: string | null;
     created_at: string;
     updated_at: string;
 }
@@ -31,6 +33,7 @@ export interface CreateUserData {
     paises?: string[];
     departamentos?: string[];
     canales?: string[];
+    zona_id?: string | null;
 }
 
 export interface UpdateUserData {
@@ -44,6 +47,7 @@ export interface UpdateUserData {
     paises?: string[] | null;
     departamentos?: string[] | null;
     canales?: string[] | null;
+    zona_id?: string | null;
 }
 
 const USERS_CACHE_KEY = 'crm_cached_users';
@@ -86,14 +90,20 @@ export function useUsers() {
 
             const { data, error: fetchError } = await supabase
                 .from('CRM_Usuarios')
-                .select('*')
+                .select('*, zona:CRM_Zonas(nombre)')
                 .order('created_at', { ascending: false });
 
             if (fetchError) throw fetchError;
 
             if (data) {
-                setUsers(data);
-                setCachedUsers(data);
+                const normalized = data.map((row: any) => {
+                    const rawZona = row.zona;
+                    const zonaNombre = Array.isArray(rawZona) ? (rawZona[0]?.nombre ?? null) : (rawZona?.nombre ?? null);
+                    const { zona: _zona, ...rest } = row;
+                    return { ...rest, zona_nombre: zonaNombre } as User;
+                });
+                setUsers(normalized);
+                setCachedUsers(normalized);
             }
         } catch (err: any) {
             console.error('[useUsers] Error fetching users:', err);
@@ -136,6 +146,7 @@ export function useUsers() {
             if (userData.paises !== undefined) updates.paises = userData.paises;
             if (userData.departamentos !== undefined) updates.departamentos = userData.departamentos;
             if (userData.canales !== undefined) updates.canales = userData.canales;
+            if (userData.zona_id !== undefined) updates.zona_id = userData.zona_id || null;
 
             // Only update if there are extra fields beyond the basic trigger defaults
             if (Object.keys(updates).length > 1 || updates.role !== 'VENDEDOR') {

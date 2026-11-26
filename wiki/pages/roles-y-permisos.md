@@ -49,9 +49,9 @@ posteriores para propietarios de cuenta (`20260218_fix_rls_owner`) y actividades
 ## Gestión de usuarios
 
 Módulo exclusivo para ADMIN (`/usuarios`, `UserList.tsx`):
-- **Vista móvil:** Tarjetas responsivas con badges de rol y estado, chips de canales de venta asignados (`canales`), fecha de creación y botones de acción rápida para editar y activar/desactivar.
-- **Vista desktop:** Tabla tradicional con columnas de usuario, rol, estado, fecha de creación y acciones.
-- Formulario de edición modal (`UserFormModal.tsx`) para asignar rol, estado activo/inactivo, coordinador, módulos permitidos (`allowed_modules`) y canales autorizados (`canales`).
+- **Vista móvil:** Tarjetas responsivas con badges de rol, estado y zona comercial (`zona_nombre`), chips de canales de venta asignados (`canales`), fecha de creación y botones de acción rápida para editar y activar/desactivar.
+- **Vista desktop:** Tabla tradicional con columnas de usuario (incluyendo badge de zona y canales), rol, estado, fecha de creación y acciones.
+- Formulario de edición modal (`UserForm.tsx`) para asignar rol, estado activo/inactivo, **zona comercial** (`zona_id` referenciando la tabla configurable `CRM_Zonas`, administrada por ADMIN desde `/configuracion` vía `ZonesManager.tsx`), coordinador, módulos permitidos (`allowed_modules`) y canales autorizados (`canales`).
 
 ## Autenticación
 

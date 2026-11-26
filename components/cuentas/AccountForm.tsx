@@ -6,7 +6,7 @@ import * as z from "zod";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, LocalCuenta } from "@/lib/db";
 import { useAccounts } from "@/lib/hooks/useAccounts";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Loader2, User, Building2, Medal, Trash2, Check } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useFormDraft } from "@/lib/hooks/useFormDraft";
@@ -23,16 +23,18 @@ import { ListTodo, History } from "lucide-react";
 import { EntityAuditHistoryTab } from "@/components/shared/EntityAuditHistoryTab";
 import { useFormAutoSave } from "@/lib/hooks/useFormAutoSave";
 import { AutoSaveIndicator } from "@/components/ui/AutoSaveIndicator";
-import { isProvisionalNit } from "@/lib/nitUtils";
+import { isProvisionalNit, sanitizeNitInput, validateColombianNit } from "@/lib/nitUtils";
 import { DuplicateAccountModal, type DuplicateAccountInfo } from "./DuplicateAccountModal";
 
-// Schema
-const accountSchema = z.object({
+// Schema factory: permite conservar NIT legado sin romper edición de otros campos, pero valida estrictamente cualquier NIT nuevo o modificado
+const buildAccountSchema = (existingNit?: string | null) => z.object({
     nombre: z.string().min(2, "Nombre requerido"),
     nit_base: z.string().optional().nullable().refine(val => {
         if (!val || val.trim() === "") return true;
-        return val.trim().length >= 5;
-    }, { message: "NIT debe tener al menos 5 caracteres" }),
+        if (isProvisionalNit(val)) return true;
+        if (existingNit && val.trim() === existingNit.trim()) return true;
+        return validateColombianNit(val);
+    }, { message: "NIT inválido: solo números y máximo un guion con 1 dígito de verificación (ej. 900123456-7)" }),
     is_child: z.boolean(),
     id_cuenta_principal: z.string().nullable().optional(),
     canal_id: z.string().min(1, "Canal de venta requerido"),
@@ -53,6 +55,8 @@ const accountSchema = z.object({
     comentarios: z.string().nullable().optional(),
     origen_cuenta: z.string().nullable().optional(),
 });
+
+const accountSchema = buildAccountSchema();
 
 type AccountFormData = z.infer<typeof accountSchema>;
 
@@ -203,8 +207,13 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
     // Tab State
     // Tab State moved to top
 
+    const activeAccountSchema = useMemo(
+        () => buildAccountSchema(account?.nit_base),
+        [account?.nit_base]
+    );
+
     const form = useForm<AccountFormData>({
-        resolver: zodResolver(accountSchema),
+        resolver: zodResolver(activeAccountSchema),
         shouldUnregister: false,
         defaultValues: {
             nombre: account?.nombre || "",
@@ -797,7 +806,7 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
                                 <option value="">Seleccione...</option>
                                 {potentialParents.map(p => (
                                     <option key={p.id} value={p.id}>
-                                        {p.nombre} ({p.nit})
+                                        {p.nombre} ({p.nit_base || p.nit})
                                     </option>
                                 ))}
                             </select>
@@ -808,7 +817,7 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
                     ) : (
                         <div className="space-y-1">
                             <div className="flex items-center justify-between">
-                                <label className="text-sm font-medium">NIT (Sin dígito de verificación)</label>
+                                <label className="text-sm font-medium">NIT (Opcional · ej. 900123456-7)</label>
                                 {isProvisionalNit(watch("nit_base")) && (
                                     <span className="text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-full">
                                         Provisional (Requerirá NIT real para pedidos)
@@ -817,14 +826,20 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
                             </div>
                             <input
                                 data-testid="accounts-input-nit"
+                                inputMode="numeric"
                                 {...register("nit_base")}
                                 className={cn("w-full border p-2 rounded", nitError ? "border-red-500 bg-red-50" : "border-slate-200")}
-                                placeholder="Ej. 890900123 (opcional, autogenera provisional si se omite)"
+                                placeholder="Ej. 900123456-7 (solo números, guion y DV opcional)"
                                 onChange={(e) => {
-                                    register("nit_base").onChange(e);
+                                    const sanitized = sanitizeNitInput(e.target.value);
+                                    e.target.value = sanitized;
+                                    setValue("nit_base", sanitized, { shouldDirty: true, shouldValidate: true });
                                     if (nitError) setNitError(null);
                                 }}
                             />
+                            <p className="text-[11px] text-slate-500">
+                                Solo números y máximo un guion con 1 dígito de verificación. Sin puntos ni espacios.
+                            </p>
                             {errors.nit_base && <span className="text-red-500 text-xs">{errors.nit_base.message}</span>}
                             {nitError && <div className="text-red-600 text-xs font-bold mt-1 bg-red-50 p-2 rounded border border-red-100">{nitError}</div>}
                         </div>

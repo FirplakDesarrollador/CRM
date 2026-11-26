@@ -12,6 +12,8 @@ export interface CurrentUser {
     allowed_modules?: string[] | null;
     coordinadores?: string[] | null;
     canales?: string[] | null;
+    zona_id?: string | null;
+    zona_nombre?: string | null;
 }
 
 interface UserState {
@@ -71,13 +73,15 @@ export const useUserStore = create<UserState>((set, get) => ({
             // Fetch user details from CRM_Usuarios table
             const { data: crmUser, error: crmError } = await supabase
                 .from('CRM_Usuarios')
-                .select('id, email, full_name, role, is_active, coordinadores, allowed_modules, canales')
+                .select('id, email, full_name, role, is_active, coordinadores, allowed_modules, canales, zona_id, zona:CRM_Zonas(nombre)')
                 .eq('id', authUser.id)
                 .single();
 
             if (crmError) throw crmError;
 
             if (crmUser) {
+                const rawZona = (crmUser as { zona?: { nombre?: string | null } | Array<{ nombre?: string | null }> | null }).zona;
+                const zonaNombre = Array.isArray(rawZona) ? (rawZona[0]?.nombre ?? null) : (rawZona?.nombre ?? null);
                 set({
                     user: {
                         id: crmUser.id,
@@ -88,6 +92,8 @@ export const useUserStore = create<UserState>((set, get) => ({
                         allowed_modules: crmUser.allowed_modules,
                         coordinadores: crmUser.coordinadores,
                         canales: crmUser.canales,
+                        zona_id: crmUser.zona_id ?? null,
+                        zona_nombre: zonaNombre,
                     },
                     initialized: true
                 });

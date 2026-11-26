@@ -6,8 +6,8 @@ que determina su lista de precios.
 
 ## Campos clave
 
-- **Identificación:** `nombre`, `nit`, `nit_base` (para agrupar sucursales; si se omite al crear o editar, se autogenera un NIT alfanumérico provisional único `PROV-XXXXXXXX` mediante `lib/nitUtils.ts`),
-  `id_cuenta_principal` (jerarquía casa matriz → sucursales).
+- **Identificación:** `nombre`, `nit`, `nit_base` (para agrupar sucursales; si se omite al crear o editar, se autogenera un NIT alfanumérico provisional único `PROV-XXXXXXXX` mediante `lib/nitUtils.ts`; cuando se digita un NIT real, el input sanitiza en vivo y solo permite números con un único guion y dígito de verificación opcional `/^\d{5,12}(-\d)?$/`, sin puntos ni espacios),
+  `id_cuenta_principal` (jerarquía casa matriz → sucursales; el índice `unique_active_nit` aplica solo a cuentas raíz permitiendo a las sucursales compartir `nit_base` con `nit_sufijo` autoincremental).
 - **Canal:** `canal_id` (obligatorio) + `subclasificacion_id` opcional por canal
   (migraciones `20260119_subclassifications`, `20260212_add_propio_subclassifications`).
 - **Propietario:** `owner_user_id` (`20260218_add_account_owner.sql`), usado también por RLS.
@@ -24,7 +24,7 @@ que determina su lista de precios.
 - Creación mediante `app/cuentas/nueva/CreateAccountWizard.tsx`: wizard de 3 pasos
   (información base, ubicación/contacto con origen_cuenta, y clasificación). La cuenta solo se crea
   desde el último paso con `Crear Cuenta`; el submit está protegido contra avances
-  o doble clics que intenten saltarse la clasificación. Si se detecta un duplicado (NIT, Razón Social, Teléfono o Email), se despliega `DuplicateAccountModal` mostrando los detalles de la cuenta existente, el asesor propietario asignado (`CRM_Usuarios`) y su canal de venta.
+  o doble clics que intenten saltarse la clasificación. Mientras el asesor digita el nombre o el NIT en el Paso 1, el RPC `SECURITY DEFINER` `search_similar_accounts` (`pg_trgm` + `unaccent` + raíz numérica de NIT) muestra en vivo cuentas similares de toda la base sin exponer teléfono ni correo ajenos, ofreciendo por fila el botón **Crear cuenta nueva en mi sucursal** (que vincula a la cuenta matriz, hereda NIT/canal y autogenera el nombre `{Nombre Matriz} - {Zona del vendedor}` usando `CRM_Usuarios.zona_id`) o **Abrir cuenta** si ya pertenece al mismo asesor. Si el asesor continúa digitando un nombre o NIT con alta coincidencia, se muestran tags persistentes de alerta (`lib/accountSimilarity.ts`). Al guardar, los duplicados exactos o de raíz de NIT bloquean con `DuplicateAccountModal` (con acción rápida de crear sucursal), y las altas coincidencias de nombre o NIT solicitan confirmación explícita (`ConfirmationModal`) advirtiendo que se notificará a la coordinación comercial; si el asesor continúa, se inserta automáticamente una notificación (`SIMILAR_ACCOUNT_CREATED`) en `CRM_Notifications` para sus coordinadores asignados (o coordinadores activos).
 - Prueba E2E dev-only en `/e2e/cuentas-wizard` para validar el wizard sin depender
   de cookies de Supabase; en producción la ruta devuelve 404.
 - Listado con filtros (`AccountFilters`, `UserPickerFilter`): vista móvil con tarjetas responsivas y vista desktop con tabla interactiva (Handsontable) donde la columna "País" (mapeada dinámicamente desde `pais_id` / catálogos) se visualiza en la vista inicial junto a Ubicación, y la edición se activa directamente al hacer clic/seleccionar la fila.
@@ -51,5 +51,5 @@ que determina su lista de precios.
 - `app/cuentas/nueva/CreateAccountWizard.tsx`
 - `app/e2e/cuentas-wizard/page.tsx`, `e2e/create_account_wizard.spec.ts`,
   `playwright.e2e.config.ts`
-- `lib/hooks/useAccounts.ts`, `useAccountsServer.ts`, `lib/db.ts` (interfaz `LocalCuenta`)
-- Migraciones: `20260108_sales_channels`, `20260113_premium_clients`, `20260119_subclassifications`, `20260218_add_account_owner`, `20260820_add_origen_cuenta`, `20260821_backfill_account_origin_from_opportunities`
+- `lib/hooks/useAccounts.ts`, `useAccountsServer.ts`, `lib/db.ts` (interfaz `LocalCuenta`), `lib/nitUtils.ts`, `lib/accountSimilarity.ts`
+- Migraciones: `20260108_sales_channels`, `20260113_premium_clients`, `20260119_subclassifications`, `20260218_add_account_owner`, `20260820_add_origen_cuenta`, `20260821_backfill_account_origin_from_opportunities`, `20261126152500_account_similarity_zones_and_branches`
