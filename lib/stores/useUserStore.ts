@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { supabase } from '@/lib/supabase';
+import { CRM_USUARIO_SELECT_BASE, CRM_USUARIO_SELECT_WITH_TIENDA, isMissingTiendaColumnError } from '@/lib/tiendaVisibility';
 
 export type UserRole = 'VENDEDOR' | 'COORDINADOR' | 'ADMIN';
 
@@ -7,6 +8,7 @@ export interface CurrentUser {
     id: string;
     email: string;
     full_name: string | null;
+    telefono?: string | null;
     role: UserRole;
     is_active: boolean;
     allowed_modules?: string[] | null;
@@ -14,6 +16,8 @@ export interface CurrentUser {
     canales?: string[] | null;
     zona_id?: string | null;
     zona_nombre?: string | null;
+    /** Ausente o false mientras la migración de tienda no esté aplicada o el usuario no sea de tienda. */
+    es_tienda?: boolean;
 }
 
 interface UserState {
@@ -26,6 +30,9 @@ interface UserState {
     // Actions
     setViewMode: (mode: UserRole | null) => void;
     fetchUser: (force?: boolean) => Promise<void>;
+    /** Lee es_tienda de nuevo sin marcar toda la pantalla como cargando. */
+    refreshTiendaFlag: () => Promise<void>;
+    applyTiendaFlag: (esTienda: boolean) => void;
     initialize: () => () => void; // Returns unsubscribe function
 }
 
@@ -42,6 +49,33 @@ export const useUserStore = create<UserState>((set, get) => ({
             localStorage.setItem('crm_view_mode', mode);
         } else {
             localStorage.removeItem('crm_view_mode');
+        }
+    },
+
+    applyTiendaFlag: (esTienda) => {
+        const current = get().user;
+        if (!current || current.es_tienda === esTienda) return;
+        set({ user: { ...current, es_tienda: esTienda } });
+    },
+
+    refreshTiendaFlag: async () => {
+        const current = get().user;
+        if (!current?.id) return;
+        try {
+            const { data, error } = await supabase
+                .from('CRM_Usuarios')
+                .select('es_tienda')
+                .eq('id', current.id)
+                .maybeSingle();
+            if (error) {
+                if (isMissingTiendaColumnError(error)) {
+                    get().applyTiendaFlag(false);
+                }
+                return;
+            }
+            get().applyTiendaFlag(data?.es_tienda === true);
+        } catch (err) {
+            console.warn('[useUserStore] No se pudo refrescar es_tienda:', err);
         }
     },
 
@@ -70,12 +104,27 @@ export const useUserStore = create<UserState>((set, get) => ({
                 return;
             }
 
-            // Fetch user details from CRM_Usuarios table
-            const { data: crmUser, error: crmError } = await supabase
+            // Fetch user details from CRM_Usuarios table.
+            // es_tienda puede no existir todavía: en ese caso se reintenta sin la columna
+            // y el usuario conserva la visibilidad de su rol.
+            const withFlag = await supabase
                 .from('CRM_Usuarios')
-                .select('id, email, full_name, role, is_active, coordinadores, allowed_modules, canales, zona_id, zona:CRM_Zonas(nombre)')
+                .select(`${CRM_USUARIO_SELECT_WITH_TIENDA}, zona_id, zona:CRM_Zonas(nombre)`)
                 .eq('id', authUser.id)
                 .single();
+
+            let crmUser = withFlag.data as (CurrentUser & { es_tienda?: boolean | null }) | null;
+            let crmError = withFlag.error;
+            if (crmError && isMissingTiendaColumnError(crmError)) {
+                const base = await supabase
+                    .from('CRM_Usuarios')
+                    .select(`${CRM_USUARIO_SELECT_BASE}, zona_id, zona:CRM_Zonas(nombre)`)
+                    .eq('id', authUser.id)
+                    .single();
+                crmUser = base.data as CurrentUser | null;
+                crmError = base.error;
+                if (crmUser) crmUser = { ...crmUser, es_tienda: false };
+            }
 
             if (crmError) throw crmError;
 
@@ -94,6 +143,7 @@ export const useUserStore = create<UserState>((set, get) => ({
                         canales: crmUser.canales,
                         zona_id: crmUser.zona_id ?? null,
                         zona_nombre: zonaNombre,
+                        es_tienda: crmUser.es_tienda === true,
                     },
                     initialized: true
                 });
@@ -123,6 +173,10 @@ export const useUserStore = create<UserState>((set, get) => ({
                 const currentUser = get().user;
                 if (!currentUser || currentUser.id !== session.user.id) {
                     get().fetchUser(true); // Force refetch if user changed or not loaded
+                } else {
+                    // La sesión sigue viva (volver a la pestaña). La bandera puede haber
+                    // cambiado en la base sin reinstalar ni borrar IndexedDB.
+                    void get().refreshTiendaFlag();
                 }
             }
         });

@@ -2,10 +2,15 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import { db } from "@/lib/db";
+import { isB2COpportunity } from "@/lib/b2c";
+import { toInputDate } from "@/lib/date-utils";
 import { X, TrendingUp, Calendar, Hash, Percent } from "lucide-react";
 import { ProbabilityDonut } from "@/components/ui/ProbabilityDonut";
 import { formatNumberCO } from "@/lib/utils";
 import { SearchableSelect } from "@/components/ui/SearchableSelect";
+import { estadoIdForPhaseName, getPhaseOutcomeByName, isClosedPhaseName } from "@/lib/opportunityPhase";
+import { resolveStepperPhaseId, selectPhasesForPicker, type PhaseCatalogItem } from "@/lib/opportunityPhaseCatalog";
 
 interface OpportunityQuickViewProps {
     opportunityId: string;
@@ -27,7 +32,6 @@ type OpportunityRecord = {
     amount?: number;
     currency_id?: string;
     fecha_cierre_estimada?: string | null;
-    estado_id?: number | null;
     fase_id?: number | null;
     probability?: number | null;
     fase_detail?: { probability?: number | null } | null;
@@ -41,8 +45,8 @@ export function OpportunityQuickView({ opportunityId, isOpen, onClose, onUpdate 
     const [error, setError] = useState<string | null>(null);
 
     // Edit Stats
-    const [statusId, setStatusId] = useState<number | null>(null);
     const [phaseId, setPhaseId] = useState<number | null>(null);
+    const [phaseTouched, setPhaseTouched] = useState(false);
     const [phaseOptions, setPhaseOptions] = useState<PhaseOption[]>([]);
 
     const fetchOpportunity = useCallback(async () => {
@@ -66,21 +70,32 @@ export function OpportunityQuickView({ opportunityId, isOpen, onClose, onUpdate 
             if (canalId) {
                 const { data: phases, error: phasesError } = await supabase
                     .from('CRM_FasesOportunidad')
-                    .select('id, nombre, orden, probability')
+                    .select('id, nombre, orden, probability, canal_id, is_active')
                     .eq('canal_id', canalId)
                     .eq('is_active', true)
                     .order('orden')
                     .returns<PhaseOption[]>();
 
                 if (phasesError) throw phasesError;
-                channelPhases = phases || [];
+                channelPhases = selectPhasesForPicker(phases || [], canalId);
+            }
+
+            let displayedPhaseId = opp.fase_id ?? null;
+            if (opp.fase_id && !channelPhases.some(phase => Number(phase.id) === Number(opp.fase_id))) {
+                const { data: currentPhase } = await supabase
+                    .from('CRM_FasesOportunidad')
+                    .select('id, nombre, orden, probability, canal_id, is_active')
+                    .eq('id', opp.fase_id)
+                    .maybeSingle();
+                const catalog = currentPhase ? [...channelPhases, currentPhase as PhaseCatalogItem] : channelPhases;
+                displayedPhaseId = resolveStepperPhaseId(opp.fase_id, catalog, canalId);
             }
 
             // Map the probability from the joined phase if the opportunity probability is missing/zero
             const probability = opp.probability || opp.fase_detail?.probability || 0;
             setOpportunity({ ...opp, probability });
-            setStatusId(opp.estado_id ?? null);
-            setPhaseId(opp.fase_id ?? null);
+            setPhaseId(displayedPhaseId);
+            setPhaseTouched(false);
             setPhaseOptions(channelPhases);
 
         } catch (err) {
@@ -97,54 +112,41 @@ export function OpportunityQuickView({ opportunityId, isOpen, onClose, onUpdate 
         }
     }, [fetchOpportunity, isOpen, opportunityId]);
 
-    const normalizePhaseName = (name?: string) =>
-        (name || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-
-    const isClosedPhase = (phase?: PhaseOption) => {
-        const name = normalizePhaseName(phase?.nombre);
-        return name.includes('ganada') || name.includes('perdida');
-    };
-
-    const findPhaseForStatus = (nextStatusId: number) => {
-        if (nextStatusId === 2) {
-            return phaseOptions.find(phase => normalizePhaseName(phase.nombre).includes('ganada'));
-        }
-
-        if (nextStatusId === 3) {
-            return phaseOptions.find(phase => normalizePhaseName(phase.nombre).includes('perdida'));
-        }
-
-        if (nextStatusId === 1) {
-            const currentPhase = phaseOptions.find(phase => phase.id === phaseId);
-            if (!currentPhase || isClosedPhase(currentPhase)) {
-                return phaseOptions.find(phase => !isClosedPhase(phase));
-            }
-        }
-
-        return null;
-    };
-
-    const handleStatusChange = (nextStatusId: number) => {
-        setStatusId(nextStatusId);
-        const matchingPhase = findPhaseForStatus(nextStatusId);
-        if (matchingPhase) setPhaseId(matchingPhase.id);
-    };
-
     const handleSave = async () => {
+        if (!phaseTouched) {
+            onClose();
+            return;
+        }
         setIsSaving(true);
         try {
             const targetPhase = phaseOptions.find(phase => phase.id === phaseId);
+            // El resultado (abierta / ganada / perdida) sale SOLO de la fase.
+            const isClosed = Boolean(targetPhase && isClosedPhaseName(targetPhase.nombre));
+            const updates: any = {
+                fase_id: phaseId,
+                probability: targetPhase?.probability ?? opportunity?.probability,
+                updated_at: new Date().toISOString()
+            };
+            // estado_id se sigue guardando por dentro (1/2/3 según la fase) para comisiones e integraciones.
+            if (targetPhase) updates.estado_id = estadoIdForPhaseName(targetPhase.nombre);
+
+            const isB2C = isB2COpportunity(opportunity?.account, opportunity, null, targetPhase);
+            if (isClosed && isB2C) {
+                updates.fecha_cierre_estimada = toInputDate(new Date());
+            }
+
             const { error } = await supabase
                 .from('CRM_Oportunidades')
-                .update({
-                    estado_id: statusId,
-                    fase_id: phaseId,
-                    probability: targetPhase?.probability ?? opportunity?.probability,
-                    updated_at: new Date().toISOString()
-                })
+                .update(updates)
                 .eq('id', opportunityId);
 
             if (error) throw error;
+
+            try {
+                await db.opportunities.update(opportunityId, updates);
+            } catch (dexieErr) {
+                console.warn('[OpportunityQuickView] Dexie update warning:', dexieErr);
+            }
 
             if (onUpdate) onUpdate();
             onClose();
@@ -227,23 +229,29 @@ export function OpportunityQuickView({ opportunityId, isOpen, onClose, onUpdate 
                                 />
                             </div>
 
-                            {/* Status Edit */}
+                            {/* Fase (el resultado abierta / ganada / perdida sale de la fase) */}
                             <div>
-                                <label className="block text-sm font-bold text-slate-700 mb-2">Estado</label>
+                                <label className="block text-sm font-bold text-slate-700 mb-2">Fase</label>
                                 <SearchableSelect
-                                    value={statusId ? String(statusId) : ""}
+                                    value={phaseId != null ? String(phaseId) : ""}
                                     onChange={(val) => {
-                                        if (val) handleStatusChange(parseInt(val, 10));
+                                        setPhaseTouched(true);
+                                        setPhaseId(val ? parseInt(val, 10) : null);
                                     }}
+                                    disabled={phaseOptions.length === 0}
                                     allowClear={false}
-                                    placeholder="Seleccionar estado..."
-                                    searchPlaceholder="Buscar estado..."
+                                    placeholder="Sin fase"
+                                    searchPlaceholder="Buscar fase..."
                                     triggerClassName="rounded-xl border-slate-200 bg-slate-50 font-medium text-slate-900"
-                                    options={[
-                                        { value: "1", label: "Abierta" },
-                                        { value: "2", label: "Ganada" },
-                                        { value: "3", label: "Perdida" },
-                                    ]}
+                                    options={phaseOptions.map(phase => {
+                                        // Cerrar como perdida exige razón y comentarios: se hace desde el detalle.
+                                        const lockLost = getPhaseOutcomeByName(phase.nombre) === 'lost' && phase.id !== opportunity?.fase_id;
+                                        return {
+                                            value: String(phase.id),
+                                            label: `${phase.nombre}${lockLost ? ' (desde el detalle)' : ''}`,
+                                            disabled: lockLost,
+                                        };
+                                    })}
                                 />
                             </div>
                         </>

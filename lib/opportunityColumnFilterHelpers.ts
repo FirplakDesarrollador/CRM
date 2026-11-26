@@ -3,11 +3,13 @@
  * Permiten que las opciones se consulten desde catálogos maestros de la BD sin cargar todas las filas en memoria.
  */
 
+import { equivalentPhaseIds, selectPhasesForPicker } from './opportunityPhaseCatalog';
+
 export const DEFAULT_OPPORTUNITIES_PAGE_SIZE = 100;
 
 export interface OpportunityFilterState {
     channel?: string | null;
-    phase?: number | null;
+    phase?: number | number[] | null;
     ownerIds?: string[] | null;
     status?: 'all' | 'open' | 'won' | 'lost' | null;
     origin?: string | null;
@@ -19,6 +21,7 @@ export interface OpportunityFilterState {
     endClose?: string | null;
     accountId?: string | null;
     accountName?: string | null;
+    setter?: string | null;
 }
 
 export interface ChannelOption {
@@ -49,62 +52,31 @@ export interface PhaseCatalogItem {
     nombre: string;
     canal_id?: string | null;
     orden?: number;
+    is_active?: boolean | null;
 }
 
 /**
- * Filtra las fases según el canal seleccionado, excluyendo fases de cierre ('cerrada'),
- * y deduplicando por nombre para que cada etapa única del embudo aparezca una sola vez.
+ * Filtra las fases según el canal seleccionado, incluyendo las etapas cerradas
+ * que siguen activas (Cerrada ganada y Cerrada perdida) y descartando inactivas
+ * antes de deduplicar por orden.
  */
 export function getAvailablePhasesForChannel(
     phases: PhaseCatalogItem[],
     selectedChannel: string | null
 ): PhaseCatalogItem[] {
     if (!selectedChannel) return [];
-
-    // 1. Filtrar por canal y descartar estados cerrados (manejados por filtro ESTADO)
-    const channelPhases = phases.filter(p =>
-        p.canal_id === selectedChannel &&
-        !p.nombre.toLowerCase().includes('cerrada')
-    );
-
-    // 2. Ordenar por 'orden' si existe
-    channelPhases.sort((a, b) => (a.orden ?? 0) - (b.orden ?? 0));
-
-    // 3. Deduplicar por nombre (si hay múltiples IDs para el mismo nombre en el mismo canal)
-    const seenNames = new Set<string>();
-    const deduplicated: PhaseCatalogItem[] = [];
-
-    for (const ph of channelPhases) {
-        const cleanName = ph.nombre.trim().toLowerCase();
-        if (!seenNames.has(cleanName)) {
-            seenNames.add(cleanName);
-            deduplicated.push(ph);
-        }
-    }
-
-    return deduplicated;
+    return selectPhasesForPicker(phases, selectedChannel);
 }
 
 /**
- * Obtiene todos los IDs equivalentes (duplicados de BD) para una fase dada dentro de su canal
+ * Obtiene todos los IDs equivalentes (mismo canal y mismo orden o nombre)
+ * para que un filtro por la fase activa siga encontrando oportunidades históricas.
  */
 export function getEquivalentPhaseIds(
     phases: PhaseCatalogItem[],
     targetPhaseId: number
 ): number[] {
-    if (targetPhaseId <= 0) return [targetPhaseId];
-    const target = phases.find(p => p.id === targetPhaseId);
-    if (!target) return [targetPhaseId];
-
-    const targetName = target.nombre?.trim().toLowerCase();
-    const targetChannel = target.canal_id;
-
-    const matches = phases.filter(p =>
-        p.nombre?.trim().toLowerCase() === targetName &&
-        (!targetChannel || p.canal_id === targetChannel)
-    );
-
-    return matches.length > 0 ? matches.map(p => p.id) : [targetPhaseId];
+    return equivalentPhaseIds(phases, targetPhaseId);
 }
 
 export const ACTIVITY_STATUS_OPTIONS = [
@@ -124,13 +96,14 @@ export function isColumnFilterActive(colKey: string, state: OpportunityFilterSta
         case 'canal':
             return Boolean(state.channel);
         case 'fase':
+            if (Array.isArray(state.phase)) return state.phase.length > 0;
             return Boolean(state.phase);
         case 'vendedor':
             return Boolean(state.ownerIds && state.ownerIds.length > 0);
-        case 'estado':
-            return Boolean(state.status && state.status !== 'open');
         case 'origen':
             return Boolean(state.origin);
+        case 'setter':
+            return Boolean(state.setter);
         case 'pais':
             return Boolean(state.country);
         case 'ciudad':

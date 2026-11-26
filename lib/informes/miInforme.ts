@@ -1,4 +1,5 @@
 import * as ExcelJS from 'exceljs';
+import { formatDateOnlyDMY } from '@/lib/dateFilterHelpers';
 import { resolveOpportunityActivityInfo } from '@/lib/utils/informes';
 
 /**
@@ -14,7 +15,6 @@ type IdMap = Map<string | number, string>;
 export interface MiInformeLookups {
     canales: IdMap;
     fases: IdMap;
-    estados: IdMap;
     segmentos: IdMap;
     departamentos: IdMap;
     ciudades: IdMap;
@@ -111,12 +111,11 @@ export function buildMiInformeSheets(data: MiInformeData, lk: MiInformeLookups):
         columns: [
             { header: 'NOMBRE OPORTUNIDAD', key: 'nombre', width: 35 },
             { header: 'CUENTA', key: 'cuenta', width: 35 },
-            { header: 'ESTADO', key: 'estado', width: 15 },
             { header: 'FASE', key: 'fase', width: 20 },
             { header: 'VALOR', key: 'amount', width: 15 },
             { header: 'MONEDA', key: 'currency_id', width: 10 },
             { header: 'PROBABILIDAD (%)', key: 'probabilidad', width: 15 },
-            { header: 'FECHA CIERRE EST.', key: 'fecha_cierre_estimada', width: 18 },
+            { header: 'FECHA ESTIMADA', key: 'fecha_cierre_estimada', width: 18 },
             { header: 'FECHA ACTIVIDAD', key: 'fecha_actividad', width: 20 },
             { header: 'ESTADO ACTIVIDAD', key: 'estado_actividad', width: 18 },
             { header: 'SEGMENTO', key: 'segmento', width: 22 },
@@ -132,12 +131,11 @@ export function buildMiInformeSheets(data: MiInformeData, lk: MiInformeLookups):
                 id: o.id,
                 nombre: asText(o.nombre),
                 cuenta: lookup(lk.cuentas, o.account_id),
-                estado: lookup(lk.estados, o.estado_id),
                 fase: lookup(lk.fases, o.fase_id),
                 amount: Number(o.amount) || 0,
                 currency_id: asText(o.currency_id),
                 probabilidad: o.probabilidad ?? o.probability ?? '',
-                fecha_cierre_estimada: asDate(o.fecha_cierre_estimada),
+                fecha_cierre_estimada: formatDateOnlyDMY(o.fecha_cierre_estimada == null ? null : String(o.fecha_cierre_estimada)) || '',
                 fecha_actividad: actInfo.fecha_actividad,
                 estado_actividad: actInfo.estado_actividad,
                 segmento: lookup(lk.segmentos, o.segmento_id),
@@ -203,7 +201,7 @@ export async function buildMiInformeWorkbook(sheets: SheetDef[], meta: { userNam
         ws.views = [{ state: 'frozen', ySplit: 1 }];
         ws.addRows(sheet.rows);
         sheet.columns.forEach((c) => {
-            if (['created_at', 'fecha_inicio', 'fecha_fin', 'fecha_cierre_estimada'].includes(c.key)) {
+            if (['created_at', 'fecha_inicio', 'fecha_fin'].includes(c.key)) {
                 ws.getColumn(c.key).numFmt = 'dd/mm/yyyy hh:mm';
             }
         });

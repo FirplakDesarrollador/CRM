@@ -32,3 +32,36 @@ export function isB2COnlyActivityClassification(name: string | null | undefined)
     const normalized = name.trim().toLowerCase();
     return B2C_ONLY_ACTIVITY_CLASSIFICATIONS.some(n => n.toLowerCase() === normalized);
 }
+
+/**
+ * Retorna true si la oportunidad o cuenta pertenece al Canal Propio / B2C / Ecommerce,
+ * o si el asesor activo pertenece al canal B2C.
+ */
+export function isB2COpportunity(
+    account?: { canal_id?: string | null } | null,
+    opportunity?: { canal_id?: string | null; origen_oportunidad?: string | null } | null,
+    user?: UserLike,
+    phase?: { canal_id?: string | null } | null
+): boolean {
+    // 1. Direct match on channel
+    if (account?.canal_id === B2C_CHANNEL_ID) return true;
+    if (opportunity?.canal_id === B2C_CHANNEL_ID) return true;
+    if (phase?.canal_id === B2C_CHANNEL_ID) return true;
+
+    // 2. Origen match (Web, Ecommerce, etc.)
+    const origen = (opportunity?.origen_oportunidad || '').toLowerCase();
+    if (origen.includes('web') || origen.includes('ecommerce') || origen.includes('e-commerce') || origen.includes('tienda') || origen.includes('feria')) {
+        return true;
+    }
+
+    // 3. User is explicitly a B2C advisor (has PROPIO in their assigned channels)
+    if (Array.isArray(user?.canales) && user.canales.includes(B2C_CHANNEL_ID)) {
+        // If the account explicitly belongs to another non-B2C channel (e.g. OBRAS_NAC), respect the account channel
+        if (account?.canal_id && account.canal_id !== B2C_CHANNEL_ID) {
+            return false;
+        }
+        return true;
+    }
+
+    return false;
+}

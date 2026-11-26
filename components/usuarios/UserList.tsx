@@ -5,7 +5,7 @@ import { useUsers, User } from '@/lib/hooks/useUsers';
 import { UserRole } from '@/lib/hooks/useCurrentUser';
 import { UserForm } from '@/components/usuarios/UserForm';
 import { ConfirmationModal } from '@/components/ui/ConfirmationModal';
-import { Search, UserPlus, Edit, Power, Shield, Users as UsersIcon, MapPin } from 'lucide-react';
+import { Search, UserPlus, Edit, Power, Shield, Users as UsersIcon, MapPin, Phone } from 'lucide-react';
 import { cn } from '@/components/ui/utils';
 import { matchesSearchTokens } from '@/lib/utils';
 import { SALES_CHANNELS } from '@/lib/salesChannels';
@@ -144,6 +144,12 @@ export function UserList() {
                                             {user.full_name || 'Sin nombre'}
                                         </div>
                                         <div className="text-xs text-slate-500 truncate">{user.email}</div>
+                                        {user.telefono && (
+                                            <div className="text-xs text-slate-400 truncate flex items-center gap-1 mt-0.5">
+                                                <Phone className="w-3 h-3" />
+                                                <span>{user.telefono}</span>
+                                            </div>
+                                        )}
                                         {user.zona_nombre && (
                                             <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 text-[10px] font-semibold bg-sky-50 text-sky-700 border border-sky-200 rounded-full">
                                                 <MapPin className="w-2.5 h-2.5" />
@@ -249,7 +255,14 @@ export function UserList() {
                                                 <span className="font-medium text-slate-900">
                                                     {user.full_name || 'Sin nombre'}
                                                 </span>
-                                                <span className="text-sm text-slate-500">{user.email}</span>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-sm text-slate-500">{user.email}</span>
+                                                    {user.telefono && (
+                                                        <span className="text-xs text-slate-400 flex items-center gap-1">
+                                                            • <Phone className="w-3 h-3 inline" /> {user.telefono}
+                                                        </span>
+                                                    )}
+                                                </div>
                                                 {user.zona_nombre && (
                                                     <div className="mt-1">
                                                         <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold bg-sky-50 text-sky-700 border border-sky-200 rounded-full">

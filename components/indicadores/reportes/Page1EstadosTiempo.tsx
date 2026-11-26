@@ -11,15 +11,18 @@ import { SearchableSelect, SearchableSelectOption } from "@/components/ui/Search
 import { MultiSelect, Option } from "@/components/ui/MultiSelect";
 import { cn } from "@/components/ui/utils";
 import {
-    EstadoBucket,
-    ESTADO_BUCKET_COLORS,
-    ESTADO_BUCKET_LABELS,
-    ESTADO_BUCKET_ORDER,
-    getEstadoBucket,
-} from "./estadoUtils";
+    ResultadoBucket as EstadoBucket,
+    RESULTADO_BUCKET_COLORS as ESTADO_BUCKET_COLORS,
+    RESULTADO_BUCKET_LABELS as ESTADO_BUCKET_LABELS,
+    RESULTADO_BUCKET_ORDER as ESTADO_BUCKET_ORDER,
+    buildPhaseOutcomeMap,
+    getResultadoBucket,
+} from "./faseResultadoUtils";
+import type { PhaseOutcome } from "@/lib/opportunityPhase";
 import { EChartsCallbackParams } from "./echartsTypes";
 import { isPlausibleYear } from "./dateUtils";
 import { getZonaByDepartamentoId, ZONA_OPTIONS } from "./zonas";
+import { expandSelectedPhaseIds, selectPhasesForPicker } from "@/lib/opportunityPhaseCatalog";
 
 const MONTH_LABELS = [
     "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
@@ -40,7 +43,10 @@ const LABEL_TO_BUCKET: Record<string, EstadoBucket> = ESTADO_BUCKET_ORDER.reduce
     {} as Record<string, EstadoBucket>
 );
 
-function computeBucketTotals(list: { amount?: number | null; valor?: number | null; estado_id?: number | null }[]) {
+function computeBucketTotals(
+    list: { amount?: number | null; valor?: number | null; fase_id?: number | string | null }[],
+    outcomeMap: Map<number, PhaseOutcome>
+) {
     const acc: Record<EstadoBucket | "total", { amount: number; count: number }> = {
         total: { amount: 0, count: 0 },
         open: { amount: 0, count: 0 },
@@ -51,7 +57,7 @@ function computeBucketTotals(list: { amount?: number | null; valor?: number | nu
         const amount = Number(o.amount ?? o.valor ?? 0);
         acc.total.amount += amount;
         acc.total.count += 1;
-        const bucket = getEstadoBucket(o.estado_id);
+        const bucket = getResultadoBucket(o.fase_id, outcomeMap);
         acc[bucket].amount += amount;
         acc[bucket].count += 1;
     });
@@ -115,6 +121,8 @@ export function Page1EstadosTiempo() {
     const { opportunities } = useOpportunities();
     const { phases, subclasificaciones, segments, channels, users, accountsMap } = useIndicadoresLookups();
     const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+    // Abierta / Cerrada ganada / Cerrada perdida se calcula SOLO por la fase.
+    const outcomeMap = useMemo(() => buildPhaseOutcomeMap(phases), [phases]);
 
     const setFilter = <K extends keyof Filters>(key: K, value: Filters[K]) => {
         setFilters(prev => {
@@ -171,9 +179,7 @@ export function Page1EstadosTiempo() {
 
     const faseOptions: Option[] = useMemo(() => {
         if (!filters.canalId) return [];
-        return phases
-            .filter(p => p.canal_id === filters.canalId)
-            .sort((a, b) => a.orden - b.orden)
+        return selectPhasesForPicker(phases, filters.canalId)
             .map(p => ({ value: String(p.id), label: p.nombre }));
     }, [phases, filters.canalId]);
 
@@ -195,7 +201,7 @@ export function Page1EstadosTiempo() {
 
         const yearNum = filters.year ? Number(filters.year) : null;
         const monthNum = filters.month !== "" ? Number(filters.month) : null;
-        const faseIdSet = filters.faseIds.length > 0 ? new Set(filters.faseIds.map(Number)) : null;
+        const faseIdSet = filters.faseIds.length > 0 ? new Set(expandSelectedPhaseIds(filters.faseIds, phases)) : null;
 
         return base.filter(o => {
             if (o.is_deleted) return false;
@@ -212,21 +218,21 @@ export function Page1EstadosTiempo() {
             }
             return true;
         });
-    }, [opportunities, filters, accountsMap]);
+    }, [opportunities, filters, accountsMap, phases]);
 
     const filtered = useMemo(() => {
         if (filters.estados.length === 0) return filteredWithoutEstado;
         const estadoSet = new Set(filters.estados);
-        return filteredWithoutEstado.filter(o => estadoSet.has(getEstadoBucket(o.estado_id)));
-    }, [filteredWithoutEstado, filters.estados]);
+        return filteredWithoutEstado.filter(o => estadoSet.has(getResultadoBucket(o.fase_id, outcomeMap)));
+    }, [filteredWithoutEstado, filters.estados, outcomeMap]);
 
     // --- KPI totals --------------------------------------------------------
-    const totals = useMemo(() => computeBucketTotals(filtered), [filtered]);
+    const totals = useMemo(() => computeBucketTotals(filtered, outcomeMap), [filtered, outcomeMap]);
 
     // Totals for the pie chart specifically: computed WITHOUT the Estado filter,
     // so all three slices stay visible (dimmed) instead of the pie collapsing to
     // a single slice when the user clicks on it.
-    const pieTotals = useMemo(() => computeBucketTotals(filteredWithoutEstado), [filteredWithoutEstado]);
+    const pieTotals = useMemo(() => computeBucketTotals(filteredWithoutEstado, outcomeMap), [filteredWithoutEstado, outcomeMap]);
 
     // Cross-filter: clicking a chart element toggles the Estado filter for the
     // whole page (click again on the same estado to clear it).
@@ -238,7 +244,7 @@ export function Page1EstadosTiempo() {
     };
 
     // Works for both the pie (params.name = slice label) and the line chart
-    // (params.seriesName = "Abierta" / "Cerrado Ganado" / "Cerrado Perdido").
+    // (params.seriesName = "Abierta" / "Cerrada ganada" / "Cerrada perdida").
     const handleChartClick = (params: EChartsCallbackParams) => {
         const bucket = LABEL_TO_BUCKET[(params.seriesName ?? params.name) as string];
         if (bucket) toggleEstadoFilter(bucket);
@@ -271,7 +277,7 @@ export function Page1EstadosTiempo() {
             legend: { bottom: 0, textStyle: { fontSize: 11, color: "#475569" } },
             series: [
                 {
-                    name: "Oportunidades por estado",
+                    name: "Oportunidades por resultado de fase",
                     type: "pie",
                     radius: ["45%", "72%"],
                     center: ["50%", "45%"],
@@ -298,7 +304,7 @@ export function Page1EstadosTiempo() {
             if (!isPlausibleYear(d.getFullYear())) return;
             const key = `${d.getFullYear()}-${String(d.getMonth()).padStart(2, "0")}`;
             if (!byMonth.has(key)) byMonth.set(key, { open: 0, won: 0, lost: 0 });
-            byMonth.get(key)![getEstadoBucket(o.estado_id)] += 1;
+            byMonth.get(key)![getResultadoBucket(o.fase_id, outcomeMap)] += 1;
         });
 
         const keys = Array.from(byMonth.keys()).sort();
@@ -345,7 +351,7 @@ export function Page1EstadosTiempo() {
             },
             series,
         };
-    }, [filtered]);
+    }, [filtered, outcomeMap]);
 
     return (
         <div className="flex flex-col gap-6">
@@ -365,7 +371,7 @@ export function Page1EstadosTiempo() {
                         <MultiSelect options={ownerOptions} selected={filters.ownerIds} onChange={v => setFilter("ownerIds", v)} placeholder="Todos" />
                     </div>
                     <div>
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Estado</label>
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Resultado (fase)</label>
                         <MultiSelect options={ESTADO_OPTIONS} selected={filters.estados} onChange={v => setFilter("estados", v as EstadoBucket[])} placeholder="Todos" />
                     </div>
                     <div>
@@ -416,9 +422,9 @@ export function Page1EstadosTiempo() {
                 <div className="lg:col-span-1 bg-white rounded-2xl border border-slate-200/60 shadow-sm p-5 flex flex-col">
                     <div className="flex items-center gap-2 mb-2">
                         <PieChart className="w-4 h-4 text-[#254153]" />
-                        <h3 className="font-bold text-slate-800 text-sm">Oportunidades por estado</h3>
+                        <h3 className="font-bold text-slate-800 text-sm">Oportunidades por resultado de fase</h3>
                     </div>
-                    <p className="text-[11px] text-slate-400 -mt-1 mb-1">Haz clic en una porción para filtrar toda la página por ese estado.</p>
+                    <p className="text-[11px] text-slate-400 -mt-1 mb-1">Haz clic en una porción para filtrar toda la página por ese resultado.</p>
                     <div className="flex-1 min-h-[280px]">
                         <ReactECharts
                             option={pieOption}

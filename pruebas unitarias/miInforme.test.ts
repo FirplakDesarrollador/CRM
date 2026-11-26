@@ -7,7 +7,6 @@ const m = (entries: [string | number, string][]) => new Map<string | number, str
 const lookups: MiInformeLookups = {
     canales: m([['OBRAS_NAC', 'Obras Nacional']]),
     fases: m([[3, 'Cotización']]),
-    estados: m([[1, 'Abierta']]),
     segmentos: m([[2, 'Constructoras']]),
     departamentos: m([[5, 'Antioquia']]),
     ciudades: m([[50, 'Medellín']]),
@@ -22,7 +21,7 @@ describe('Mi informe (Excel personal del asesor)', () => {
     const sheets = buildMiInformeSheets({
         cuentas: [{ id: 'acc-1', nombre: 'Constructora Uno', nit_base: '900123', nit_sufijo: '4', canal_id: 'OBRAS_NAC', departamento_id: 5, ciudad_id: 50, es_premium: true, created_at: '2026-10-01T10:00:00Z' }],
         contactos: [{ id: 'c-1', nombre: 'Laura', account_id: 'acc-1', es_principal: true }],
-        oportunidades: [{ id: 'opp-1', nombre: 'Torre Norte', account_id: 'acc-1', estado_id: 1, fase_id: 3, amount: '1500000', segmento_id: 2 }],
+        oportunidades: [{ id: 'opp-1', nombre: 'Torre Norte', account_id: 'acc-1', fase_id: 3, amount: '1500000', segmento_id: 2 }],
         actividades: [{ id: 'a-1', asunto: 'Visita obra', tipo_actividad_id: 7, account_id: 'acc-1', opportunity_id: 'opp-1', is_completed: false, descripcion: 'Texto con "comillas" y\nsaltos' }]
     }, lookups);
 
@@ -30,7 +29,9 @@ describe('Mi informe (Excel personal del asesor)', () => {
         expect(sheets.map(s => s.name)).toEqual(['Cuentas', 'Contactos', 'Oportunidades', 'Actividades']);
         expect(sheets[0].rows[0]).toMatchObject({ nit: '900123-4', canal: 'Obras Nacional', ciudad: 'Medellín', premium: 'Sí' });
         expect(sheets[1].rows[0]).toMatchObject({ cuenta: 'Constructora Uno', principal: 'Sí' });
-        expect(sheets[2].rows[0]).toMatchObject({ estado: 'Abierta', fase: 'Cotización', amount: 1500000, segmento: 'Constructoras' });
+        expect(sheets[2].rows[0]).toMatchObject({ fase: 'Cotización', amount: 1500000, segmento: 'Constructoras' });
+        // El estado de la oportunidad ya no se exporta (solo la fase).
+        expect(sheets[2].columns.some(c => c.key === 'estado')).toBe(false);
         expect(sheets[3].rows[0]).toMatchObject({ tipo: 'Visita', oportunidad: 'Torre Norte', estado: 'Pendiente' });
     });
 

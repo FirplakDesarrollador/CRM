@@ -7,7 +7,8 @@ import { useRouter } from "next/navigation";
 import { useOnClickOutside } from "@/lib/hooks/useOnClickOutside"; // Assuming this exists or I'll implement a simple ref check
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { db } from "@/lib/db";
-import { isSellerRole, sellerCanSeeAccount, sellerCanSeeOpportunity } from "@/lib/sellerVisibility";
+import { canViewAllAccountsContactsOpportunities, isSellerRole, sellerCanSeeAccount, sellerCanSeeOpportunity } from "@/lib/sellerVisibility";
+import { filterSearchResultsForTienda, isTiendaUser } from "@/lib/tiendaVisibility";
 
 type SearchResult = {
     entity_type: 'opportunity' | 'account' | 'contact';
@@ -82,8 +83,24 @@ export function GlobalSearch() {
                 });
 
                 if (error) throw error;
-                const rows = (data || []) as SearchResult[];
-                setResults(isSellerRole(role) && currentUser?.id ? await filterResultsForSeller(rows, currentUser.id) : rows);
+                let rows = (data || []) as SearchResult[];
+                if (isTiendaUser(currentUser) && currentUser?.id) {
+                    const opportunityIds = rows.filter(row => row.entity_type === 'opportunity').map(row => row.id);
+                    let owned = new Set<string>();
+                    if (opportunityIds.length > 0) {
+                        const { data: ownedRows } = await supabase
+                            .from('CRM_Oportunidades')
+                            .select('id')
+                            .in('id', opportunityIds)
+                            .eq('owner_user_id', currentUser.id);
+                        owned = new Set((ownedRows || []).map(row => row.id as string));
+                    }
+                    // Cuentas y contactos se quedan completos. Solo se recortan oportunidades.
+                    setResults(filterSearchResultsForTienda(rows, currentUser, owned));
+                    return;
+                }
+                const restrictPortfolio = isSellerRole(role) && !!currentUser?.id && !canViewAllAccountsContactsOpportunities(currentUser);
+                setResults(restrictPortfolio && currentUser?.id ? await filterResultsForSeller(rows, currentUser.id) : rows);
             } catch (err) {
                 console.error("Global Search Error:", err);
             } finally {
@@ -92,7 +109,7 @@ export function GlobalSearch() {
         }, 300);
 
         return () => clearTimeout(timer);
-    }, [query, role, currentUser?.id]);
+    }, [query, role, currentUser]);
 
     const handleSelect = (result: SearchResult) => {
         setIsOpen(false);

@@ -6,6 +6,7 @@ import { BarChart3, ListChecks } from "lucide-react";
 import { useActivities } from "@/lib/hooks/useActivities";
 import { useOpportunities } from "@/lib/hooks/useOpportunities";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { canViewAllAccountsContactsOpportunities } from "@/lib/sellerVisibility";
 import { useIndicadoresLookups } from "@/lib/hooks/useIndicadoresLookups";
 import { SearchableSelect, SearchableSelectOption } from "@/components/ui/SearchableSelect";
 import { MultiSelect, Option } from "@/components/ui/MultiSelect";
@@ -128,7 +129,7 @@ export function Page2Clasificaciones() {
 
         return (activities || []).filter(a => {
             if (a.is_deleted) return false;
-            if (isVendedor && user?.id && a.user_id !== user.id) return false;
+            if (isVendedor && user?.id && !canViewAllAccountsContactsOpportunities(user) && a.user_id !== user.id) return false;
             if (ownerSet && (!a.user_id || !ownerSet.has(a.user_id))) return false;
             if (clasifSet && (a.clasificacion_id == null || !clasifSet.has(a.clasificacion_id))) return false;
             if (filters.canalId || filters.zonaId) {

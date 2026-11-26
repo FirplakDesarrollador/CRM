@@ -35,7 +35,7 @@ vi.mock('./supabase', () => ({
 }));
 
 import { db } from './db';
-import { hydrateOpportunityActivities, hydrateActivitiesForSearch, hydrateOwnActivities } from './serverHydration';
+import { hydrateOpportunityActivities, hydrateActivitiesForSearch, hydrateOwnActivities, hydrateActivityById, hydrateActivityReferences, hydrateActivityContacts } from './serverHydration';
 import { accentInsensitiveRegex, accentInsensitiveCondition } from './utils';
 
 const OPP = 'opp-1';
@@ -64,7 +64,7 @@ describe('serverHydration', () => {
         calls.length = 0;
         responses = {};
         if (!db.isOpen()) await db.open();
-        await Promise.all([db.activities.clear(), db.outbox.clear(), db.opportunities.clear(), db.accounts.clear()]);
+        await Promise.all([db.activities.clear(), db.outbox.clear(), db.opportunities.clear(), db.accounts.clear(), db.contacts.clear()]);
     });
 
     it('adds every missing activity of the opportunity without overwriting local or pending ones', async () => {
@@ -88,6 +88,37 @@ describe('serverHydration', () => {
         await hydrateOpportunityActivities(OPP, { viewerId: 'seller-1', viewerRole: 'VENDEDOR' });
         const ops = calls[0].ops.map(([op, args]) => `${op}:${args.join('|')}`);
         expect(ops).toContain('eq:user_id|seller-1');
+    });
+
+    it('un coordinador de tienda solo hidrata sus actividades y no guarda oportunidades ajenas', async () => {
+        responses.CRM_Actividades = [act('t1', { user_id: 'tienda-1' })];
+        responses.CRM_Oportunidades = [{ id: OPP, nombre: 'Ajena', account_id: 'acc-1', owner_user_id: 'otro', is_deleted: false }];
+        responses.CRM_Cuentas = [{ id: 'acc-1', nombre: 'Cuenta visible', is_deleted: false }];
+
+        await hydrateOpportunityActivities(OPP, { viewerId: 'tienda-1', viewerRole: 'COORDINADOR', esTienda: true });
+        const listOps = calls.find(call => call.table === 'CRM_Actividades')!.ops.map(([op, args]) => `${op}:${args.join('|')}`);
+        expect(listOps).toContain('eq:user_id|tienda-1');
+
+        await db.activities.clear();
+        calls.length = 0;
+        const added = await hydrateActivityById('t1', { viewerId: 'tienda-1', viewerRole: 'COORDINADOR', esTienda: true });
+        expect(added).toBe(1);
+        const deepOps = calls.find(call => call.table === 'CRM_Actividades')!.ops.map(([op, args]) => `${op}:${args.join('|')}`);
+        expect(deepOps).toContain('eq:user_id|tienda-1');
+        expect(await db.accounts.get('acc-1')).toBeTruthy();
+        expect(await db.opportunities.get(OPP)).toBeUndefined();
+    });
+
+    it('quien ve toda la cartera hidrata las actividades de todos', async () => {
+        responses.CRM_Actividades = [act('s1', { user_id: 'otro-asesor' })];
+        await hydrateOpportunityActivities(OPP, {
+            viewerId: '1870c27f-e901-41ed-97d4-7ecc89fd4935',
+            viewerEmail: 'cotizaciones@firplak.co',
+            viewerRole: 'VENDEDOR',
+        });
+        const ops = calls[0].ops.map(([op, args]) => `${op}:${args.join('|')}`);
+        expect(ops.some(op => op.startsWith('eq:user_id'))).toBe(false);
+        expect(await db.activities.get('s1')).toBeTruthy();
     });
 
     it('search hydrates matching activities plus their opportunity and account', async () => {
@@ -127,5 +158,84 @@ describe('serverHydration', () => {
         const ops = actCall.ops.map(([op, args]) => `${op}:${args.join('|')}`);
         expect(ops).toContain('eq:user_id|seller-1');
         expect(ops).toContain('or:is_completed.eq.false,fecha_inicio.gte.2025-10-30T12:00:00.000Z');
+    });
+
+    it('deep link trae la actividad que no está en Dexie junto con su oportunidad y su cuenta', async () => {
+        responses.CRM_Actividades = [act('deep-1', { asunto: 'Llamada en servidor' })];
+        responses.CRM_Oportunidades = [{ id: OPP, nombre: 'POT900 - Tienda', account_id: 'acc-1', is_deleted: false }];
+        responses.CRM_Cuentas = [{ id: 'acc-1', nombre: 'Tienda Norte', is_deleted: false }];
+
+        const added = await hydrateActivityById('deep-1', { viewerId: 'admin-1', viewerRole: 'ADMIN' });
+
+        expect(added).toBe(1);
+        expect((await db.activities.get('deep-1'))?.asunto).toBe('Llamada en servidor');
+        expect((await db.opportunities.get(OPP))?.nombre).toBe('POT900 - Tienda');
+        expect((await db.accounts.get('acc-1'))?.nombre).toBe('Tienda Norte');
+        const actCall = calls.find(c => c.table === 'CRM_Actividades')!;
+        const ops = actCall.ops.map(([op, args]) => `${op}:${args.join('|')}`);
+        expect(ops).toContain('eq:id|deep-1');
+        expect(ops.some(op => op.startsWith('eq:user_id'))).toBe(false);
+    });
+
+    it('un asesor solo trae por id una actividad asignada a él y no pisa la copia local', async () => {
+        responses.CRM_Actividades = [act('deep-2', { asunto: 'servidor' })];
+        responses.CRM_Oportunidades = [{ id: OPP, account_id: 'acc-1', nombre: 'Opp', is_deleted: false }];
+        responses.CRM_Cuentas = [{ id: 'acc-1', nombre: 'Cuenta', is_deleted: false }];
+        await db.activities.add(act('deep-2', { asunto: 'local' }) as unknown as Parameters<typeof db.activities.add>[0]);
+
+        const added = await hydrateActivityById('deep-2', { viewerId: 'seller-1', viewerRole: 'VENDEDOR' });
+
+        expect(added).toBe(0);
+        expect((await db.activities.get('deep-2'))?.asunto).toBe('local');
+        expect(await db.opportunities.get(OPP)).toBeTruthy();
+        const actCall = calls.find(c => c.table === 'CRM_Actividades')!;
+        const ops = actCall.ops.map(([op, args]) => `${op}:${args.join('|')}`);
+        expect(ops).toContain('eq:id|deep-2');
+        expect(ops).toContain('eq:user_id|seller-1');
+    });
+
+    it('hydrateActivityReferences guarda la oportunidad y la cuenta que faltan sin tocar actividades', async () => {
+        responses.CRM_Oportunidades = [{ id: OPP, nombre: 'POT1', account_id: 'acc-9', is_deleted: false }];
+        responses.CRM_Cuentas = [{ id: 'acc-9', nombre: 'Cuenta 9', is_deleted: false }];
+
+        await hydrateActivityReferences({ opportunity_id: OPP, account_id: null });
+
+        expect((await db.opportunities.get(OPP))?.account_id).toBe('acc-9');
+        expect((await db.accounts.get('acc-9'))?.nombre).toBe('Cuenta 9');
+        expect(await db.activities.count()).toBe(0);
+    });
+
+    it('trae el contacto principal que falta y no pisa el contacto local', async () => {
+        responses.CRM_Contactos = [
+            { id: 'c-pri', account_id: 'acc-1', nombre: 'Vanessa', es_principal: true, is_deleted: false },
+            { id: 'c-local', account_id: 'acc-1', nombre: 'Servidor', es_principal: false, is_deleted: false },
+        ];
+        await db.contacts.add({ id: 'c-local', account_id: 'acc-1', nombre: 'Editado', es_principal: false });
+
+        const added = await hydrateActivityContacts({ accountId: 'acc-1', contactIds: [] });
+
+        expect(added).toBe(1);
+        expect((await db.contacts.get('c-pri'))?.nombre).toBe('Vanessa');
+        expect((await db.contacts.get('c-local'))?.nombre).toBe('Editado');
+        const contactCall = calls.find(call => call.table === 'CRM_Contactos')!;
+        const ops = contactCall.ops.map(([op, args]) => `${op}:${args.join('|')}`);
+        expect(ops).toContain('eq:account_id|acc-1');
+    });
+
+    it('si la cuenta ya tiene principal local, solo completa el contacto de la oportunidad que falta', async () => {
+        responses.CRM_Contactos = [
+            { id: 'c-opp', account_id: 'acc-1', nombre: 'Contacto opp', es_principal: false, is_deleted: false },
+        ];
+        await db.contacts.add({ id: 'c-pri', account_id: 'acc-1', nombre: 'Principal', es_principal: true });
+
+        const added = await hydrateActivityContacts({ accountId: 'acc-1', contactIds: ['c-opp', 'c-pri'] });
+
+        expect(added).toBe(1);
+        expect((await db.contacts.get('c-opp'))?.nombre).toBe('Contacto opp');
+        expect((await db.contacts.get('c-pri'))?.nombre).toBe('Principal');
+        const contactCalls = calls.filter(call => call.table === 'CRM_Contactos');
+        expect(contactCalls.some(call => call.ops.some(([op]) => op === 'eq' && call.ops.some(([, args]) => args[0] === 'account_id')))).toBe(false);
+        const idCall = contactCalls.find(call => call.ops.some(([op]) => op === 'in'));
+        expect(idCall?.ops.find(([op]) => op === 'in')?.[1][1]).toEqual(['c-opp']);
     });
 });

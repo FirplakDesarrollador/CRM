@@ -1,15 +1,18 @@
 "use client";
 
 import React, { useState, useMemo } from 'react';
+import { getPhaseOutcomeByName, splitPhaseIdsByOutcome, type PhaseOutcome } from '@/lib/opportunityPhase';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useUsers } from '@/lib/hooks/useUsers';
 import { supabase } from '@/lib/supabase';
-import { downloadExcel, downloadCSV, downloadSopExcel, ExportColumn, SopRow, mapOpportunityReportRow, mapActivityReportRow, fetchAllInChunks } from '@/lib/utils/informes';
+import { downloadExcel, downloadCSV, downloadSopExcel, ExportColumn, SopRow, mapOpportunityReportRow, mapActivityReportRow, fetchAllInChunks, resolveExportScope } from '@/lib/utils/informes';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { FileSpreadsheet, Loader2, Download, TableProperties, Users, Briefcase, Building2, Calendar as CalendarIcon, Filter, RotateCcw, DollarSign, MapPin, Tag } from 'lucide-react';
 import { cn } from '@/components/ui/utils';
 import { MiInformeCard } from '@/components/informes/MiInformeCard';
+import { userHasB2CAccess } from '@/lib/b2c';
+import { toBogotaEndOfDayISO, toBogotaStartOfDayISO } from '@/lib/dateFilterHelpers';
 
 // Constantes para filtros
 const ENTIDADES = [
@@ -23,20 +26,22 @@ const ENTIDADES = [
 
 type EntidadType = typeof ENTIDADES[number]['id'];
 
-const ESTADOS_OPPORTUNIDADES = ['Abierta', 'Ganada', 'Perdida', 'Suspendida'];
+// Resultado de la oportunidad: se calcula SOLO por la fase (el estado ya no se usa ni se muestra).
+const RESULTADOS_OPORTUNIDAD: Array<{ label: string; value: PhaseOutcome }> = [
+    { label: 'Abierta', value: 'open' },
+    { label: 'Cerrada ganada', value: 'won' },
+    { label: 'Cerrada perdida', value: 'lost' },
+];
 const ESTADOS_COTIZACION = ['DRAFT', 'SENT', 'WINNER', 'REJECTED', 'EXPIRED'];
 const MESES_ES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
-const ESTADO_IDS_BY_NAME: Record<string, number[]> = {
-    Abierta: [1],
-    Ganada: [2, 11],
-    Perdida: [3, 14],
-    Suspendida: [4]
-};
 
 const SELECT_TRIGGER_CLASS = "w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-left text-slate-800 text-sm font-normal hover:bg-white focus:bg-white transition-all justify-between flex items-center";
 
 export default function InformesPage() {
-    const { role, isLoading: isLoadingUser } = useCurrentUser();
+    const { role, user, isLoading: isLoadingUser } = useCurrentUser();
+    // Columnas pedidas por B2C (Canal Propio): solo PROPIO y ADMIN las ven.
+    const canSeeB2CReportColumns = userHasB2CAccess(user);
+    const isAdmin = role === 'ADMIN';
     const { users } = useUsers();
 
     const [selectedEntidad, setSelectedEntidad] = useState<EntidadType>('oportunidades');
@@ -46,6 +51,8 @@ export default function InformesPage() {
     // Filtros Generales
     const [dateFrom, setDateFrom] = useState('');
     const [dateTo, setDateTo] = useState('');
+    const [closeDateFrom, setCloseDateFrom] = useState('');
+    const [closeDateTo, setCloseDateTo] = useState('');
     const [dueDateFrom, setDueDateFrom] = useState('');
     const [dueDateTo, setDueDateTo] = useState('');
     const [selectedUser, setSelectedUser] = useState('');
@@ -150,6 +157,8 @@ export default function InformesPage() {
     const handleResetFilters = () => {
         setDateFrom('');
         setDateTo('');
+        setCloseDateFrom('');
+        setCloseDateTo('');
         setDueDateFrom('');
         setDueDateTo('');
         setSelectedUser('');
@@ -210,8 +219,8 @@ export default function InformesPage() {
     ], [catalogs.canales]);
 
     const estadoOppOptions = useMemo(() => [
-        { label: 'Todos los estados', value: '' },
-        ...ESTADOS_OPPORTUNIDADES.map(e => ({ label: e, value: e }))
+        { label: 'Todos', value: '' },
+        ...RESULTADOS_OPORTUNIDAD
     ], []);
 
     const faseOptions = useMemo(() => [
@@ -310,35 +319,20 @@ export default function InformesPage() {
         );
     }
 
-    if (role !== 'ADMIN') {
-        // Asesores y coordinadores: solo su informe personal (filtrado en el servidor).
-        return (
-            <div className="flex-1 w-full bg-slate-50 min-h-screen pb-safe">
-                <header className="bg-white border-b border-slate-200/60">
-                    <div className="max-w-3xl mx-auto px-4 sm:px-6 py-5 flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center">
-                            <FileSpreadsheet className="w-5 h-5 text-blue-600" />
-                        </div>
-                        <div>
-                            <h1 className="text-2xl font-bold text-slate-800 tracking-tight leading-tight">Informes</h1>
-                            <p className="text-sm text-slate-500 font-medium mt-0.5">Tu información en Excel</p>
-                        </div>
-                    </div>
-                </header>
-                <main className="max-w-3xl mx-auto px-4 sm:px-6 py-6 space-y-4">
-                    <MiInformeCard />
-                    <p className="text-xs text-slate-400">Los informes generales (todos los asesores, S&amp;OP) siguen siendo solo para administradores.</p>
-                </main>
-            </div>
-        );
-    }
-
     // Handlers
     const handleExport = async (format: 'excel' | 'csv') => {
         setIsExporting(true);
         try {
             const entidadDef = ENTIDADES.find(e => e.id === selectedEntidad);
             if (!entidadDef) throw new Error("Entidad no válida");
+
+            // El administrador puede elegir un asesor. El resto siempre descarga solo lo suyo.
+            const scopeUserId = resolveExportScope(isAdmin, selectedUser, user?.id);
+            if (!isAdmin && !scopeUserId) {
+                alert('No se pudo identificar tu usuario. Vuelve a iniciar sesión.');
+                setIsExporting(false);
+                return;
+            }
 
             // 1. Cargar Catálogos para Mapeo (Lookups)
             const [
@@ -431,21 +425,30 @@ export default function InformesPage() {
                         probabilidad,
                         probability,
                         fecha_cierre_estimada,
+                        fecha_entrega,
                         created_at,
                         owner_user_id,
                         account_id,
-                        estado_id,
                         fase_id,
                         cuenta:CRM_Cuentas(nombre, canal_id, subclasificacion_id),
-                        fase:CRM_FasesOportunidad(nombre, canal_id),
-                        estado_info:CRM_EstadosOportunidad(nombre)
+                        fase:CRM_FasesOportunidad(nombre, canal_id)
                     `)
                     .eq('is_deleted', false);
 
-                if (selectedUser) oppQuery = oppQuery.eq('owner_user_id', selectedUser);
+                if (scopeUserId) oppQuery = oppQuery.eq('owner_user_id', scopeUserId);
+                if (dateFrom) {
+                    const startISO = toBogotaStartOfDayISO(dateFrom);
+                    if (startISO) oppQuery = oppQuery.gte('created_at', startISO);
+                }
+                if (dateTo) {
+                    const endISO = toBogotaEndOfDayISO(dateTo);
+                    if (endISO) oppQuery = oppQuery.lte('created_at', endISO);
+                }
+                if (closeDateFrom) oppQuery = oppQuery.gte('fecha_cierre_estimada', closeDateFrom);
+                if (closeDateTo) oppQuery = oppQuery.lte('fecha_cierre_estimada', closeDateTo);
 
                 oppQuery = oppQuery.order('created_at', { ascending: false }).order('id', { ascending: false });
-                const opps = await fetchAllInChunks(oppQuery, 2500, (total) => {
+                const opps = await fetchAllInChunks(oppQuery, 1000, (total) => {
                     setExportProgress(`Cargando oportunidades (${total.toLocaleString()})...`);
                 });
 
@@ -548,13 +551,13 @@ export default function InformesPage() {
                         if (!opp) return;
 
                         const cuentaObj = getJoinedSingle(opp.cuenta);
-                        const estadoObj = getJoinedSingle(opp.estado_info);
+                        const faseObj = getJoinedSingle(opp.fase);
 
                         const canalId = cuentaObj?.canal_id;
                         const subcanalId = cuentaObj?.subclasificacion_id;
 
                         if (selectedCanal && canalId !== selectedCanal) return;
-                        if (selectedEstado && estadoObj?.nombre !== selectedEstado) return;
+                        if (selectedEstado && getPhaseOutcomeByName(faseObj?.nombre) !== selectedEstado) return;
 
                         const fechaFact = (ped as any)['EXTRA_Fecha de facturación'] || ped.closeDate || ped.expectedCloseDate;
                         const fechaEntr = (ped as any)['EXTRA_Fecha mínima requerida por comercial/cliente'] || ped.expectedCloseDate || ped.closeDate;
@@ -606,14 +609,14 @@ export default function InformesPage() {
                         if (!opp) return;
 
                         const cuentaObj = getJoinedSingle(opp.cuenta);
-                        const estadoObj = getJoinedSingle(opp.estado_info);
+                        const faseObj = getJoinedSingle(opp.fase);
 
                         const canalId = cuentaObj?.canal_id;
                         const subcanalId = cuentaObj?.subclasificacion_id;
                         const oppProb = Number(opp.probabilidad || opp.probability || 0);
 
                         if (selectedCanal && canalId !== selectedCanal) return;
-                        if (selectedEstado && estadoObj?.nombre !== selectedEstado) return;
+                        if (selectedEstado && getPhaseOutcomeByName(faseObj?.nombre) !== selectedEstado) return;
                         if (minProbabilidad && oppProb < Number(minProbabilidad)) return;
 
                         const quote = quotesData.find(q => q.opportunity_id === oppId && q.status === 'WINNER')
@@ -621,13 +624,18 @@ export default function InformesPage() {
 
                         if (!quote || !quote.items || quote.items.length === 0) return;
 
-                        const dtComercial = getYearAndMonth(opp.fecha_cierre_estimada);
-                        const dtPlanta = getYearAndMonth(opp.fecha_cierre_estimada);
+                        // Mes planta y mes comercial salen solo de la fecha de entrega de la oportunidad.
+                        // Si no hay fecha_entrega, año/mes/quincena se muestran como "Sin fecha"
+                        // (ya no se usa fecha_cierre_estimada como respaldo).
+                        const fechaOpp = opp.fecha_entrega;
+                        const dtComercial = getYearAndMonth(fechaOpp);
+                        const dtPlanta = getYearAndMonth(fechaOpp);
+                        const sinFechaEntrega = !fechaOpp || fechaOpp === '-' || dtComercial.monthName === 'Sin fecha';
 
-                        const anioFact = dtComercial.year;
-                        const mesComercial = dtComercial.monthName;
-                        const mesPlanta = dtPlanta.monthName;
-                        const quincena = dtComercial.day <= 15 ? 1 : 2;
+                        const anioFact = sinFechaEntrega ? 'Sin fecha' : dtComercial.year;
+                        const mesComercial = sinFechaEntrega ? 'Sin fecha' : dtComercial.monthName;
+                        const mesPlanta = sinFechaEntrega ? 'Sin fecha' : dtPlanta.monthName;
+                        const quincena = sinFechaEntrega ? 'Sin fecha' : (dtComercial.day <= 15 ? 1 : 2);
 
                         if (selectedSopAnio && String(anioFact) !== selectedSopAnio) return;
                         if (selectedSopMes && mesComercial !== selectedSopMes) return;
@@ -643,7 +651,7 @@ export default function InformesPage() {
                                 anio_fact: anioFact,
                                 mes_planta: mesPlanta,
                                 mes_comercial: mesComercial,
-                                estado: estadoObj?.nombre || 'Proyectado',
+                                estado: faseObj?.nombre ? `Proyectado (${faseObj.nombre})` : 'Proyectado',
                                 asesor: userMap.get(opp.owner_user_id) || '-',
                                 grupo_cliente: canalMap.get(canalId) || '-',
                                 subgrupo_cliente: subclasificacionMap.get(subcanalId) || '-',
@@ -668,6 +676,13 @@ export default function InformesPage() {
                     return;
                 }
 
+                // Las filas sin fecha de entrega quedan al final, sin reordenar el resto.
+                sopRows.sort((a, b) => {
+                    const aSin = a.anio_fact === 'Sin fecha' || a.mes_comercial === 'Sin fecha' ? 1 : 0;
+                    const bSin = b.anio_fact === 'Sin fecha' || b.mes_comercial === 'Sin fecha' ? 1 : 0;
+                    return aSin - bSin;
+                });
+
                 const currentDateTime = new Date().toISOString().replace(/:/g, '-').split('.')[0];
                 const fileName = `Informe_SOP_${currentDateTime}`;
 
@@ -678,7 +693,7 @@ export default function InformesPage() {
                         { header: 'Año fact', key: 'anio_fact' },
                         { header: 'Mes Planta', key: 'mes_planta' },
                         { header: 'Mes Comercial', key: 'mes_comercial' },
-                        { header: 'Estado', key: 'estado' },
+                        { header: 'Pedido / Proyectado', key: 'estado' },
                         { header: 'Asesor', key: 'asesor' },
                         { header: 'Grupo Cliente', key: 'grupo_cliente' },
                         { header: 'Subgrupo Cliente', key: 'subgrupo_cliente' },
@@ -709,7 +724,6 @@ export default function InformesPage() {
                     *,
                     cuenta:CRM_Cuentas(nombre, canal_id, pais_id),
                     fase:CRM_FasesOportunidad(nombre, canal_id),
-                    estado_info:CRM_EstadosOportunidad(nombre),
                     segmento:CRM_Segmentos(nombre),
                     actividades:CRM_Actividades(id, fecha_inicio, fecha_fin, is_completed, created_at, is_deleted)
                 `;
@@ -723,12 +737,13 @@ export default function InformesPage() {
                     { header: 'CANAL', key: 'canal_nombre' },
                     { header: 'SEGMENTO', key: 'segmento_nombre', width: 25 },
                     { header: 'VENDEDOR', key: 'vendedor_nombre', width: 25 },
-                    { header: 'ESTADO', key: 'estado_nombre', width: 15 },
                     { header: 'FASE ACTUAL', key: 'fase_nombre', width: 20 },
                     { header: 'VALOR', key: 'amount', width: 15 },
                     { header: 'MONEDA', key: 'currency_id', width: 10 },
                     { header: 'PROBABILIDAD (%)', key: 'probabilidad', width: 15 },
-                    { header: 'FECHA CIERRE EST.', key: 'fecha_cierre_estimada', width: 18 },
+                    { header: 'FECHA ESTIMADA', key: 'fecha_estimada', width: 18 },
+                    // Fecha real de cierre (Cerrada Ganada / Cerrada Perdida) — B2C y admins
+                    ...(canSeeB2CReportColumns ? [{ header: 'FECHA DE CIERRE', key: 'fecha_cierre', width: 18 }] : []),
                     { header: 'FECHA ENTREGA', key: 'fecha_entrega', width: 18 },
                     { header: 'FECHA ACTIVIDAD', key: 'fecha_actividad', width: 20 },
                     { header: 'ESTADO ACTIVIDAD', key: 'estado_actividad', width: 18 },
@@ -877,22 +892,44 @@ export default function InformesPage() {
             if (selectedCanal && selectedEntidad === 'oportunidades') {
                 selectStr = selectStr.replace('cuenta:CRM_Cuentas(', 'cuenta:CRM_Cuentas!inner(');
             }
+            if (scopeUserId && selectedEntidad === 'contactos') {
+                selectStr = selectStr.replace('cuenta:CRM_Cuentas(', 'cuenta:CRM_Cuentas!inner(');
+            }
+            if (scopeUserId && selectedEntidad === 'cotizaciones') {
+                selectStr = selectStr.replace('oportunidad:CRM_Oportunidades(', 'oportunidad:CRM_Oportunidades!inner(');
+            }
 
             let query = supabase.from(entidadDef.table).select(selectStr);
 
-            if (dateFrom) query = query.gte('created_at', `${dateFrom}T00:00:00Z`);
-            if (dateTo) query = query.lte('created_at', `${dateTo}T23:59:59Z`);
+            if (dateFrom) {
+                const startISO = toBogotaStartOfDayISO(dateFrom);
+                if (startISO) query = query.gte('created_at', startISO);
+            }
+            if (dateTo) {
+                const endISO = toBogotaEndOfDayISO(dateTo);
+                if (endISO) query = query.lte('created_at', endISO);
+            }
+            if (selectedEntidad === 'oportunidades' && closeDateFrom) {
+                query = query.gte('fecha_cierre_estimada', closeDateFrom);
+            }
+            if (selectedEntidad === 'oportunidades' && closeDateTo) {
+                query = query.lte('fecha_cierre_estimada', closeDateTo);
+            }
 
             if (selectedEntidad === 'actividades') {
                 if (dueDateFrom) query = query.gte('fecha_fin', `${dueDateFrom}T00:00:00Z`);
                 if (dueDateTo) query = query.lte('fecha_fin', `${dueDateTo}T23:59:59Z`);
             }
 
-            if (selectedUser) {
+            if (scopeUserId) {
                 if (selectedEntidad === 'oportunidades' || selectedEntidad === 'cuentas') {
-                    query = query.eq('owner_user_id', selectedUser);
-                } else {
-                    query = query.eq('user_id', selectedUser);
+                    query = query.eq('owner_user_id', scopeUserId);
+                } else if (selectedEntidad === 'actividades') {
+                    query = query.or(`user_id.eq.${scopeUserId},created_by.eq.${scopeUserId}`);
+                } else if (selectedEntidad === 'contactos') {
+                    query = query.eq('cuenta.owner_user_id', scopeUserId);
+                } else if (selectedEntidad === 'cotizaciones') {
+                    query = query.eq('oportunidad.owner_user_id', scopeUserId);
                 }
             }
 
@@ -905,10 +942,11 @@ export default function InformesPage() {
             }
 
             if (selectedEstado && selectedEntidad === 'oportunidades') {
-                const estadoIds = ESTADO_IDS_BY_NAME[selectedEstado];
-                if (estadoIds?.length) {
-                    query = query.in('estado_id', estadoIds);
-                }
+                // Resultado por FASE: ganada / perdida = fases "Cerrada ...", abierta = el resto o sin fase.
+                const { won, lost, closed } = splitPhaseIdsByOutcome(catalogs.fases);
+                if (selectedEstado === 'won') query = query.in('fase_id', won.length ? won : [-1]);
+                else if (selectedEstado === 'lost') query = query.in('fase_id', lost.length ? lost : [-1]);
+                else if (selectedEstado === 'open' && closed.length) query = query.or(`fase_id.is.null,fase_id.not.in.(${closed.join(',')})`);
             }
 
             if (selectedFase && selectedEntidad === 'oportunidades') {
@@ -963,7 +1001,7 @@ export default function InformesPage() {
             }
 
             query = query.order('created_at', { ascending: false }).order('id', { ascending: false });
-            const data = await fetchAllInChunks(query, 2500, (total) => {
+            const data = await fetchAllInChunks(query, 1000, (total) => {
                 setExportProgress(`Descargando registros (${total.toLocaleString()})...`);
             });
 
@@ -1015,7 +1053,11 @@ export default function InformesPage() {
                         </div>
                         <div>
                             <h1 className="text-2xl font-bold text-slate-800 tracking-tight leading-tight">Informes y Exportaciones</h1>
-                            <p className="text-sm text-slate-500 font-medium mt-0.5">Exportaciones generales (administradores) y tu informe personal</p>
+                            <p className="text-sm text-slate-500 font-medium mt-0.5">
+                                {isAdmin
+                                    ? 'Exportaciones generales (administradores) y tu informe personal'
+                                    : 'Cada informe incluye únicamente tu información'}
+                            </p>
                         </div>
                     </div>
                 </div>
@@ -1078,7 +1120,7 @@ export default function InformesPage() {
                         <div className="space-y-3 col-span-1 lg:col-span-2">
                             <label className="text-sm font-semibold text-slate-700 flex items-center gap-2">
                                 <CalendarIcon className="w-4 h-4 text-slate-400" />
-                                Rango de Fechas (Creación)
+                                Fecha de creación
                             </label>
                             <div className="grid grid-cols-2 gap-3">
                                 <div className="relative">
@@ -1101,6 +1143,36 @@ export default function InformesPage() {
                                 </div>
                             </div>
                         </div>
+
+                        {(selectedEntidad === 'oportunidades' || selectedEntidad === 'sop') && (
+                            <div className="space-y-3 col-span-1 lg:col-span-2">
+                                <label className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+                                    <CalendarIcon className="w-4 h-4 text-slate-400" />
+                                    Fecha de cierre
+                                </label>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div className="relative">
+                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-500 font-medium">Desde</span>
+                                        <input
+                                            type="date"
+                                            value={closeDateFrom}
+                                            onChange={e => setCloseDateFrom(e.target.value)}
+                                            className="w-full pl-12 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:bg-white transition-all text-sm"
+                                        />
+                                    </div>
+                                    <div className="relative">
+                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-500 font-medium">Hasta</span>
+                                        <input
+                                            type="date"
+                                            value={closeDateTo}
+                                            onChange={e => setCloseDateTo(e.target.value)}
+                                            className="w-full pl-12 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:bg-white transition-all text-sm"
+                                        />
+                                    </div>
+                                </div>
+                                <p className="text-[11px] text-slate-400">Usa la fecha estimada de cierre. El día «hasta» queda incluido.</p>
+                            </div>
+                        )}
 
                         {/* Rango de Fechas (Vencimiento) - Solo para Actividades */}
                         {selectedEntidad === 'actividades' && (
@@ -1132,17 +1204,27 @@ export default function InformesPage() {
                             </div>
                         )}
 
-                        {/* Asesor Comercial */}
-                        <div className="space-y-3">
-                            <label className="text-sm font-semibold text-slate-700">Asesor Comercial</label>
-                            <SearchableSelect
-                                options={asesorOptions}
-                                value={selectedUser}
-                                onChange={setSelectedUser}
-                                placeholder="Todos los asesores"
-                                triggerClassName={SELECT_TRIGGER_CLASS}
-                            />
-                        </div>
+                        {/* Asesor Comercial: el administrador elige; el asesor queda fijo en su propia información */}
+                        {isAdmin ? (
+                            <div className="space-y-3">
+                                <label className="text-sm font-semibold text-slate-700">Asesor Comercial</label>
+                                <SearchableSelect
+                                    options={asesorOptions}
+                                    value={selectedUser}
+                                    onChange={setSelectedUser}
+                                    placeholder="Todos los asesores"
+                                    triggerClassName={SELECT_TRIGGER_CLASS}
+                                />
+                            </div>
+                        ) : (
+                            <div className="space-y-3">
+                                <label className="text-sm font-semibold text-slate-700">Asesor Comercial</label>
+                                <div className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 flex items-center justify-between">
+                                    <span className="font-medium truncate">{user?.full_name || user?.email || 'Mi usuario'}</span>
+                                    <span className="text-xs bg-blue-100 text-blue-700 font-semibold px-2 py-0.5 rounded-full shrink-0 ml-2">Solo tu información</span>
+                                </div>
+                            </div>
+                        )}
 
                         {/* Canal */}
                         {(selectedEntidad === 'oportunidades' || selectedEntidad === 'cuentas' || selectedEntidad === 'sop') && (
@@ -1158,15 +1240,15 @@ export default function InformesPage() {
                             </div>
                         )}
 
-                        {/* Estado Oportunidad */}
+                        {/* Resultado de la oportunidad (por fase) */}
                         {(selectedEntidad === 'oportunidades' || selectedEntidad === 'sop') && (
                             <div className="space-y-3">
-                                <label className="text-sm font-semibold text-slate-700">Estado Oportunidad</label>
+                                <label className="text-sm font-semibold text-slate-700">Resultado (por fase)</label>
                                 <SearchableSelect
                                     options={estadoOppOptions}
                                     value={selectedEstado}
                                     onChange={setSelectedEstado}
-                                    placeholder="Todos los estados"
+                                    placeholder="Todos"
                                     triggerClassName={SELECT_TRIGGER_CLASS}
                                 />
                             </div>

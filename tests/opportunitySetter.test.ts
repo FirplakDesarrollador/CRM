@@ -74,4 +74,16 @@ describe('Opportunity Setter Field and Report Contract', () => {
         const mappedNone = mapOpportunityReportRow(itemWithoutSetter, mockLookups);
         expect(mappedNone.setter).toBe('-');
     });
+
+    it('Opportunities table includes Setter column in column keys, definitions, and page', () => {
+        const tableHelpers = readFileSync(path.join(root, 'lib', 'opportunityTableHelpers.ts'), 'utf8');
+        expect(tableHelpers).toMatch(/'setter'/);
+
+        const pageSource = readFileSync(path.join(root, 'app', 'oportunidades', 'page.tsx'), 'utf8');
+        expect(pageSource).toMatch(/key:\s*'setter',\s*label:\s*'Setter'/);
+        expect(pageSource).toMatch(/setter:\s*\{/);
+
+        const serverHookSource = readFileSync(path.join(root, 'lib', 'hooks', 'useOpportunitiesServer.ts'), 'utf8');
+        expect(serverHookSource).toMatch(/setter,/);
+    });
 });

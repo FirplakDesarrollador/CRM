@@ -4,19 +4,34 @@ import { useOpportunitiesServer } from "@/lib/hooks/useOpportunitiesServer";
 import { useInfiniteScroll } from "@/lib/hooks/useInfiniteScroll";
 import React, { useState, useEffect, useCallback, Suspense, useMemo, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { Plus, Search, Filter, Briefcase, ArrowUpDown, ChevronUp, ChevronDown, Columns3, Check, X, Loader2 } from "lucide-react";
+import { Plus, Search, Filter, Briefcase, ArrowUpDown, ChevronUp, ChevronDown, Columns3, Check, X, Loader2, GripVertical, RotateCcw } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/components/ui/utils";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { canViewAllAccountsContactsOpportunities } from "@/lib/sellerVisibility";
+import { canChooseOtherPortfolioUsers, isTiendaUser } from "@/lib/tiendaVisibility";
 import { UserPickerFilter } from "@/components/cuentas/UserPickerFilter";
 import { OpportunityFilters } from "@/components/oportunidades/OpportunityFilters";
 import { QuickDateFilter, FloatingDateFilterPopover } from "@/components/oportunidades/QuickDateFilter";
 import { FloatingColumnFilterPopover, FloatingColumnFilterAnchor } from "@/components/oportunidades/FloatingColumnFilterPopover";
 import { isColumnFilterActive, formatColumnHeaderTitle } from "@/lib/opportunityColumnFilterHelpers";
+import { readPersistedPhaseIds, withoutOpportunityStatusParam } from "@/lib/opportunityPhaseListFilter";
+import { isToolbarOwnedTableColumn } from "@/lib/tableFilterPolicy";
 import { parseHandsontableDate } from "@/lib/dateFilterHelpers";
 import { computeOpportunityActivitySummary } from "@/lib/opportunityActivities";
 import { isNewTabClick, openLinkInBackgroundTab, wrapCellInRowLink } from "@/lib/rowLinks";
 import { buildOpportunityHotRow, resolveHotRowData, type HotInstanceLike, OPPORTUNITY_TABLE_COLUMN_KEYS } from "@/lib/opportunityTableHelpers";
+import {
+    activeColumnKeys,
+    defaultOpportunityTablePrefs,
+    loadOpportunityTablePrefs,
+    moveColumnStep,
+    moveColumnTo,
+    saveOpportunityTablePrefs,
+    toggleHiddenColumn,
+    type OpportunityTablePrefs
+} from "@/lib/opportunityColumnPrefs";
+import { userHasB2CAccess } from "@/lib/b2c";
 import { supabase } from "@/lib/supabase";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/db";
@@ -27,7 +42,7 @@ import 'handsontable/styles/ht-theme-main.min.css';
 const HotTable = dynamic(() => import('@/components/HotTableWrapper'), { ssr: false });
 
 function OpportunitiesContent() {
-    const { role: userRole } = useCurrentUser();
+    const { user: currentUser, role: userRole } = useCurrentUser();
     const searchParams = useSearchParams();
     const router = useRouter();
 
@@ -75,6 +90,8 @@ function OpportunitiesContent() {
         setFamiliaFilter,
         setCountryFilter,
         setCityFilter,
+        setterFilter,
+        setSetterFilter,
         setStartDate,
         setEndDate,
         setStartClosingDate,
@@ -82,8 +99,10 @@ function OpportunitiesContent() {
         setSortField,
         setSortAsc,
         sortField,
-        sortAsc
-    } = useOpportunitiesServer({ pageSize: 100 });
+        sortAsc,
+        idFilter,
+        setIdFilter
+    } = useOpportunitiesServer({ pageSize: 100, initialStatus: 'all', ignorePersistedStatus: true });
 
     const { tableContainerRef, sentinelRef, triggerLoadMore } = useInfiniteScroll({
         loading,
@@ -171,15 +190,16 @@ function OpportunitiesContent() {
         }
         return null;
     });
-    const [selectedPhase, setSelectedPhase] = useState<number | null>(() => {
-        const fromUrl = searchParams.get('phase');
-        if (fromUrl) return Number(fromUrl);
+    const [selectedPhaseIds, setSelectedPhaseIds] = useState<number[]>(() => {
+        const fromUrl = readPersistedPhaseIds(searchParams.get('phases'), searchParams.get('phase'));
+        if (fromUrl.length > 0) return fromUrl;
         if (typeof window !== 'undefined') {
             const saved = sessionStorage.getItem('crm_oportunidades_state');
-            const value = saved ? new URLSearchParams(saved).get('phase') : null;
-            return value ? Number(value) : null;
+            if (!saved) return [];
+            const params = new URLSearchParams(saved);
+            return readPersistedPhaseIds(params.get('phases'), params.get('phase'));
         }
-        return null;
+        return [];
     });
     const [selectedOrigin, setSelectedOrigin] = useState<string | null>(() => {
         const fromUrl = searchParams.get('origin');
@@ -190,15 +210,7 @@ function OpportunitiesContent() {
         }
         return null;
     });
-    const [statusFilter, setStatusFilterState] = useState<'all' | 'open' | 'won' | 'lost'>(() => {
-        const fromUrl = searchParams.get('status');
-        if (fromUrl) return (fromUrl as any);
-        if (typeof window !== 'undefined') {
-            const saved = sessionStorage.getItem('crm_oportunidades_state');
-            if (saved) return (new URLSearchParams(saved).get('status') as any) || 'open';
-        }
-        return 'open';
-    });
+    const [statusFilter, setStatusFilterState] = useState<'all' | 'open' | 'won' | 'lost'>('all');
 
     const [startDate, setStartDateState] = useState<string | null>(() => {
         const fromUrl = searchParams.get('start');
@@ -283,6 +295,15 @@ function OpportunitiesContent() {
         return null;
     });
 
+    const [selectedIdFilter, setSelectedIdFilter] = useState<string | null>(() => {
+        const fromUrl = searchParams.get('oppId') || searchParams.get('id');
+        if (fromUrl) return fromUrl;
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_oportunidades_state');
+            if (saved) return new URLSearchParams(saved).get('oppId') || null;
+        }
+        return null;
+    });
     // Synchronize initial & restored filter values from URL or sessionStorage to the server hook
     useEffect(() => {
         const savedState = typeof window !== 'undefined' ? sessionStorage.getItem('crm_oportunidades_state') : null;
@@ -294,8 +315,10 @@ function OpportunitiesContent() {
         const initialChannel = searchParams.get('channel') || saved.get('channel') || null;
         const initialSubclass = searchParams.get('subclass') || saved.get('subclass') || null;
         const initialSegment = searchParams.get('segment') || saved.get('segment') || null;
-        const initialPhase = searchParams.get('phase') || saved.get('phase') || null;
-        const initialStatus = searchParams.get('status') || saved.get('status') || 'open';
+        const initialPhaseIds = readPersistedPhaseIds(
+            searchParams.get('phases') || saved.get('phases'),
+            searchParams.get('phase') || saved.get('phase')
+        );
         const initialOrigin = searchParams.get('origin') || saved.get('origin') || null;
         const rawSort = searchParams.get('sort') || saved.get('sort');
         const initialSort = (rawSort && rawSort !== 'updated_at') ? rawSort : 'created_at';
@@ -308,10 +331,13 @@ function OpportunitiesContent() {
         const initialCity = searchParams.get('city') || saved.get('city') || null;
         const initialPlanta = searchParams.get('planta') || saved.get('planta') || null;
         const initialFamilia = searchParams.get('familia') || saved.get('familia') || null;
+        const initialId = searchParams.get('oppId') || searchParams.get('id') || saved.get('oppId') || null;
 
         setSearchTerm(initialSearch);
         setInputValue(initialSearch);
-        const ownerList = initialOwner ? initialOwner.split(',').filter(Boolean) : [];
+        const ownerList = isTiendaUser(currentUser)
+            ? []
+            : (initialOwner ? initialOwner.split(',').filter(Boolean) : []);
         setAccountOwnerIds(ownerList);
         setSelectedAccountOwnerIds(ownerList);
         setChannelFilter(initialChannel);
@@ -322,22 +348,23 @@ function OpportunitiesContent() {
         const segmentNum = initialSegment ? Number(initialSegment) : null;
         setSegmentFilter(segmentNum);
         setSelectedSegment(segmentNum);
-        const phaseNum = initialPhase ? Number(initialPhase) : null;
-        setPhaseFilter(phaseNum);
-        setSelectedPhase(phaseNum);
+        setPhaseFilter(initialPhaseIds);
+        setSelectedPhaseIds(initialPhaseIds);
         const countryNum = initialCountry ? Number(initialCountry) : null;
         setCountryFilter(countryNum);
         setSelectedCountry(countryNum);
         setCityFilter(initialCity);
         setSelectedCity(initialCity);
-        setStatusFilter(initialStatus as any);
-        setStatusFilterState(initialStatus as any);
+        setStatusFilter('all');
+        setStatusFilterState('all');
         setOriginFilter(initialOrigin);
         setSelectedOrigin(initialOrigin);
         setPlantaFilter(initialPlanta);
         setSelectedPlanta(initialPlanta);
         setFamiliaFilter(initialFamilia);
         setSelectedFamilia(initialFamilia);
+        setSelectedIdFilter(initialId);
+        setIdFilter(initialId);
         setStartDate(start);
         setStartDateState(start);
         setEndDate(end);
@@ -350,7 +377,7 @@ function OpportunitiesContent() {
         setSortAsc(initialDirection === 'asc');
         setUserFilter(initialTab as any);
         setTab(initialTab as any);
-    }, [searchParams]);
+    }, [searchParams, currentUser]);
 
     // Restore state from sessionStorage if navigating from sidebar (empty query)
     useEffect(() => {
@@ -360,7 +387,8 @@ function OpportunitiesContent() {
                 const savedParams = new URLSearchParams(savedState);
                 // Evitamos redireccionar al detalle por defecto para siempre mostrar la lista inicial
                 savedParams.delete('id');
-                const restoredState = savedParams.toString();
+                savedParams.delete('status');
+                const restoredState = withoutOpportunityStatusParam(savedParams.toString());
                 if (restoredState !== '') {
                     router.replace(`/oportunidades?${restoredState}`, { scroll: false });
                 }
@@ -381,6 +409,7 @@ function OpportunitiesContent() {
     useEffect(() => {
         const timer = setTimeout(() => {
             const params = new URLSearchParams(Array.from(searchParams.entries()));
+            params.delete('status');
             if (inputValue) params.set('search', inputValue);
             else params.delete('search');
             const next = new URLSearchParams(params.toString());
@@ -414,8 +443,9 @@ function OpportunitiesContent() {
         if (selectedSegment) params.set('segment', String(selectedSegment));
         else params.delete('segment');
 
-        if (selectedPhase) params.set('phase', String(selectedPhase));
-        else params.delete('phase');
+        if (selectedPhaseIds.length > 0) params.set('phases', selectedPhaseIds.join(','));
+        else params.delete('phases');
+        params.delete('phase');
 
         if (selectedOrigin) params.set('origin', selectedOrigin);
         else params.delete('origin');
@@ -426,8 +456,10 @@ function OpportunitiesContent() {
         if (selectedFamilia) params.set('familia', selectedFamilia);
         else params.delete('familia');
 
-        if (statusFilter && statusFilter !== 'open') params.set('status', statusFilter);
-        else params.delete('status');
+        if (selectedIdFilter && selectedIdFilter.trim() !== '') params.set('oppId', selectedIdFilter.trim());
+        else params.delete('oppId');
+
+        params.delete('status');
         
         if (startDate) params.set('start', startDate);
         else params.delete('start');
@@ -446,6 +478,9 @@ function OpportunitiesContent() {
 
         if (selectedCity && selectedCity.trim() !== '') params.set('city', selectedCity.trim());
         else params.delete('city');
+
+        if (setterFilter) params.set('setter', setterFilter);
+        else params.delete('setter');
 
         if (sortField !== 'created_at') params.set('sort', sortField);
         else params.delete('sort');
@@ -471,21 +506,21 @@ function OpportunitiesContent() {
         
         const query = queryString ? `?${queryString}` : window.location.pathname;
         router.replace(query.startsWith('?') ? `${window.location.pathname}${query}` : query, { scroll: false });
-    }, [tab, selectedAccountOwnerIds, selectedChannel, selectedSubclass, selectedSegment, selectedPhase, selectedOrigin, selectedPlanta, selectedFamilia, selectedCountry, selectedCity, statusFilter, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc, searchParams, router]); // Search is handled by the debounced effect above.
+    }, [tab, selectedAccountOwnerIds, selectedChannel, selectedSubclass, selectedSegment, selectedPhaseIds, selectedOrigin, selectedPlanta, selectedFamilia, selectedIdFilter, selectedCountry, selectedCity, setterFilter, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc, searchParams, router]); // Search is handled by the debounced effect above.
 
 
     const handleFilterChange = useCallback(({ 
-        channelId, subclassificationId, segmentId, phaseId, statusFilter: newStatus,
+        channelId, subclassificationId, segmentId, phaseIds,
         startDate: sD, endDate: eD, startClosingDate: sCD, endClosingDate: eCD,
         origin: oG,
         planta: pL,
-        familia: fM
+        familia: fM,
+        idFilter: iD
     }: {
         channelId: string | null;
         subclassificationId: number | null;
         segmentId: number | null;
-        phaseId: number | null;
-        statusFilter: 'all' | 'open' | 'won' | 'lost';
+        phaseIds: number[];
         startDate: string | null;
         endDate: string | null;
         startClosingDate: string | null;
@@ -493,12 +528,12 @@ function OpportunitiesContent() {
         origin: string | null;
         planta?: string | null;
         familia?: string | null;
+        idFilter?: string | null;
     }) => {
         setSelectedChannel(channelId);
         setSelectedSubclass(subclassificationId);
         setSelectedSegment(segmentId);
-        setSelectedPhase(phaseId);
-        setStatusFilterState(newStatus);
+        setSelectedPhaseIds(phaseIds);
         setStartDateState(sD);
         setEndDateState(eD);
         setStartClosingDateState(sCD);
@@ -506,12 +541,13 @@ function OpportunitiesContent() {
         setSelectedOrigin(oG);
         setSelectedPlanta(pL || null);
         setSelectedFamilia(fM || null);
+        setSelectedIdFilter(iD || null);
         
         setChannelFilter(channelId);
         setSubclassificationFilter(subclassificationId);
         setSegmentFilter(segmentId);
-        setPhaseFilter(phaseId);
-        setStatusFilter(newStatus);
+        setPhaseFilter(phaseIds);
+        setStatusFilter('all');
         setStartDate(sD);
         setEndDate(eD);
         setStartClosingDate(sCD);
@@ -519,40 +555,8 @@ function OpportunitiesContent() {
         setOriginFilter(oG);
         setPlantaFilter(pL || null);
         setFamiliaFilter(fM || null);
-    }, [setChannelFilter, setSubclassificationFilter, setSegmentFilter, setPhaseFilter, setStatusFilter, setStartDate, setEndDate, setStartClosingDate, setEndClosingDate, setOriginFilter, setPlantaFilter, setFamiliaFilter]);
-
-    const handleDeleteOpportunity = async (oppId: string) => {
-        try {
-            // Eliminar registros relacionados manualmente para evitar errores de llave foránea (FK constraint)
-            await supabase.from('CRM_Actividades').delete().eq('oportunidad_id', oppId);
-            await supabase.from('CRM_Pagos').delete().eq('oportunidad_id', oppId);
-            await supabase.from('CRM_Comisiones_Movimientos').delete().eq('oportunidad_id', oppId);
-            // CRM_Oportunidades_Colaboradores tiene ON DELETE CASCADE pero lo aseguramos
-            await supabase.from('CRM_Oportunidades_Colaboradores').delete().eq('oportunidad_id', oppId);
-            
-            // También eliminamos las cotizaciones y sus items vinculados
-            const { data: quotes } = await supabase.from('CRM_Cotizaciones').select('id').eq('opportunity_id', oppId);
-            if (quotes && quotes.length > 0) {
-                const quoteIds = quotes.map(q => q.id);
-                await supabase.from('CRM_CotizacionItems').delete().in('cotizacion_id', quoteIds);
-            }
-            
-            const { error: quoteError } = await supabase.from('CRM_Cotizaciones').delete().eq('opportunity_id', oppId);
-            if (quoteError) throw quoteError;
-            
-            const { error } = await supabase.from('CRM_Oportunidades').delete().eq('id', oppId);
-            if (error) throw error;
-            
-            refresh();
-        } catch (error: any) {
-            console.error("Error eliminando la oportunidad:", error);
-            if (error.message?.includes('CRM_ComisionLedger is immutable')) {
-                alert("No se puede eliminar la oportunidad porque ya tiene comisiones generadas en el Ledger Financiero. Por políticas de auditoría, estos registros son inmutables. \n\nPara solucionarlo, debes cambiar el estado de la oportunidad a 'Perdida' o 'Anulada' en lugar de eliminarla de la base de datos.");
-            } else {
-                alert("Error eliminando la oportunidad: " + error.message);
-            }
-        }
-    };
+        setIdFilter(iD || null);
+    }, [setChannelFilter, setSubclassificationFilter, setSegmentFilter, setPhaseFilter, setStatusFilter, setStartDate, setEndDate, setStartClosingDate, setEndClosingDate, setOriginFilter, setPlantaFilter, setFamiliaFilter, setIdFilter]);
 
     // PERF FIX: Stable callback references
     const handleTabChange = useCallback((newTab: 'mine' | 'collab' | 'all' | 'team' | 'web') => {
@@ -574,8 +578,8 @@ function OpportunitiesContent() {
         { key: 'ciudad',      label: 'Ciudad' },
         { key: 'canal',       label: 'Canal' },
         { key: 'origen',      label: 'Origen' },
+        { key: 'setter',      label: 'Setter' },
         { key: 'fase',        label: 'Fase' },
-        { key: 'estado',      label: 'Estado' },
         { key: 'creada',      label: 'Creada' },
         { key: 'categoria',   label: 'Categoría de Interés' },
         { key: 'valor',       label: 'Valor' },
@@ -583,32 +587,57 @@ function OpportunitiesContent() {
         { key: 'vendedor',    label: 'Vendedor' },
     ];
 
-    const [visibleColumns, setVisibleColumns] = useState<string[]>(() => {
-        const defaultKeys = ALL_COLUMNS.map(c => c.key);
-        if (typeof window !== 'undefined') {
-            const saved = localStorage.getItem('crm_opp_visible_cols_v4') || localStorage.getItem('crm_opp_visible_cols_v3') || localStorage.getItem('crm_opp_visible_cols_v2') || localStorage.getItem('crm_opp_visible_cols');
-            if (saved) {
-                try {
-                    const parsed: string[] = JSON.parse(saved);
-                    if (Array.isArray(parsed)) {
-                        const savedSet = new Set(parsed);
-                        const missingKeys = defaultKeys.filter(k => !savedSet.has(k));
-                        const reordered = defaultKeys.filter(k => savedSet.has(k) || missingKeys.includes(k));
-                        localStorage.setItem('crm_opp_visible_cols_v4', JSON.stringify(reordered));
-                        return reordered;
-                    }
-                } catch (e) {}
-            }
-        }
-        return defaultKeys;
-    });
+    // Preferencias de columnas por usuario (orden + ocultas), guardadas en localStorage.
+    // Planner "Funcionalidades CRM B2C_2": cada usuario organiza sus columnas.
+    const { user } = useCurrentUser();
+    const canReorderColumns = userHasB2CAccess(user);
+    const [tablePrefs, setTablePrefs] = useState<OpportunityTablePrefs>(() =>
+        defaultOpportunityTablePrefs(OPPORTUNITY_TABLE_COLUMN_KEYS)
+    );
+    const [draggedColumnKey, setDraggedColumnKey] = useState<string | null>(null);
 
-    const toggleColumn = (key: string) => {
-        setVisibleColumns(prev => {
-            const next = prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key];
-            localStorage.setItem('crm_opp_visible_cols_v4', JSON.stringify(next));
+    // Cargar las preferencias del usuario cuando se conoce (o cambia) su id.
+    const prefsUserKey = user?.id ?? null;
+    const [prefsLoadedFor, setPrefsLoadedFor] = useState<string | null | undefined>(undefined);
+    if (prefsLoadedFor !== prefsUserKey && typeof window !== 'undefined') {
+        setPrefsLoadedFor(prefsUserKey);
+        setTablePrefs(loadOpportunityTablePrefs(window.localStorage, prefsUserKey, OPPORTUNITY_TABLE_COLUMN_KEYS));
+    }
+
+    const updateTablePrefs = useCallback((updater: (prev: OpportunityTablePrefs) => OpportunityTablePrefs) => {
+        setTablePrefs(prev => {
+            const next = updater(prev);
+            if (typeof window !== 'undefined') saveOpportunityTablePrefs(window.localStorage, user?.id, next);
             return next;
         });
+    }, [user?.id]);
+
+    // Columnas visibles en el orden que eligió el usuario (los B2C pueden reordenar).
+    const visibleColumns = useMemo(
+        () => activeColumnKeys(tablePrefs, OPPORTUNITY_TABLE_COLUMN_KEYS, canReorderColumns),
+        [tablePrefs, canReorderColumns]
+    );
+
+    // Lista del selector de columnas, en el orden del usuario.
+    const orderedColumnOptions = (canReorderColumns ? tablePrefs.order : OPPORTUNITY_TABLE_COLUMN_KEYS)
+        .map(key => ALL_COLUMNS.find(c => c.key === key))
+        .filter((c): c is { key: string; label: string } => Boolean(c));
+
+    const toggleColumn = (key: string) => {
+        updateTablePrefs(prev => toggleHiddenColumn(prev, key));
+    };
+
+    const moveColumn = (key: string, delta: -1 | 1) => {
+        updateTablePrefs(prev => ({ ...prev, order: moveColumnStep(prev.order, key, delta) }));
+    };
+
+    const dropColumnOn = (targetKey: string) => {
+        if (!draggedColumnKey || draggedColumnKey === targetKey) return;
+        updateTablePrefs(prev => ({
+            ...prev,
+            order: moveColumnTo(prev.order, prev.order.indexOf(draggedColumnKey), prev.order.indexOf(targetKey))
+        }));
+        setDraggedColumnKey(null);
     };
 
     const hotTableRef = useRef<{ hotInstance?: { toPhysicalRow?: (r: number) => number; getSourceDataAtRow?: (r: number) => unknown } } | null>(null);
@@ -617,7 +646,6 @@ function OpportunitiesContent() {
         return opportunities.map(opp => buildOpportunityHotRow(opp, countryMap));
     }, [opportunities, countryMap]);
 
-    const { user } = useCurrentUser();
     const colStorageKey = `crm_col_widths_oportunidades_${user?.id || 'default'}`;
     const [colWidths, setColWidths] = useState<Record<string, number>>({});
 
@@ -637,8 +665,7 @@ function OpportunitiesContent() {
             colIndex = arg1;
             width = arg2;
         }
-        const activeKeys = OPPORTUNITY_TABLE_COLUMN_KEYS
-            .filter(key => visibleColumns.includes(key));
+        const activeKeys = visibleColumns;
         const keyName = activeKeys[colIndex];
         if (keyName && width > 30) {
             setColWidths(prev => {
@@ -760,6 +787,23 @@ function OpportunitiesContent() {
                 return td;
             }
         },
+        setter: {
+            data: 'setter', title: 'Setter', readOnly: true, width: colWidths['setter'] || 100, wordWrap: false,
+            renderer(_: unknown, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
+                const val = (value || '').toUpperCase().trim();
+                let badge = '<span style="color:#94a3b8;font-weight:500;">-</span>';
+                if (val === 'CO') {
+                    badge = '<span style="display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:800;letter-spacing:0.04em;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;">CO</span>';
+                } else if (val === 'REC') {
+                    badge = '<span style="display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:800;letter-spacing:0.04em;background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;">REC</span>';
+                } else if (val && val !== '-') {
+                    badge = `<span style="display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700;background:#f8fafc;color:#475569;border:1px solid #e2e8f0;">${val}</span>`;
+                }
+                td.innerHTML = `<div style="display:flex;align-items:center;height:100%;">${badge}</div>`;
+                td.style.overflow = 'visible';
+                return td;
+            }
+        },
         fase: {
             data: 'fase', title: 'Fase', readOnly: true, width: colWidths['fase'] || 130, wordWrap: false,
             renderer(_: unknown, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
@@ -773,18 +817,6 @@ function OpportunitiesContent() {
                 else if (f.includes('ganad')) { bg = '#f0fdf4'; c = '#15803d'; bd = '#bbf7d0'; }
                 td.innerHTML = `<div style="display:flex;align-items:center;height:100%;"><span style="display:inline-block;padding:3px 10px;border-radius:99px;font-size:11px;font-weight:700;white-space:nowrap;background:${bg};color:${c};border:1px solid ${bd};line-height:1.4;">${value || ''}</span></div>`;
                 td.style.overflow = 'visible';
-                return td;
-            }
-        },
-        estado: {
-            data: 'estado', title: 'Estado', readOnly: true, width: colWidths['estado'] || 110, wordWrap: false,
-            renderer(_: unknown, td: HTMLTableCellElement, __: number, ___: number, ____: string, value: any) {
-                const e = (value || '').toLowerCase();
-                let dot = '#94a3b8';
-                if (e.includes('abierta'))      dot = '#3b82f6';
-                else if (e.includes('ganada'))  dot = '#10b981';
-                else if (e.includes('perdida')) dot = '#ef4444';
-                td.innerHTML = `<div style="display:flex;align-items:center;gap:6px;height:100%;"><span style="width:7px;height:7px;border-radius:50%;background:${dot};flex-shrink:0;box-shadow:0 0 0 2px ${dot}33;"></span><span style="font-size:13px;font-weight:500;color:#334155;white-space:nowrap;">${value || ''}</span></div>`;
                 return td;
             }
         },
@@ -885,9 +917,8 @@ function OpportunitiesContent() {
     };
 
     const hotColumns = [
-        // Solo incluir las columnas marcadas como visibles, manteniendo el orden original
-        ...OPPORTUNITY_TABLE_COLUMN_KEYS
-            .filter(key => visibleColumns.includes(key))
+        // Solo las columnas visibles, en el orden que eligió el usuario
+        ...visibleColumns
             .map(key => ALL_COLUMN_DEFS[key])
             .filter(Boolean)
             .map(withOpportunityRowLink)
@@ -911,17 +942,17 @@ function OpportunitiesContent() {
     const getInitials = (name: string) => name ? name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : '??';
 
     const [showAdvancedFilters, setShowAdvancedFilters] = useState(() => Boolean(
+        searchParams.get('oppId') || searchParams.get('id') ||
         searchParams.get('channel') || searchParams.get('subclass') || searchParams.get('segment') ||
-        searchParams.get('phase') || searchParams.get('origin') || searchParams.get('start') ||
-        searchParams.get('end') || searchParams.get('startClose') || searchParams.get('endClose') ||
-        (searchParams.get('status') && searchParams.get('status') !== 'open')
+        searchParams.get('phase') || searchParams.get('phases') || searchParams.get('origin') || searchParams.get('start') ||
+        searchParams.get('end') || searchParams.get('startClose') || searchParams.get('endClose')
     ));
     const [showColumnPicker, setShowColumnPicker] = useState(false);
-    const activeFilterCount = selectedAccountOwnerIds.length + (selectedChannel ? 1 : 0) + (selectedSubclass ? 1 : 0) +
-        (selectedSegment ? 1 : 0) + (selectedPhase ? 1 : 0) + (selectedOrigin ? 1 : 0) +
-        (statusFilter !== 'open' ? 1 : 0) + (startDate ? 1 : 0) + (endDate ? 1 : 0) +
+    const activeFilterCount = (selectedIdFilter ? 1 : 0) + selectedAccountOwnerIds.length + (selectedChannel ? 1 : 0) + (selectedSubclass ? 1 : 0) +
+        (selectedSegment ? 1 : 0) + (selectedPhaseIds.length > 0 ? 1 : 0) + (selectedOrigin ? 1 : 0) +
+        (startDate ? 1 : 0) + (endDate ? 1 : 0) +
         (startClosingDate ? 1 : 0) + (endClosingDate ? 1 : 0) +
-        (selectedCountry ? 1 : 0) + (selectedCity ? 1 : 0);
+        (selectedCountry ? 1 : 0) + (selectedCity ? 1 : 0) + (setterFilter ? 1 : 0);
 
     return (
         <div data-testid="opportunities-page" className="space-y-3.5 max-w-[1600px] mx-auto pb-8 md:pb-2 animate-in fade-in duration-300">
@@ -958,8 +989,8 @@ function OpportunitiesContent() {
                         { id: 'mine', label: 'Mis Oportunidades' },
                         { id: 'collab', label: 'Colaboración' },
                         ...(userRole === 'ADMIN' ? [{ id: 'team', label: 'Equipo' }] : []),
-                        // El asesor no ve la pestaña Web (mostraría oportunidades de otros).
-                        ...(userRole === 'VENDEDOR' ? [] : [{ id: 'web', label: 'Web' }])
+                        // El asesor no ve la pestaña Web, salvo quien tiene visibilidad de toda la cartera.
+                        ...(userRole === 'VENDEDOR' && !canViewAllAccountsContactsOpportunities(currentUser) ? [] : [{ id: 'web', label: 'Web' }])
                     ].map(t => (
                         <button
                             key={t.id}
@@ -980,6 +1011,7 @@ function OpportunitiesContent() {
                 </div>
 
                 <div className="flex flex-wrap sm:flex-nowrap gap-2 items-center w-full 2xl:w-auto">
+                    {canChooseOtherPortfolioUsers(currentUser) && (
                     <div className="hidden sm:block shrink-0">
                         <UserPickerFilter
                             multiple={true}
@@ -987,20 +1019,33 @@ function OpportunitiesContent() {
                             onUsersSelect={handleUsersSelect}
                         />
                     </div>
+                    )}
                     <div className="shrink-0">
                         <QuickDateFilter
+                            idleLabel="Fecha de creación"
+                            title="Fecha de creación"
+                            todayLabel="Creadas hoy"
                             startDate={startDate}
                             endDate={endDate}
                             statusFilter={statusFilter}
-                            onDateChange={({ startDate: sD, endDate: eD, statusFilter: newStatus }) => {
+                            onDateChange={({ startDate: sD, endDate: eD }) => {
                                 setStartDateState(sD);
                                 setStartDate(sD);
                                 setEndDateState(eD);
                                 setEndDate(eD);
-                                if (newStatus) {
-                                    setStatusFilterState(newStatus);
-                                    setStatusFilter(newStatus);
-                                }
+                            }}
+                        />
+                        <QuickDateFilter
+                            idleLabel="Fecha de cierre"
+                            title="Fecha de cierre"
+                            todayLabel="Cierre hoy"
+                            startDate={startClosingDate}
+                            endDate={endClosingDate}
+                            onDateChange={({ startDate: sD, endDate: eD }) => {
+                                setStartClosingDateState(sD);
+                                setStartClosingDate(sD);
+                                setEndClosingDateState(eD);
+                                setEndClosingDate(eD);
                             }}
                         />
                     </div>
@@ -1061,45 +1106,110 @@ function OpportunitiesContent() {
                                 <div
                                     onClick={() => setShowColumnPicker(false)}
                                 />
-                                <div className="absolute right-0 top-full mt-2 z-50 bg-white border border-slate-200 rounded-2xl shadow-xl shadow-slate-200/60 p-4 w-52 animate-in fade-in slide-in-from-top-2 duration-200">
-                                    <div className="flex items-center justify-between mb-3">
-                                        <p className="text-xs font-bold text-slate-700 uppercase tracking-wide">Columnas visibles</p>
-                                        <button
-                                            onClick={() => {
-                                                const allKeys = ALL_COLUMNS.map(c => c.key);
-                                                setVisibleColumns(allKeys);
-                                                localStorage.setItem('crm_opp_visible_cols_v4', JSON.stringify(allKeys));
-                                            }}
-                                            className="text-[10px] text-indigo-600 hover:text-indigo-800 font-semibold transition-colors"
-                                        >
-                                            Todas
-                                        </button>
-                                    </div>
-                                    <div className="flex flex-col gap-1">
-                                        {ALL_COLUMNS.map(col => (
+                                <div
+                                    className={cn(
+                                        "absolute right-0 top-full mt-2 z-50 bg-white border border-slate-200 rounded-2xl shadow-xl shadow-slate-200/60 p-4 animate-in fade-in slide-in-from-top-2 duration-200",
+                                        canReorderColumns ? "w-64" : "w-52"
+                                    )}
+                                    data-testid="opp-column-picker"
+                                >
+                                    <div className="flex items-center justify-between mb-1">
+                                        <p className="text-xs font-bold text-slate-700 uppercase tracking-wide">
+                                            {canReorderColumns ? 'Organizar columnas' : 'Columnas visibles'}
+                                        </p>
+                                        <div className="flex items-center gap-2">
                                             <button
-                                                key={col.key}
-                                                onClick={() => toggleColumn(col.key)}
-                                                className={cn(
-                                                    "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 w-full text-left",
-                                                    visibleColumns.includes(col.key)
-                                                        ? "bg-indigo-50 text-indigo-700"
-                                                        : "text-slate-500 hover:bg-slate-50 hover:text-slate-700"
-                                                )}
+                                                onClick={() => updateTablePrefs(prev => ({ ...prev, hidden: [] }))}
+                                                className="text-[10px] text-indigo-600 hover:text-indigo-800 font-semibold transition-colors"
                                             >
-                                                <span className={cn(
-                                                    "w-4 h-4 rounded flex items-center justify-center border transition-all shrink-0",
-                                                    visibleColumns.includes(col.key)
-                                                        ? "bg-indigo-600 border-indigo-600"
-                                                        : "border-slate-300"
-                                                )}>
-                                                    {visibleColumns.includes(col.key) && (
-                                                        <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />
-                                                    )}
-                                                </span>
-                                                {col.label}
+                                                Todas
                                             </button>
-                                        ))}
+                                            {canReorderColumns && (
+                                                <button
+                                                    onClick={() => updateTablePrefs(() => defaultOpportunityTablePrefs(OPPORTUNITY_TABLE_COLUMN_KEYS))}
+                                                    className="text-[10px] text-slate-500 hover:text-slate-800 font-semibold transition-colors flex items-center gap-0.5"
+                                                    title="Volver al orden y columnas por defecto"
+                                                >
+                                                    <RotateCcw className="w-3 h-3" /> Restablecer
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+                                    {canReorderColumns && (
+                                        <p className="text-[10px] text-slate-400 mb-2">Arrastra o usa las flechas para cambiar el orden. Se guarda para tu usuario.</p>
+                                    )}
+                                    <div className="flex flex-col gap-1 max-h-[60vh] overflow-y-auto">
+                                        {orderedColumnOptions.map((col, index) => {
+                                            const isVisible = !tablePrefs.hidden.includes(col.key);
+                                            return (
+                                                <div
+                                                    key={col.key}
+                                                    data-testid={`opp-column-option-${col.key}`}
+                                                    draggable={canReorderColumns}
+                                                    onDragStart={(e) => {
+                                                        if (!canReorderColumns) return;
+                                                        setDraggedColumnKey(col.key);
+                                                        e.dataTransfer.effectAllowed = 'move';
+                                                    }}
+                                                    onDragOver={(e) => {
+                                                        if (canReorderColumns && draggedColumnKey) e.preventDefault();
+                                                    }}
+                                                    onDrop={(e) => {
+                                                        e.preventDefault();
+                                                        dropColumnOn(col.key);
+                                                    }}
+                                                    onDragEnd={() => setDraggedColumnKey(null)}
+                                                    className={cn(
+                                                        "flex items-center gap-1 rounded-lg transition-all duration-150",
+                                                        draggedColumnKey === col.key && "opacity-40",
+                                                        isVisible ? "bg-indigo-50" : "hover:bg-slate-50"
+                                                    )}
+                                                >
+                                                    {canReorderColumns && (
+                                                        <GripVertical className="w-3.5 h-3.5 text-slate-300 shrink-0 ml-1 cursor-grab" />
+                                                    )}
+                                                    <button
+                                                        onClick={() => toggleColumn(col.key)}
+                                                        className={cn(
+                                                            "flex items-center gap-3 px-2 py-2 text-sm font-medium flex-1 text-left min-w-0",
+                                                            isVisible ? "text-indigo-700" : "text-slate-500 hover:text-slate-700"
+                                                        )}
+                                                    >
+                                                        <span className={cn(
+                                                            "w-4 h-4 rounded flex items-center justify-center border transition-all shrink-0",
+                                                            isVisible ? "bg-indigo-600 border-indigo-600" : "border-slate-300"
+                                                        )}>
+                                                            {isVisible && (
+                                                                <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />
+                                                            )}
+                                                        </span>
+                                                        <span className="truncate">{col.label}</span>
+                                                    </button>
+                                                    {canReorderColumns && (
+                                                        <div className="flex flex-col pr-1">
+                                                            <button
+                                                                onClick={() => moveColumn(col.key, -1)}
+                                                                disabled={index === 0}
+                                                                className="p-0.5 text-slate-400 hover:text-indigo-700 disabled:opacity-20 disabled:cursor-not-allowed"
+                                                                title="Mover a la izquierda"
+                                                                aria-label={`Mover ${col.label} antes`}
+                                                            >
+                                                                <ChevronUp className="w-3 h-3" />
+                                                            </button>
+                                                            <button
+                                                                onClick={() => moveColumn(col.key, 1)}
+                                                                disabled={index === orderedColumnOptions.length - 1}
+                                                                className="p-0.5 text-slate-400 hover:text-indigo-700 disabled:opacity-20 disabled:cursor-not-allowed"
+                                                                title="Mover a la derecha"
+                                                                aria-label={`Mover ${col.label} después`}
+                                                            >
+                                                                <ChevronDown className="w-3 h-3" />
+                                                            </button>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
                                     </div>
                                 </div>
                             </>
@@ -1113,11 +1223,11 @@ function OpportunitiesContent() {
                 <div className="animate-in fade-in slide-in-from-top-4 duration-300">
                     <OpportunityFilters
                         onFilterChange={handleFilterChange}
+                        initialIdFilter={selectedIdFilter}
                         initialChannelId={selectedChannel}
                         initialSubclassId={selectedSubclass}
                         initialSegmentId={selectedSegment}
-                        initialPhaseId={selectedPhase}
-                        initialStatusFilter={statusFilter}
+                        initialPhaseIds={selectedPhaseIds}
                         initialOrigin={selectedOrigin}
                         initialPlanta={selectedPlanta}
                         initialFamilia={selectedFamilia}
@@ -1184,6 +1294,19 @@ function OpportunitiesContent() {
                                                 <span>{opp.account?.pais_id ? (countryMap[opp.account.pais_id] || "Colombia") : (opp.account?.pais || "Colombia")}</span>
                                                 <span className="text-slate-300">•</span>
                                                 <span className="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded text-[10.5px] font-bold">{opp.account?.canal_id || "-"}</span>
+                                                {Boolean((opp as any).setter) && (
+                                                    <>
+                                                        <span className="text-slate-300">•</span>
+                                                        <span className={cn(
+                                                            "px-1.5 py-0.5 rounded text-[10.5px] font-bold uppercase",
+                                                            (opp as any).setter === 'CO' ? "bg-blue-100 text-blue-700" :
+                                                            (opp as any).setter === 'REC' ? "bg-emerald-100 text-emerald-700" :
+                                                            "bg-slate-100 text-slate-700"
+                                                        )}>
+                                                            {(opp as any).setter}
+                                                        </span>
+                                                    </>
+                                                )}
                                             </div>
                                             <div className="text-slate-600 text-xs truncate font-medium">
                                                 <Link href={`/oportunidades/${opp.id}`} className="hover:text-blue-600 transition-colors">
@@ -1197,13 +1320,6 @@ function OpportunitiesContent() {
                                     </div>
                                     
                                     <div className="p-4 bg-slate-50/50 grid grid-cols-2 gap-y-3 gap-x-2 text-xs">
-                                        <div>
-                                            <span className="block text-slate-400 mb-1">Estado</span>
-                                            <div className="flex items-center gap-1.5 font-medium text-slate-700">
-                                                <span className={cn("w-2 h-2 rounded-full", opp.estado_data?.nombre?.toLowerCase() === 'abierta' ? 'bg-blue-500' : 'bg-slate-300')}></span>
-                                                {opp.estado_data?.nombre || 'Abierta'}
-                                            </div>
-                                        </div>
                                         <div>
                                             <span className="block text-slate-400 mb-1">Valor</span>
                                             <span className="font-bold text-slate-800">{formatCurrency(opp.amount || 0)}</span>
@@ -1455,7 +1571,10 @@ function OpportunitiesContent() {
                                                 title: colKey === 'creada' ? 'Fecha de Creación' : 'Fecha de Cierre',
                                                 colKey: colKey as 'creada' | 'cierre'
                                             });
-                                        } else if (colKey && ['canal', 'fase', 'vendedor', 'estado', 'origen', 'pais', 'ciudad'].includes(colKey)) {
+                                        } else if (colKey === 'vendedor' && !canChooseOtherPortfolioUsers(currentUser)) {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                        } else if (isToolbarOwnedTableColumn('oportunidades', colKey) && colKey !== 'creada' && colKey !== 'cierre') {
                                             e.preventDefault();
                                             e.stopPropagation();
                                             const rect = btn.getBoundingClientRect();
@@ -1463,8 +1582,8 @@ function OpportunitiesContent() {
                                                 canal: 'Canal de Venta',
                                                 fase: 'Fase del Negocio',
                                                 vendedor: 'Asignado a',
-                                                estado: 'Estado',
                                                 origen: 'Origen Oportunidad',
+                                                setter: 'Setter',
                                                 pais: 'País de la Cuenta',
                                                 ciudad: 'Ciudad de la Cuenta'
                                             };
@@ -1483,7 +1602,7 @@ function OpportunitiesContent() {
                                     if (btn) {
                                         const th = btn.closest('th');
                                         const colKey = th?.getAttribute('data-col-key');
-                                        if (colKey && ['creada', 'cierre', 'canal', 'fase', 'vendedor', 'estado', 'origen', 'pais', 'ciudad'].includes(colKey)) {
+                                        if (isToolbarOwnedTableColumn('oportunidades', colKey)) {
                                             e.stopPropagation();
                                         }
                                     }
@@ -1505,9 +1624,9 @@ function OpportunitiesContent() {
                                     beforeDropdownMenuShow={(instance: any) => {
                                         const activeRange = instance.hot?.getSelectedRangeActive();
                                         const col = activeRange ? activeRange.highlight?.col : -1;
-                                        const activeKeys = OPPORTUNITY_TABLE_COLUMN_KEYS.filter(key => visibleColumns.includes(key));
+                                        const activeKeys = visibleColumns;
                                         const colKey = activeKeys[col];
-                                        if (colKey && ['creada', 'cierre', 'canal', 'fase', 'vendedor', 'estado', 'origen', 'pais', 'ciudad'].includes(colKey)) {
+                                        if (isToolbarOwnedTableColumn('oportunidades', colKey)) {
                                             setTimeout(() => {
                                                 instance.close();
                                             }, 0);
@@ -1515,7 +1634,7 @@ function OpportunitiesContent() {
                                     }}
                                     afterFilter={(conditionsStack: any[]) => {
                                         if (!conditionsStack || !Array.isArray(conditionsStack)) return;
-                                        const activeKeys = OPPORTUNITY_TABLE_COLUMN_KEYS.filter(key => visibleColumns.includes(key));
+                                        const activeKeys = visibleColumns;
                                         for (const colFilter of conditionsStack) {
                                             const colKey = activeKeys[colFilter.column];
                                             if (colKey === 'creada' && colFilter.conditions && colFilter.conditions.length > 0) {
@@ -1629,12 +1748,13 @@ function OpportunitiesContent() {
                                             const sortKey = fieldSortMap[colDef.data];
                                             const isFiltered = isColumnFilterActive(colDef.data, {
                                                 channel: selectedChannel,
-                                                phase: selectedPhase,
+                                                phase: selectedPhaseIds,
                                                 ownerIds: selectedAccountOwnerIds,
                                                 status: statusFilter,
                                                 origin: selectedOrigin,
                                                 country: selectedCountry,
                                                 city: selectedCity,
+                                                setter: setterFilter,
                                                 startDate,
                                                 endDate,
                                                 startClose: startClosingDate,
@@ -1659,17 +1779,20 @@ function OpportunitiesContent() {
                                 {/* Popover flotante intuitivo anclado a la cabecera de la columna Creada / Cierre */}
                                 <FloatingDateFilterPopover
                                     anchor={headerDateFilterAnchor}
-                                    startDate={startDate}
-                                    endDate={endDate}
+                                    startDate={headerDateFilterAnchor?.colKey === 'cierre' ? startClosingDate : startDate}
+                                    endDate={headerDateFilterAnchor?.colKey === 'cierre' ? endClosingDate : endDate}
                                     statusFilter={statusFilter}
-                                    onDateChange={({ startDate: sD, endDate: eD, statusFilter: newStatus }) => {
-                                        setStartDateState(sD);
-                                        setStartDate(sD);
-                                        setEndDateState(eD);
-                                        setEndDate(eD);
-                                        if (newStatus) {
-                                            setStatusFilterState(newStatus);
-                                            setStatusFilter(newStatus);
+                                    onDateChange={({ startDate: sD, endDate: eD }) => {
+                                        if (headerDateFilterAnchor?.colKey === 'cierre') {
+                                            setStartClosingDateState(sD);
+                                            setStartClosingDate(sD);
+                                            setEndClosingDateState(eD);
+                                            setEndClosingDate(eD);
+                                        } else {
+                                            setStartDateState(sD);
+                                            setStartDate(sD);
+                                            setEndDateState(eD);
+                                            setEndDate(eD);
                                         }
                                     }}
                                     onClose={() => setHeaderDateFilterAnchor(null)}
@@ -1684,20 +1807,16 @@ function OpportunitiesContent() {
                                         setSelectedChannel(ch);
                                         setChannelFilter(ch);
                                     }}
-                                    selectedPhase={selectedPhase}
+                                    selectedPhaseIds={selectedPhaseIds}
                                     onSelectPhase={(ph) => {
-                                        setSelectedPhase(ph);
-                                        setPhaseFilter(ph);
+                                        const next = ph == null ? [] : [ph];
+                                        setSelectedPhaseIds(next);
+                                        setPhaseFilter(next);
                                     }}
                                     selectedAccountOwnerIds={selectedAccountOwnerIds}
                                     onSelectAccountOwners={(owners) => {
                                         setSelectedAccountOwnerIds(owners);
                                         setAccountOwnerIds(owners);
-                                    }}
-                                    statusFilter={statusFilter}
-                                    onSelectStatus={(st) => {
-                                        setStatusFilterState(st);
-                                        setStatusFilter(st);
                                     }}
                                     selectedOrigin={selectedOrigin}
                                     onSelectOrigin={(orig) => {
@@ -1709,6 +1828,8 @@ function OpportunitiesContent() {
                                         setSelectedCountry(cId);
                                         setCountryFilter(cId);
                                     }}
+                                    selectedSetter={setterFilter}
+                                    onSelectSetter={(st) => setSetterFilter(st)}
                                     selectedCity={selectedCity}
                                     onSelectCity={(city) => {
                                         setSelectedCity(city);

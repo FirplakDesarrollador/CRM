@@ -2,11 +2,13 @@
 
 import React, { useMemo, useState, useRef, useEffect } from "react";
 import { useOpportunities } from "@/lib/hooks/useOpportunities";
-import { useLiveQuery } from "dexie-react-hooks";
-import { db } from "@/lib/db";
+import type { LocalPhase } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 import { DollarSign, Calendar as CalendarIcon, TrendingUp, Filter, Check, ChevronDown } from "lucide-react";
 import { cn } from "@/components/ui/utils";
 import { SearchableSelect } from "@/components/ui/SearchableSelect";
+import { buildPhaseOutcomeMap, getPhaseOutcome } from "@/lib/opportunityPhase";
+import { expandSelectedPhaseIds, selectPhasesForPicker } from "@/lib/opportunityPhaseCatalog";
 
 
 export const VentasGanadasTile = () => {
@@ -22,7 +24,25 @@ export const VentasGanadasTile = () => {
 
     // 2. Fetch opportunities and phases
     const { opportunities } = useOpportunities();
-    const phases = useLiveQuery(() => db.phases.toArray());
+    const [phases, setPhases] = useState<LocalPhase[] | undefined>(undefined);
+
+    useEffect(() => {
+        let cancelled = false;
+        supabase
+            .from("CRM_FasesOportunidad")
+            .select("*")
+            .then(({ data }) => {
+                if (!cancelled && data) {
+                    setPhases(data as LocalPhase[]);
+                }
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    // Ganada = fase "Cerrada ganada" (el resultado se calcula solo por la fase).
+    const outcomeMap = useMemo(() => buildPhaseOutcomeMap(phases), [phases]);
 
     const channels = useMemo(() => {
         if (!phases) return [];
@@ -33,6 +53,11 @@ export const VentasGanadasTile = () => {
         if (!phases || selectedChannel === "ALL") return [];
         return phases.filter(p => p.canal_id === selectedChannel).sort((a, b) => a.orden - b.orden);
     }, [phases, selectedChannel]);
+
+    const phasePickerOptions = useMemo(
+        () => selectPhasesForPicker(phasesForSelectedChannel, selectedChannel === "ALL" ? null : selectedChannel),
+        [phasesForSelectedChannel, selectedChannel]
+    );
 
     // Close popover when clicking outside
     useEffect(() => {
@@ -54,19 +79,19 @@ export const VentasGanadasTile = () => {
                 // fecha_cierre_estimada must be in the selected month/year
                 if (!opp.fecha_cierre_estimada) return false;
 
-                const fechaCierre = new Date(opp.fecha_cierre_estimada);
-                // Adjust for timezone differences if necessary
-                const isCorrectDate = fechaCierre.getFullYear() === selectedYear &&
-                                      fechaCierre.getMonth() === selectedMonth;
+                // fecha_cierre_estimada es 'YYYY-MM-DD': se leen año y mes del texto (evita desfase UTC).
+                const [y, m] = String(opp.fecha_cierre_estimada).slice(0, 10).split('-').map(Number);
+                const isCorrectDate = y === selectedYear && (m - 1) === selectedMonth;
                 if (!isCorrectDate) return false;
 
                 if (selectedChannel === "ALL") {
                     // Default logic: sum all won opportunities
-                    return opp.estado_id === 2;
+                    return getPhaseOutcome(opp.fase_id, outcomeMap) === "won";
                 } else {
                     // Filter by specific channel's phases
                     if (selectedPhases.length > 0) {
-                        return selectedPhases.includes(opp.fase_id);
+                        const expanded = expandSelectedPhaseIds(selectedPhases, phases || []);
+                        return expanded.includes(Number(opp.fase_id));
                     } else if (phasesForSelectedChannel.length > 0) {
                         // if channel selected but no specific phases, include all phases of that channel
                         const channelPhaseIds = phasesForSelectedChannel.map(p => p.id);
@@ -77,7 +102,7 @@ export const VentasGanadasTile = () => {
             })
             .reduce((sum, opp) => sum + (Number(opp.amount || opp.valor) || 0), 0);
 
-    }, [opportunities, selectedYear, selectedMonth, selectedChannel, selectedPhases, phasesForSelectedChannel]);
+    }, [opportunities, selectedYear, selectedMonth, selectedChannel, selectedPhases, phases, phasesForSelectedChannel, outcomeMap]);
 
     const formatCurrency = (amount: number) => {
         return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(amount);
@@ -118,7 +143,7 @@ export const VentasGanadasTile = () => {
     };
 
     const selectAllPhases = () => {
-        setSelectedPhases(phasesForSelectedChannel.map(p => p.id));
+        setSelectedPhases(phasePickerOptions.map(p => p.id));
     };
 
     const clearPhaseSelection = () => {
@@ -255,7 +280,7 @@ export const VentasGanadasTile = () => {
                                                         background: #cbd5e1;
                                                     }
                                                 `}</style>
-                                                {phasesForSelectedChannel.map(phase => {
+                                                {phasePickerOptions.map(phase => {
                                                     const isSelected = selectedPhases.includes(phase.id);
                                                     return (
                                                         <label 

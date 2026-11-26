@@ -26,6 +26,7 @@ visitas y eventos del equipo comercial. Pueden asociarse a [[oportunidades]] y a
   - **Mes:** Vista de cuadrícula mensual con conteo de actividades por día, tooltip contextual con indicador `group/day` y apertura directa del modal de edición sin cambiar la vista activa gracias a `e.stopPropagation()`.
 - Creación rápida vía `CreateActivityModal` desde varios módulos (también desde tiendas
   con `CreateStoreActivityModal`). La creación se estructura como un Wizard de 3 pasos (Tipo & Asunto, Clasificación & Fechas, Detalles).
+  - **Asignación de usuario al programar actividad (`lib/activityAssignee.ts`):** En el Paso 1 ("Tipo & Asunto") del wizard de creación, se incluye una lista desplegable con buscador (`SearchableSelect`, campo **ASIGNAR A**) cargada con todos los usuarios activos de la plataforma (`CRM_Usuarios` con `is_active = true`). Por defecto aparece preseleccionado el usuario logueado (`resolveDefaultActivityUserId` + `buildActivityUserOptions`), permitiendo asignarle la actividad a sí mismo o a cualquier otro usuario de la plataforma; `useActivities.createActivity` persiste el `user_id` seleccionado.
 - **Validaciones y obligatoriedad de campos:**
   - `clasificacion_id`: Obligatorio.
   - `fecha_inicio`: Obligatorio únicamente para tareas (Fecha de Vencimiento). Opcional para eventos.
@@ -36,11 +37,11 @@ visitas y eventos del equipo comercial. Pueden asociarse a [[oportunidades]] y a
   - **Edición de actividades pasadas:** Los selectores `DateTimePicker` deshabilitan la restricción `minDate={new Date()}` en modo edición, permitiendo consultar y reprogramar actividades vencidas.
   - **Reasignación y asistentes persistentes:** El selector de reasignación (`reassignUserId` para ADMIN/COORDINADOR) usa `SearchableSelect` con búsqueda por nombre y correo, y junto a la lista de colaboradores/invitados (`attendees` en `_sync_metadata`) persiste inmediatamente invocando `updateActivity` en sus respectivos handlers.
   - **Reuniones Teams:** Toggle interactivo para eventos que vincula automáticamente el enlace de Microsoft Teams al sincronizar con Calendar.
+- **Hidratación Just-In-Time (JIT) de Oportunidades y Cuentas:** Como el sincronizador inicial descarga un máximo de las 3.000 oportunidades y cuentas más recientes para mantener ágil la carga offline, actividades con oportunidades o cuentas creadas o actualizadas antes de ese corte carecen de copia en Dexie. Tanto `CreateActivityModal` como el listado `/actividades` implementan hidratación JIT: si un `opportunity_id` o `account_id` no existe en la base local, se consulta en Supabase (en lote para la lista, puntual para el modal) y se guarda en Dexie (`bulkPut`/`put`), activando reactivamente `useLiveQuery` para mostrar el nombre, badge y enlaces sin dejar registros huérfanos aparentes.
 - Vencimiento: las actividades no completadas después de su fecha generan
   [[notificaciones]] de tipo `ACTIVITY_OVERDUE` (Edge Function
   `check-overdue-activities`, ejecutada por cron).
-- Visibilidad por rol: VENDEDOR solo las propias; COORDINADOR/ADMIN todas
-  (ver [[roles-y-permisos]]; RLS ajustado en `20260428_fix_activities_rls`).
+- Visibilidad por rol: VENDEDOR solo las propias (`user_id = currentUserId`); en canal B2C las actividades del setter nunca se atribuyen ni aparecen como vencidas para el asesor aunque este sea dueño o colaborador de la oportunidad o cuenta (`20261105120000_fix_check_overdue_activities_assigned_user.sql`, `lib/sellerVisibility.ts`). COORDINADOR/ADMIN ven todas (ver [[roles-y-permisos]]; RLS ajustado en `20260428_fix_activities_rls`).
 
 ## Notas operativas
 

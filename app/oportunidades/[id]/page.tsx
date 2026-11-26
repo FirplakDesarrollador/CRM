@@ -10,9 +10,10 @@ import Link from "next/link";
 import { cn, formatNumberCO, formatOpportunityAmount } from "@/lib/utils";
 import { db, LocalCuenta } from "@/lib/db";
 import { ProbabilityDonut } from "@/components/ui/ProbabilityDonut";
-import { syncEngine } from "@/lib/sync";
+import { hydrateActivityCatalogsFromSupabase, hydrateOpportunityDetailFromSupabase, refreshLossReasonsFromSupabase } from "@/lib/supabaseDirect";
+import { lossReasonOptionLabel, selectLossReasonsForPicker, type LossReasonCatalogItem } from "@/lib/lossReasonCatalog";
 import { useLiveQuery } from "dexie-react-hooks";
-import { formatColombiaDate, isDateOverdue, toInputDate } from "@/lib/date-utils";
+import { formatColombiaDate, formatColombiaDateTime, isDateOverdue, toInputDate } from "@/lib/date-utils";
 import {
     Calendar as CalendarIcon,
     CheckCircle2,
@@ -21,6 +22,8 @@ import {
     ListTodo,
 } from "lucide-react";
 import { useActivities, LocalActivity } from "@/lib/hooks/useActivities";
+import { activitiesVisibleToViewer, canViewAllAccountsContactsOpportunities } from "@/lib/sellerVisibility";
+import { isTiendaUser } from "@/lib/tiendaVisibility";
 import { hydrateOpportunityActivities } from "@/lib/serverHydration";
 import { CreateActivityModal } from "@/components/activities/CreateActivityModal";
 import { useActivityFollowUp } from "@/components/activities/ActivityFollowUp";
@@ -39,9 +42,15 @@ import { useOpportunityOrigins } from "@/lib/hooks/useOpportunityOrigins";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { SearchableSelect } from "@/components/ui/SearchableSelect";
 import { OPPORTUNITY_CATEGORIES, parseOpportunityCategories, formatOpportunityCategories } from "@/lib/opportunityCategories";
+import { isB2COpportunity, userHasB2CAccess } from "@/lib/b2c";
 import { AccountModal } from "@/components/cuentas/AccountModal";
+import { AccountNivelBadge } from "@/components/cuentas/AccountNivelBadge";
 import { EntityAuditHistoryTab } from "@/components/shared/EntityAuditHistoryTab";
 import { History } from "lucide-react";
+import { getPhaseOutcomeByName, ESTADO_ID_ABIERTA, ESTADO_ID_GANADA, ESTADO_ID_PERDIDA } from "@/lib/opportunityPhase";
+import { phaseLabelForId, resolveShownPhaseId, selectPhasesForPicker } from "@/lib/opportunityPhaseCatalog";
+import { buildClosedLostPhaseUpdate, planLossReasonSelection, WON_TO_LOST_CONFIRM_MESSAGE } from "@/lib/opportunityLossClose";
+import { readFullPhaseCatalog } from "@/lib/phaseCatalogStore";
 
 export default function OpportunityDetailPage() {
     const params = useParams();
@@ -50,80 +59,73 @@ export default function OpportunityDetailPage() {
     const { opportunities, deleteOpportunity, updateOpportunity } = useOpportunities();
     const { user: currentUser, role: userRole, isAdmin } = useCurrentUser();
     const setIsLoadingData = useSyncStore(state => state.setIsLoadingData);
-    const phases = useLiveQuery(() => db.phases.toArray());
-    const phaseMap = new Map(phases?.map(p => [p.id, p.nombre]));
+    const phases = useLiveQuery(() => readFullPhaseCatalog());
 
     const opportunity = opportunities?.find(o => o.id === id);
+    const accountCanalId = useLiveQuery(async () => {
+        if (!opportunity?.account_id) return null;
+        const account = await db.accounts.get(opportunity.account_id);
+        return account?.canal_id ?? null;
+    }, [opportunity?.account_id]);
     const [serverOpportunity, setServerOpportunity] = useState<any>(null);
     const [isFetchingServer, setIsFetchingServer] = useState(false);
 
-    // Fallback: If not found locally, try to fetch from server (JIT Sync)
+    // Direct Supabase load for opportunity detail, account, contacts, collaborators, quotes and items
     useEffect(() => {
+        if (!id) return;
+        let cancelled = false;
+
         const fetchFromServer = async () => {
-            if (opportunities && !opportunity && !isFetchingServer && !serverOpportunity) {
-                if (!navigator.onLine) {
-                    console.warn(`[JIT Sync] Offline: Cannot fetch opportunity ${id}`);
-                    setServerOpportunity('NOT_FOUND');
+            if (!navigator.onLine) {
+                if (!opportunity) setServerOpportunity('NOT_FOUND');
+                return;
+            }
+            setIsFetchingServer(true);
+            setIsLoadingData(true);
+            try {
+                const { oppData, collaborators, forbidden } = await hydrateOpportunityDetailFromSupabase(
+                    id,
+                    isTiendaUser(currentUser) && currentUser?.id ? { requireOwnerId: currentUser.id } : undefined
+                );
+                if (cancelled) return;
+
+                if (forbidden) {
+                    await db.opportunities.delete(id);
+                    setServerOpportunity('UNAUTHORIZED');
                     return;
                 }
-                console.log(`[JIT Sync] Opportunity ${id} not found locally. Fetching from server...`);
-                setIsFetchingServer(true);
-                setIsLoadingData(true);
-                try {
-                    // Fetch Opportunity
-                    const { data: oppData, error: oppError } = await supabase
-                        .from('CRM_Oportunidades')
-                        .select('*')
-                        .eq('id', id)
-                        .single();
 
-                    if (oppData && !oppError) {
-                        console.log(`[JIT Sync] Found opportunity on server. Saving locally...`);
-                        await db.opportunities.put(oppData);
-
-                        // Fetch Collaborators (Defensive)
-                        let isCollab = false;
-                        try {
-                            const { data: collabs, error: collabsError } = await supabase
-                                .from('CRM_Oportunidades_Colaboradores')
-                                .select('*')
-                                .eq('oportunidad_id', id);
-
-                            if (collabs && !collabsError) {
-                                await db.opportunityCollaborators.bulkPut(collabs);
-                                isCollab = collabs.some(c => c.usuario_id === currentUser?.id && !c.is_deleted);
-                            }
-                        } catch (err) {
-                            console.warn("Could not fetch collaborators from server (table might be missing):", err);
+                if (oppData) {
+                    const isCollab = collaborators.some(
+                        (c) => c.usuario_id === currentUser?.id && !c.is_deleted
+                    );
+                    if (userRole === 'VENDEDOR' && currentUser?.id && !canViewAllAccountsContactsOpportunities(currentUser)) {
+                        const isOwner = oppData.owner_user_id === currentUser.id;
+                        if (!isOwner && !isCollab) {
+                            setServerOpportunity('UNAUTHORIZED');
+                            return;
                         }
-
-                        if (userRole === 'VENDEDOR') {
-                            // Asesor: solo dueño o colaborador (crear la oportunidad para otro no da acceso).
-                            const isOwner = oppData.owner_user_id === currentUser?.id;
-                            if (!isOwner && !isCollab) {
-                                setServerOpportunity('UNAUTHORIZED');
-                                return;
-                            }
-                        }
-
-                        setServerOpportunity('FOUND_AND_SAVED');
-
-                    } else if (oppError) {
-                        console.warn(`[JIT Sync] Opportunity not found on server either:`, oppError.message);
-                        setServerOpportunity('NOT_FOUND');
                     }
-                } catch (err) {
-                    console.error(`[JIT Sync] Error fetching opportunity:`, err);
+                    setServerOpportunity('FOUND_AND_SAVED');
+                } else if (!opportunity) {
                     setServerOpportunity('NOT_FOUND');
-                } finally {
+                }
+            } catch (err) {
+                console.error('[OpportunityDetail] Error fetching opportunity:', err);
+                if (!cancelled && !opportunity) setServerOpportunity('NOT_FOUND');
+            } finally {
+                if (!cancelled) {
                     setIsFetchingServer(false);
                     setIsLoadingData(false);
                 }
             }
         };
 
-        fetchFromServer();
-    }, [id, opportunity, opportunities, isFetchingServer, serverOpportunity]);
+        void fetchFromServer();
+        return () => {
+            cancelled = true;
+        };
+    }, [id, currentUser, userRole]);
 
     const searchParams = useSearchParams();
     const initialTab = searchParams.get('tab') as any;
@@ -217,10 +219,12 @@ export default function OpportunityDetailPage() {
                 title={opportunity.nombre}
                 subtitle={formatOpportunityAmount(opportunity.amount, opportunity.currency_id || 'COP')}
                 status={
-                    opportunity.estado_id === 2 ? 'Ganada' :
-                        opportunity.estado_id === 3 ? 'Perdida' :
-                            opportunity.estado_id === 4 ? 'Cancelada' :
-                                (phaseMap.get(opportunity.fase_id) || opportunity.fase || 'Prospecto')
+                    // Misma fase que el stepper (activa equivalente). El estado no se muestra.
+                    phaseLabelForId(
+                        resolveShownPhaseId(opportunity.fase_id, phases, accountCanalId, opportunity.fase),
+                        phases,
+                        opportunity.fase || 'Prospecto',
+                    )
                 }
                 backHref="/oportunidades?view=list"
                 onTitleSave={async (nombre) => {
@@ -315,32 +319,11 @@ export default function OpportunityDetailPage() {
     );
 }
 
-const LOSS_REASONS = [
-    "N - No responde 1mer contacto",
-    "N- Sin información de contacto",
-    "N- Inadecuada Segmentación",
-    "N- No va a comprar",
-    "RED- MAC",
-    "RED- Firplak Home",
-    "RED- Ser. Tecnico",
-    "RED- Distribución",
-    "RED- Obras",
-    "INT - Abandona Conversación",
-    "INT - Precio Elevado",
-    "INT - Sin cobertura",
-    "INT - Tiempos de entrega",
-    "INT - No se fabrica",
-    "INT- No se tiene medida / Color",
-    "INT- Competencia diferente a precio",
-    "INT- Compro FIRPLAK",
-    "INT- Pago contraentrega",
-    "INT - Lo pospone",
-    "INT - Compra en Homcenter",
-    "Duplicado"
-];
-
 function SummaryTab({ opportunity }: { opportunity: any }) {
     const { updateOpportunity } = useOpportunities();
+    // Usuario logueado: lo usa isB2COpportunity en handlePhaseChange.
+    // Sin esta línea, `user` no existe y cambiar de fase lanza ReferenceError.
+    const { user } = useCurrentUser();
     const { origins: opportunityOrigins } = useOpportunityOrigins();
     const { quotes } = useQuotes(opportunity.id);
     const [localAmount, setLocalAmount] = useState(opportunity.amount || 0);
@@ -366,6 +349,25 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     const [isSavingCategoria, setIsSavingCategoria] = useState(false);
     const [isSavingContactos, setIsSavingContactos] = useState(false);
     const [isSavingClientesAtendidos, setIsSavingClientesAtendidos] = useState(false);
+
+    // Loss reasons come from CRM_RazonesPerdida (active rows only). The remote
+    // read runs every time this tab mounts, so a reason added in Supabase shows
+    // up after a refresh without a code change. Dexie is the offline fallback.
+    const cachedLossReasons = useLiveQuery(() => db.lossReasons.toArray(), []);
+    const [remoteLossReasons, setRemoteLossReasons] = useState<LossReasonCatalogItem[] | null>(null);
+    useEffect(() => {
+        let cancelled = false;
+        void refreshLossReasonsFromSupabase().then(rows => {
+            if (!cancelled && rows && rows.length > 0) setRemoteLossReasons(rows);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+    const lossReasonOptions = useMemo(
+        () => selectLossReasonsForPicker(remoteLossReasons ?? cachedLossReasons ?? []),
+        [remoteLossReasons, cachedLossReasons],
+    );
 
     // Loss reason inline fields
     const [localRazonPerdida, setLocalRazonPerdida] = useState(opportunity.razon_perdida || "");
@@ -528,21 +530,17 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
         ciudad: ""
     } : null);
 
-    // Fetch Phases for Channel (with deduplication by orden in case of DB integrity issues)
-    const phases = useLiveQuery(
-        async () => {
-            if (!effectiveAccount?.canal_id) return [];
-            const raw = await db.phases.where('canal_id').equals(effectiveAccount.canal_id).sortBy('orden');
-            // Deduplicate by orden, keeping the entry with the lowest id
-            const seen = new Map<number, typeof raw[0]>();
-            for (const phase of raw) {
-                if (!seen.has(phase.orden)) {
-                    seen.set(phase.orden, phase);
-                }
-            }
-            return Array.from(seen.values()).sort((a, b) => a.orden - b.orden);
-        },
-        [account?.canal_id]
+    // Catálogo completo (incluye inactivas) para el nombre; el stepper solo ofrece activas.
+    const phaseCatalog = useLiveQuery(() => readFullPhaseCatalog(), [effectiveAccount?.canal_id]);
+    const phases = useMemo(
+        () => effectiveAccount?.canal_id ? selectPhasesForPicker(phaseCatalog ?? [], effectiveAccount.canal_id) : [],
+        [phaseCatalog, effectiveAccount?.canal_id]
+    );
+    const highlightedPhaseId = resolveShownPhaseId(
+        opportunity.fase_id,
+        phaseCatalog ?? [],
+        effectiveAccount?.canal_id,
+        opportunity.fase,
     );
 
     // Fetch contacts for account to allow linking contacts to opportunity
@@ -561,41 +559,67 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
     // Computed: both loss reason fields are filled
     const lossFieldsComplete = localRazonPerdida.trim() !== "" && localComentariosPerdida.trim() !== "";
 
+    // Resultado actual (abierta / ganada / perdida) de la misma fase que pintan el badge y el stepper.
+    const currentPhaseOutcome = getPhaseOutcomeByName(
+        phaseLabelForId(highlightedPhaseId, phaseCatalog ?? [], opportunity.fase || ''),
+    );
+
+    const persistClosedLost = async (phaseId: number, reason: string) => {
+        const lostPhase = (phaseCatalog ?? []).find(phase => Number(phase.id) === Number(phaseId))
+            ?? phases?.find(phase => Number(phase.id) === Number(phaseId));
+        const isB2C = isB2COpportunity(effectiveAccount, opportunity, user, lostPhase);
+        const updates = buildClosedLostPhaseUpdate({
+            phaseId,
+            probability: lostPhase?.probability,
+            razonPerdida: reason,
+            comentariosPerdida: localComentariosPerdida,
+            isB2C,
+            today: toInputDate(new Date()),
+        });
+        if (updates.fecha_cierre_estimada) setLocalClosingDate(updates.fecha_cierre_estimada);
+        await updateOpportunity(opportunity.id, updates);
+    };
+
     const handlePhaseChange = async (phaseId: number) => {
         const targetPhase = phases?.find(p => p.id === phaseId);
 
-        // Check if target is "Cerrada Perdida"
-        const normalizedName = targetPhase?.nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") || "";
+        // Check if target is "Cerrada Perdida" or "Cerrada Ganada" (solo por la fase)
+        const targetOutcome = getPhaseOutcomeByName(targetPhase?.nombre);
+        const isClosedWon = targetOutcome === 'won';
+        const isClosedLost = targetOutcome === 'lost';
 
-        if (normalizedName.includes('perdida')) {
-            // Block if loss reason fields are not filled
+        // B2C / Canal Propio / Ecommerce check
+        const isB2C = isB2COpportunity(effectiveAccount, opportunity, user, targetPhase);
+        const todayStr = toInputDate(new Date());
+
+        if (isClosedLost) {
+            // El botón sigue exigiendo razón y comentarios. El guardado es el mismo que la razón.
             if (!lossFieldsComplete) return;
-
-            const lostPhase = phases?.find(p => p.id === phaseId);
-            await updateOpportunity(opportunity.id, {
-                fase_id: phaseId,
-                razon_perdida: localRazonPerdida,
-                comentarios_perdida: localComentariosPerdida,
-                estado_id: 3,
-                probability: lostPhase?.probability ?? 0
-            });
+            await persistClosedLost(phaseId, localRazonPerdida);
             return;
         }
 
         // Check if target is "Cerrada Ganada"
-        if (normalizedName.includes('ganada')) {
-            await updateOpportunity(opportunity.id, {
+        if (isClosedWon) {
+            const updates: any = {
                 fase_id: phaseId,
-                estado_id: 2, // Explicitly set to Won status
+                estado_id: ESTADO_ID_GANADA, // Por dentro: dispara trg_opp_devengada (comisiones). No se muestra.
                 probability: targetPhase?.probability ?? 100 // Propagate phase probability
-            });
+            };
+
+            if (isB2C) {
+                updates.fecha_cierre_estimada = todayStr;
+                setLocalClosingDate(todayStr);
+            }
+
+            await updateOpportunity(opportunity.id, updates);
             return;
         }
 
-        // Default: just update phase, reset estado to Open if coming from a closed state
+        // Default: just update phase; estado_id (oculto) vuelve a Abierta
         await updateOpportunity(opportunity.id, {
             fase_id: phaseId,
-            estado_id: 1, // Reset to Open status when moving to any other phase
+            estado_id: ESTADO_ID_ABIERTA, // Por dentro, para triggers/integraciones. No se muestra.
             probability: targetPhase?.probability ?? 0 // Propagate phase probability
         });
     };
@@ -607,7 +631,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
             await updateOpportunity(opportunity.id, {
                 fase_id: pendingPhaseId,
                 razon_perdida_id: reasonId,
-                estado_id: 3,
+                estado_id: ESTADO_ID_PERDIDA,
                 probability: lostPhase?.probability ?? 0
             });
             setIsLossReasonModalOpen(false);
@@ -625,7 +649,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
         );
     }
 
-    const currentPhaseIndex = phases?.findIndex(p => Number(p.id) === Number(opportunity.fase_id)) ?? -1;
+    const currentPhaseIndex = phases?.findIndex(p => Number(p.id) === Number(highlightedPhaseId)) ?? -1;
 
     return (
         <div className="space-y-6 animate-in fade-in duration-500">
@@ -712,7 +736,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                         return normalized.includes('cerrada') || normalized.includes('ganada') || normalized.includes('perdida');
                                     }).map((phase) => {
                                         const isWon = phase.nombre.toLowerCase().includes('ganada');
-                                        const isActive = Number(opportunity.fase_id) === Number(phase.id);
+                                        const isActive = Number(highlightedPhaseId) === Number(phase.id);
 
                                         const isLostPhase = phase.nombre.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes('perdida');
                                         const isBlocked = isLostPhase && !lossFieldsComplete;
@@ -752,8 +776,8 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                 )}
             </div>
 
-            {/* Commission Badge - Only shown for Won opportunities */}
-            {opportunity.estado_id === 2 && (
+            {/* Commission Badge - Only shown for Won opportunities (fase "Cerrada ganada") */}
+            {currentPhaseOutcome === 'won' && (
                 <CommissionBadge opportunityId={opportunity.id} />
             )}
 
@@ -804,8 +828,8 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                             </div>
                             <ProbabilityDonut
                                 percentage={
-                                    opportunity.estado_id === 2 ? 100 : // Cerrada Ganada = 100%
-                                        opportunity.estado_id === 3 ? 0 :   // Cerrada Perdida = 0%
+                                    currentPhaseOutcome === 'won' ? 100 : // Cerrada Ganada = 100%
+                                        currentPhaseOutcome === 'lost' ? 0 :   // Cerrada Perdida = 0%
                                             // Always re-derive from current phase for accuracy;
                                             // fall back to stored probability only if phase not found locally
                                             (opportunity?.fase_id ? (phases?.find(p => p.id === opportunity.fase_id)?.probability ?? opportunity?.probability) : opportunity?.probability) ?? 0
@@ -988,24 +1012,6 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                             </div>
                         </div>
 
-                        <div className="pt-4 border-t border-slate-100">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Estado</label>
-                            <div className={cn(
-                                "px-3 py-1.5 rounded-lg font-bold text-sm border",
-                                opportunity.estado_id === 2 ? "bg-green-50 text-green-700 border-green-100" :
-                                    opportunity.estado_id === 3 ? "bg-red-50 text-red-700 border-red-100" :
-                                        opportunity.estado_id === 4 ? "bg-slate-50 text-slate-700 border-slate-200" :
-                                            "bg-blue-50 text-blue-700 border-blue-100"
-                            )}>
-                                {opportunity.status || (
-                                    opportunity.estado_id === 1 ? 'Abierta' :
-                                        opportunity.estado_id === 2 ? 'Ganada' :
-                                            opportunity.estado_id === 3 ? 'Perdida' :
-                                                opportunity.estado_id === 4 ? 'Cancelada' : 'Abierta'
-                                )}
-                            </div>
-                        </div>
-
                         {/* Dirección de entrega Section */}
                         <div className="pt-4 border-t border-slate-100">
                             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Dirección de Entrega</label>
@@ -1136,7 +1142,10 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                             <div className="space-y-3">
                                 <div>
                                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Nombre / Razón Social</label>
-                                    <p className="text-slate-900 font-medium">{effectiveAccount.nombre}</p>
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <p className="text-slate-900 font-medium">{effectiveAccount.nombre}</p>
+                                        {account ? <AccountNivelBadge nivel={account.nivel_premium} /> : null}
+                                    </div>
                                 </div>
                                 <div className="grid grid-cols-2 gap-4">
                                     <div>
@@ -1152,6 +1161,20 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                     <div>
                                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Dirección</label>
                                         <p className="text-slate-700">{effectiveAccount.direccion} {effectiveAccount.ciudad && `• ${effectiveAccount.ciudad}`}</p>
+                                    </div>
+                                )}
+
+                                {/* Fechas de creación (B2C: Canal Propio y admins) */}
+                                {userHasB2CAccess(user) && (
+                                    <div className="grid grid-cols-2 gap-4" data-testid="opp-creation-dates">
+                                        <div>
+                                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Fecha creación oportunidad</label>
+                                            <p className="text-slate-700" data-testid="opp-created-at">{formatColombiaDateTime(opportunity.created_at, 'No registrada')}</p>
+                                        </div>
+                                        <div>
+                                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Cuenta creada</label>
+                                            <p className="text-slate-700" data-testid="account-created-at">{formatColombiaDateTime((effectiveAccount as { created_at?: string | null }).created_at, 'No registrada')}</p>
+                                        </div>
                                     </div>
                                 )}
 
@@ -1305,11 +1328,28 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                         compact
                                         dataTestId="razon-perdida-select"
                                         value={localRazonPerdida}
-                                        onChange={async (val) => {
-                                            setLocalRazonPerdida(val);
+                                        onChange={async (nextReason) => {
+                                            setLocalRazonPerdida(nextReason);
                                             setIsSavingLossReason(true);
                                             try {
-                                                await updateOpportunity(opportunity.id, { razon_perdida: val || null });
+                                                const plan = planLossReasonSelection({
+                                                    nextReason,
+                                                    faseId: opportunity.fase_id,
+                                                    phases: phaseCatalog ?? [],
+                                                    canalId: effectiveAccount?.canal_id,
+                                                });
+                                                if (plan.action === 'reason-only') {
+                                                    await updateOpportunity(opportunity.id, { razon_perdida: plan.razonPerdida });
+                                                    return;
+                                                }
+                                                if (plan.action === 'confirm-won') {
+                                                    const accepted = window.confirm(WON_TO_LOST_CONFIRM_MESSAGE);
+                                                    if (!accepted) {
+                                                        setLocalRazonPerdida(opportunity.razon_perdida || '');
+                                                        return;
+                                                    }
+                                                }
+                                                await persistClosedLost(plan.faseId, plan.razonPerdida);
                                             } finally {
                                                 setIsSavingLossReason(false);
                                             }
@@ -1321,10 +1361,13 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                                             localRazonPerdida ? "border-slate-200" : "border-red-200 bg-red-50"
                                         )}
                                         options={[
-                                            ...(localRazonPerdida && !LOSS_REASONS.includes(localRazonPerdida)
-                                                ? [{ value: localRazonPerdida, label: localRazonPerdida }]
+                                            ...(localRazonPerdida && !lossReasonOptions.some(reason => reason.descripcion === localRazonPerdida)
+                                                ? [{ value: localRazonPerdida, label: lossReasonOptionLabel(localRazonPerdida) }]
                                                 : []),
-                                            ...LOSS_REASONS.map(r => ({ value: r, label: r })),
+                                            ...lossReasonOptions.map(reason => ({
+                                                value: reason.descripcion,
+                                                label: lossReasonOptionLabel(reason.descripcion),
+                                            })),
                                         ]}
                                     />
                                     {isSavingLossReason && (
@@ -1876,9 +1919,9 @@ function ActivitiesTab({ opportunityId, accountId }: { opportunityId: string, ac
     // tiene las 3.000 más recientes). Sin conexión se muestra lo que haya en la copia local.
     useEffect(() => {
         if (!opportunityId || !viewerRole || typeof navigator === 'undefined' || !navigator.onLine) return;
-        hydrateOpportunityActivities(opportunityId, { viewerId, viewerRole })
+        hydrateOpportunityActivities(opportunityId, { viewerId, viewerRole, esTienda: isTiendaUser(viewerUser) })
             .catch(err => console.warn('[ActivitiesTab] No se pudieron traer las actividades del servidor:', err));
-    }, [opportunityId, viewerId, viewerRole]);
+    }, [opportunityId, viewerId, viewerRole, viewerUser?.es_tienda]);
     const [selectedActivity, setSelectedActivity] = useState<LocalActivity | null>(null);
     const { opportunities } = useOpportunities();
 
@@ -1904,17 +1947,17 @@ function ActivitiesTab({ opportunityId, accountId }: { opportunityId: string, ac
         else resetFollowUp(act.id);
     };
 
-    const sortedActivities = activities?.sort((a, b) => new Date(b.fecha_inicio).getTime() - new Date(a.fecha_inicio).getTime());
+    const visibleActivities = activitiesVisibleToViewer(activities, viewerRole, viewerId, viewerUser);
+    const sortedActivities = visibleActivities.slice().sort((a, b) => new Date(b.fecha_inicio).getTime() - new Date(a.fecha_inicio).getTime());
 
     // Catalogs
     const classifications = useLiveQuery(() => db.activityClassifications.toArray().then(arr => arr.filter(c => !c.is_deleted)), []) || [];
     const subclassifications = useLiveQuery(() => db.activitySubclassifications.toArray().then(arr => arr.filter(s => !s.is_deleted)), []) || [];
 
-    // PROACTIVE SYNC: If catalogs are empty, trigger a pull
+    // PROACTIVE LOAD: If catalogs are empty, fetch them directly from Supabase
     useEffect(() => {
         if (classifications.length === 0 && navigator.onLine) {
-            console.log("[ActivitiesTab] Catalogs empty, triggering sync...");
-            syncEngine.triggerSync();
+            void hydrateActivityCatalogsFromSupabase();
         }
     }, [classifications.length]);
 

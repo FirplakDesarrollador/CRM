@@ -1,4 +1,5 @@
 import { formatColombiaDateTime } from './date-utils';
+import { formatDateOnlyDMY, isDateOnlyOverdue } from './dateFilterHelpers';
 import { computeOpportunityActivitySummary } from './opportunityActivities';
 import { formatOpportunityCategories } from './opportunityCategories';
 
@@ -10,8 +11,8 @@ export const OPPORTUNITY_TABLE_COLUMN_KEYS = [
     'ciudad',
     'canal',
     'origen',
+    'setter',
     'fase',
-    'estado',
     'creada',
     'categoria',
     'valor',
@@ -30,8 +31,8 @@ export interface OpportunityHotRow {
     ciudad: string;
     canal: string;
     origen: string;
+    setter: string;
     fase: string;
-    estado: string;
     creada: string;
     categoria: string;
     valor: number;
@@ -46,6 +47,7 @@ export interface OpportunityInput {
     nombre?: string | null;
     amount?: number | null;
     categoria_oportunidad?: string | string[] | null;
+    setter?: string | null;
     account?: {
         id?: string;
         nombre?: string | null;
@@ -58,7 +60,6 @@ export interface OpportunityInput {
     activity_summary?: ReturnType<typeof computeOpportunityActivitySummary> | null;
     origen_oportunidad?: string | null;
     fase_data?: { nombre?: string | null } | null;
-    estado_data?: { nombre?: string | null } | null;
     created_at?: string | null;
     fecha_cierre_estimada?: string | null;
     vendedor?: { full_name?: string | null } | null;
@@ -95,17 +96,14 @@ export function buildOpportunityHotRow(
         ciudad: opp.account?.ciudad || 'Sin ciudad',
         canal: opp.account?.canal_id || '-',
         origen: opp.origen_oportunidad || '-',
+        setter: opp.setter ? String(opp.setter).toUpperCase().trim() : '-',
         fase: opp.fase_data?.nombre || 'Pros.',
-        estado: opp.estado_data?.nombre || 'Abierta',
         creada: formatColombiaDateTime(opp.created_at),
         categoria: formatOpportunityCategories(opp.categoria_oportunidad) || '-',
         valor: opp.amount || 0,
-        cierre: opp.fecha_cierre_estimada
-            ? new Date(opp.fecha_cierre_estimada).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })
-            : '-',
-        cierre_overdue: opp.fecha_cierre_estimada
-            ? new Date(opp.fecha_cierre_estimada) < new Date()
-            : false,
+        // fecha_cierre_estimada es "solo día": se muestra tal cual (sin pasar a UTC, que la corría un día atrás).
+        cierre: formatDateOnlyDMY(opp.fecha_cierre_estimada) || '-',
+        cierre_overdue: isDateOnlyOverdue(opp.fecha_cierre_estimada),
         vendedor: opp.vendedor?.full_name || 'Sin asignar'
     };
 }

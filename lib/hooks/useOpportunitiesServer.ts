@@ -6,11 +6,17 @@ import { useSyncStore } from '@/lib/stores/useSyncStore';
 import { matchesSearchTokens, getSearchTokens, getPhoneIlikePatterns, accentInsensitiveCondition, applyAccentInsensitiveFilter } from '@/lib/utils';
 import { getCellphoneSearchDigits, findPhoneMatchesServer, findPhoneMatchesLocal, opportunityMatchesPhone, PhoneSearchMatches } from '@/lib/phoneSearch';
 import { computeOpportunityActivitySummary, OpportunityActivitySummary, ActivityItem } from '@/lib/opportunityActivities';
-import { PROSPECTO_PHASE_ID, getEquivalentPhaseIds, PhaseCatalogItem, calculateTotalAmount, DEFAULT_OPPORTUNITIES_PAGE_SIZE } from '@/lib/opportunityColumnFilterHelpers';
-import { toStartOfDayISO, toEndOfDayISO } from '@/lib/dateFilterHelpers';
-import { activitiesVisibleToViewer, sellerCanSeeOpportunity, sellerOpportunityOrFilter } from '@/lib/sellerVisibility';
+import { PhaseCatalogItem, calculateTotalAmount, DEFAULT_OPPORTUNITIES_PAGE_SIZE } from '@/lib/opportunityColumnFilterHelpers';
+import { toBogotaStartOfDayISO, toBogotaEndOfDayISO, toDateOnly, isDateOnlyInRange } from '@/lib/dateFilterHelpers';
+import { buildWonCloseDateOrFilter, matchesOpportunityListDateRange } from '@/lib/opportunityListDateFilter';
+import { isClosedPhaseName, splitPhaseIdsByOutcome } from '@/lib/opportunityPhase';
+import { buildClosedStatusOrCondition, buildOpenPhaseOrCondition, matchesStatusFilter, matchesSetterFilter, normalizeSetterFilter, SetterFilter } from '@/lib/opportunityStatusFilter';
+import { activitiesVisibleToViewer, canViewAllAccountsContactsOpportunities, sellerCanSeeOpportunity, sellerOpportunityOrFilter } from '@/lib/sellerVisibility';
+import { isTiendaUser } from '@/lib/tiendaVisibility';
 import { FlatQuoteItemProduct, getOpportunityIdsByProductFilters } from '@/lib/opportunityProductFilterHelpers';
 import { fetchFullCatalog, PriceListProduct } from '@/lib/hooks/useProducts';
+import { readFullPhaseCatalog } from '@/lib/phaseCatalogStore';
+import { normalizePhaseFilterValue, opportunityMatchesPhaseIds, readPersistedPhaseIds, resolvePhaseIdQuery } from '@/lib/opportunityPhaseListFilter';
 
 export type OpportunityServer = {
     id: string;
@@ -25,12 +31,10 @@ export type OpportunityServer = {
     created_at: string;
     fecha_cierre_estimada?: string | null;
     segmento_id?: number | null;
-    estado_id?: number | null;
     origen_oportunidad?: string | null;
     url_origen?: string | null;
     account?: { nombre: string; canal_id?: string; ciudad?: string | null; pais_id?: number | null; pais?: string | null } | null; // Joined data
     fase_data?: { nombre: string } | null; // Joined data
-    estado_data?: { nombre: string } | null; // Joined data
     vendedor?: { full_name: string } | null; // Joined data
     actividades?: Array<{ id: string; user_id?: string | null; fecha_fin?: string | null; is_completed?: boolean; is_deleted?: boolean }> | null;
     activity_summary?: OpportunityActivitySummary;
@@ -41,9 +45,13 @@ type StatusFilter = 'all' | 'open' | 'won' | 'lost';
 type UseOpportunitiesServerProps = {
     pageSize?: number;
     initialStatus?: string;
+    /** Ignora los filtros guardados del listado (URL y sessionStorage); para vistas embebidas. */
+    ignorePersistedFilters?: boolean;
+    /** El home ya no filtra por estado: no relee `status` de la URL ni de la sesión. */
+    ignorePersistedStatus?: boolean;
 };
 
-export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_SIZE }: UseOpportunitiesServerProps = {}) {
+export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_SIZE, initialStatus, ignorePersistedFilters = false, ignorePersistedStatus = false }: UseOpportunitiesServerProps = {}) {
     const [data, setData] = useState<OpportunityServer[]>([]);
     const [count, setCount] = useState<number>(0);
     const [loading, setLoading] = useState<boolean>(true);
@@ -53,6 +61,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
     // Helper to extract initial filter from URL or sessionStorage
     const getInitialParam = (key: string) => {
         if (typeof window === 'undefined') return null;
+        if (ignorePersistedFilters) return null;
         const urlParams = new URLSearchParams(window.location.search);
         const fromUrl = urlParams.get(key);
         if (fromUrl) return fromUrl;
@@ -79,20 +88,31 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
         const val = getInitialParam('segment');
         return val ? Number(val) : null;
     });
-    const [phaseFilter, setPhaseFilter] = useState<number | null>(() => {
-        const val = getInitialParam('phase');
-        return val ? Number(val) : null;
+    const [phaseFilter, setPhaseFilterState] = useState<number[]>(() => readPersistedPhaseIds(getInitialParam('phases'), getInitialParam('phase')));
+    const setPhaseFilter = useCallback((value: number | number[] | null) => {
+        setPhaseFilterState(normalizePhaseFilterValue(value));
+    }, []);
+    const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => {
+        if (!ignorePersistedStatus) {
+            const saved = getInitialParam('status') as StatusFilter | null;
+            if (saved) return saved;
+        }
+        return (initialStatus as StatusFilter | undefined) || 'open';
     });
-    const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => (getInitialParam('status') as StatusFilter | null) || 'open');
     const [originFilter, setOriginFilter] = useState<string | null>(() => getInitialParam('origin'));
     const [plantaFilter, setPlantaFilter] = useState<string | null>(() => getInitialParam('planta'));
     const [familiaFilter, setFamiliaFilter] = useState<string | null>(() => getInitialParam('familia'));
     const [accountIdFilter, setAccountIdFilter] = useState<string | null>(null);
+    const [idFilter, setIdFilter] = useState<string | null>(() => {
+        const val = getInitialParam('oppId') || getInitialParam('id');
+        return val ? val.trim() : null;
+    });
     const [countryFilter, setCountryFilter] = useState<number | null>(() => {
         const val = getInitialParam('country');
         return val ? Number(val) : null;
     });
     const [cityFilter, setCityFilter] = useState<string | null>(() => getInitialParam('city'));
+    const [setterFilter, setSetterFilter] = useState<SetterFilter | null>(() => normalizeSetterFilter(getInitialParam('setter')));
 
     // Date Filters
     const [startDate, setStartDate] = useState<string | null>(() => getInitialParam('start'));
@@ -119,6 +139,8 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
     // User Context - uses useCurrentUser to respect viewMode
     const { user, role: userRole, isVendedor } = useCurrentUser();
     const currentUserId = user?.id || null;
+    const seesAllPortfolio = canViewAllAccountsContactsOpportunities(user);
+    const tiendaScoped = isTiendaUser(user);
     const [subordinateIds, setSubordinateIds] = useState<string[]>([]);
 
     // PERF FIX: Use ref for page to avoid including it in useCallback deps
@@ -148,7 +170,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
             let phases: PhaseCatalogItem[] = [];
 
             if (!navigator.onLine) {
-                const localPhases = await db.phases.toArray();
+                const localPhases = await readFullPhaseCatalog();
                 phases = localPhases;
             } else {
                 try {
@@ -158,26 +180,17 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                     if (!error && data && data.length > 0) {
                         phases = data;
                     } else {
-                        phases = await db.phases.toArray();
+                        phases = await readFullPhaseCatalog();
                     }
                 } catch {
-                    phases = await db.phases.toArray();
+                    phases = await readFullPhaseCatalog();
                 }
             }
 
             if (phases && phases.length > 0) {
                 allPhasesRef.current = phases;
-                const won: number[] = [];
-                const lost: number[] = [];
-
-                phases.forEach(p => {
-                    const nombre = p.nombre.toLowerCase();
-                    if (nombre.includes('ganada')) {
-                        won.push(p.id);
-                    } else if (nombre.includes('perdida')) {
-                        lost.push(p.id);
-                    }
-                });
+                // Ganada / perdida se calcula SOLO por la fase (nombre, sin tildes ni mayúsculas).
+                const { won, lost } = splitPhaseIdsByOutcome(phases);
 
                 wonPhaseIdsRef.current = won;
                 lostPhaseIdsRef.current = lost;
@@ -195,7 +208,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
     // Phase IDs are read from refs (populated once on mount) to avoid triggering
     // a cascade of refetches when they resolve after initial load.
     const fetchOpportunities = useCallback(async (isLoadMore = false) => {
-        if (!currentUserId) return; // Wait for user
+        if (!currentUserId || !userRole) return; // Wait for user and role
         if (!phasesLoadedRef.current) return; // Wait for phases to load
 
         const setIsLoadingData = useSyncStore.getState().setIsLoadingData;
@@ -208,8 +221,11 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
         const fetchOffline = async () => {
             console.log("[useOpportunitiesServer] Falling back to local Dexie database...");
             let localOpps = await db.opportunities.toArray();
+            if (tiendaScoped && currentUserId) {
+                localOpps = localOpps.filter(o => o.owner_user_id === currentUserId);
+            }
             const allAccounts = await db.accounts.toArray();
-            const allPhases = await db.phases.toArray();
+            const allPhases = await readFullPhaseCatalog();
             const { data: usersData } = await supabase.from('CRM_Usuarios').select('id, full_name, email');
 
             const accMap = new Map(allAccounts.map(a => [a.id, a]));
@@ -218,7 +234,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
 
             // Asesor (VENDEDOR): solo sus oportunidades (dueño) y aquellas donde es colaborador,
             // sin importar la pestaña (Todas, Web, etc.).
-            if (isVendedor && currentUserId) {
+            if (!seesAllPortfolio && isVendedor && currentUserId) {
                 const sellerCollabs = await db.opportunityCollaborators.where('usuario_id').equals(currentUserId).toArray();
                 const sellerCollabIds = new Set(sellerCollabs.filter(c => !c.is_deleted).map(c => c.oportunidad_id));
                 localOpps = localOpps.filter(o => sellerCanSeeOpportunity(o, currentUserId, sellerCollabIds));
@@ -243,6 +259,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 localOpps = localOpps.filter(o =>
                     opportunityMatchesPhone(o, localPhoneMatches) ||
                     matchesSearchTokens([
+                        o.id,
                         o.nombre,
                         accMap.get(o.account_id)?.nombre,
                         userMap.get(o.owner_user_id || '')?.full_name,
@@ -251,6 +268,11 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                         ...(contactPhonesByAccount.get(o.account_id) || [])
                     ], searchTerm)
                 );
+            }
+
+            if (idFilter && idFilter.trim()) {
+                const cleanId = idFilter.trim().toLowerCase();
+                localOpps = localOpps.filter(o => o.id && o.id.toLowerCase().includes(cleanId));
             }
 
             if (channelFilter) {
@@ -265,24 +287,23 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 localOpps = localOpps.filter(o => o.segmento_id === segmentFilter);
             }
 
-            if (phaseFilter) {
-                if (phaseFilter === PROSPECTO_PHASE_ID) {
-                    localOpps = localOpps.filter(o => !o.fase_id);
-                } else {
-                    const equivalentIds = getEquivalentPhaseIds(allPhasesRef.current, phaseFilter);
-                    localOpps = localOpps.filter(o => o.fase_id && equivalentIds.includes(Number(o.fase_id)));
-                }
+            if (phaseFilter.length > 0) {
+                localOpps = localOpps.filter(o => opportunityMatchesPhaseIds(o.fase_id, phaseFilter, allPhasesRef.current));
             }
 
-            if (statusFilter === 'won' && wonPhaseIdsRef.current.length > 0) {
-                localOpps = localOpps.filter(o => wonPhaseIdsRef.current.includes(o.fase_id as number));
-            } else if (statusFilter === 'lost' && lostPhaseIdsRef.current.length > 0) {
-                localOpps = localOpps.filter(o => lostPhaseIdsRef.current.includes(o.fase_id as number));
-            } else if (statusFilter === 'open' && closedPhaseIdsRef.current.length > 0) {
+            const isFilteringExplicitClosedPhase = phaseFilter.some(id =>
+                id > 0 && allPhasesRef.current.some(p => Number(p.id) === id && isClosedPhaseName(p.nombre))
+            );
+
+            if (!isFilteringExplicitClosedPhase && statusFilter !== 'all') {
+                // Ganada = fase "Cerrada ganada"; Perdida = fase "Cerrada perdida" (solo por fase).
                 localOpps = localOpps.filter(o =>
-                    !closedPhaseIdsRef.current.includes(o.fase_id as number) &&
-                    ![2, 3, 4, 11, 14].includes(o.estado_id as number)
+                    matchesStatusFilter(o, statusFilter, wonPhaseIdsRef.current, lostPhaseIdsRef.current)
                 );
+            }
+
+            if (setterFilter) {
+                localOpps = localOpps.filter(o => matchesSetterFilter((o as any).setter, setterFilter));
             }
 
             if (accountIdFilter) {
@@ -347,25 +368,16 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 localOpps = localOpps.filter(o => matchingOppIds.has(o.id));
             }
 
-            if (startDate) {
-                const startISO = toStartOfDayISO(startDate);
-                localOpps = localOpps.filter(o => o.created_at && (!startISO || new Date(o.created_at) >= new Date(startISO)));
-            }
-            if (endDate) {
-                const endISO = toEndOfDayISO(endDate);
-                localOpps = localOpps.filter(o => o.created_at && (!endISO || new Date(o.created_at) <= new Date(endISO)));
+            if (startDate || endDate) {
+                localOpps = localOpps.filter(o => matchesOpportunityListDateRange(o, statusFilter, startDate, endDate));
             }
 
-            if (startClosingDate) {
-                const startCloseISO = toStartOfDayISO(startClosingDate);
-                localOpps = localOpps.filter(o => o.fecha_cierre_estimada && (!startCloseISO || new Date(o.fecha_cierre_estimada) >= new Date(startCloseISO)));
-            }
-            if (endClosingDate) {
-                const endCloseISO = toEndOfDayISO(endClosingDate);
-                localOpps = localOpps.filter(o => o.fecha_cierre_estimada && (!endCloseISO || new Date(o.fecha_cierre_estimada) <= new Date(endCloseISO)));
+            // fecha_cierre_estimada es "solo día": se compara como YYYY-MM-DD, sin pasar a UTC (evita corrimiento de un día).
+            if (startClosingDate || endClosingDate) {
+                localOpps = localOpps.filter(o => isDateOnlyInRange(o.fecha_cierre_estimada, startClosingDate, endClosingDate));
             }
 
-            if (accountOwnerIds && accountOwnerIds.length > 0) {
+            if (!tiendaScoped && accountOwnerIds && accountOwnerIds.length > 0) {
                 localOpps = localOpps.filter(o => o.owner_user_id && accountOwnerIds.includes(o.owner_user_id));
             }
 
@@ -377,7 +389,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                     const collabOppIds = new Set(localCollabs.filter(c => !c.is_deleted).map(c => c.oportunidad_id));
                     localOpps = localOpps.filter(o => o.owner_user_id === currentUserId || collabOppIds.has(o.id));
                 } else if (userFilter === 'all') {
-                    if (userRole !== 'ADMIN' && currentUserId) {
+                    if (userRole !== 'ADMIN' && currentUserId && !seesAllPortfolio) {
                         const localCollabs = await db.opportunityCollaborators.where('usuario_id').equals(currentUserId || '').toArray();
                         const collabOppIds = new Set(localCollabs.filter(c => !c.is_deleted).map(c => c.oportunidad_id));
                         localOpps = localOpps.filter(o =>
@@ -443,7 +455,8 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
             const localActs = activitiesVisibleToViewer(
                 await db.activities.where('opportunity_id').anyOf(oppIds).toArray(),
                 userRole,
-                currentUserId
+                currentUserId,
+                user
             );
             const actsByOpp = new Map<string, any[]>();
             localActs.forEach(act => {
@@ -458,15 +471,15 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 const acc = accMap.get(item.account_id);
                 const ph = phaseMap.get(item.fase_id as number);
                 const itemActs = actsByOpp.get(item.id) || [];
+                const visibleActs = activitiesVisibleToViewer(itemActs, userRole, currentUserId, user);
                 const usr = userMap.get(item.owner_user_id || '');
                 return {
                     ...item,
                     account: acc ? { nombre: acc.nombre, canal_id: acc.canal_id, ciudad: acc.ciudad, pais_id: acc.pais_id } : null,
                     fase_data: ph ? { nombre: ph.nombre } : null,
                     vendedor: usr ? { full_name: usr.full_name || usr.email } : null,
-                    estado_data: null,
-                    actividades: itemActs,
-                    activity_summary: computeOpportunityActivitySummary(itemActs)
+                    actividades: visibleActs,
+                    activity_summary: computeOpportunityActivitySummary(visibleActs)
                 };
             });
 
@@ -564,12 +577,39 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 }).filter(Boolean))) as string[];
             }
 
+            let matchedIdOppIds: string[] | null = null;
+            if (idFilter && idFilter.trim()) {
+                const cleanId = idFilter.trim();
+                const isFullUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanId);
+                if (isFullUuid) {
+                    matchedIdOppIds = [cleanId];
+                } else {
+                    try {
+                        const { data: rpcIds, error: rpcErr } = await supabase.rpc('search_opportunities_by_id', { search_term: cleanId });
+                        if (!rpcErr && Array.isArray(rpcIds)) {
+                            matchedIdOppIds = rpcIds;
+                        } else {
+                            matchedIdOppIds = [];
+                        }
+                    } catch {
+                        matchedIdOppIds = [];
+                    }
+                }
+            }
             const useInnerJoin = Boolean(channelFilter || subclassificationFilter || countryFilter || (cityFilter && cityFilter.trim() !== ''));
             const accountRelation = useInnerJoin ? 'account:CRM_Cuentas!inner(nombre, canal_id, subclasificacion_id, ciudad, pais_id)' : 'account:CRM_Cuentas(nombre, canal_id, subclasificacion_id, ciudad, pais_id)';
 
             // Builder unificado para aplicar idénticos filtros a la consulta de datos y al conteo de totales
             const applyCommonFilters = (targetQuery: any) => {
                 let q = targetQuery.eq('is_deleted', false);
+
+                if (matchedIdOppIds !== null) {
+                    if (matchedIdOppIds.length > 0) {
+                        q = q.in('id', matchedIdOppIds);
+                    } else {
+                        q = q.eq('id', '00000000-0000-0000-0000-000000000000');
+                    }
+                }
 
                 if (searchTerm && searchTerm.trim() && searchIsPhone) {
                     const phoneConditions = [`nombre.ilike.${getPhoneIlikePatterns(phoneDigits)[0]}`];
@@ -582,16 +622,22 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                     }
                     q = q.or(phoneConditions.join(','));
                 } else if (searchTerm && searchTerm.trim()) {
-                    const tokens = getSearchTokens(searchTerm);
-                    for (const token of tokens) {
-                        const orConditions = [accentInsensitiveCondition('nombre', token)];
-                        if (searchAccountIds.length > 0) {
-                            orConditions.push(`account_id.in.(${searchAccountIds.join(',')})`);
+                    const cleanSearch = searchTerm.trim();
+                    const searchIsUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanSearch);
+                    if (searchIsUuid) {
+                        q = q.eq('id', cleanSearch);
+                    } else {
+                        const tokens = getSearchTokens(cleanSearch);
+                        for (const token of tokens) {
+                            const orConditions = [accentInsensitiveCondition('nombre', token)];
+                            if (searchAccountIds.length > 0) {
+                                orConditions.push(`account_id.in.(${searchAccountIds.join(',')})`);
+                            }
+                            if (searchUserIds.length > 0) {
+                                orConditions.push(`owner_user_id.in.(${searchUserIds.join(',')})`);
+                            }
+                            q = q.or(orConditions.join(','));
                         }
-                        if (searchUserIds.length > 0) {
-                            orConditions.push(`owner_user_id.in.(${searchUserIds.join(',')})`);
-                        }
-                        q = q.or(orConditions.join(','));
                     }
                 }
 
@@ -603,28 +649,41 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                     q = q.eq('account.subclasificacion_id', subclassificationFilter);
                 }
 
-                if (statusFilter === 'won') {
-                    q = q.in('estado_id', [2, 11]);
-                } else if (statusFilter === 'lost') {
-                    q = q.in('estado_id', [3, 4, 14]);
-                } else if (statusFilter === 'open') {
-                    q = q.not('estado_id', 'in', '(2,3,4,11,14)');
+                const isFilteringExplicitClosedPhase = phaseFilter.some(id =>
+                    id > 0 && allPhasesRef.current.some(p => Number(p.id) === id && isClosedPhaseName(p.nombre))
+                );
+
+                if (!isFilteringExplicitClosedPhase) {
+                    if (statusFilter === 'won' || statusFilter === 'lost') {
+                        // Fase "Cerrada ganada" / "Cerrada perdida" (solo por fase)
+                        const closedCondition = buildClosedStatusOrCondition(statusFilter, wonPhaseIdsRef.current, lostPhaseIdsRef.current);
+                        if (closedCondition) q = q.or(closedCondition);
+                    } else if (statusFilter === 'open') {
+                        const openPhaseCondition = buildOpenPhaseOrCondition(closedPhaseIdsRef.current);
+                        if (openPhaseCondition) q = q.or(openPhaseCondition);
+                    }
+                }
+
+                if (setterFilter) {
+                    q = setterFilter === 'NONE' ? q.is('setter', null) : q.eq('setter', setterFilter);
                 }
 
                 if (segmentFilter) {
                     q = q.eq('segmento_id', segmentFilter);
                 }
 
-                if (phaseFilter) {
-                    if (phaseFilter === PROSPECTO_PHASE_ID) {
+                if (phaseFilter.length > 0) {
+                    const { includeUnassigned, faseIds } = resolvePhaseIdQuery(phaseFilter, allPhasesRef.current);
+                    if (includeUnassigned && faseIds.length === 0) {
                         q = q.is('fase_id', null);
+                    } else if (!includeUnassigned && faseIds.length === 1) {
+                        q = q.eq('fase_id', faseIds[0]);
+                    } else if (!includeUnassigned && faseIds.length > 1) {
+                        q = q.in('fase_id', faseIds);
+                    } else if (includeUnassigned && faseIds.length > 0) {
+                        q = q.or(`fase_id.is.null,fase_id.in.(${faseIds.join(',')})`);
                     } else {
-                        const equivalentIds = getEquivalentPhaseIds(allPhasesRef.current, phaseFilter);
-                        if (equivalentIds.length > 1) {
-                            q = q.in('fase_id', equivalentIds);
-                        } else {
-                            q = q.eq('fase_id', equivalentIds[0]);
-                        }
+                        q = q.eq('fase_id', -1);
                     }
                 }
 
@@ -657,27 +716,36 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                     }
                 }
 
-                if (startDate) {
-                    const startISO = toStartOfDayISO(startDate);
-                    if (startISO) q = q.gte('created_at', startISO);
+                // Ganadas: el rango superior filtra fecha_cierre_estimada (o created_at si el cierre es null).
+                // Todas, Abiertas y Perdidas siguen en created_at. El conteo usa applyCommonFilters.
+                const wonDateOr = statusFilter === 'won' ? buildWonCloseDateOrFilter(startDate, endDate) : null;
+                if (wonDateOr) {
+                    q = q.or(wonDateOr);
+                } else {
+                    if (startDate) {
+                        const startISO = toBogotaStartOfDayISO(startDate);
+                        if (startISO) q = q.gte('created_at', startISO);
+                    }
+
+                    if (endDate) {
+                        const endISO = toBogotaEndOfDayISO(endDate);
+                        if (endISO) q = q.lte('created_at', endISO);
+                    }
                 }
 
-                if (endDate) {
-                    const endISO = toEndOfDayISO(endDate);
-                    if (endISO) q = q.lte('created_at', endISO);
-                }
-
+                // Fecha de cierre del listado: solo fecha_cierre_estimada (columna date, día inclusive).
+                // No hay columna de cierre real filtrable; resolveOpportunityCloseDate es solo de presentación.
                 if (startClosingDate) {
-                    const startCloseISO = toStartOfDayISO(startClosingDate);
-                    if (startCloseISO) q = q.gte('fecha_cierre_estimada', startCloseISO);
+                    const startCloseDay = toDateOnly(startClosingDate);
+                    if (startCloseDay) q = q.gte('fecha_cierre_estimada', startCloseDay);
                 }
 
                 if (endClosingDate) {
-                    const endCloseISO = toEndOfDayISO(endClosingDate);
-                    if (endCloseISO) q = q.lte('fecha_cierre_estimada', endCloseISO);
+                    const endCloseDay = toDateOnly(endClosingDate);
+                    if (endCloseDay) q = q.lte('fecha_cierre_estimada', endCloseDay);
                 }
 
-                if (accountOwnerIds && accountOwnerIds.length > 0) {
+                if (!tiendaScoped && accountOwnerIds && accountOwnerIds.length > 0) {
                     q = q.in('owner_user_id', accountOwnerIds);
                 }
 
@@ -697,7 +765,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                         }
                         q = q.or(ownershipConditions.join(','));
                     } else if (userFilter === 'all') {
-                        if (userRole !== 'ADMIN') {
+                        if (userRole !== 'ADMIN' && !seesAllPortfolio) {
                             const visibleConditions = [`owner_user_id.eq.${currentUserId}`];
                             // El asesor solo ve las suyas (dueño) y en las que colabora; no las que creó para otro.
                             if (!isVendedor) {
@@ -717,8 +785,13 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 }
 
                 // Asesor (VENDEDOR): restricción fija en cualquier pestaña/filtro (Todas, Web, cuenta, búsqueda).
-                if (isVendedor && currentUserId) {
+                if (!seesAllPortfolio && isVendedor && currentUserId) {
                     q = q.or(sellerOpportunityOrFilter(currentUserId, collabOppIds));
+                }
+
+                // Tienda: solo oportunidades que posee, en cualquier pestaña (Todas, Web, equipo, colaboración).
+                if (tiendaScoped && currentUserId) {
+                    q = q.eq('owner_user_id', currentUserId);
                 }
 
                 return q;
@@ -743,9 +816,9 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                     origen_oportunidad,
                     categoria_oportunidad,
                     contactos_ids,
+                    setter,
                     ${accountRelation},
                     fase_data:CRM_FasesOportunidad(nombre),
-                    estado_data:CRM_EstadosOportunidad(nombre),
                     vendedor:CRM_Usuarios!owner_user_id(full_name),
                     actividades:CRM_Actividades(id, user_id, fecha_inicio, fecha_fin, tipo_actividad, is_completed, is_deleted)
                 `);
@@ -814,7 +887,9 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 const localOpps = await db.opportunities.where('id').anyOf(Array.from(missingPendingIds)).toArray();
                 const pendingCollabIds = new Set(collabOppIds);
                 pendingLocalOpps = localOpps.filter((o: any) => {
-                    if (isVendedor && currentUserId && !sellerCanSeeOpportunity(o, currentUserId, pendingCollabIds) && o.created_by !== currentUserId) return false;
+                    if (!matchesOpportunityListDateRange(o, statusFilter, startDate, endDate)) return false;
+                    if (tiendaScoped && currentUserId && o.owner_user_id !== currentUserId) return false;
+                    if (!seesAllPortfolio && isVendedor && currentUserId && !sellerCanSeeOpportunity(o, currentUserId, pendingCollabIds) && o.created_by !== currentUserId) return false;
                     if (accountIdFilter && o.account_id !== accountIdFilter) return false;
                     if (searchIsPhone && opportunityMatchesPhone(o, serverPhoneMatches)) return true;
                     if (searchTerm) {
@@ -831,10 +906,14 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 }));
             }
 
-            let combinedResults = [...pendingLocalOpps, ...(result as any[])].map((o: any) => ({
-                ...o,
-                activity_summary: computeOpportunityActivitySummary(activitiesVisibleToViewer<ActivityItem>(o.actividades, userRole, currentUserId))
-            }));
+            let combinedResults = [...pendingLocalOpps, ...(result as any[])].map((o: any) => {
+                const visibleActs = activitiesVisibleToViewer<ActivityItem>(o.actividades, userRole, currentUserId, user);
+                return {
+                    ...o,
+                    actividades: visibleActs,
+                    activity_summary: computeOpportunityActivitySummary(visibleActs)
+                };
+            });
             if (searchTerm && searchTerm.trim()) {
                 combinedResults = combinedResults.filter(o =>
                     (searchIsPhone && opportunityMatchesPhone(o, serverPhoneMatches)) ||
@@ -880,7 +959,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
             setLoading(false);
             useSyncStore.getState().setIsLoadingData(false);
         }
-    }, [currentUserId, isVendedor, subordinateIds, pageSize, userFilter, searchTerm, accountIdFilter, accountOwnerIds, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, originFilter, plantaFilter, familiaFilter, countryFilter, cityFilter, phasesReady, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc]);
+    }, [currentUserId, user, user?.email, user?.es_tienda, seesAllPortfolio, tiendaScoped, isVendedor, subordinateIds, pageSize, userFilter, searchTerm, accountIdFilter, idFilter, accountOwnerIds, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, originFilter, plantaFilter, familiaFilter, countryFilter, cityFilter, setterFilter, phasesReady, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc]);
 
     useEffect(() => {
         fetchOpportunities(false);
@@ -939,10 +1018,14 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
         setFamiliaFilter,
         familiaFilter,
         setAccountIdFilter,
+        idFilter,
+        setIdFilter,
         setCountryFilter,
         countryFilter,
         setCityFilter,
         cityFilter,
+        setSetterFilter,
+        setterFilter,
         setStartDate,
         setEndDate,
         setStartClosingDate,

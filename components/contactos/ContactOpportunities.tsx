@@ -4,11 +4,12 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Briefcase, ChevronRight, Plus } from "lucide-react";
 import { db } from "@/lib/db";
+import { readFullPhaseCatalog } from "@/lib/phaseCatalogStore";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/components/ui/utils";
 import { formatNumberCO } from "@/lib/utils";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
-import { isSellerRole, sellerCanSeeOpportunity } from "@/lib/sellerVisibility";
+import { canViewAllAccountsContactsOpportunities, isSellerRole, sellerCanSeeOpportunity } from "@/lib/sellerVisibility";
 
 interface ContactOpportunitiesProps {
     contactId: string;
@@ -38,7 +39,9 @@ export function newOpportunityUrlForContact(accountId: string, contactId: string
 export function ContactOpportunities({ contactId, accountId }: ContactOpportunitiesProps) {
     const [rows, setRows] = useState<ContactOpportunityRow[] | null>(null);
     const { user: currentUser, role } = useCurrentUser();
-    const sellerId = isSellerRole(role) ? currentUser?.id || null : null;
+    const sellerId = isSellerRole(role) && !canViewAllAccountsContactsOpportunities(currentUser)
+        ? currentUser?.id || null
+        : null;
 
     useEffect(() => {
         let cancelled = false;
@@ -83,7 +86,7 @@ export function ContactOpportunities({ contactId, accountId }: ContactOpportunit
             if (!result) {
                 const [local, phases] = await Promise.all([
                     db.opportunities.where('account_id').equals(accountId).filter(o => !o.is_deleted).toArray(),
-                    db.phases.toArray()
+                    readFullPhaseCatalog()
                 ]);
                 const phaseMap = new Map(phases.map(p => [p.id, p.nombre]));
                 result = local.map(o => ({

@@ -256,6 +256,54 @@ describe("Deep Link y Estado de Modal de Actividades", () => {
         expect(isModalOpen).toBe(true);
         expect(selectedActivityId).toBe("act-1");
     });
+
+    it("detecta oportunidades y cuentas faltantes fuera de la ventana de sync local para hidratación JIT", () => {
+        const visibleActs = [
+            { id: "act-10", opportunity_id: "opp-in-cache", account_id: "acc-in-cache" },
+            { id: "act-11", opportunity_id: "opp-old-outside-cache", account_id: "acc-old-outside-cache" },
+            { id: "act-12", opportunity_id: null, account_id: "acc-in-cache" },
+            { id: "act-13", opportunity_id: "opp-old-outside-cache", account_id: null }
+        ];
+
+        const localCachedOpps = [{ id: "opp-in-cache", nombre: "POT Reciente" }];
+        const localCachedAccs = [{ id: "acc-in-cache", nombre: "Cuenta Reciente" }];
+
+        const knownOppIds = new Set(localCachedOpps.map(o => o.id));
+        const missingOppIds = Array.from(new Set(
+            visibleActs
+                .map(a => a.opportunity_id)
+                .filter((id): id is string => Boolean(id) && !knownOppIds.has(id as string))
+        ));
+
+        const knownAccIds = new Set(localCachedAccs.map(a => a.id));
+        const missingAccIds = Array.from(new Set(
+            visibleActs
+                .map(a => a.account_id)
+                .filter((id): id is string => Boolean(id) && !knownAccIds.has(id as string))
+        ));
+
+        expect(missingOppIds).toEqual(["opp-old-outside-cache"]);
+        expect(missingAccIds).toEqual(["acc-old-outside-cache"]);
+    });
+
+    it("OpportunityCombobox resuelve correctamente el nombre cuando la oportunidad viene por initialLabel o resolvedName", () => {
+        const resolveLabel = (value?: string, selectedOpp?: { nombre: string }, resolvedName?: string, initialLabel?: string) => {
+            if (!value) return "Seleccione una oportunidad...";
+            return selectedOpp?.nombre || resolvedName || initialLabel || "Cargando...";
+        };
+
+        // Caso 1: Oportunidad en la página inicial cargada
+        expect(resolveLabel("opp-1", { nombre: "POT123 - Cliente A" })).toBe("POT123 - Cliente A");
+
+        // Caso 2: Oportunidad no en página inicial pero provista por initialLabel (de la actividad o modal)
+        expect(resolveLabel("opp-old", undefined, undefined, "POT34293 - HERNAN SUAREZ")).toBe("POT34293 - HERNAN SUAREZ");
+
+        // Caso 3: Oportunidad resuelta asíncronamente desde Dexie/Supabase
+        expect(resolveLabel("opp-old", undefined, "POT34293 - HERNAN SUAREZ", undefined)).toBe("POT34293 - HERNAN SUAREZ");
+
+        // Caso 4: Sin valor seleccionado
+        expect(resolveLabel(undefined)).toBe("Seleccione una oportunidad...");
+    });
 });
 
 

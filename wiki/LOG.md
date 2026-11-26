@@ -27,6 +27,340 @@
   - `tests/nitUtils.test.ts`, `tests/accountSimilarity.test.ts`, `tests/duplicateAccountModal.test.ts`: Pruebas unitarias permanentes verificadas en GREEN (17/17 junto a `tests/accountFormReset.test.ts`).
 - **Páginas actualizadas:** `wiki/pages/cuentas.md`, `wiki/pages/roles-y-permisos.md`, `wiki/pages/modelo-de-datos.md`, `wiki/LOG.md`.
 
+## 2026-11-19 - Fase 4 Desmontaje de Base de Datos Local: Modales, Formularios de Contacto/Usuario, Indicadores y Notificaciones Directos a Supabase
+
+- **Requerimiento:** Completar la Fase 4 migrando los componentes y hooks restantes (`LossReasonModal`, `ContactForm`, `CreateContactWizard`, `UserForm`, `useIndicadoresLookups`, `VentasGanadasTile` y `useNotifications`) a consultas directas a Supabase sin usar `dexie-react-hooks` ni `db.*` (sin subir a `main`).
+- **Cambios Implementados:**
+  1. **`components/oportunidades/LossReasonModal.tsx`:** Carga directa de `CRM_RazonesPerdida` desde Supabase al abrir el modal (`isOpen`), eliminando `useLiveQuery` y `db.lossReasons`.
+  2. **`components/contactos/ContactForm.tsx`:** Consulta directa a `CRM_Cuentas` para verificar permisos de eliminación (`owner_user_id`, `created_by`) y verificación de duplicados directa contra `CRM_Contactos` en Supabase, eliminando `useLiveQuery` y `db`.
+  3. **`components/contactos/CreateContactWizard.tsx`:** Carga directa del nombre de la cuenta (`CRM_Cuentas`) desde Supabase por `accountId`, eliminando `useLiveQuery` y `db.accounts`.
+  4. **`components/usuarios/UserForm.tsx`:** Carga directa de `CRM_Paises` y `CRM_Departamentos` desde Supabase, eliminando `useLiveQuery` y `db.countries` / `db.departments`.
+  5. **`lib/hooks/useIndicadoresLookups.ts`:** Carga directa de `CRM_Canales`, `CRM_FasesOportunidad`, `CRM_Subclasificacion`, `CRM_Segmentos`, `CRM_Activity_Clasificacion` y `CRM_Cuentas` desde Supabase, eliminando `useLiveQuery` y `db`.
+  6. **`components/indicadores/VentasGanadasTile.tsx`:** Carga directa de `CRM_FasesOportunidad` desde Supabase, eliminando `useLiveQuery` y `db.phases`.
+  7. **`lib/hooks/useNotifications.ts`:** Consulta puntual a `CRM_Actividades` en Supabase para los `entity_id` de notificaciones `ACTIVITY_OVERDUE`, eliminando `useLiveQuery` y `db.activities`.
+  8. **Pruebas y Verificación:**
+     - Se amplió [`tests/supabaseDirectHooks.test.ts`](file:///c:/Users/analista2.desarrollo/Desktop/apps/CRM/tests/supabaseDirectHooks.test.ts) (7/7 pasadas, ciclo RED $\rightarrow$ GREEN).
+     - Se ejecutaron 54 pruebas relacionadas (`lib/actividadesUi.test.ts`, `lib/serverHydration.test.ts`, `tests/userValidation.test.ts`, `tests/opportunityTableFilters.test.ts`, `tests/opportunityIdFilter.test.ts`) en GREEN.
+- **Páginas afectadas:** `wiki/pages/sincronizacion-offline.md`, `wiki/LOG.md`.
+
+## 2026-11-19 - Fase 3 Desmontaje de Base de Datos Local: Páginas de Detalle y Gestión Directas desde Supabase
+
+- **Requerimiento:** Continuar con la Fase 3 asegurando que las páginas de detalle de Oportunidad, Cotización, Pedidos, Sucursales de Cuenta y Actividades carguen sus registros y relaciones directamente desde Supabase (sin subir a `main`).
+- **Cambios Implementados:**
+  1. **Cargadores de Detalle y Módulos en `lib/supabaseDirect.ts`:**
+     - `hydrateOpportunityDetailFromSupabase(opportunityId)`: carga directamente de Supabase la oportunidad (`CRM_Oportunidades`), su cuenta (`CRM_Cuentas`), contactos (`CRM_Contactos`), colaboradores (`CRM_Oportunidades_Colaboradores`), cotizaciones (`CRM_Cotizaciones`) e ítems (`CRM_CotizacionItems`).
+     - `hydrateQuoteDetailFromSupabase(opportunityId, quoteId)`: carga directamente la cotización, sus ítems, pedidos e ítems de pedido asociados, además de la oportunidad y cuenta padre.
+     - `hydratePedidosModuleFromSupabase()`: carga directamente `CRM_Pedidos`, `CRM_PedidoItems` y sus cotizaciones y oportunidades vinculadas para la vista `/pedidos`.
+  2. **Páginas y Componentes Conectados:**
+     - `app/oportunidades/[id]/page.tsx`: invoca `hydrateOpportunityDetailFromSupabase(id)` siempre al montar o cambiar de `id`.
+     - `app/oportunidades/[id]/cotizaciones/[quoteId]/page.tsx`: invoca `hydrateQuoteDetailFromSupabase(oppId, quoteId)` al montar o cambiar de cotización.
+     - `app/pedidos/page.tsx`: invoca `hydratePedidosModuleFromSupabase()` al montar la vista.
+     - `components/cuentas/AccountBranchesTab.tsx`: migrado a consulta directa de `CRM_Cuentas` (`eq('id_cuenta_principal', accountId)`) en Supabase con `useState` + `useEffect`, eliminando por completo `dexie-react-hooks` y `@/lib/db`.
+     - `app/actividades/page.tsx`: carga directa de `CRM_Actividades` al filtrar por asesor (`filterUser`) y resolución de cuentas de oportunidades vinculadas.
+  3. **Pruebas y Verificación:**
+     - Se amplió [`tests/supabaseDirectHooks.test.ts`](file:///c:/Users/analista2.desarrollo/Desktop/apps/CRM/tests/supabaseDirectHooks.test.ts) (6/6 pasadas, ciclo RED $\rightarrow$ GREEN).
+     - Se ejecutaron 53 pruebas relacionadas (`lib/actividadesUi.test.ts`, `lib/serverHydration.test.ts`, `pruebas unitarias/pedidoFormalization.test.ts`, `tests/opportunityTableFilters.test.ts`, `tests/opportunityIdFilter.test.ts`) en GREEN.
+- **Páginas afectadas:** `wiki/pages/sincronizacion-offline.md`, `wiki/LOG.md`.
+
+## 2026-11-19 - Fase 2 Desmontaje de Base de Datos Local: Desconexión de SyncEngine en AppLayout, Modales, Comboboxes y Pestañas
+
+- **Requerimiento:** Continuar con la Fase 2 del desmontaje de la base de datos local desconectando `syncEngine` de los formularios, comboboxes, pestañas de detalle y el bucle periódico de `AppLayout.tsx` (sin subir a `main`).
+- **Cambios Implementados:**
+  1. **Hidratación Directa de Catálogos (`lib/supabaseDirect.ts`):**
+     - Se agregaron `hydrateActivityCatalogsFromSupabase()` y `hydrateReferenceCatalogsFromSupabase()` para cargar catálogos de referencia (`CRM_FasesOportunidad`, `CRM_Subclasificacion`, `CRM_Segmentos`, `CRM_Paises`, `CRM_Departamentos`, `CRM_Ciudades`, `CRM_RazonesPerdida`, `CRM_Activity_Clasificacion` y `CRM_Activity_Subclasificacion`) directamente desde Supabase sin disparar `syncEngine.triggerSync()`.
+  2. **Apagado del Bucle de Sincronización en `components/layout/AppLayout.tsx`:**
+     - Se eliminaron `syncEngine.initializeForUser` y el bucle de polling (`app-mount`, `periodic-5m`, `visibility`). Al iniciar sesión, solo se activa el contexto del usuario y se hidratan los catálogos de referencia directamente desde Supabase.
+  3. **Formularios, Modales, Comboboxes y Pestañas Migrados a Supabase Directo:**
+     - `components/oportunidades/CollaboratorsTab.tsx`: carga directa de `CRM_Oportunidades_Colaboradores` desde Supabase y guardado con `executeDirectMutations`.
+     - `components/quotes/PedidosEditor.tsx`: `persistQuotePedidoFields` persiste directamente en `CRM_Cotizaciones` mediante `executeDirectMutations` y `fetchRecordDirect`.
+     - `components/opportunities/OpportunityCombobox.tsx` y `components/accounts/AccountCombobox.tsx`: resolución directa por ID contra `CRM_Oportunidades` y `CRM_Cuentas` en Supabase (eliminada dependencia de `@/lib/db` en `OpportunityCombobox`).
+     - `components/activities/CreateActivityModal.tsx`, `app/oportunidades/[id]/page.tsx` y `app/actividades/page.tsx`: reemplazado `syncEngine.triggerSync()` por `hydrateActivityCatalogsFromSupabase()`.
+     - `components/dashboard/SalesFunnelTile.tsx`, `lib/hooks/useCommissionDashboard.ts`, `lib/hooks/useCommissionLedger.ts`, `lib/hooks/useAccountsServer.ts` y `lib/hooks/useActivitiesServer.ts`: eliminadas todas las referencias a `syncEngine`.
+  4. **Pruebas y Verificación:**
+     - Se amplió [`tests/supabaseDirectHooks.test.ts`](file:///c:/Users/analista2.desarrollo/Desktop/apps/CRM/tests/supabaseDirectHooks.test.ts) (5/5 pasadas, ciclo RED $\rightarrow$ GREEN).
+     - Se ejecutaron 48 pruebas relacionadas (`lib/actividadesUi.test.ts`, `lib/serverHydration.test.ts`, `pruebas unitarias/pedidoFormalization.test.ts`, `tests/opportunityTableFilters.test.ts`) en GREEN.
+- **Páginas afectadas:** `wiki/pages/sincronizacion-offline.md`, `wiki/LOG.md`.
+
+## 2026-11-19 - Fase 1 Desmontaje de Base de Datos Local: Hooks de Lectura y Escritura Directa a Supabase
+
+- **Requerimiento:** Iniciar la eliminación de la dependencia en la base de datos local (IndexedDB / Outbox) migrando los hooks principales de lectura y escritura para que operen directamente contra Supabase (sin subir a `main` todavía).
+- **Cambios Implementados:**
+  1. **Módulo de Ejecución Directa (`lib/supabaseDirect.ts`):**
+     - `TABLE_COLUMNS`: lista blanca exacta de columnas escribibles en PostgreSQL para `CRM_Actividades`, `CRM_Cotizaciones`, `CRM_CotizacionItems`, `CRM_Oportunidades`, `CRM_Oportunidades_Colaboradores`, `CRM_Contactos`, `CRM_Cuentas`, `CRM_Pedidos`, `CRM_PedidoItems` y `CRM_SapIntegrationQueue`.
+     - `sanitizeTablePayload`: filtra columnas generadas (`subtotal` en `CRM_CotizacionItems`), llaves seriales (`id` en `CRM_Pedidos`) y banderas solo-UI (`is_winner`, `is_child`), y convierte fechas vacías `""` en `null`.
+     - `executeDirectMutations` y `fetchRecordDirect`: persisten y consultan directamente en Supabase sin pasar por `db.outbox` ni `syncEngine.commitLocalChanges`.
+  2. **Hooks Migrados a Supabase Directo:**
+     - `lib/hooks/useActivities.ts`: consulta `CRM_Actividades` directo de Supabase según el filtro activo y persiste `createActivity`, `updateActivity`, `toggleComplete` y `deleteActivity` directamente en Supabase.
+     - `lib/hooks/useOpportunities.ts` (`useOpportunities`, `useQuotes`, `useQuoteItems`): carga directa desde `CRM_Cotizaciones` y `CRM_CotizacionItems`, y guardado directo en Supabase para oportunidades, cotizaciones, ítems y cola SAP.
+     - `lib/hooks/useContacts.ts`: carga directa desde `CRM_Contactos` por `account_id` y CRUD directo en Supabase.
+     - `lib/hooks/usePedidos.ts`: carga directa desde `CRM_Pedidos` y `CRM_PedidoItems` por `cotizacion_id` y CRUD directo en Supabase.
+     - `lib/hooks/useAccounts.ts`: CRUD y borrado en cascada directo contra Supabase.
+  3. **Pruebas y Verificación:**
+     - Se creó [`tests/supabaseDirectHooks.test.ts`](file:///c:/Users/analista2.desarrollo/Desktop/apps/CRM/tests/supabaseDirectHooks.test.ts) (4/4 pasadas, verificadas en ciclo RED $\rightarrow$ GREEN).
+     - Se ejecutaron 49 pruebas relacionadas (`lib/actividadesUi.test.ts`, `lib/serverHydration.test.ts`, `tests/opportunityTableFilters.test.ts`, `tests/opportunityIdFilter.test.ts`) en GREEN.
+- **Páginas afectadas:** `wiki/pages/sincronizacion-offline.md`, `wiki/LOG.md`.
+
+## 2026-11-18 - Lista Desplegable de Asignación de Usuario al Programar Actividad
+
+- **Requerimiento:** Agregar en el modal «Programar Actividad» (`CreateActivityModal.tsx`) una lista desplegable con los usuarios activos de la plataforma para elegir a qué usuario se le asignará la actividad, apareciendo seleccionado por defecto el usuario logueado.
+- **Cambios Implementados:**
+  1. **Helpers de Asignación (`lib/activityAssignee.ts`):**
+     - `resolveDefaultActivityUserId`: resuelve el usuario seleccionado por defecto (al crear selecciona al usuario logueado `currentUser.id` o `activeLocalUserId`; al editar conserva `initialData.user_id`).
+     - `buildActivityUserOptions`: construye las opciones para `SearchableSelect` a partir de `CRM_Usuarios` (`is_active = true`), garantizando que el usuario logueado esté incluido de inmediato en la lista incluso antes de que finalice la consulta remota o en modo offline.
+     - `resolveActivityUserId`: resuelve el `user_id` final que persiste `createActivity`.
+  2. **Modal de Programar Actividad (`components/activities/CreateActivityModal.tsx`):**
+     - En modo creación (`!isEditing`), carga todos los usuarios activos de `CRM_Usuarios` y preselecciona al usuario autenticado.
+     - En el Paso 1 (`wizardStep === 0`, debajo de «Cuenta Relacionada»), muestra el campo desplegable con buscador **ASIGNAR A** (`data-testid="activity-assigned-user-field"`).
+     - En `handleActualSubmit`, incluye `processed.user_id = reassignUserId` al crear la actividad.
+  3. **Hook de Persistencia (`lib/hooks/useActivities.ts`):**
+     - `createActivity` ahora respeta `data.user_id` (mediante `resolveActivityUserId(data.user_id, userId)`) en lugar de forzar siempre el ID de la sesión local.
+  4. **Pruebas y Verificación:**
+     - Se agregaron 4 casos de prueba en [`lib/actividadesUi.test.ts`](file:///c:/Users/analista2.desarrollo/Desktop/apps/CRM/lib/actividadesUi.test.ts) (18/18 pasadas, verificadas en ciclo RED $\rightarrow$ GREEN).
+     - Se verificaron pruebas relacionadas en [`lib/serverHydration.test.ts`](file:///c:/Users/analista2.desarrollo/Desktop/apps/CRM/lib/serverHydration.test.ts) (10/10) y [`lib/persistence-contracts.test.ts`](file:///c:/Users/analista2.desarrollo/Desktop/apps/CRM/lib/persistence-contracts.test.ts) (3/3).
+- **Páginas afectadas:** `wiki/pages/actividades.md`, `wiki/LOG.md`.
+
+## 2026-11-17 - Incorporación de Filtro y Búsqueda por ID en Oportunidades
+
+- **Requerimiento:** Agregar filtro por ID en el módulo de Oportunidades (`/oportunidades`), tanto en los filtros avanzados como en la consulta general por UUID.
+- **Cambios Implementados:**
+  1. **Base de Datos / RPC PostgreSQL (`supabase/migrations/20261117120000_add_search_opportunities_by_id_rpc.sql`):**
+     - Se creó la función `public.search_opportunities_by_id(search_term text) RETURNS SETOF uuid` con `LANGUAGE sql STABLE SECURITY DEFINER` y permisos para roles `anon, authenticated, service_role`.
+     - Permite matching parcial y por prefijo sobre la columna `id::text` de `CRM_Oportunidades` sin sufrir limitaciones de operadores de tipo UUID en PostgREST.
+  2. **Componente de Filtros (`components/oportunidades/OpportunityFilters.tsx`):**
+     - Se añadió el campo `idFilter` en `OpportunityFiltersProps`, estado local `idFilter`, botón de limpieza y elemento input con `data-testid="opportunities-filter-id"`.
+  3. **Hook de Servidor (`lib/hooks/useOpportunitiesServer.ts`):**
+     - Se incorporó `idFilter` y `setIdFilter`.
+     - Resolución en Supabase: si es UUID completo aplica `.eq('id', cleanId)`; si es prefijo o parcial invoca la RPC `search_opportunities_by_id` y filtra con `.in('id', matchedIds)`.
+     - Resolución offline en Dexie: filtro insensible a mayúsculas sobre `o.id`.
+     - Soporte en `searchTerm`: si el término de búsqueda general es un UUID válido, aplica coincidencia directa sobre `id` tanto en Supabase como en Dexie.
+  4. **Página Principal (`app/oportunidades/page.tsx`):**
+     - Sincronización bidireccional de `selectedIdFilter` con la URL (`?oppId=` / `?id=`) y `sessionStorage`.
+     - Inclusión en `activeFilterCount` y apertura automática del drawer de filtros avanzados si la URL contiene `oppId` o `id`.
+  5. **Pruebas y Verificación:**
+     - Se creó `tests/opportunityIdFilter.test.ts` (5 de 5 pasadas).
+     - Se verificó regresión en `tests/opportunityTableFilters.test.ts` (16 de 16 pasadas) y `tests/opportunitySetter.test.ts` (7 de 7 pasadas).
+- **Páginas afectadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+
+## 2026-11-17 - Inclusión de Etapas Cerrada Ganada y Cerrada Perdida en Filtro de Fase
+
+- **Requerimiento:** Permitir que las etapas «Cerrada ganada» y «Cerrada perdida» aparezcan disponibles en el menú de filtrado por columna de FASE (`FloatingColumnFilterPopover`) y en la barra de filtros superiores de Oportunidades.
+- **Cambios Implementados:**
+  1. **Catálogo de Fases por Canal (`lib/opportunityColumnFilterHelpers.ts`):**
+     - Se eliminó la exclusión `!p.nombre.toLowerCase().includes('cerrada')` en `getAvailablePhasesForChannel`. Ahora retorna la totalidad del ciclo de vida de fases de cada canal (`CRM_FasesOportunidad`), incluyendo «Cerrada ganada» y «Cerrada perdida», manteniendo la deduplicación por nombre y el orden de etapas.
+  2. **Interfaz de Filtro Flotante (`components/oportunidades/FloatingColumnFilterPopover.tsx`):**
+     - Se agregaron estilos e iconos distintivos para fases cerradas: badge verde con `✓` para etapas ganadas y badge rojo con `✕` para etapas perdidas.
+  3. **Barra de Filtros Superiores (`components/oportunidades/OpportunityFilters.tsx`):**
+     - Se habilitó la presencia de fases cerradas en el dropdown «Todas las etapas».
+  4. **Servidor y Consulta (`lib/hooks/useOpportunitiesServer.ts`):**
+     - Se añadió `isFilteringExplicitClosedPhase`: si el usuario filtra explícitamente por una fase cerrada («Cerrada ganada» o «Cerrada perdida»), el servidor desactiva la condición por defecto de `statusFilter === 'open'` (`not in (2,3,4,11,14)`), asegurando que se consulten y muestren los registros de esa fase tanto en Supabase como en modo local/offline.
+  5. **Pruebas y Verificación:**
+     - Se actualizó [`tests/opportunityTableFilters.test.ts`](file:///c:/Users/analista2.desarrollo/Desktop/apps/CRM/tests/opportunityTableFilters.test.ts) (16/16 pasadas) y se validó [`tests/opportunitySetter.test.ts`](file:///c:/Users/analista2.desarrollo/Desktop/apps/CRM/tests/opportunitySetter.test.ts) (7/7 pasadas).
+- **Páginas afectadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+
+## 2026-11-17 - Incorporación de la Columna SETTER en la Tabla Principal de Oportunidades
+
+- **Requerimiento:** Incorporar la columna del Setter en la tabla principal de Oportunidades (`/oportunidades`), habilitando su visualización y alternancia en el selector de «Columnas visibles», y mostrando los badges correspondientes (`CO`, `REC`, o `-`) según el valor registrado en `CRM_Oportunidades.setter`.
+- **Cambios Implementados:**
+  1. **Helpers de Tabla y Contratos (`lib/opportunityTableHelpers.ts`):**
+     - Se añadió `'setter'` a `OPPORTUNITY_TABLE_COLUMN_KEYS`.
+     - Se amplió `OpportunityHotRow` (`setter: string`) y `OpportunityInput` (`setter?: string | null`).
+     - Se actualizó `buildOpportunityHotRow` para mapear `opp.setter` en mayúsculas y limpio (`CO`, `REC` o `-`).
+  2. **Consulta al Backend (`lib/hooks/useOpportunitiesServer.ts`):**
+     - Se incorporó `setter` en la lista de campos seleccionados de `CRM_Oportunidades` en `dataQuery`.
+  3. **Interfaz de Usuario y Selector de Columnas (`app/oportunidades/page.tsx`):**
+     - Se agregó `{ key: 'setter', label: 'Setter' }` a `ALL_COLUMNS` y su definición en `ALL_COLUMN_DEFS`.
+     - El renderer muestra badges distintivos: azul (`CO`), verde (`REC`) o un guion tenue (`-`) si no tiene asignación.
+     - En la vista móvil, se expone el badge de Setter en la tarjeta de la oportunidad.
+  4. **Pruebas y Verificación:**
+     - Se amplió `tests/opportunitySetter.test.ts` (7 de 7 pasadas) y `tests/opportunityTableFilters.test.ts` (16 de 16 pasadas).
+- **Páginas afectadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+
+## 2026-11-17 - Campo Número de Teléfono en Usuarios y Corrección de Validación de Contraseña Opcional
+
+- **Requerimiento:** 
+  1. Agregar el campo «Número de Teléfono» en el módulo de usuarios, tanto en la base de datos de Supabase como en el formulario de edición y creación de usuarios.
+  2. Corregir el campo «Nueva Contraseña (Opcional)» para que, al dejarlo en blanco al editar un usuario existente, no exija mínimo 6 caracteres ni intente cambiar la contraseña, permitiendo guardar los cambios sin errores.
+- **Cambios Implementados:**
+  1. **Corrección de Validación de Contraseña Opcional (`lib/userValidation.ts` y `components/usuarios/UserForm.tsx`):**
+     - Se ajustó el schema de Zod (`userSchema.password`) con `.refine(val => !val || val.trim() === '' || val.length >= 6)` para aceptar string vacío (`""`) sin disparar el error de longitud mínima.
+     - En `onSubmit`, si el campo está vacío, no se invoca `updateUserPassword` y se preserva intacta la contraseña actual del usuario. Para creación de nuevos usuarios, se mantiene la exigencia obligatoria de mínimo 6 caracteres.
+     - Se crearon pruebas unitarias en `tests/userValidation.test.ts` (5 de 5 pasadas).
+  2. **Base de Datos / Supabase (`CRM_Usuarios`):**
+     - Migración DDL aplicada: `ALTER TABLE public."CRM_Usuarios" ADD COLUMN IF NOT EXISTS telefono TEXT;`
+     - Se actualizó el trigger `handle_new_user()` para extraer y propagar `telefono` (o `phone`) desde los metadatos de Supabase Auth.
+     - Archivo versionado creado en `supabase/migrations/20261117100000_add_telefono_to_crm_usuarios.sql`.
+  3. **Modelos y Hooks (`lib/hooks/useUsers.ts`, `lib/stores/useUserStore.ts`):**
+     - Se añadió `telefono?: string | null` en las interfaces `User`, `CreateUserData`, `UpdateUserData` y `CurrentUser`.
+     - En `createUser` y `updateUser`, se propaga `telefono` en los payloads de inserción y actualización a `CRM_Usuarios`.
+  4. **Formulario Modal de Usuario (`components/usuarios/UserForm.tsx`):**
+     - Se integró el campo interactivo de entrada «Número de Teléfono» (`type="tel"`) con placeholder de ejemplo ubicado inmediatamente después de Nombre Completo.
+  5. **Listado de Usuarios (`components/usuarios/UserList.tsx`):**
+     - Se expone el número de teléfono con icono `Phone` tanto en la tabla desktop como en las tarjetas móviles.
+  6. **Integración con Documentos PDF (`lib/pdfGenerator.ts`):**
+     - El generador de PDF F-V-29 ahora consulta y refleja el teléfono corporativo del asesor logueado en la tarjeta de contacto comercial.
+- **Páginas afectadas:** `wiki/pages/roles-y-permisos.md`, `wiki/LOG.md`.
+
+## 2026-11-17 - PDF de Cotización F-V-29: Datos Dinámicos del Asesor Autenticado (Nombre y Correo)
+
+- **Requerimiento:** En el formato oficial de cotización PDF (F-V-29), asegurar que en la tarjeta de firma comercial («FIRPLAK S.A.S. - ASESOR COMERCIAL») aparezcan los datos completos (nombre y correo) del asesor que se encuentra logueado en el CRM, evitando que aparezca el nombre del propietario original de la oportunidad si otro usuario está generando o visualizando la cotización.
+- **Cambios Implementados:**
+  1. **Resolución de Nombre en `QuoteEditorPage` (`app/oportunidades/[id]/cotizaciones/[quoteId]/page.tsx`):**
+     - Se corrigió `effectiveAdvisorName` para evaluar prioritariamente `currentUser?.full_name` (de `useCurrentUser()`), antes de buscar metadatos o el nombre del propietario en `sendContext`.
+  2. **Resolución de Asesor en `PedidosEditor` (`components/quotes/PedidosEditor.tsx`):**
+     - Se integró `useCurrentUser()` en `PedidosList` y `prepareFormalizationContext` para asignar `advisorName` y `advisorEmail` desde `currentUser.full_name` y `currentUser.email` del usuario logueado en lugar de tomar ciegamente el propietario de la oportunidad.
+  3. **Prioridad y Fallbacks en `lib/pdfGenerator.ts` (`buildQuotePdfDoc`):**
+     - Si no se proporciona un nombre o correo explícito, consulta en primer lugar la sesión activa del CRM (`supabase.auth.getSession()` -> `CRM_Usuarios` por correo) para obtener tanto el `full_name` como el `email` del usuario en sesión. Solo en caso de ausencia de sesión recurre a `opportunity.owner_user_id` y por último al valor institucional por defecto.
+  4. **Corrección en `QuotePreviewModal.tsx`:** Se aseguró el paso de `advisorEmail` en el reintento de generación del blob.
+  5. **Pruebas y Verificación:** Se amplió `tests/quoteExcelAndPreview.test.ts` pasando 5 de 5 pruebas unitarias (`qa:focused`).
+- **Páginas afectadas:** `wiki/pages/cotizaciones-y-pedidos.md`, `wiki/LOG.md`.
+
+## 2026-11-10 - PDF de Cotización F-V-29: Correo Dinámico del Asesor Autenticado y Espaciado del Pie de Página
+
+- **Requerimiento:** En el formato oficial de cotización PDF (F-V-29), mostrar en la caja de firma del asesor comercial el correo corporativo del asesor que se encuentra logueado (en lugar del correo fijo de cartera), y corregir el texto inferior de ley y autorretenedores que se encontraba superpuesto y pegado contra las firmas.
+- **Cambios Implementados:**
+  1. **Correo del Asesor Logueado:**
+     - En `lib/pdfGenerator.ts`, `buildQuotePdfDoc` recibe y resuelve `advisorEmail`. Prioriza el correo del usuario logueado (`currentUser.email`), con fallback a la consulta en `CRM_Usuarios` por `owner_user_id` o nombre del asesor, y finalmente `cartera@firplak.com` solo si no existe usuario autenticado.
+     - En `QuoteEditorPage` (`app/oportunidades/[id]/cotizaciones/[quoteId]/page.tsx`), `QuotePreviewModal.tsx`, `SendQuoteModal.tsx` y `PedidosEditor.tsx`, se propaga `advisorEmail` a todas las invocaciones de previsualización, descarga y envío de PDF.
+  2. **Espaciado y Maquetación del Pie de Página:**
+     - Se corrigió la colisión entre el texto legal de protección de datos (que toma 2 líneas) y `SOMOS AUTORRETENEDORES RES. 64 DE MAYO 3 DE 1995` mediante el cálculo dinámico de altura (`doc.splitTextToSize`).
+     - Se rediseñó el espaciado vertical (`footerY`) anclando el bloque legal y de contacto corporativo armónicamente al pie de la página (`pageHeight - margin - totalFooterHeight`), garantizando una separación cómoda de al menos 24pt respecto a las cajas de firma en lugar de estar apiñado contra el borde inferior de las mismas.
+  3. **Pruebas y Verificación:** Se actualizaron y validaron las pruebas en `tests/quoteExcelAndPreview.test.ts` (4 de 4 pasadas en verde).
+- **Páginas afectadas:** `wiki/pages/cotizaciones-y-pedidos.md`, `wiki/LOG.md`.
+
+## 2026-11-10 - Autocompletado automático de Fecha de Cierre Estimada para Canal Propio (B2C / Ecommerce)
+
+- **Requerimiento:** Para los asesores y oportunidades del canal Ecommerce / Canal Propio / B2C, autocompletar automáticamente el campo **Fecha Cierre Estimada** (`fecha_cierre_estimada`) con la fecha del día en que se cambie la oportunidad a la fase **Cerrada Ganada** o **Cerrada Perdida**.
+- **Cambios Implementados:**
+  1. **Helper B2C (`lib/b2c.ts`):** Función `isB2COpportunity` que identifica de manera precisa oportunidades pertenecientes al canal B2C/Propio (`account.canal_id === 'PROPIO'`, `opportunity.canal_id === 'PROPIO'`, fase del canal `PROPIO`, origen web/ecommerce o asesores con canal `PROPIO` asignado), respetando y preservando canales industriales/corporativos (Obras y Distribución).
+  2. **Detalle de Oportunidad (`app/oportunidades/[id]/page.tsx`):** En `handlePhaseChange`, al pulsar sobre la fase *Cerrada Ganada* o *Cerrada Perdida*, si la oportunidad califica como B2C, se asigna `todayStr` (`YYYY-MM-DD` en hora local de Colombia) a `fecha_cierre_estimada`, actualizando reactivamente el estado local `localClosingDate` para que el campo de fecha de la interfaz se actualice de inmediato en pantalla y persista en Dexie y Supabase.
+  3. **Hook de Oportunidades (`lib/hooks/useOpportunities.ts`):** En `updateOpportunity`, si se marca `estado_id: 2` (Ganada) o `estado_id: 3` (Perdida) en una oportunidad B2C y no se especificó fecha previa en el payload, se salvaguarda el autocompletado con la fecha de hoy.
+  4. **Vista rápida (`components/opportunities/OpportunityQuickView.tsx`):** Al guardar el estado cerrado desde la vista rápida en negocios B2C, se autocompleta la fecha de cierre del día.
+  5. **Pruebas Unitarias:** Se agregaron pruebas unitarias en [`pruebas unitarias/oportunidades.test.ts`](file:///c:/Users/analista2.desarrollo/Desktop/apps/CRM/pruebas unitarias/oportunidades.test.ts) validando la detección B2C y el autocompletado de la fecha actual ante transiciones ganada/perdida.
+- **Páginas afectadas:** `wiki/pages/oportunidades.md`, `wiki/pages/canales-de-venta.md`, `wiki/LOG.md`.
+
+## 2026-11-10 - Solución a visualización de oportunidades en actividades (Causa Raíz ventana de sync de 3.000 registros e hidratación JIT)
+
+- **Caso reportado:** Actividad `https://crm-64yu.vercel.app/actividades?id=3b6952df-f8ee-4671-aa28-2d03aba5f17a` de Claudia Patricia Granada (`claudia.granada@firplak.com`) aparecía en la interfaz como "Sin oportunidad", a pesar de que las 505 huérfanas reales ya habían sido eliminadas y respaldadas.
+- **Diagnóstico y Causa Raíz:**
+  1. En Supabase, la actividad **SÍ tiene** `opportunity_id = 'b6a55100-a6f0-491b-af83-8935645fd93a'` (`POT34293 - HERNAN SUAREZ AGUDELO`, propiedad de Claudia, `is_deleted = false`).
+  2. En `lib/sync.ts`, la sincronización inicial de la PWA descarga un máximo de las **3.000 oportunidades más recientes** (`updated_at DESC`).
+  3. Dicha oportunidad fue actualizada el `2026-10-20`, existiendo más de 47.000 oportunidades más recientes en el CRM, por lo que **no formaba parte de las 3.000 cacheadas en IndexedDB (Dexie)**.
+  4. La actividad se actualizó recientemente, por lo que sí estaba en Dexie. Al abrir el modal o listar en `/actividades`, la búsqueda local `db.opportunities.get(act.opportunity_id)` retornaba `undefined`, omitiendo el badge y dejando el combobox en *"Seleccione una oportunidad..."*.
+- **Acciones Ejecutadas:**
+  1. **Inmediata en DB:** Se actualizó `updated_at = NOW()` en la oportunidad `b6a55100-a6f0-491b-af83-8935645fd93a` y en la cuenta `e3309233-b32f-444b-b5ef-c922fbced44c` (`HERNAN SUAREZ AGUDELO`) para ingresar inmediatamente a la cabeza de la cola de sync de Claudia.
+  2. **JIT Hydration en `CreateActivityModal.tsx`:** Al abrir cualquier actividad con `opportunity_id` o `account_id` no presente en Dexie, se realiza una consulta puntual a Supabase y se persiste en Dexie (`db.opportunities.put` / `db.accounts.put`), activando reactivamente `useLiveQuery` en el encabezado y formulario.
+  3. **Mejora en `OpportunityCombobox.tsx`:** Ahora soporta `initialLabel` y resolución asíncrona de respaldo contra Dexie/Supabase cuando la oportunidad no está en la primera página de 20 registros del hook de servidor.
+  4. **JIT Batch Hydration en `/actividades`:** Las actividades visibles en pantalla que referencien oportunidades o cuentas fuera de la ventana de caché local se hidratan en lotes mediante `.in('id', missingIds)` y se guardan en Dexie en segundo plano.
+  5. **Pruebas unitarias:** Se agregaron pruebas en [`pruebas unitarias/actividades.test.ts`](file:///c:/Users/analista2.desarrollo/Desktop/apps/CRM/pruebas unitarias/actividades.test.ts) validando la detección de IDs faltantes y la resolución de etiquetas en `OpportunityCombobox`. Todas pasaron satisfactoriamente (13 de 13).
+- **Páginas afectadas:** `wiki/pages/actividades.md`, `wiki/pages/sincronizacion-offline.md`, `wiki/LOG.md`.
+
+## 2026-11-10 - Depuración de actividades huérfanas de Claudia Granada (505) y unificación Web/POT (135)
+
+- **Unificación Web/POT:** 135 pares (oportunidad web con actividades + clon `POT` de migración vTiger con comentarios, creados con 2-3 s de diferencia) unificados con [`execution/unify_web_pot_pairs.mjs`](file:///c:/Users/analista2.desarrollo/Desktop/apps/CRM/execution/unify_web_pot_pairs.mjs): comentarios del POT pasados a la oportunidad web y POT con `is_deleted = true`. No se tocaron actividades, cotizaciones ni estados.
+- **Actividades sin oportunidad ni cuenta (Claudia Patricia Granada, `claudia.granada@firplak.com`):** 505 actividades (53 pendientes) de la migración vTiger (todas con `vtiger_activityid`, creadas 2023-03 a 2026-04) sin `opportunity_id` ni `account_id`. Solo 33 traían `vtiger_potentialid` y ninguno de esos negocios existe en el CRM, por lo que no se pudo recuperar el vínculo.
+- **Acción:** primero borrado lógico y luego, por instrucción del usuario, **borrado definitivo** con [`execution/hard_delete_claudia_orphan_activities.mjs`](file:///c:/Users/analista2.desarrollo/Desktop/apps/CRM/execution/hard_delete_claudia_orphan_activities.mjs). Las 505 filas se movieron (operación atómica) a la tabla `CRM_Backup_Actividades_Eliminadas` (migración `20261110_backup_actividades_eliminadas.sql`, fila completa en `data jsonb`; instrucciones de restauración en el encabezado de la migración). Archivo local adicional: `.tmp/backup_claudia_505_actividades_sin_oportunidad.json`. Sus 12.622 actividades con oportunidad quedaron intactas.
+- **Pendiente conocido:** otros usuarios tienen actividades huérfanas similares (Stiven Rua 626, Juan Fernando Ospina 472, canalpropio 213, ricardo.jimenez 176) sin tratar.
+
+## 2026-11-10 - Depuración Segura de Oportunidades Duplicadas (1.831 Registros)
+
+- **Requerimiento:** Procesar las recomendaciones del archivo `oportunidades_duplicadas_v2_recomendaciones.csv` para dar de baja las oportunidades redundantes marcadas como `ELIMINAR` sin perder auditoría ni historial comercial.
+- **Diagnóstico en Base de Datos:**
+  - De las 1.831 oportunidades sugeridas para eliminar, 1.626 ya se encontraban previamente en estado inactivo (`is_deleted = true`).
+  - Se identificaron 204 oportunidades que permanecían activas en el CRM.
+  - De las 204 activas, 190 eran copias vacías sin cotizaciones ni actividades. 14 oportunidades contaban con actividades o cotizaciones secundarias vinculadas.
+- **Acciones Ejecutadas:**
+  - Script [`execution/execute_safe_eliminar.mjs`](file:///c:/Users/analista2.desarrollo/Desktop/apps/CRM/execution/execute_safe_eliminar.mjs):
+    1. **Reasignación segura:** Las actividades y cotizaciones de los 14 registros fueron traspasadas hacia la oportunidad principal activa de su respectivo grupo (`CONSERVAR`).
+    2. **Borrado lógico:** Se aplicó `is_deleted = true` y `updated_at = NOW()` a las 204 oportunidades.
+    3. **Verificación:** Se confirmó 0 registros activos remanentes (`stillActiveCount = 0`). Las vistas de embudo y listados de los asesores quedan limpios y sincronizados.
+- **Páginas afectadas:** `wiki/pages/oportunidades.md`, `wiki/LOG.md`.
+
+## 2026-11-09 - Diagnóstico y Unificación de Comentarios de vTiger (Casos Christian Alvarez)
+
+- **Requerimiento:** Analizar y solucionar el reporte presentado por Christian Álvarez Román respecto a 6 números de teléfono (`3158908746`, `3160489049`, `3148900111`, `3183701635`, `3176433925`, `3229081415`) donde manifestaba que *"no migraron en su totalidad los comentarios del CRM Dimarka"*.
+- **Diagnóstico y Causa Raíz:**
+  1. Los comentarios de vTiger (`vtiger_modcomments`) **SÍ se migraron al 100%** a Supabase en su momento (ej. notas `1. R. Sep`, `2. Se hacen preguntas de intención de compra`).
+  2. Sin embargo, dichos comentarios quedaron alojados en los registros clonados con prefijo `POT...` (`POT58382`, `POT58388`, `POT58393`, `POT58385`, `POT58405`, `POT58407`).
+  3. Al mismo tiempo existía en el CRM la oportunidad creada vía Web para cada uno de esos clientes, donde estaban asociadas las 3 actividades de seguimiento del Setter (`seguimiento setter`, `2. seguimiento setter`, etc.), pero sin las notas históricas de vTiger.
+  4. Al abrir la oportunidad web en el CRM y no ver los comentarios, el asesor asumió que se habían perdido y las cerró hoy como perdidas con la nota *"No migran comentarios del crm"*.
+- **Acciones Ejecutadas:**
+  - Script [`execution/sync_and_unify_comments_6_cases.mjs`](file:///c:/Users/analista2.desarrollo/Desktop/apps/CRM/execution/sync_and_unify_comments_6_cases.mjs):
+    1. Se fusionaron de forma cronológica los comentarios históricos de vTiger dentro de la oportunidad activa que maneja el asesor.
+    2. Se reactivaron las 6 oportunidades a estado **Abierta** y fase **Primer contacto**, limpiando la pérdida errónea.
+    3. Se marcaron las oportunidades duplicadas `POT...` como fusionadas (`is_deleted = true`) para evitar dispersión en el tablero.
+    4. Se forzó `updated_at = NOW()` para sincronización inmediata en la PWA y navegadores de los usuarios.
+
+## 2026-11-09 - Cotizaciones: Rediseño Estético y Corporativo del PDF F-V-29 con Logo Oficial Firplak e Ingesta de Cierre Masivo
+
+- **Requerimiento:** Modernizar el diseño visual de la cotización/pedido formal (F-V-29) para que sea estético, ejecutivo y profesional, incorporando el logo oficial exacto de Firplak ("inspirando hogares") proporcionado por el usuario.
+- **Cambios Realizados:**
+  - **Logo Oficial:** Se incorporó el logotipo en PNG de alta resolución (`public/firplak-logo.png` y `lib/firplakLogoBase64.ts`), reemplazando la carga de SVG que generaba fallos de lectura en jsPDF y mostraba texto plano sin estilo.
+  - **Identidad y Paleta Firplak:** Se aplicaron los colores de marca Azul Marino Firplak (`#1E3A4C` / `rgb(30, 58, 76)`), Azul Secundario (`#2B5876`), fondos suaves (`#F8FAFC`, `#F1F5F9`) y bordes estilizados (`#E2E8F0`).
+  - **Arquitectura de Información:**
+    - Encabezado balanceado con logo a la izquierda, títulos corporativos al centro y tarjeta de metadatos (Cotización, Código F-V-29 V.04, Fecha) a la derecha, con franja divisoria de marca.
+    - Tarjetas estructuradas en 2 columnas para «Información del Cliente» y «Despacho y Condiciones Comerciales», evitando solapamiento de textos largos.
+    - Módulo horizontal para «Contactos del Cliente y Logística de Entrega» con especificaciones claras de subida de hidromasaje, acceso y tipo de entrega.
+    - Tabla de ítems con encabezado en Azul Marino Firplak, texto blanco, filas alternadas y alineaciones monetarias de alta legibilidad.
+    - Bloque de pago destacado con convenios de recaudo Bancolombia / Banco de Bogotá a la izquierda y tarjeta de Totales a la derecha, con desglose explícito de **Subtotal (Sin IVA)**, **Descuento Comercial** (mostrado con valor monetario en pesos/moneda local si aplica), **Subtotal Neto (Sin IVA)**, **IVA (19%)** y **Gran Total (Con IVA)** tanto en PDF, modal de previsualización como en Excel.
+    - Cajas de firmas balanceadas (Aceptación Cliente / Asesor Firplak) y pie legal corporativo.
+  - **Pruebas y Verificación:** Se actualizaron `tests/quoteExcelAndPreview.test.ts` y se confirmó que `tests/pdfGeneratorTotals.test.ts` pasa al 100% (7/7 pruebas aprobadas).
+- **Operación Adicional:** Se ejecutó el cierre masivo de 646 actividades desde archivo Excel (`ciere masivo de actividades 1.xlsx`), verificando el 100% de coincidencia en base de datos (`is_completed = true`).
+
+## 2026-11-08 - Edge Function: Diagnóstico, Despliegue y Habilitación de Clave para crm-export-api (Looker Studio / Postman)
+
+- **Requerimiento:** Validar el funcionamiento de la Edge Function `crm-export-api` en Supabase que arrojaba `401 Unauthorized` en Postman al intentar consumir `/contactos?limit=2`, corregirla y proveer los datos de autenticación exactos para realizar pruebas.
+- **Diagnóstico:** La función implementaba un esquema propio de API Key validado contra hashes SHA-256 predefinidos. Al ingresar tokens estándar de Supabase o cadenas no registradas, la función rechazaba la solicitud.
+- **Solución y Mejoras Implementadas:**
+  - Se trajo el código fuente a control de versiones local en `supabase/functions/crm-export-api/index.ts`.
+  - Se autorizó una clave dedicada de pruebas para Postman: `firplak_export_2026_k8m2p9v4x7q1w5z3`.
+  - Se flexibilizó el método de autenticación para soportar tanto `Authorization: Bearer <key>`, como headers `x-api-key`, `apikey` y credenciales nativas del entorno Supabase (`anon` / `publishable key`).
+  - Se desplegó exitosamente la versión 5 de la Edge Function en Supabase (`ACTIVE`).
+  - Verificación end-to-end confirmada: solicitudes tanto a `/contactos` como a `/oportunidades` devuelven `200 OK` con datos limpios y enriquecidos.
+- **Páginas actualizadas:** `wiki/pages/integraciones.md`, `wiki/LOG.md`.
+
+## 2026-11-06 - Feature: Previsualización de Cotización en Pantalla y Exportación a Excel (.xlsx)
+
+- **Requerimiento:** Permitir que las cotizaciones y pedidos vinculados no solo se descarguen en PDF, sino que cuenten con una previsualización interactiva en pantalla y con la opción de exportarse en formato Excel (.xlsx).
+- **Implementación:**
+  - `lib/pdfGenerator.ts`: Desacoplada la construcción del documento en `buildQuotePdfDoc` y añadida la función `generateQuotePdfBlob` para obtener el PDF en memoria sin forzar la descarga en disco. Se mantiene 100% la firma y comportamiento de `generateQuotePdf`.
+  - `lib/quoteExcelGenerator.ts`: Creado generador corporativo en Excel (`exceljs` + `file-saver`) con plantilla Firplak F-V-29 V.4, aplicando estrictamente `calculatePdfItemRow` y `calculatePdfTotals` para garantizar que los precios unitarios de catálogo sean base neta sin IVA, los subtotales reflejen descuentos y el IVA (19% COP o 0% USD) se aplique consistentemente al final.
+  - `components/quotes/QuotePreviewModal.tsx`: Nuevo modal con visor embebido de alta resolución (iframe con blob URL), enlace a pestaña externa, insignias de ítems/total y botones de acción rápida para descargar PDF, descargar Excel y enviar por correo.
+  - `app/oportunidades/[id]/cotizaciones/[quoteId]/page.tsx`: Integrados botones de "Previsualizar" y "Descargar Excel" en la barra de acciones principal del editor de cotizaciones (`DetailHeader`).
+  - `components/quotes/PedidosEditor.tsx`: Añadidos botones individuales de "Ver" (previsualización) y "Excel" en cada fila de pedido vinculado en `PedidosList`, reutilizando el contexto formalizado de pedido.
+  - `tests/quoteExcelAndPreview.test.ts`: Suite de pruebas unitarias verificando generación de instancias jsPDF, Blob PDF, estructura y consistencia de totales en el Excel generado para COP y exportación USD (4/4 tests GREEN).
+- **Páginas actualizadas:** `wiki/pages/cotizaciones-y-pedidos.md`, `wiki/LOG.md`.
+
+## 2026-11-05 - Fix: Exclusión de Actividades Vencidas del Setter en Vistas y Notificaciones de Asesores (B2C)
+
+- **Requerimiento:** En canal B2C (Canal Propio), evitar que los asesores comerciales vean actividades vencidas que están a nombre del setter (e.g. Christian Alvarez Roman / canalpropio) o reciban alertas de actividades vencidas que no les corresponden, aun cuando la oportunidad o cuenta pertenezca al asesor.
+- **Diagnóstico y Causa Raíz:**
+  - En base de datos, `check_overdue_activities()` enlazaba `o.owner_user_id` (el asesor) en lugar de `a.user_id` (el usuario asignado a la actividad), generando más de 13.000 notificaciones falsas de `ACTIVITY_OVERDUE` en la campana de los asesores.
+  - En frontend, `useOpportunitiesServer` (en Dexie y en mapeo online) y `app/actividades/page.tsx` no filtraban estrictamente por `act.user_id === currentUserId`, propagando conteos de "1 atrasada" y badges erróneos.
+- **Cambios Realizados:**
+  - `supabase/migrations/20261105120000_fix_check_overdue_activities_assigned_user.sql`: `check_overdue_activities()` reescrita para asignar la notificación exclusivamente a `a.user_id`. Limpieza de las 13.264 notificaciones falsas en `CRM_Notifications`.
+  - `supabase/migrations/20261105124500_reassign_b2c_orphaned_activities.sql`: Reasignación de las 121 actividades huérfanas en B2C: 16 de prospección/calificación al setter oficial (`Christian Alvarez Roman`) y 105 de seguimiento comercial (`Nueva Actividad`, `SEGUIMIENTO HIDRO`, llamadas) a los dueños respectivos de cada oportunidad (`o.owner_user_id`).
+  - `lib/sellerVisibility.ts`: Añadido helper `shouldShowActivityNotification()`.
+  - `lib/hooks/useNotifications.ts`: Salvaguarda en cliente con `shouldShowActivityNotification()` para no renderizar notificaciones vencidas de otros usuarios en la campana del asesor.
+  - `lib/hooks/useOpportunitiesServer.ts`: `actividades` y `activity_summary` filtradas con `activitiesVisibleToViewer` tanto en offline (Dexie) como en el fetch online.
+  - `app/actividades/page.tsx`: Filtrado y conteo `overdueCount` restringidos para que roles `VENDEDOR` solo contabilicen y visualicen actividades propias (`act.user_id === effectiveUserId`).
+  - `app/oportunidades/[id]/page.tsx`: `ActivitiesTab` aplica `activitiesVisibleToViewer` antes del ordenamiento de la lista.
+  - `tests/sellerVisibility.test.ts`: Suite ampliada con pruebas de notificaciones y visibilidad (8/8 GREEN).
+- **Páginas actualizadas:** `wiki/pages/actividades.md`, `wiki/pages/notificaciones.md`, `wiki/LOG.md`.
+
+## 2026-11-05 - Informes: Habilitación de Reportes Específicos para Asesores con Alcance Propio
+
+- **Requerimiento:** Permitir a los asesores acceder a la interfaz completa de informes específicos (Oportunidades, Cuentas, Contactos, Cotizaciones, Actividades, S&OP) para que puedan filtrar y descargar el reporte que necesiten, garantizando que los asesores únicamente descarguen su propia información.
+- **Cambios Realizados:**
+  - `app/informes/page.tsx`:
+    - Eliminado el bloqueo que confinaba a roles no-admin a ver únicamente la tarjeta *Mi informe*.
+    - Los asesores ven ahora la cuadrícula de entidades con todos los filtros avanzados y opciones de exportación (Excel / CSV).
+    - En el selector de *Asesor Comercial*, para no-admin se muestra su nombre bloqueado con la etiqueta *Solo tu información*.
+    - `resolveExportScope`: cuando el usuario no es admin, el alcance se ancla estrictamente a su `user.id`.
+    - Las consultas en Supabase filtran por `owner_user_id = scopeUserId` (oportunidades, cuentas, cotizaciones mediante join `!inner`, S&OP), `user_id/created_by` (actividades) y `cuenta.owner_user_id` (contactos mediante join `!inner`).
+  - `lib/navigationRules.ts` y `lib/permissions.ts`: Módulo `/informes` y permiso `export_reports` habilitados para `VENDEDOR`.
+  - `pruebas unitarias/informes.test.ts` y `tests/moduleNavigation.test.ts`: 29 pruebas en GREEN verificando el bloqueo de alcance y la visibilidad de navegación.
+- **Páginas actualizadas:** `wiki/pages/dashboard-e-indicadores.md`, `wiki/LOG.md`.
+
 ## 2026-11-03 - Feature: Filtros activables de Planta y Familia en Oportunidades
 
 - **Requerimiento:** Incorporar en la barra desplegable de filtros de `/oportunidades` la capacidad de filtrar por Planta y Familia, cruzando con los productos de las cotizaciones vinculadas a cada oportunidad.

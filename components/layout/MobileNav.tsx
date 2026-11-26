@@ -20,7 +20,8 @@ import {
     UserCircle,
     Store,
     BookOpen,
-    Warehouse
+    Warehouse,
+    ArchiveRestore,
 } from "lucide-react";
 
 const MOBILE_NAV = [
@@ -37,6 +38,7 @@ const MOBILE_NAV = [
     { label: "Inventarios", href: "/inventarios", icon: Warehouse, requiredRole: "ADMIN" },
     { label: "Informes", href: "/informes", icon: FileSpreadsheet },
     { label: "Usuarios", href: "/usuarios", icon: UserCircle },
+    { label: "Eliminaciones", href: "/admin/eliminaciones", icon: ArchiveRestore, allowedRoles: ["ADMIN", "COORDINADOR"] as string[] },
     { label: "Configuración", href: "/configuracion", icon: Settings },
 ];
 
@@ -47,6 +49,7 @@ export const MobileNav = memo(function MobileNav() {
     const visibleNav = React.useMemo(() => {
         const allowedModules = user?.allowed_modules || [];
         return MOBILE_NAV.filter(item => {
+            if ('allowedRoles' in item && item.allowedRoles) return !!role && item.allowedRoles.includes(role);
             if (item.href === '/usuarios' && role !== 'ADMIN') return false;
             if (role === 'ADMIN') return true;
             if (allowedModules.length > 0) return item.href === '/' || allowedModules.includes(item.href);

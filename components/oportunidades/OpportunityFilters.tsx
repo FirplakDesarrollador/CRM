@@ -1,8 +1,10 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "@/lib/supabase";
-import { Filter, X, CircleDot, Trophy, XCircle } from "lucide-react";
+import { Filter, X, ChevronDown } from "lucide-react";
 import { cn } from "@/components/ui/utils";
+import { matchesSearchTokens } from "@/lib/utils";
 import { useFullCatalog } from "@/lib/hooks/useProducts";
+import { buildPhaseFilterOptions } from "@/lib/opportunityPhaseListFilter";
 import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 type Channel = {
@@ -26,6 +28,8 @@ type Phase = {
     id: number;
     nombre: string;
     canal_id: string;
+    orden?: number | null;
+    is_active?: boolean | null;
     probability?: number;
 };
 
@@ -37,16 +41,12 @@ type Origin = {
     is_active?: boolean;
 };
 
-// Status filter type - includes both open stages and closed states
-type StatusFilter = 'all' | 'open' | 'won' | 'lost';
-
 interface OpportunityFiltersProps {
     onFilterChange: (filters: {
         channelId: string | null;
         subclassificationId: number | null;
         segmentId: number | null;
-        phaseId: number | null;
-        statusFilter: StatusFilter;
+        phaseIds: number[];
         startDate: string | null;
         endDate: string | null;
         startClosingDate: string | null;
@@ -54,15 +54,16 @@ interface OpportunityFiltersProps {
         origin: string | null;
         planta?: string | null;
         familia?: string | null;
+        idFilter?: string | null;
     }) => void;
     initialChannelId?: string | null;
     initialSubclassId?: number | null;
     initialSegmentId?: number | null;
-    initialPhaseId?: number | null;
-    initialStatusFilter?: StatusFilter;
+    initialPhaseIds?: number[];
     initialOrigin?: string | null;
     initialPlanta?: string | null;
     initialFamilia?: string | null;
+    initialIdFilter?: string | null;
     initialDates?: {
         startDate: string | null;
         endDate: string | null;
@@ -76,11 +77,11 @@ export function OpportunityFilters({
     initialChannelId,
     initialSubclassId,
     initialSegmentId,
-    initialPhaseId,
-    initialStatusFilter,
+    initialPhaseIds,
     initialOrigin,
     initialPlanta,
     initialFamilia,
+    initialIdFilter,
     initialDates
 }: OpportunityFiltersProps) {
     const [channels, setChannels] = useState<Channel[]>([]);
@@ -93,11 +94,14 @@ export function OpportunityFilters({
     const [selectedChannel, setSelectedChannel] = useState<string | null>(initialChannelId || null);
     const [selectedSubclass, setSelectedSubclass] = useState<number | null>(initialSubclassId || null);
     const [selectedSegment, setSelectedSegment] = useState<number | null>(initialSegmentId || null);
-    const [selectedPhase, setSelectedPhase] = useState<number | null>(initialPhaseId || null);
-    const [statusFilter, setStatusFilter] = useState<StatusFilter>(initialStatusFilter || 'open');
+    const [selectedPhaseIds, setSelectedPhaseIds] = useState<number[]>(initialPhaseIds || []);
+    const [phaseMenuOpen, setPhaseMenuOpen] = useState(false);
+    const [phaseSearch, setPhaseSearch] = useState("");
+    const phaseMenuRef = useRef<HTMLDivElement>(null);
     const [selectedOrigin, setSelectedOrigin] = useState<string | null>(initialOrigin || null);
     const [selectedPlanta, setSelectedPlanta] = useState<string | null>(initialPlanta || null);
     const [selectedFamilia, setSelectedFamilia] = useState<string | null>(initialFamilia || null);
+    const [idFilter, setIdFilter] = useState<string | null>(initialIdFilter || null);
     const { products } = useFullCatalog();
 
     const [startDate, setStartDate] = useState<string | null>(initialDates?.startDate || null);
@@ -106,6 +110,12 @@ export function OpportunityFilters({
     const [endClosingDate, setEndClosingDate] = useState<string | null>(initialDates?.endClosingDate || null);
 
     const [loadingMetadata, setLoadingMetadata] = useState(true);
+
+    useEffect(() => {
+        if (initialIdFilter !== undefined) {
+            setIdFilter(initialIdFilter || null);
+        }
+    }, [initialIdFilter]);
 
     useEffect(() => {
         if (initialOrigin !== undefined) {
@@ -138,14 +148,8 @@ export function OpportunityFilters({
     }, [initialSegmentId]);
 
     useEffect(() => {
-        setSelectedPhase(initialPhaseId || null);
-    }, [initialPhaseId]);
-
-    useEffect(() => {
-        if (initialStatusFilter) {
-            setStatusFilter(initialStatusFilter);
-        }
-    }, [initialStatusFilter]);
+        setSelectedPhaseIds(initialPhaseIds || []);
+    }, [initialPhaseIds]);
 
     useEffect(() => {
         setStartDate(initialDates?.startDate || null);
@@ -159,7 +163,7 @@ export function OpportunityFilters({
         const loadMetadata = async () => {
             try {
                 const [phasesRes, chanRes, subRes, segRes, origRes] = await Promise.all([
-                    supabase.from('CRM_FasesOportunidad').select('id, nombre, canal_id, probability').eq('is_active', true),
+                    supabase.from('CRM_FasesOportunidad').select('id, nombre, canal_id, orden, probability, is_active').eq('is_active', true),
                     supabase.from('CRM_Canales').select('id, nombre').order('nombre'),
                     supabase.from('CRM_Subclasificacion').select('*'),
                     supabase.from('CRM_Segmentos').select('*'),
@@ -188,20 +192,20 @@ export function OpportunityFilters({
 
                 // If initial filters were set (e.g., from URL on back navigation),
                 // notify the parent so the hook fetches with correct filters
-                if (initialChannelId || initialSubclassId || initialSegmentId || initialPhaseId || initialOrigin || initialPlanta || initialFamilia || (initialStatusFilter && initialStatusFilter !== 'open') || initialDates) {
+                if (initialChannelId || initialSubclassId || initialSegmentId || (initialPhaseIds && initialPhaseIds.length > 0) || initialOrigin || initialPlanta || initialFamilia || initialIdFilter || initialDates) {
                     onFilterChange({
                         channelId: initialChannelId || null,
                         subclassificationId: initialSubclassId || null,
                         segmentId: initialSegmentId || null,
-                        phaseId: initialPhaseId || null,
-                        statusFilter: initialStatusFilter || 'open',
+                        phaseIds: initialPhaseIds || [],
                         startDate: initialDates?.startDate || null,
                         endDate: initialDates?.endDate || null,
                         startClosingDate: initialDates?.startClosingDate || null,
                         endClosingDate: initialDates?.endClosingDate || null,
                         origin: initialOrigin || null,
                         planta: initialPlanta || null,
-                        familia: initialFamilia || null
+                        familia: initialFamilia || null,
+                        idFilter: initialIdFilter || null
                     });
                 }
 
@@ -226,18 +230,34 @@ export function OpportunityFilters({
         return segments.filter(seg => seg.subclasificacion_id === selectedSubclass);
     }, [selectedSubclass, segments]);
 
-    // Get phases for selected channel, excluding closed phases for the phase dropdown
-    // (closed phases are handled via statusFilter)
-    const availablePhases = useMemo(() => {
-        if (!selectedChannel) return [];
-        return phases
-            .filter(p => p.canal_id === selectedChannel)
-            .filter(p => {
-                const nombre = p.nombre.toLowerCase();
-                // Exclude closed phases from the phase dropdown
-                return !nombre.includes('cerrada');
-            });
-    }, [selectedChannel, phases]);
+    const channelLabels = useMemo(() => {
+        const labels: Record<string, string> = {};
+        for (const channel of channels) {
+            if (channel.id) labels[channel.id] = channel.nombre || channel.id;
+        }
+        return labels;
+    }, [channels]);
+
+    const phaseOptions = useMemo(
+        () => buildPhaseFilterOptions(phases, selectedChannel, channelLabels),
+        [phases, selectedChannel, channelLabels]
+    );
+
+    const visiblePhaseOptions = useMemo(() => {
+        if (!phaseSearch.trim()) return phaseOptions;
+        return phaseOptions.filter(option => matchesSearchTokens([option.label], phaseSearch));
+    }, [phaseOptions, phaseSearch]);
+
+    useEffect(() => {
+        if (!phaseMenuOpen) return;
+        const onPointerDown = (event: MouseEvent) => {
+            if (phaseMenuRef.current && !phaseMenuRef.current.contains(event.target as Node)) {
+                setPhaseMenuOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', onPointerDown);
+        return () => document.removeEventListener('mousedown', onPointerDown);
+    }, [phaseMenuOpen]);
 
     const availablePlants = useMemo(() => {
         const list = Array.from(new Set(products.map(p => p.planta).filter(Boolean))).sort() as string[];
@@ -251,27 +271,29 @@ export function OpportunityFilters({
         return Array.from(new Set(filtered.map(p => p.familia).filter(Boolean))).sort() as string[];
     }, [products, selectedPlanta]);
 
-    // Handle Status Filter Change
-    const handleStatusChange = (status: StatusFilter) => {
-        setStatusFilter(status);
-        // When changing status filter, reset phase selection if not compatible
-        if (status === 'won' || status === 'lost') {
-            setSelectedPhase(null);
-        }
+    const publishPhaseIds = (nextIds: number[]) => {
+        setSelectedPhaseIds(nextIds);
         onFilterChange({
             channelId: selectedChannel,
             subclassificationId: selectedSubclass,
             segmentId: selectedSegment,
-            phaseId: null,
-            statusFilter: status,
+            phaseIds: nextIds,
             startDate,
             endDate,
             startClosingDate,
             endClosingDate,
             origin: selectedOrigin,
             planta: selectedPlanta,
-            familia: selectedFamilia
+            familia: selectedFamilia,
+            idFilter
         });
+    };
+
+    const togglePhase = (phaseId: number) => {
+        const nextIds = selectedPhaseIds.includes(phaseId)
+            ? selectedPhaseIds.filter(id => id !== phaseId)
+            : [...selectedPhaseIds, phaseId];
+        publishPhaseIds(nextIds);
     };
 
     // Handle Changes
@@ -280,21 +302,21 @@ export function OpportunityFilters({
         setSelectedChannel(val);
         setSelectedSubclass(null);
         setSelectedSegment(null);
-        setSelectedPhase(null);
+        setSelectedPhaseIds([]);
 
         onFilterChange({
             channelId: val,
             subclassificationId: null,
             segmentId: null,
-            phaseId: null,
-            statusFilter,
+            phaseIds: [],
             startDate,
             endDate,
             startClosingDate,
             endClosingDate,
             origin: selectedOrigin,
             planta: selectedPlanta,
-            familia: selectedFamilia
+            familia: selectedFamilia,
+            idFilter
         });
     };
 
@@ -307,15 +329,15 @@ export function OpportunityFilters({
             channelId: selectedChannel,
             subclassificationId: val,
             segmentId: null,
-            phaseId: selectedPhase,
-            statusFilter,
+            phaseIds: selectedPhaseIds,
             startDate,
             endDate,
             startClosingDate,
             endClosingDate,
             origin: selectedOrigin,
             planta: selectedPlanta,
-            familia: selectedFamilia
+            familia: selectedFamilia,
+            idFilter
         });
     };
 
@@ -326,38 +348,15 @@ export function OpportunityFilters({
             channelId: selectedChannel,
             subclassificationId: selectedSubclass,
             segmentId: val,
-            phaseId: selectedPhase,
-            statusFilter,
+            phaseIds: selectedPhaseIds,
             startDate,
             endDate,
             startClosingDate,
             endClosingDate,
             origin: selectedOrigin,
             planta: selectedPlanta,
-            familia: selectedFamilia
-        });
-    };
-
-    const handlePhaseChange = (valRaw: string) => {
-        const val = valRaw ? Number(valRaw) : null;
-        setSelectedPhase(val);
-        // When selecting a specific phase, set status to all or open
-        if (val) {
-            setStatusFilter('open');
-        }
-        onFilterChange({
-            channelId: selectedChannel,
-            subclassificationId: selectedSubclass,
-            segmentId: selectedSegment,
-            phaseId: val,
-            statusFilter: val ? 'open' : statusFilter,
-            startDate,
-            endDate,
-            startClosingDate,
-            endClosingDate,
-            origin: selectedOrigin,
-            planta: selectedPlanta,
-            familia: selectedFamilia
+            familia: selectedFamilia,
+            idFilter
         });
     };
 
@@ -368,15 +367,15 @@ export function OpportunityFilters({
             channelId: selectedChannel,
             subclassificationId: selectedSubclass,
             segmentId: selectedSegment,
-            phaseId: selectedPhase,
-            statusFilter,
+            phaseIds: selectedPhaseIds,
             startDate,
             endDate,
             startClosingDate,
             endClosingDate,
             origin: val,
             planta: selectedPlanta,
-            familia: selectedFamilia
+            familia: selectedFamilia,
+            idFilter
         });
     };
 
@@ -395,15 +394,15 @@ export function OpportunityFilters({
             channelId: selectedChannel,
             subclassificationId: selectedSubclass,
             segmentId: selectedSegment,
-            phaseId: selectedPhase,
-            statusFilter,
+            phaseIds: selectedPhaseIds,
             startDate,
             endDate,
             startClosingDate,
             endClosingDate,
             origin: selectedOrigin,
             planta: val,
-            familia: nextFamilia
+            familia: nextFamilia,
+            idFilter
         });
     };
 
@@ -414,15 +413,34 @@ export function OpportunityFilters({
             channelId: selectedChannel,
             subclassificationId: selectedSubclass,
             segmentId: selectedSegment,
-            phaseId: selectedPhase,
-            statusFilter,
+            phaseIds: selectedPhaseIds,
             startDate,
             endDate,
             startClosingDate,
             endClosingDate,
             origin: selectedOrigin,
             planta: selectedPlanta,
-            familia: val
+            familia: val,
+            idFilter
+        });
+    };
+
+    const handleIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const val = e.target.value ? e.target.value.trim() : null;
+        setIdFilter(val);
+        onFilterChange({
+            channelId: selectedChannel,
+            subclassificationId: selectedSubclass,
+            segmentId: selectedSegment,
+            phaseIds: selectedPhaseIds,
+            startDate,
+            endDate,
+            startClosingDate,
+            endClosingDate,
+            origin: selectedOrigin,
+            planta: selectedPlanta,
+            familia: selectedFamilia,
+            idFilter: val
         });
     };
 
@@ -430,11 +448,11 @@ export function OpportunityFilters({
         setSelectedChannel(null);
         setSelectedSubclass(null);
         setSelectedSegment(null);
-        setSelectedPhase(null);
-        setStatusFilter('open');
+        setSelectedPhaseIds([]);
         setSelectedOrigin(null);
         setSelectedPlanta(null);
         setSelectedFamilia(null);
+        setIdFilter(null);
         setStartDate(null);
         setEndDate(null);
         setStartClosingDate(null);
@@ -443,187 +461,92 @@ export function OpportunityFilters({
             channelId: null,
             subclassificationId: null,
             segmentId: null,
-            phaseId: null,
-            statusFilter: 'open',
+            phaseIds: [],
             startDate: null,
             endDate: null,
             startClosingDate: null,
             endClosingDate: null,
             origin: null,
             planta: null,
-            familia: null
+            familia: null,
+            idFilter: null
         });
     };
 
-    const hasActiveFilters = selectedChannel || selectedSubclass || selectedSegment || selectedPhase || selectedOrigin || selectedPlanta || selectedFamilia || statusFilter !== 'open' || startDate || endDate || startClosingDate || endClosingDate;
+    const hasActiveFilters = selectedChannel || selectedSubclass || selectedSegment || selectedPhaseIds.length > 0 || selectedOrigin || selectedPlanta || selectedFamilia || Boolean(idFilter) || startDate || endDate || startClosingDate || endClosingDate;
 
     if (loadingMetadata) return <div className="text-xs text-slate-400">Cargando filtros...</div>;
 
     return (
         <div data-testid="opportunities-filters" className="space-y-3">
             <div className="flex flex-wrap items-center gap-3">
-                {/* Status Filter Pills - Quick access to closed states */}
-                <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
-                    <button
-                        data-testid="opportunities-filter-status-all"
-                        onClick={() => handleStatusChange('all')}
-                        className={cn(
-                            "px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5",
-                            statusFilter === 'all'
-                                ? "bg-white text-slate-800 shadow-sm"
-                                : "text-slate-500 hover:text-slate-700"
-                        )}
-                    >
-                        <CircleDot className="w-3 h-3" />
-                        Todas
-                    </button>
-                    <button
-                        data-testid="opportunities-filter-status-open"
-                        onClick={() => handleStatusChange('open')}
-                        className={cn(
-                            "px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5",
-                            statusFilter === 'open'
-                                ? "bg-white text-blue-600 shadow-sm"
-                                : "text-slate-500 hover:text-slate-700"
-                        )}
-                    >
-                        <CircleDot className="w-3 h-3" />
-                        Abiertas
-                    </button>
-                    <button
-                        data-testid="opportunities-filter-status-won"
-                        onClick={() => handleStatusChange('won')}
-                        className={cn(
-                            "px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5",
-                            statusFilter === 'won'
-                                ? "bg-emerald-500 text-white shadow-sm"
-                                : "text-slate-500 hover:text-emerald-600"
-                        )}
-                    >
-                        <Trophy className="w-3 h-3" />
-                        Ganadas
-                    </button>
-                    <button
-                        data-testid="opportunities-filter-status-lost"
-                        onClick={() => handleStatusChange('lost')}
-                        className={cn(
-                            "px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5",
-                            statusFilter === 'lost'
-                                ? "bg-red-500 text-white shadow-sm"
-                                : "text-slate-500 hover:text-red-600"
-                        )}
-                    >
-                        <XCircle className="w-3 h-3" />
-                        Perdidas
-                    </button>
-                </div>
-
-                {/* Date Filters */}
-                <div className="flex flex-wrap items-center gap-2 border border-slate-200 rounded-lg px-3 py-1.5 bg-white shadow-sm overflow-x-auto whitespace-nowrap">
-                    <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-slate-500 uppercase tracking-tight">Creación:</span>
+            <div ref={phaseMenuRef} data-testid="opportunities-filter-phases" className="relative flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 bg-white shadow-sm">
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-tight">Fase:</span>
+                <button
+                    type="button"
+                    data-testid="opportunities-filter-phase-trigger"
+                    onClick={() => setPhaseMenuOpen(open => !open)}
+                    className="text-sm font-medium text-slate-700 max-w-[220px] truncate flex items-center gap-1"
+                >
+                    <span className="truncate">
+                        {selectedPhaseIds.length === 0
+                            ? "Todas"
+                            : phaseOptions
+                                .filter(option => selectedPhaseIds.includes(option.id))
+                                .map(option => option.label)
+                                .join(", ") || `${selectedPhaseIds.length} fases`}
+                    </span>
+                    <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                </button>
+                {phaseMenuOpen && (
+                    <div className="absolute left-0 top-full z-50 mt-1 w-72 rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
                         <input
-                            type="date"
-                            className="text-xs bg-slate-50 border border-slate-200 rounded px-2 py-1 focus:ring-1 focus:ring-blue-500 outline-none"
-                            value={startDate || ""}
-                            onChange={(e) => {
-                                const val = e.target.value || null;
-                                setStartDate(val);
-                                onFilterChange({
-                                    channelId: selectedChannel,
-                                    subclassificationId: selectedSubclass,
-                                    segmentId: selectedSegment,
-                                    phaseId: selectedPhase,
-                                    statusFilter,
-                                    startDate: val,
-                                    endDate,
-                                    startClosingDate,
-                                    endClosingDate,
-                                    origin: selectedOrigin,
-                                    planta: selectedPlanta,
-                                    familia: selectedFamilia
-                                });
-                            }}
+                            type="text"
+                            value={phaseSearch}
+                            onChange={(e) => setPhaseSearch(e.target.value)}
+                            placeholder="Buscar fase..."
+                            className="mb-2 w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-700 outline-none focus:border-blue-500 focus:bg-white"
                         />
-                        <span className="text-slate-300 text-xs text-center min-w-[12px]">-</span>
-                        <input
-                            type="date"
-                            className="text-xs bg-slate-50 border border-slate-200 rounded px-2 py-1 focus:ring-1 focus:ring-blue-500 outline-none"
-                            value={endDate || ""}
-                            onChange={(e) => {
-                                const val = e.target.value || null;
-                                setEndDate(val);
-                                onFilterChange({
-                                    channelId: selectedChannel,
-                                    subclassificationId: selectedSubclass,
-                                    segmentId: selectedSegment,
-                                    phaseId: selectedPhase,
-                                    statusFilter,
-                                    startDate,
-                                    endDate: val,
-                                    startClosingDate,
-                                    endClosingDate,
-                                    origin: selectedOrigin,
-                                    planta: selectedPlanta,
-                                    familia: selectedFamilia
-                                });
-                            }}
-                        />
+                        <div className="max-h-64 space-y-0.5 overflow-y-auto">
+                            <button
+                                type="button"
+                                data-testid="opportunities-filter-phase-all"
+                                onClick={() => publishPhaseIds([])}
+                                className={cn(
+                                    "flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-xs font-medium",
+                                    selectedPhaseIds.length === 0 ? "bg-blue-50 font-bold text-blue-700" : "text-slate-600 hover:bg-slate-50"
+                                )}
+                            >
+                                <span>Todas</span>
+                            </button>
+                            {visiblePhaseOptions.map(option => {
+                                const checked = selectedPhaseIds.includes(option.id);
+                                return (
+                                    <label
+                                        key={option.id}
+                                        className={cn(
+                                            "flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs",
+                                            checked ? "bg-blue-50 font-semibold text-blue-700" : "text-slate-700 hover:bg-slate-50"
+                                        )}
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            data-testid={`opportunities-filter-phase-${option.id}`}
+                                            checked={checked}
+                                            onChange={() => togglePhase(option.id)}
+                                            className="h-3.5 w-3.5 rounded border-slate-300 text-blue-600"
+                                        />
+                                        <span className="truncate">{option.label}</span>
+                                    </label>
+                                );
+                            })}
+                            {visiblePhaseOptions.length === 0 && (
+                                <p className="px-2 py-3 text-center text-xs text-slate-400">No hay fases con ese nombre.</p>
+                            )}
+                        </div>
                     </div>
-
-                    <div className="w-px h-6 bg-slate-200 mx-1"></div>
-
-                    <div className="flex items-center gap-2">
-                        <span className="text-xs font-bold text-slate-500 uppercase tracking-tight">Cierre:</span>
-                        <input
-                            type="date"
-                            className="text-xs bg-slate-50 border border-slate-200 rounded px-2 py-1 focus:ring-1 focus:ring-blue-500 outline-none"
-                            value={startClosingDate || ""}
-                            onChange={(e) => {
-                                const val = e.target.value || null;
-                                setStartClosingDate(val);
-                                onFilterChange({
-                                    channelId: selectedChannel,
-                                    subclassificationId: selectedSubclass,
-                                    segmentId: selectedSegment,
-                                    phaseId: selectedPhase,
-                                    statusFilter,
-                                    startDate,
-                                    endDate,
-                                    startClosingDate: val,
-                                    endClosingDate,
-                                    origin: selectedOrigin,
-                                    planta: selectedPlanta,
-                                    familia: selectedFamilia
-                                });
-                            }}
-                        />
-                        <span className="text-slate-300 text-xs text-center min-w-[12px]">-</span>
-                        <input
-                            type="date"
-                            className="text-xs bg-slate-50 border border-slate-200 rounded px-2 py-1 focus:ring-1 focus:ring-blue-500 outline-none"
-                            value={endClosingDate || ""}
-                            onChange={(e) => {
-                                const val = e.target.value || null;
-                                setEndClosingDate(val);
-                                onFilterChange({
-                                    channelId: selectedChannel,
-                                    subclassificationId: selectedSubclass,
-                                    segmentId: selectedSegment,
-                                    phaseId: selectedPhase,
-                                    statusFilter,
-                                    startDate,
-                                    endDate,
-                                    startClosingDate,
-                                    endClosingDate: val,
-                                    origin: selectedOrigin,
-                                    planta: selectedPlanta,
-                                    familia: selectedFamilia
-                                });
-                            }}
-                        />
-                    </div>
-                </div>
+                )}
+            </div>
 
                 {/* Hierarchical Filters */}
                 <div className="flex flex-wrap items-center gap-2 border border-slate-200 rounded-lg px-2.5 py-1 bg-white shadow-sm">
@@ -687,37 +610,6 @@ export function OpportunityFilters({
                                     }))}
                                 />
                             </div>
-
-                            <span className="text-slate-300">|</span>
-
-                            {/* Phase Select - Only show when status is 'all' or 'open' */}
-                            {(statusFilter === 'all' || statusFilter === 'open') && (
-                                <div className="w-[165px]">
-                                    <SearchableSelect
-                                        compact
-                                        dataTestId="opportunities-filter-phase"
-                                        value={selectedPhase ? String(selectedPhase) : ""}
-                                        onChange={handlePhaseChange}
-                                        placeholder="Todas las Etapas"
-                                        searchPlaceholder="Buscar etapa..."
-                                        triggerClassName="min-h-0 h-8 border-none bg-transparent px-1 py-0 text-sm text-slate-700 focus:ring-0 shadow-none"
-                                        options={availablePhases.map(p => ({
-                                            value: String(p.id),
-                                            label: p.nombre,
-                                        }))}
-                                    />
-                                </div>
-                            )}
-
-                            {/* Show closed status badge when won/lost selected */}
-                            {(statusFilter === 'won' || statusFilter === 'lost') && (
-                                <span className={cn(
-                                    "px-2 py-0.5 rounded text-xs font-medium",
-                                    statusFilter === 'won' ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"
-                                )}>
-                                    {statusFilter === 'won' ? 'Cerrada Ganada' : 'Cerrada Perdida'}
-                                </span>
-                            )}
                         </>
                     )}
                 </div>
@@ -781,6 +673,45 @@ export function OpportunityFilters({
                             }))}
                         />
                     </div>
+                </div>
+
+                {/* ID Filter */}
+                <div className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 bg-white shadow-sm">
+                    <span className="text-xs font-bold text-slate-500 uppercase tracking-tight">ID:</span>
+                    <input
+                        type="text"
+                        data-testid="opportunities-filter-id"
+                        placeholder="Buscar por ID..."
+                        value={idFilter || ""}
+                        onChange={handleIdChange}
+                        className="text-sm bg-transparent border-none focus:ring-0 p-0 text-slate-700 font-medium w-36 placeholder:text-slate-400 placeholder:font-normal focus:outline-none"
+                    />
+                    {idFilter && (
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setIdFilter(null);
+                                onFilterChange({
+                                    channelId: selectedChannel,
+                                    subclassificationId: selectedSubclass,
+                                    segmentId: selectedSegment,
+                                    phaseIds: selectedPhaseIds,
+                                    startDate,
+                                    endDate,
+                                    startClosingDate,
+                                    endClosingDate,
+                                    origin: selectedOrigin,
+                                    planta: selectedPlanta,
+                                    familia: selectedFamilia,
+                                    idFilter: null
+                                });
+                            }}
+                            className="text-slate-400 hover:text-slate-600 p-0.5 rounded-full hover:bg-slate-100 transition-colors cursor-pointer"
+                            title="Limpiar filtro de ID"
+                        >
+                            <X className="w-3.5 h-3.5" />
+                        </button>
+                    )}
                 </div>
 
                 {/* Clear Button */}

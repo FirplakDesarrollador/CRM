@@ -27,6 +27,7 @@ import {
     Store,
     BookOpen,
     Warehouse,
+    ArchiveRestore,
 } from "lucide-react";
 import packageJson from "../../package.json";
 
@@ -44,6 +45,7 @@ const NAV_ITEMS = [
     { label: "Inventarios", href: "/inventarios", icon: Warehouse, requiredRole: 'ADMIN' },
     { label: "Informes", href: "/informes", icon: FileSpreadsheet },
     { label: "Usuarios", href: "/usuarios", icon: UserCircle, requiredRole: 'ADMIN' },
+    { label: "Eliminaciones", href: "/admin/eliminaciones", icon: ArchiveRestore, allowedRoles: ['ADMIN', 'COORDINADOR'] as string[] },
     { label: "Configuración", href: "/configuracion", icon: Settings },
 ];
 
@@ -120,6 +122,7 @@ export const Sidebar = React.memo(function Sidebar({ isCollapsed, toggleSidebar 
     const visibleNavItems = React.useMemo(() => {
         const allowedModules = user?.allowed_modules || [];
         return NAV_ITEMS.filter(item => {
+            if ('allowedRoles' in item && item.allowedRoles) return !!role && item.allowedRoles.includes(role);
             if (item.href === '/usuarios' && role !== 'ADMIN') return false;
             if (role === 'ADMIN') return true;
             if (allowedModules.length > 0) {

@@ -80,7 +80,9 @@ interface AccountFormProps {
 
 export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountFormProps) {
     const { createAccount, updateAccount, deleteAccount } = useAccounts();
-    const { role: userRole, isAdmin } = useCurrentUser();
+    const { role: userRole, isAdmin, isCoordinador, user: currentUser } = useCurrentUser();
+    // Eliminar: admin, coordinador o el dueño/creador de la cuenta (no abre otros privilegios de admin)
+    const canDeleteAccount = isAdmin || isCoordinador || (!!currentUser?.id && (account?.owner_user_id === currentUser.id || (account as { created_by?: string } | undefined)?.created_by === currentUser.id));
     const [parents, setParents] = useState<any[]>([]);
     const [activeTab, setActiveTab] = useState<'info' | 'contacts' | 'opportunities' | 'branches' | 'assigned' | 'activities' | 'history'>('info');
     const [hasBranches, setHasBranches] = useState(false);
@@ -997,7 +999,7 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
                     <div className="flex justify-between items-center gap-4 pt-4 border-t border-slate-100">
                         {account?.id ? (
                             <>
-                                {isAdmin ? (
+                                {canDeleteAccount ? (
                                     <button
                                         type="button"
                                         onClick={() => setShowDeleteModal(true)}
@@ -1066,7 +1068,7 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
                 <div className="p-4">
                     {account?.id && <AccountContactsTab accountId={account.id} />}
                     <div className="flex justify-between items-center pt-4 border-t mt-4">
-                        {isAdmin && account?.id ? (
+                        {canDeleteAccount && account?.id ? (
                             <button
                                 type="button"
                                 onClick={() => setShowDeleteModal(true)}
@@ -1084,9 +1086,9 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
                 </div>
             ) : activeTab === 'assigned' ? (
                 <div className="p-4">
-                    {account?.id && <AccountAssignedTab accountId={account.id} currentOwnerId={(account as any).owner_user_id || account.created_by || null} />}
+                    {account?.id && <AccountAssignedTab accountId={account.id} currentOwnerId={(account as { owner_user_id?: string; created_by?: string }).owner_user_id || account.created_by || null} />}
                     <div className="flex justify-between items-center pt-4 border-t mt-4">
-                        {isAdmin && account?.id ? (
+                        {canDeleteAccount && account?.id ? (
                             <button
                                 type="button"
                                 onClick={() => setShowDeleteModal(true)}
@@ -1108,7 +1110,7 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
                         // Logic to open branch account
                     }} />}
                     <div className="flex justify-between items-center pt-4 border-t mt-4">
-                        {isAdmin && account?.id ? (
+                        {canDeleteAccount && account?.id ? (
                             <button
                                 type="button"
                                 onClick={() => setShowDeleteModal(true)}
@@ -1128,7 +1130,7 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
                 <div className="p-4">
                     {account?.id && <AccountActivitiesTab accountId={account.id} />}
                     <div className="flex justify-between items-center pt-4 border-t mt-4">
-                        {isAdmin && account?.id ? (
+                        {canDeleteAccount && account?.id ? (
                             <button
                                 type="button"
                                 onClick={() => setShowDeleteModal(true)}
@@ -1163,7 +1165,7 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
                 <div className="p-4">
                     {account?.id && <AccountOpportunitiesTab accountId={account.id} />}
                     <div className="flex justify-between items-center pt-4 border-t mt-4">
-                        {isAdmin && account?.id ? (
+                        {canDeleteAccount && account?.id ? (
                             <button
                                 type="button"
                                 onClick={() => setShowDeleteModal(true)}

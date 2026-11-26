@@ -2,6 +2,9 @@ import { activateLocalDatabase, db, getActiveLocalUserId, OutboxItem } from './d
 import type { Table } from 'dexie';
 import { supabase } from './supabase';
 import { hydrateOwnActivities } from './serverHydration';
+import { localIdsOutsideTiendaScope, needsTiendaFullAccountPull, readEsTiendaFlag, TIENDA_ACCOUNTS_FULL_CURSOR } from './tiendaVisibility';
+import { useUserStore } from './stores/useUserStore';
+import { applyLossReasonCatalog } from './supabaseDirect';
 import { v4 as uuidv4 } from 'uuid';
 import { useSyncStore } from './stores/useSyncStore';
 import { generateProvisionalNit } from './nitUtils';
@@ -13,7 +16,11 @@ import {
     isSyncLeaseExpired,
     shouldRefreshCatalogs,
     isCatalogVersionNewer,
-    syncCursorId
+    syncCursorId,
+    portfolioBootstrapLimit,
+    needsFullPortfolioPull,
+    FULL_PORTFOLIO_CURSOR,
+    FULL_PORTFOLIO_SYNC_SAFETY_LIMIT
 } from './sync-runtime';
 
 const TABLE_PRIORITY: Record<string, number> = {
@@ -1634,7 +1641,8 @@ export class SyncEngine {
         label: string,
         fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: any }>,
         maxRows = Number.POSITIVE_INFINITY,
-        pageSize = 1000
+        pageSize = 1000,
+        safetyLimit = 100_000
     ): Promise<T[]> {
         const rows: T[] = [];
         let from = 0;
@@ -1651,14 +1659,41 @@ export class SyncEngine {
             if (page.length < requested) break;
             from += page.length;
 
-            if (from >= 100_000) {
-                throw new Error(`${label} exceeded the 100,000-row synchronization safety limit.`);
+            if (from >= safetyLimit) {
+                const shown = safetyLimit === 100_000 ? '100,000' : String(safetyLimit);
+                throw new Error(`${label} exceeded the ${shown}-row synchronization safety limit.`);
             }
             await this.yield();
         }
 
         return rows;
     }
+    /**
+     * Quita de la copia local oportunidades o actividades que un usuario de tienda
+     * no debe conservar (por ejemplo, las bajadas antes de marcar es_tienda).
+     * No toca filas con cambios pendientes ni las cuentas.
+     */
+    private async purgeTiendaLocal(
+        table: 'opportunities' | 'activities',
+        entityType: string,
+        field: 'owner_user_id' | 'user_id',
+        userId: string
+    ) {
+        const pendingIds = new Set(
+            (await db.outbox
+                .where('entity_type').equals(entityType)
+                .and(item => item.status === 'PENDING' || item.status === 'SYNCING')
+                .toArray()
+            ).map(item => item.entity_id)
+        );
+        const rows = await db[table].toArray();
+        const dropIds = localIdsOutsideTiendaScope(rows, field, userId, pendingIds);
+        if (dropIds.length > 0) {
+            await db[table].bulkDelete(dropIds);
+            console.log(`[Sync] Tienda: se quitaron ${dropIds.length} filas locales de ${entityType} que no son del usuario.`);
+        }
+    }
+
     /**
      * PULL: Download server data to local IndexedDB
      * Called on app initialization to ensure all browsers have the same data
@@ -1667,6 +1702,34 @@ export class SyncEngine {
         console.log('[Sync] Pulling data from server...');
         useSyncStore.getState().setIsLoadingData(true);
         const lastSync = await this.getSyncCursor(_user.id, '__global__');
+        const portfolioViewer = { id: _user?.id ?? null, email: _user?.email ?? null };
+        const tiendaUserId = _user?.id
+            ? (await readEsTiendaFlag(async () => {
+                const { data, error } = await supabase
+                    .from('CRM_Usuarios')
+                    .select('es_tienda')
+                    .eq('id', _user.id)
+                    .maybeSingle();
+                return { data, error };
+            }))
+                ? _user.id as string
+                : null
+            : null;
+        useUserStore.getState().applyTiendaFlag(Boolean(tiendaUserId));
+        const tiendaAccountsCursor = _user?.id
+            ? await this.getSyncCursor(_user.id, TIENDA_ACCOUNTS_FULL_CURSOR)
+            : null;
+        const pullAllTiendaAccounts = needsTiendaFullAccountPull(
+            { id: _user?.id ?? null, es_tienda: Boolean(tiendaUserId) },
+            tiendaAccountsCursor
+        );
+        const fullPortfolioCursor = _user?.id
+            ? await this.getSyncCursor(_user.id, FULL_PORTFOLIO_CURSOR)
+            : null;
+        const pullEntirePortfolio = needsFullPortfolioPull(portfolioViewer, fullPortfolioCursor);
+        const portfolioLimit = portfolioBootstrapLimit(portfolioViewer);
+        const portfolioSafetyLimit = pullEntirePortfolio ? FULL_PORTFOLIO_SYNC_SAFETY_LIMIT : 100_000;
+        const incrementalPortfolio = Boolean(lastSync) && !pullEntirePortfolio;
         const pullErrors: string[] = [];
         const catalogErrors: string[] = [];
 
@@ -1693,7 +1756,16 @@ export class SyncEngine {
             // Pull Accounts (CRM_Cuentas)
             // PERF OPTIMIZATION: Incremental sync based on lastSyncTime + Segmented Advisor Priority
             let accounts: any[] = [];
-            if (lastSync) {
+            if (pullAllTiendaAccounts) {
+                // Una vez: todas las cuentas. El tope de 3.000 dejaba al vendedor de tienda sin el resto.
+                accounts = await this.fetchAllPages<any>('CRM_Cuentas tienda full', (from, to) => supabase
+                    .from('CRM_Cuentas')
+                    .select('*')
+                    .eq('is_deleted', false)
+                    .order('updated_at', { ascending: true })
+                    .order('id', { ascending: true })
+                    .range(from, to), Number.POSITIVE_INFINITY, 1000, FULL_PORTFOLIO_SYNC_SAFETY_LIMIT);
+            } else if (incrementalPortfolio && lastSync) {
                 accounts = await this.fetchAllPages<any>('CRM_Cuentas delta', (from, to) => supabase
                     .from('CRM_Cuentas')
                     .select('*')
@@ -1724,7 +1796,7 @@ export class SyncEngine {
                     .eq('is_deleted', false)
                     .order('updated_at', { ascending: false })
                     .order('id', { ascending: false })
-                    .range(from, to), 3000);
+                    .range(from, to), portfolioLimit, 1000, portfolioSafetyLimit);
 
                 // Merge and deduplicate by ID
                 const accMap = new Map<string, any>();
@@ -1785,6 +1857,11 @@ export class SyncEngine {
                 }
 
                 console.log(`[Sync] Merged ${mergedCount} accounts (${skippedCount} with pending changes skipped).`);
+            }
+
+            if (pullAllTiendaAccounts && _user?.id) {
+                await this.setSyncCursor(_user.id, TIENDA_ACCOUNTS_FULL_CURSOR, upperBound);
+                console.log('[Sync] Tienda: descarga completa de cuentas guardada.');
             }
 
             // CLEANUP: Remove locally-cached accounts that were deleted on the server
@@ -1876,6 +1953,27 @@ export class SyncEngine {
             } catch (pErr: any) {
                 console.error('[Sync] Failed to pull phases:', pErr.message);
                 catalogErrors.push(`CRM_FasesOportunidad: ${pErr.message}`);
+            }
+            await this.yield();
+
+            // Pull loss reasons (CRM_RazonesPerdida). Small catalog, no channel column.
+            // Replace the local copy so a reason added or deactivated in Supabase
+            // shows up on the next catalog refresh instead of sticking in Dexie.
+            try {
+                const lossReasons = await this.fetchAllPages<{ id: number; descripcion: string | null; is_active: boolean | null }>('CRM_RazonesPerdida catalog', (from, to) => supabase
+                    .from('CRM_RazonesPerdida')
+                    .select('id, descripcion, is_active')
+                    .order('id', { ascending: true })
+                    .range(from, to));
+
+                if (lossReasons && lossReasons.length > 0) {
+                    await applyLossReasonCatalog(lossReasons);
+                    console.log(`[Sync] Pulled ${lossReasons.length} loss reasons.`);
+                }
+            } catch (lrErr: unknown) {
+                const message = lrErr instanceof Error ? lrErr.message : String(lrErr);
+                console.error('[Sync] Failed to pull loss reasons:', message);
+                catalogErrors.push(`CRM_RazonesPerdida: ${message}`);
             }
             await this.yield();
 
@@ -2096,11 +2194,11 @@ export class SyncEngine {
                     .from('CRM_Contactos')
                     .select('*')
                     .eq('is_deleted', false);
-                query = lastSync
-                    ? query.gte('updated_at', lastSync).lte('updated_at', upperBound).order('updated_at', { ascending: true })
+                query = incrementalPortfolio
+                    ? query.gte('updated_at', lastSync as string).lte('updated_at', upperBound).order('updated_at', { ascending: true })
                     : query.order('updated_at', { ascending: false });
-                return query.order('id', { ascending: Boolean(lastSync) }).range(from, to);
-            }, lastSync ? Number.POSITIVE_INFINITY : 3000);
+                return query.order('id', { ascending: incrementalPortfolio }).range(from, to);
+            }, incrementalPortfolio ? Number.POSITIVE_INFINITY : portfolioLimit, 1000, portfolioSafetyLimit);
 
             if (contacts && contacts.length > 0) {
                 const pendingContactIds = new Set(
@@ -2192,11 +2290,12 @@ export class SyncEngine {
                     .from('CRM_Oportunidades')
                     .select('*')
                     .eq('is_deleted', false);
-                query = lastSync
-                    ? query.gte('updated_at', lastSync).lte('updated_at', upperBound).order('updated_at', { ascending: true })
+                if (tiendaUserId) query = query.eq('owner_user_id', tiendaUserId);
+                query = incrementalPortfolio
+                    ? query.gte('updated_at', lastSync as string).lte('updated_at', upperBound).order('updated_at', { ascending: true })
                     : query.order('updated_at', { ascending: false });
-                return query.order('id', { ascending: Boolean(lastSync) }).range(from, to);
-            }, lastSync ? Number.POSITIVE_INFINITY : 3000);
+                return query.order('id', { ascending: incrementalPortfolio }).range(from, to);
+            }, incrementalPortfolio ? Number.POSITIVE_INFINITY : portfolioLimit, 1000, portfolioSafetyLimit);
 
             console.log(`[Sync] Pulled ${opportunities?.length || 0} opportunities from server.`);
 
@@ -2231,6 +2330,10 @@ export class SyncEngine {
                 console.log(`[Sync] Merged ${mergedCount} opportunities (${skippedCount} with pending changes skipped).`);
             } else {
                 console.warn('[Sync] No opportunities returned from server (Length is 0 or undefined). Check RLS policies?');
+            }
+
+            if (tiendaUserId) {
+                await this.purgeTiendaLocal('opportunities', 'CRM_Oportunidades', 'owner_user_id', tiendaUserId);
             }
 
             // CLEANUP: Remove locally cached opportunities that were deleted on server
@@ -2489,16 +2592,18 @@ export class SyncEngine {
         // Pull Activities (CRM_Actividades) - SMART MERGE with incremental sync
             // Re-enabled to ensure activities persist across browser sessions
             try {
+                const activityIncremental = Boolean(lastSync) && !pullEntirePortfolio;
                 const activities = await this.fetchAllPages<any>('CRM_Actividades', (from, to) => {
                     let query = supabase
                         .from('CRM_Actividades')
                         .select('*')
                         .eq('is_deleted', false);
-                    query = lastSync
-                        ? query.gte('updated_at', lastSync).lte('updated_at', upperBound).order('updated_at', { ascending: true })
+                    if (tiendaUserId) query = query.eq('user_id', tiendaUserId);
+                    query = activityIncremental
+                        ? query.gte('updated_at', lastSync as string).lte('updated_at', upperBound).order('updated_at', { ascending: true })
                         : query.order('updated_at', { ascending: false });
-                    return query.order('id', { ascending: Boolean(lastSync) }).range(from, to);
-                }, lastSync ? Number.POSITIVE_INFINITY : 3000);
+                    return query.order('id', { ascending: activityIncremental }).range(from, to);
+                }, activityIncremental ? Number.POSITIVE_INFINITY : (pullEntirePortfolio ? portfolioLimit : 3000), 1000, pullEntirePortfolio ? portfolioSafetyLimit : 100_000);
 
                 if (activities && activities.length > 0) {
                     // Smart merge: Apply Last-Write-Wins (LWW) locally
@@ -2560,9 +2665,17 @@ export class SyncEngine {
 
                     console.log(`[Sync] Merged ${activitiesToPut.length} activities (LWW field-level merge).`);
                 }
+                if (tiendaUserId) {
+                    await this.purgeTiendaLocal('activities', 'CRM_Actividades', 'user_id', tiendaUserId);
+                }
             } catch (actErr: any) {
                 console.error('[Sync] Failed to pull activities:', actErr.message);
                 pullErrors.push(`CRM_Actividades: ${actErr.message}`);
+            }
+
+            if (pullEntirePortfolio && _user?.id && !pullErrors.some(error => error.startsWith('CRM_Actividades'))) {
+                await this.setSyncCursor(_user.id, FULL_PORTFOLIO_CURSOR, upperBound);
+                console.log('[Sync] Full portfolio pull stored for accounts, contacts, opportunities and activities.');
             }
 
             // Actividades propias fuera del caché de 3.000 (una vez por copia local).
@@ -2570,7 +2683,10 @@ export class SyncEngine {
             const ownActivitiesKey = '__own_activities_v1__';
             if (_user?.id && !(await this.getSyncCursor(_user.id, ownActivitiesKey))) {
                 try {
-                    const added = await hydrateOwnActivities(_user.id);
+                    const added = await hydrateOwnActivities(_user.id, new Date(upperBound), {
+                        viewerId: _user.id,
+                        esTienda: Boolean(tiendaUserId)
+                    });
                     await this.setSyncCursor(_user.id, ownActivitiesKey, upperBound);
                     console.log(`[Sync] Own activities backfill: ${added} added.`);
                 } catch (ownErr: unknown) {

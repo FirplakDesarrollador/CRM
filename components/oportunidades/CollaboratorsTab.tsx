@@ -6,13 +6,37 @@ import { db } from '@/lib/db';
 import { CollaboratorSelector, CollaboratorEntry } from './CollaboratorSelector';
 import { Button } from '@/components/ui/button';
 import { Loader2, Save } from 'lucide-react';
-import { syncEngine } from '@/lib/sync';
+import { executeDirectMutations, DirectMutationRequest } from '@/lib/supabaseDirect';
 import { v4 as uuidv4 } from 'uuid';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { supabase } from '@/lib/supabase';
 import { canEditOpportunityCollaborators } from '@/lib/opportunityCollaboratorPermissions';
 
 export function CollaboratorsTab({ opportunityId }: { opportunityId: string }) {
+    // Direct Supabase fetch for collaborators of this opportunity
+    useEffect(() => {
+        if (!opportunityId || typeof window === 'undefined' || !navigator.onLine) return;
+        let cancelled = false;
+        const loadCollaborators = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('CRM_Oportunidades_Colaboradores')
+                    .select('*')
+                    .eq('oportunidad_id', opportunityId)
+                    .eq('is_deleted', false);
+                if (!cancelled && !error && Array.isArray(data) && data.length > 0) {
+                    await db.opportunityCollaborators.bulkPut(data);
+                }
+            } catch (err) {
+                console.warn('[CollaboratorsTab] Direct Supabase load warning:', err);
+            }
+        };
+        void loadCollaborators();
+        return () => {
+            cancelled = true;
+        };
+    }, [opportunityId]);
+
     const dbCollaborators = useLiveQuery(
         () => db.opportunityCollaborators
             .where('oportunidad_id').equals(opportunityId)
@@ -104,13 +128,14 @@ export function CollaboratorsTab({ opportunityId }: { opportunityId: string }) {
             const keptIds = new Set(newEntries.map(e => e.tempId).filter(Boolean));
             const toDelete = dbCollaborators.filter(c => !keptIds.has(c.id));
 
-            await syncEngine.commitLocalChanges([db.opportunityCollaborators], async () => {
-                const requests = [];
+            await executeDirectMutations(async () => {
+                const requests: DirectMutationRequest[] = [];
                 for (const item of toDelete) {
                     await db.opportunityCollaborators.update(item.id, { is_deleted: true });
                     requests.push({
-                        entityTable: 'CRM_Oportunidades_Colaboradores', entityId: item.id,
-                        changes: { is_deleted: true }
+                        entityTable: 'CRM_Oportunidades_Colaboradores',
+                        entityId: item.id,
+                        changes: { ...item, is_deleted: true, updated_at: new Date().toISOString() } as unknown as Record<string, unknown>,
                     });
                 }
 
@@ -133,13 +158,9 @@ export function CollaboratorsTab({ opportunityId }: { opportunityId: string }) {
                                 };
                                 await db.opportunityCollaborators.put(updated);
                                 requests.push({
-                                    entityTable: 'CRM_Oportunidades_Colaboradores', entityId: updated.id,
-                                    changes: {
-                                        usuario_id: entry.usuario_id,
-                                        porcentaje: entry.porcentaje,
-                                        rol: entry.rol,
-                                        updated_at: updated.updated_at
-                                    }
+                                    entityTable: 'CRM_Oportunidades_Colaboradores',
+                                    entityId: updated.id,
+                                    changes: updated as unknown as Record<string, unknown>,
                                 });
                             }
                         }
@@ -155,8 +176,12 @@ export function CollaboratorsTab({ opportunityId }: { opportunityId: string }) {
                             created_at: new Date().toISOString(),
                             updated_at: new Date().toISOString()
                         };
-                        await db.opportunityCollaborators.add(newItem);
-                        requests.push({ entityTable: 'CRM_Oportunidades_Colaboradores', entityId: newId, changes: newItem });
+                        await db.opportunityCollaborators.put(newItem);
+                        requests.push({
+                            entityTable: 'CRM_Oportunidades_Colaboradores',
+                            entityId: newId,
+                            changes: newItem as unknown as Record<string, unknown>,
+                        });
                     }
                 }
                 return requests;

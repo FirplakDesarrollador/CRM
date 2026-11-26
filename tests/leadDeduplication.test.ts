@@ -1,5 +1,14 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { describe, it, expect } from 'vitest';
-import { shouldDeduplicateLead, buildAppendedLeadComments, DEDUPLICATION_WINDOW_HOURS } from '../lib/leadDeduplication';
+import {
+  shouldDeduplicateLead,
+  buildAppendedLeadComments,
+  DEDUPLICATION_WINDOW_HOURS,
+  isPlaceholderLeadName,
+  resolveLeadPersonName,
+  resolveLeadOpportunityName,
+} from '../lib/leadDeduplication';
 
 describe('Lead Deduplication Logic', () => {
   const now = new Date('2026-10-23T12:00:00.000Z');
@@ -68,3 +77,42 @@ describe('Lead Deduplication Logic', () => {
     expect(result).toContain('https://firplak.com/tina');
   });
 });
+
+describe('Nombre de lead web (no usar Consumidor Final si hay nombre real)', () => {
+  it('usa apellido/lastname de vTiger cuando nombre viene vacío, guion o Consumidor Final', () => {
+    expect(resolveLeadPersonName({ nombre: '', lastname: 'Caralina' })).toBe('Caralina');
+    expect(resolveLeadPersonName({ nombre: '-', apellido: 'Caralina' })).toBe('Caralina');
+    expect(resolveLeadPersonName({ nombre: 'Consumidor Final', lastname: 'Caralina' })).toBe('Caralina');
+    expect(resolveLeadPersonName({ firstname: '', last_name: 'Caralina' })).toBe('Caralina');
+  });
+
+  it('concatena nombre y apellido reales', () => {
+    expect(resolveLeadPersonName({ nombre: 'Juan', apellido: 'Pérez' })).toBe('Juan Pérez');
+  });
+
+  it('reemplaza Por definir de la oportunidad por el nombre de la persona', () => {
+    expect(resolveLeadOpportunityName('Por definir', 'Caralina')).toBe('Caralina');
+    expect(resolveLeadOpportunityName('-', 'Caralina')).toBe('Caralina');
+    expect(resolveLeadOpportunityName('', 'Caralina')).toBe('Caralina');
+    expect(resolveLeadOpportunityName('Proyecto Jacuzzi', 'Caralina')).toBe('Proyecto Jacuzzi');
+  });
+
+  it('marca Consumidor Final, Por definir y vacío como placeholder', () => {
+    expect(isPlaceholderLeadName('Consumidor Final')).toBe(true);
+    expect(isPlaceholderLeadName('Por definir')).toBe(true);
+    expect(isPlaceholderLeadName(null)).toBe(true);
+    expect(isPlaceholderLeadName('Caralina')).toBe(false);
+  });
+
+  it('la Edge Function de WordPress usa el resolver de nombre y no solo contacto.nombre', () => {
+    const edge = readFileSync(
+      path.join(process.cwd(), 'supabase', 'functions', 'wordpress-lead-intake', 'index.ts'),
+      'utf8'
+    );
+    expect(edge).toContain('resolveLeadPersonName');
+    expect(edge).toContain('resolveLeadOpportunityName');
+    expect(edge).toContain('isPlaceholderLeadName');
+    expect(edge).not.toMatch(/let nombreContacto = \(body\.contacto\?\.nombre \?\? ""\)\.trim\(\);/);
+  });
+});
+

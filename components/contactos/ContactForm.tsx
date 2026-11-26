@@ -1,7 +1,7 @@
 import { useContacts } from "@/lib/hooks/useContacts";
-import { db, LocalContact } from "@/lib/db";
+import type { LocalAccount, LocalContact } from "@/lib/db";
 import { useForm } from "react-hook-form";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useFormDraft } from "@/lib/hooks/useFormDraft";
 import { ContactImportButton } from "./ContactImportButton";
@@ -25,7 +25,35 @@ interface ContactFormProps {
 
 export function ContactForm({ accountId, existingContact, onSuccess, onCancel, onDelete }: ContactFormProps) {
     const { createContact, updateContact, deleteContact, contacts } = useContacts(accountId);
-    const { isAdmin } = useCurrentUser();
+    const { isAdmin, isCoordinador, user: currentUser } = useCurrentUser();
+    const [contactAccount, setContactAccount] = useState<Pick<LocalAccount, 'id' | 'owner_user_id' | 'created_by'> | undefined>(undefined);
+
+    useEffect(() => {
+        if (!existingContact?.account_id) {
+            setContactAccount(undefined);
+            return;
+        }
+        let cancelled = false;
+        supabase
+            .from('CRM_Cuentas')
+            .select('id, owner_user_id, created_by')
+            .eq('id', existingContact.account_id)
+            .maybeSingle()
+            .then(({ data }) => {
+                if (!cancelled) {
+                    setContactAccount((data as Pick<LocalAccount, 'id' | 'owner_user_id' | 'created_by'>) || undefined);
+                }
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [existingContact?.account_id]);
+    // Eliminar: admin, coordinador, creador del contacto o dueño/creador de la cuenta
+    const canDeleteContact = isAdmin || isCoordinador || (!!currentUser?.id && (
+        (existingContact as { created_by?: string } | undefined)?.created_by === currentUser.id ||
+        contactAccount?.owner_user_id === currentUser.id ||
+        (contactAccount as { created_by?: string } | undefined)?.created_by === currentUser.id
+    ));
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
     const [activeTab, setActiveTab] = useState<'info' | 'history'>('info');
@@ -119,26 +147,7 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel, o
 
                 if (checks.length === 0) return null;
 
-                // 1. LOCAL CHECK (Dexie) - Crucial for offline or pending sync items
-                try {
-                    const localResults = await db.contacts.filter(c => {
-                        if (existingContact?.id && c.id === existingContact.id) return false;
-                        
-                        const matchName = data.nombre && c.nombre?.toLowerCase() === data.nombre.toLowerCase();
-                        const matchEmail = data.email && c.email?.toLowerCase() === data.email.toLowerCase();
-                        const matchPhone = data.telefono && c.telefono === data.telefono;
-                        
-                        return !!(matchName || matchEmail || matchPhone);
-                    }).toArray();
-
-                    if (localResults.length > 0) {
-                        return localResults.map(r => ({ ...r, source: 'local' }));
-                    }
-                } catch (e) {
-                    console.warn("[ContactForm] local duplicate check failed:", e);
-                }
-
-                // 2. SERVER CHECK (Supabase)
+                // SERVER CHECK (Supabase)
                 try {
                     const orFilters = [];
                     if (data.email) orFilters.push(`email.eq.${data.email}`);
@@ -159,8 +168,6 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel, o
                     return duplicates?.map(d => ({ ...d, source: 'server' })) || null;
                 } catch (error: any) {
                     console.error("Error checking contact duplicates on server:", error);
-                    // If server check fails, we already did local check. 
-                    // We might want to warn the user but local is ok for now.
                     return null;
                 }
             };
@@ -355,7 +362,7 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel, o
                     <div className="flex justify-between items-center gap-3 pt-6 border-t border-slate-100">
                         {existingContact ? (
                             <>
-                                {isAdmin ? (
+                                {canDeleteContact ? (
                                     <button
                                         type="button"
                                         onClick={() => setIsDeleteModalOpen(true)}

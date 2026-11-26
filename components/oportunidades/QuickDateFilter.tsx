@@ -3,7 +3,8 @@
 import React, { useState, useRef, useEffect } from "react";
 import { CalendarDays, ChevronDown, Check, X, Sparkles, CalendarRange } from "lucide-react";
 import { cn } from "@/components/ui/utils";
-import { DATE_FILTER_PRESETS, DateRangePreset } from "@/lib/dateFilterHelpers";
+import { DATE_FILTER_PRESETS, DateRangePreset, bogotaYMD } from "@/lib/dateFilterHelpers";
+import { listDateFilterTitle, listDateTodayLabel } from "@/lib/opportunityListDateFilter";
 
 export interface DateFilterChangePayload {
     startDate: string | null;
@@ -15,7 +16,6 @@ interface DateFilterPanelProps {
     title?: string;
     startDate: string | null;
     endDate: string | null;
-    statusFilter?: string;
     onDateChange: (payload: DateFilterChangePayload) => void;
     onClose?: () => void;
 }
@@ -24,21 +24,18 @@ export function DateFilterPanel({
     title = "Fecha de Creación",
     startDate,
     endDate,
-    statusFilter,
     onDateChange,
     onClose
 }: DateFilterPanelProps) {
-    const todayStr = new Date().toISOString().split("T")[0];
+    const todayStr = bogotaYMD();
 
     const [customStart, setCustomStart] = useState<string>(startDate || "");
     const [customEnd, setCustomEnd] = useState<string>(endDate || "");
-    const [includeAllStatuses, setIncludeAllStatuses] = useState<boolean>(statusFilter === 'all');
 
     useEffect(() => {
         setCustomStart(startDate || "");
         setCustomEnd(endDate || "");
-        setIncludeAllStatuses(statusFilter === 'all');
-    }, [startDate, endDate, statusFilter]);
+    }, [startDate, endDate]);
 
     const isUpToToday = !startDate && endDate === todayStr;
     const isToday = startDate === todayStr && endDate === todayStr;
@@ -46,12 +43,9 @@ export function DateFilterPanel({
 
     const handleApplyPreset = (preset: DateRangePreset) => {
         const range = preset.getRange();
-        // If up_to_today, by default bring all statuses to bring all historical data as user requested
-        const shouldIncludeAll = preset.id === 'up_to_today' ? true : includeAllStatuses;
         onDateChange({
             startDate: range.startDate,
-            endDate: range.endDate,
-            ...(shouldIncludeAll ? { statusFilter: 'all' as const } : {})
+            endDate: range.endDate
         });
         onClose?.();
     };
@@ -60,8 +54,7 @@ export function DateFilterPanel({
         e.preventDefault();
         onDateChange({
             startDate: customStart || null,
-            endDate: customEnd || null,
-            ...(includeAllStatuses ? { statusFilter: 'all' as const } : {})
+            endDate: customEnd || null
         });
         onClose?.();
     };
@@ -209,19 +202,6 @@ export function DateFilterPanel({
                     </div>
                 </div>
 
-                {/* Traer todos los datos (ganadas, perdidas, abiertas) */}
-                <label className="flex items-start gap-2 pt-1 text-[11px] text-slate-600 cursor-pointer select-none">
-                    <input
-                        type="checkbox"
-                        checked={includeAllStatuses}
-                        onChange={(e) => setIncludeAllStatuses(e.target.checked)}
-                        className="mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                    />
-                    <span className="leading-tight">
-                        <strong className="text-slate-800 font-semibold">Traer todos los datos</strong> (incluir ganadas y perdidas del histórico)
-                    </span>
-                </label>
-
                 <div className="pt-1 flex gap-2">
                     <button
                         type="submit"
@@ -251,6 +231,11 @@ interface QuickDateFilterProps {
     startDate: string | null;
     endDate: string | null;
     statusFilter?: string;
+    /** Rótulo del botón cuando no hay rango. */
+    idleLabel?: string;
+    /** Título del panel. Si no se pasa, depende del filtro de estado. */
+    title?: string;
+    todayLabel?: string;
     onDateChange: (payload: DateFilterChangePayload) => void;
 }
 
@@ -258,6 +243,9 @@ export function QuickDateFilter({
     startDate,
     endDate,
     statusFilter,
+    idleLabel = "Filtrar por fecha",
+    title,
+    todayLabel,
     onDateChange
 }: QuickDateFilterProps) {
     const [isOpen, setIsOpen] = useState(false);
@@ -276,16 +264,16 @@ export function QuickDateFilter({
         }
     }, [isOpen]);
 
-    const todayStr = new Date().toISOString().split("T")[0];
+    const todayStr = bogotaYMD();
     const isUpToToday = !startDate && endDate === todayStr;
     const isToday = startDate === todayStr && endDate === todayStr;
     const hasFilter = Boolean(startDate || endDate);
 
-    let currentLabel = "Filtrar por fecha";
+    let currentLabel = idleLabel;
     if (isUpToToday) {
         currentLabel = "Hasta hoy (Todo)";
     } else if (isToday) {
-        currentLabel = "Creadas hoy";
+        currentLabel = todayLabel ?? listDateTodayLabel(statusFilter);
     } else if (startDate && endDate) {
         currentLabel = `${startDate} a ${endDate}`;
     } else if (startDate) {
@@ -314,7 +302,7 @@ export function QuickDateFilter({
                         ? "bg-blue-600 text-white border-blue-600 shadow-blue-500/20 ring-2 ring-blue-500/20"
                         : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300"
                 )}
-                title="Filtrar oportunidades por fecha"
+                title={title ?? listDateFilterTitle(statusFilter)}
             >
                 <CalendarDays className={cn("w-4 h-4 shrink-0", hasFilter ? "text-white" : "text-blue-600")} />
                 <span className="whitespace-nowrap max-w-[170px] truncate">{currentLabel}</span>
@@ -335,10 +323,9 @@ export function QuickDateFilter({
             {isOpen && (
                 <div className="absolute left-0 sm:left-auto sm:right-0 top-full mt-2 z-50">
                     <DateFilterPanel
-                        title="Fecha de Creación"
+                        title={title ?? listDateFilterTitle(statusFilter)}
                         startDate={startDate}
                         endDate={endDate}
-                        statusFilter={statusFilter}
                         onDateChange={onDateChange}
                         onClose={() => setIsOpen(false)}
                     />
@@ -408,10 +395,9 @@ export function FloatingDateFilterPopover({
             onMouseDown={(e) => e.stopPropagation()}
         >
             <DateFilterPanel
-                title={anchor.title || "Fecha de Creación"}
+                title={anchor.title || listDateFilterTitle(statusFilter)}
                 startDate={startDate}
                 endDate={endDate}
-                statusFilter={statusFilter}
                 onDateChange={onDateChange}
                 onClose={onClose}
             />

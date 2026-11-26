@@ -64,4 +64,39 @@ describe("Cálculos de Precios e IVA en PDF", () => {
         expect(totals.iva).toBe(0);
         expect(totals.granTotal).toBe(4750);
     });
+
+    it("desglosa subtotal bruto sin IVA, descuento en pesos, subtotal neto e IVA", () => {
+        const items = [
+            {
+                producto_id: "prod-1",
+                precio_unitario: 5000000,
+                cantidad: 2,
+                discount_pct: 10,
+                subtotal: 9000000,
+            },
+            {
+                producto_id: "prod-2",
+                precio_unitario: 1000000,
+                cantidad: 1,
+                discount_pct: 0,
+                subtotal: 1000000,
+            },
+        ];
+        const quote = {
+            currency_id: "COP",
+        };
+
+        const totals = calculatePdfTotals(items, quote);
+
+        // Subtotal bruto antes de descuento: 5.000.000*2 + 1.000.000*1 = 11.000.000
+        expect(totals.subtotalBruto).toBe(11000000);
+        // Descuento en pesos: 1.000.000 (10% sobre los 10.000.000)
+        expect(totals.descuentoTotal).toBe(1000000);
+        // Subtotal neto sin IVA tras descuento: 10.000.000
+        expect(totals.subtotal).toBe(10000000);
+        // IVA 19% sobre subtotal neto: 1.900.000
+        expect(totals.iva).toBe(1900000);
+        // Gran total con IVA: 11.900.000
+        expect(totals.granTotal).toBe(11900000);
+    });
 });

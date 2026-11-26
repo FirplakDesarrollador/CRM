@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import { isSellerRole, sellerCanSeeActivity } from '@/lib/sellerVisibility';
+import { canViewAllAccountsContactsOpportunities, isSellerRole, sellerCanSeeActivity } from '@/lib/sellerVisibility';
+import { isTiendaUser } from '@/lib/tiendaVisibility';
 import { supabase } from '@/lib/supabase';
-import { syncEngine } from '@/lib/sync';
 import { db } from '@/lib/db';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { matchesSearchTokens, getSearchTokens, accentInsensitiveCondition } from '@/lib/utils';
@@ -46,6 +46,8 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
     // User Context
     const { user, role: userRole, isAdmin } = useCurrentUser();
     const currentUserId = user?.id;
+    const seesAllPortfolio = canViewAllAccountsContactsOpportunities(user);
+    const tiendaScoped = isTiendaUser(user);
 
     const [subordinateIds, setSubordinateIds] = useState<string[]>([]);
 
@@ -64,7 +66,7 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
     }, [userRole, currentUserId]);
 
     const fetchActivities = useCallback(async (isLoadMore = false) => {
-        if (!currentUserId) return; // Wait for user
+        if (!currentUserId || !userRole) return; // Wait for user and role
 
         const setIsLoadingData = useSyncStore.getState().setIsLoadingData;
         setLoading(true);
@@ -81,8 +83,8 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
                 const allOpps = await db.opportunities.toArray();
                 const oppMap = new Map(allOpps.map(o => [o.id, o]));
 
-                // Asesor (VENDEDOR): solo actividades asignadas a él, en cualquier vista (lista, cuenta, oportunidad).
-                if (isSellerRole(userRole)) {
+                // Asesor (VENDEDOR) y tienda: solo actividades asignadas a él, en cualquier vista.
+                if ((tiendaScoped || (isSellerRole(userRole) && !seesAllPortfolio)) && currentUserId) {
                     localActivities = localActivities.filter(a => sellerCanSeeActivity(a, currentUserId));
                 }
 
@@ -174,8 +176,8 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
                 `, { count: 'exact' })
                 .eq('is_deleted', false);
 
-            // Asesor (VENDEDOR): solo actividades asignadas a él, en cualquier vista.
-            if (isSellerRole(userRole)) {
+            // Asesor (VENDEDOR) y tienda: solo actividades asignadas a él, en cualquier vista.
+            if ((tiendaScoped || (isSellerRole(userRole) && !seesAllPortfolio)) && currentUserId) {
                 query = query.eq('user_id', currentUserId);
             }
 
@@ -258,7 +260,7 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
             setLoading(false);
             setIsLoadingData(false);
         }
-    }, [currentUserId, pageSize, searchTerm, typeFilter, showCompleted, opportunityId, accountId, page, isAdmin, userRole, subordinateIds]);
+    }, [currentUserId, seesAllPortfolio, tiendaScoped, pageSize, searchTerm, typeFilter, showCompleted, opportunityId, accountId, page, isAdmin, userRole, subordinateIds]);
 
     // Initial Fetch & Filter Fetch - Reset on filter change
     useEffect(() => {

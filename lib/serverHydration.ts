@@ -12,11 +12,16 @@
  * - Nunca toca registros con cambios pendientes en el outbox (p. ej. una actividad borrada
  *   offline que aún no se ha subido no "revive").
  * - No escribe nada en Supabase: solo lecturas.
- * - Asesor (VENDEDOR): solo trae actividades asignadas a él (misma regla de sellerVisibility).
+ * - Asesor (VENDEDOR): solo trae actividades asignadas a él (misma regla de sellerVisibility),
+ *   salvo canViewAllAccountsContactsOpportunities, que hidrata las de todos.
+ * - Usuario de tienda (es_tienda): igual que el asesor en actividades (user_id) y no guarda
+ *   oportunidades de las que no es dueño. Las cuentas sí se guardan.
+ * - Cuentas, contactos y oportunidades de referencia no se recortan por dueño.
+ *   La excepción de cartera se aplica en las vistas, no al guardar estas filas.
  */
 import { db } from '@/lib/db';
 import { supabase } from '@/lib/supabase';
-import { isSellerRole } from '@/lib/sellerVisibility';
+import { canViewAllAccountsContactsOpportunities, isSellerRole } from '@/lib/sellerVisibility';
 import { getSearchTokens, accentInsensitiveCondition, applyAccentInsensitiveFilter } from '@/lib/utils';
 import { getCellphoneSearchDigits } from '@/lib/phoneSearch';
 
@@ -28,7 +33,14 @@ const MAX_OPPORTUNITY_ACTIVITIES = 5000;
 const MAX_OWN_ACTIVITIES = 30000;
 const OWN_HISTORY_MONTHS = 12;
 
-type Viewer = { viewerId?: string | null; viewerRole?: string | null };
+type Viewer = { viewerId?: string | null; viewerRole?: string | null; viewerEmail?: string | null; esTienda?: boolean | null };
+
+/** Actividades hidratadas: asesor o tienda solo traen las suyas, salvo la excepción de cartera completa. */
+function sellerActivitiesOnly(viewer: Viewer): boolean {
+    if (viewer.esTienda === true) return true;
+    if (canViewAllAccountsContactsOpportunities({ id: viewer.viewerId, email: viewer.viewerEmail })) return false;
+    return isSellerRole(viewer.viewerRole);
+}
 type Row = { id: string; [key: string]: unknown };
 
 const isOnline = () => typeof navigator === 'undefined' || navigator.onLine;
@@ -65,7 +77,7 @@ async function pendingEntityIds(entityType: string): Promise<Set<string>> {
 
 /** Inserta en Dexie solo las filas que no existen localmente y no tienen cambios pendientes. */
 async function addMissing(
-    table: 'activities' | 'opportunities' | 'accounts',
+    table: 'activities' | 'opportunities' | 'accounts' | 'contacts',
     entityType: string,
     rows: Row[]
 ): Promise<number> {
@@ -95,9 +107,9 @@ async function addMissing(
 }
 
 /** Trae del servidor las oportunidades/cuentas referenciadas que no están localmente. */
-async function hydrateReferences(activities: Row[]): Promise<void> {
+async function hydrateReferences(activities: ReadonlyArray<Record<string, unknown>>, viewer?: Viewer): Promise<void> {
     const oppIds = new Set<string>();
-    for (const a of activities) if (typeof a.opportunity_id === 'string') oppIds.add(a.opportunity_id);
+    for (const a of activities) if (typeof a.opportunity_id === 'string' && a.opportunity_id) oppIds.add(a.opportunity_id);
     const localOpps = await db.opportunities.bulkGet(Array.from(oppIds));
     const missingOppIds = Array.from(oppIds).filter((_, i) => !localOpps[i]);
 
@@ -109,11 +121,17 @@ async function hydrateReferences(activities: Row[]): Promise<void> {
     }
     // La visibilidad (asesor: dueño/colaborador) la siguen aplicando las vistas sobre la copia local,
     // igual que con lo que trae la sincronización normal.
-    const oppsToAdd = fetchedOpps;
+    // Tienda: la cuenta sí se guarda; la oportunidad ajena no entra a la copia local.
+    const tiendaOwnerId = viewer?.esTienda === true && viewer.viewerId
+        ? viewer.viewerId
+        : null;
+    const oppsToAdd = tiendaOwnerId
+        ? fetchedOpps.filter(opp => opp.owner_user_id === tiendaOwnerId)
+        : fetchedOpps;
     await addMissing('opportunities', 'CRM_Oportunidades', oppsToAdd);
 
     const accountIds = new Set<string>();
-    for (const a of activities) if (typeof a.account_id === 'string') accountIds.add(a.account_id);
+    for (const a of activities) if (typeof a.account_id === 'string' && a.account_id) accountIds.add(a.account_id);
     for (const o of oppsToAdd) if (typeof o.account_id === 'string') accountIds.add(o.account_id);
     const localAccounts = await db.accounts.bulkGet(Array.from(accountIds));
     const missingAccountIds = Array.from(accountIds).filter((_, i) => !localAccounts[i]);
@@ -133,7 +151,7 @@ async function hydrateReferences(activities: Row[]): Promise<void> {
  */
 export async function hydrateOpportunityActivities(opportunityId: string, viewer: Viewer): Promise<number> {
     if (!opportunityId || !isOnline()) return 0;
-    if (isSellerRole(viewer.viewerRole) && !viewer.viewerId) return 0;
+    if (sellerActivitiesOnly(viewer) && !viewer.viewerId) return 0;
 
     const rows = await fetchPaged((from, to) => {
         let query = supabase
@@ -141,7 +159,7 @@ export async function hydrateOpportunityActivities(opportunityId: string, viewer
             .select('*')
             .eq('is_deleted', false)
             .eq('opportunity_id', opportunityId);
-        if (isSellerRole(viewer.viewerRole)) query = query.eq('user_id', viewer.viewerId as string);
+        if (sellerActivitiesOnly(viewer)) query = query.eq('user_id', viewer.viewerId as string);
         return query.order('fecha_inicio', { ascending: false }).order('id', { ascending: false }).range(from, to);
     }, MAX_OPPORTUNITY_ACTIVITIES);
 
@@ -158,12 +176,15 @@ export async function hydrateActivitiesForSearch(searchText: string, viewer: Vie
     const text = (searchText || '').trim();
     if (text.length < 3 || !isOnline()) return 0;
     if (getCellphoneSearchDigits(text)) return 0; // la búsqueda por celular tiene su propio flujo
-    if (isSellerRole(viewer.viewerRole) && !viewer.viewerId) return 0;
+    if (sellerActivitiesOnly(viewer) && !viewer.viewerId) return 0;
 
     const tokens = getSearchTokens(text).filter(t => /[\p{L}\p{N}]/u.test(t));
     if (tokens.length === 0) return 0;
 
     let oppQuery = supabase.from('CRM_Oportunidades').select('id').eq('is_deleted', false);
+    if (viewer.esTienda === true && viewer.viewerId) {
+        oppQuery = oppQuery.eq('owner_user_id', viewer.viewerId);
+    }
     let accQuery = supabase.from('CRM_Cuentas').select('id').eq('is_deleted', false);
     for (const token of tokens) {
         oppQuery = applyAccentInsensitiveFilter(oppQuery, 'nombre', token);
@@ -188,11 +209,11 @@ export async function hydrateActivitiesForSearch(searchText: string, viewer: Vie
             .select('*')
             .eq('is_deleted', false)
             .or(conditions.join(','));
-        if (isSellerRole(viewer.viewerRole)) query = query.eq('user_id', viewer.viewerId as string);
+        if (sellerActivitiesOnly(viewer)) query = query.eq('user_id', viewer.viewerId as string);
         return query.order('fecha_inicio', { ascending: false }).order('id', { ascending: false }).range(from, to);
     }, MAX_SEARCH_ACTIVITIES);
 
-    await hydrateReferences(rows);
+    await hydrateReferences(rows, viewer);
     return addMissing('activities', 'CRM_Actividades', rows);
 }
 
@@ -202,7 +223,7 @@ export async function hydrateActivitiesForSearch(searchText: string, viewer: Vie
  * la empresa, así que a un asesor le faltaban casi todas las suyas en /actividades.
  * Se ejecuta una vez por copia local (ver syncEngine.pullChanges). Devuelve cuántas agregó.
  */
-export async function hydrateOwnActivities(userId: string, now: Date = new Date()): Promise<number> {
+export async function hydrateOwnActivities(userId: string, now: Date = new Date(), viewer?: Viewer): Promise<number> {
     if (!userId || !isOnline()) return 0;
     const since = new Date(now);
     since.setMonth(since.getMonth() - OWN_HISTORY_MONTHS);
@@ -217,6 +238,91 @@ export async function hydrateOwnActivities(userId: string, now: Date = new Date(
         .order('id', { ascending: false })
         .range(from, to), MAX_OWN_ACTIVITIES);
 
-    await hydrateReferences(rows);
+    await hydrateReferences(rows, viewer ? { ...viewer, viewerId: viewer.viewerId || userId } : undefined);
     return addMissing('activities', 'CRM_Actividades', rows);
+}
+
+/**
+ * Deep link `?id=`: trae esa actividad si no está en la copia local, y con ella
+ * su oportunidad y su cuenta. No escribe en Supabase. No pisa filas locales ni
+ * cambios pendientes. Un asesor solo puede traer una actividad asignada a él.
+ */
+export async function hydrateActivityById(activityId: string, viewer: Viewer): Promise<number> {
+    if (!activityId || !isOnline()) return 0;
+    if (sellerActivitiesOnly(viewer) && !viewer.viewerId) return 0;
+
+    let query = supabase
+        .from('CRM_Actividades')
+        .select('*')
+        .eq('is_deleted', false)
+        .eq('id', activityId);
+    if (sellerActivitiesOnly(viewer)) query = query.eq('user_id', viewer.viewerId as string);
+
+    const { data, error } = await query.limit(1);
+    if (error) throw error;
+    const rows = ((data || []) as Row[]).filter(row => row && row.id);
+    if (rows.length === 0) return 0;
+
+    await hydrateReferences(rows, viewer);
+    return addMissing('activities', 'CRM_Actividades', rows);
+}
+
+/** Guarda en Dexie la oportunidad y la cuenta de una actividad cuando todavía no están en la copia local. */
+export async function hydrateActivityReferences(
+    activity: { opportunity_id?: string | null; account_id?: string | null },
+    viewer?: Viewer
+): Promise<void> {
+    if (!isOnline()) return;
+    if (!activity.opportunity_id && !activity.account_id) return;
+    await hydrateReferences([activity], viewer);
+}
+
+/**
+ * Trae contactos que el modal de actividad necesita para "Ir al contacto" y que
+ * no están en la copia local (la sync inicial solo guarda los 3.000 más recientes).
+ * Solo lee Supabase. No pisa filas locales ni cambios pendientes.
+ * Si la cuenta ya tiene un contacto principal local, no vuelve a bajar toda la cuenta.
+ */
+export async function hydrateActivityContacts(input: {
+    accountId?: string | null;
+    contactIds?: Array<string | null> | null;
+}): Promise<number> {
+    if (!isOnline()) return 0;
+    const accountId = (input.accountId || '').trim();
+    const contactIds = Array.from(new Set(
+        (input.contactIds || []).map(id => (typeof id === 'string' ? id.trim() : '')).filter(Boolean)
+    ));
+    if (!accountId && contactIds.length === 0) return 0;
+
+    const rows: Row[] = [];
+    if (accountId) {
+        const local = await db.contacts.where('account_id').equals(accountId).toArray();
+        const hasPrincipal = local.some(contact => !contact.is_deleted && contact.es_principal);
+        if (!hasPrincipal) {
+            const { data, error } = await supabase
+                .from('CRM_Contactos')
+                .select('*')
+                .eq('account_id', accountId)
+                .eq('is_deleted', false);
+            if (error) throw error;
+            rows.push(...((data || []) as Row[]));
+        }
+    }
+
+    const missingIds: string[] = [];
+    for (const id of contactIds) {
+        const local = await db.contacts.get(id);
+        if (!local) missingIds.push(id);
+    }
+    if (missingIds.length > 0) {
+        const { data, error } = await supabase
+            .from('CRM_Contactos')
+            .select('*')
+            .in('id', missingIds)
+            .eq('is_deleted', false);
+        if (error) throw error;
+        rows.push(...((data || []) as Row[]));
+    }
+
+    return addMissing('contacts', 'CRM_Contactos', rows);
 }

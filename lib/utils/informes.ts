@@ -1,6 +1,8 @@
 import * as ExcelJS from 'exceljs';
 import { saveAs } from 'file-saver';
 import { formatOpportunityCategories } from '@/lib/opportunityCategories';
+import { resolveOpportunityCloseDate } from '@/lib/opportunityCloseDate';
+import { formatDateOnlyDMY } from '@/lib/dateFilterHelpers';
 
 /**
  * Interface parameter for columns
@@ -74,7 +76,8 @@ export const downloadCSV = <T extends object>(
 };
 
 export interface SopRow {
-  anio_fact: number;
+  // number en fechas válidas; "Sin fecha" cuando la oportunidad no tiene fecha de entrega
+  anio_fact: number | string;
   mes_planta: string;
   mes_comercial: string;
   estado: string;
@@ -90,7 +93,7 @@ export interface SopRow {
   cantidad_total: number;
   valor_total: number;
   probabilidad: number;
-  quincena: number;
+  quincena: number | string;
 }
 
 /**
@@ -111,7 +114,7 @@ export const downloadSopExcel = async (
     { header: 'Año fact', key: 'anio_fact', width: 12 },
     { header: 'Mes Planta', key: 'mes_planta', width: 15 },
     { header: 'Mes Comercial', key: 'mes_comercial', width: 15 },
-    { header: 'Estado', key: 'estado', width: 15 },
+    { header: 'Pedido / Proyectado', key: 'estado', width: 22 },
     { header: 'Asesor', key: 'asesor', width: 25 },
     { header: 'Grupo Cliente', key: 'grupo_cliente', width: 20 },
     { header: 'Subgrupo Cliente', key: 'subgrupo_cliente', width: 22 },
@@ -153,8 +156,13 @@ export const downloadSopExcel = async (
     row.getCell('cantidad_total').numFmt = '#,##0';
     row.getCell('valor_total').numFmt = '$#,##0';
     row.getCell('probabilidad').numFmt = '0%';
-    row.getCell('anio_fact').numFmt = '0';
-    row.getCell('quincena').numFmt = '0';
+    // No aplicar formato numérico a "Sin fecha" para evitar NaN en Excel
+    if (typeof item.anio_fact === 'number') {
+      row.getCell('anio_fact').numFmt = '0';
+    }
+    if (typeof item.quincena === 'number') {
+      row.getCell('quincena').numFmt = '0';
+    }
     row.font = { name: 'Segoe UI', size: 10 };
   });
 
@@ -181,18 +189,28 @@ export const downloadSopExcel = async (
   // 1. Extract dimensions (Channels, Years, Months)
   const channels = Array.from(new Set(data.map(d => d.grupo_cliente || 'Desconocido'))).sort();
   
-  // Get unique Year-Month combinations
-  const yearMonthMap: Record<number, Set<string>> = {};
+  // Get unique Year-Month combinations. "Sin fecha" se agrupa al final, no como NaN.
+  type SopYearKey = number | string;
+  const yearMonthMap = new Map<SopYearKey, Set<string>>();
   data.forEach(d => {
-    const yr = d.anio_fact || new Date().getFullYear();
+    const yr: SopYearKey = (d.anio_fact !== null && d.anio_fact !== undefined && d.anio_fact !== 0)
+      ? d.anio_fact
+      : new Date().getFullYear();
     const ms = d.mes_comercial || 'Desconocido';
-    if (!yearMonthMap[yr]) {
-      yearMonthMap[yr] = new Set<string>();
+    if (!yearMonthMap.has(yr)) {
+      yearMonthMap.set(yr, new Set<string>());
     }
-    yearMonthMap[yr].add(ms);
+    yearMonthMap.get(yr)!.add(ms);
   });
 
-  const sortedYears = Object.keys(yearMonthMap).map(Number).sort((a, b) => a - b);
+  const sortedYears = Array.from(yearMonthMap.keys()).sort((a, b) => {
+    const aNum = typeof a === 'number';
+    const bNum = typeof b === 'number';
+    if (aNum && bNum) return (a as number) - (b as number);
+    if (aNum && !bNum) return -1;
+    if (!aNum && bNum) return 1;
+    return String(a).localeCompare(String(b), 'es');
+  });
   
   // Meses ordenados en español para orden correcto en columnas
   const mesOrden: Record<string, number> = {
@@ -205,7 +223,7 @@ export const downloadSopExcel = async (
   // Siguientes columnas mapeadas por año y mes
   interface ColDef {
     colIndex: number;
-    year: number | null;
+    year: number | string | null;
     month: string | null;
     isTotal: boolean;
     headerLabel: string;
@@ -214,7 +232,7 @@ export const downloadSopExcel = async (
   let colCounter = 2; // Inicia en B
 
   sortedYears.forEach(year => {
-    const months = Array.from(yearMonthMap[year]).sort((a, b) => {
+    const months = Array.from(yearMonthMap.get(year) || []).sort((a, b) => {
       return (mesOrden[a] || 99) - (mesOrden[b] || 99);
     });
     
@@ -254,7 +272,7 @@ export const downloadSopExcel = async (
   // Combinar celdas de cabecera por años
   let currentStartCol = 2;
   sortedYears.forEach(year => {
-    const monthsInYear = yearMonthMap[year].size;
+    const monthsInYear = yearMonthMap.get(year)?.size || 0;
     const endCol = currentStartCol + monthsInYear; // Meses + Total
     wsTd.mergeCells(3, currentStartCol, 3, endCol);
     const yrCell = wsTd.getCell(3, currentStartCol);
@@ -294,7 +312,7 @@ export const downloadSopExcel = async (
     row.getCell(1).font = { name: 'Segoe UI', size: 10 };
     
     let channelRowTotal = 0;
-    const channelYearTotals: Record<number, number> = {};
+    const channelYearTotals: Record<string, number> = {};
 
     colDefs.forEach(def => {
       const cell = row.getCell(def.colIndex);
@@ -463,6 +481,15 @@ export function resolveOpportunityActivityInfo(actividades: any[] | any) {
   };
 }
 
+/**
+ * Determina el ID de usuario a utilizar para filtrar los datos a exportar.
+ * Si el usuario es ADMIN, puede filtrar por cualquier asesor (o ver todos si está vacío).
+ * Si no es ADMIN (es asesor/vendedor), el alcance está estrictamente bloqueado a su propio ID.
+ */
+export function resolveExportScope(isAdmin: boolean, selectedUser: string, currentUserId?: string | null): string {
+  return isAdmin ? selectedUser : (currentUserId || '');
+}
+
 export function mapOpportunityReportRow(
   item: any,
   lookups: OpportunityFlattenLookups
@@ -470,7 +497,6 @@ export function mapOpportunityReportRow(
   const getJoinedSingle = <T>(rel: T | T[]) => Array.isArray(rel) ? rel[0] : rel;
   const cuentaObj = getJoinedSingle(item.cuenta);
   const faseObj = getJoinedSingle(item.fase);
-  const estadoObj = getJoinedSingle(item.estado_info);
   const paisId = cuentaObj?.pais_id ?? item.pais_id;
   
   const segObj = getJoinedSingle(item.segmento);
@@ -486,7 +512,6 @@ export function mapOpportunityReportRow(
     cuenta_nombre: cuentaObj?.nombre || '-',
     pais_nombre: paisId ? (lookups.countryMap.get(paisId) || lookups.countryMap.get(Number(paisId)) || lookups.countryMap.get(String(paisId)) || '-') : '-',
     fase_nombre: faseObj?.nombre || '-',
-    estado_nombre: estadoObj?.nombre || '-',
     vendedor_nombre: lookups.userMap.get(item.owner_user_id) || '-',
     creador_nombre: lookups.userMap.get(item.created_by) || '-',
     segmento_nombre: segmentoNombre,
@@ -500,7 +525,11 @@ export function mapOpportunityReportRow(
     categorias_interes: formatOpportunityCategories(item.categoria_oportunidad) || '-',
     setter: item.setter || '-',
     fecha_actividad: activityInfo.fecha_actividad,
-    estado_actividad: activityInfo.estado_actividad
+    estado_actividad: activityInfo.estado_actividad,
+    // Fecha estimada de cierre (columna date fecha_cierre_estimada), mismo formato DD/MM/AAAA del listado.
+    fecha_estimada: formatDateOnlyDMY(item.fecha_cierre_estimada) || '-',
+    // Fecha real de cierre: solo para Cerrada Ganada / Cerrada Perdida
+    fecha_cierre: resolveOpportunityCloseDate(item) || '-'
   };
 }
 
@@ -548,22 +577,30 @@ export function mapActivityReportRow(
 }
 
 /**
+ * Máximo de filas que PostgREST/Supabase devuelve por petición (max-rows = 1000).
+ * Si se piden bloques más grandes el servidor igual responde 1000 y el bucle creía que era el último bloque,
+ * por eso el Excel se quedaba en 1000 filas.
+ */
+export const POSTGREST_MAX_ROWS = 1000;
+
+/**
  * Ejecuta una consulta PostgREST de Supabase por bloques (chunking) consecutivos.
  * Previene que respuestas gigantes (e.g. 75.000 actividades o 68.000 oportunidades)
  * excedan los buffers de Cloudflare o PostgREST (50k filas), evitando el fallo
  * 'SyntaxError: Unterminated string in JSON'.
+ * Los bloques se limitan a POSTGREST_MAX_ROWS y se avanza según las filas recibidas.
  */
 export async function fetchAllInChunks(
   baseQuery: any,
-  batchSize: number = 2500,
+  batchSize: number = POSTGREST_MAX_ROWS,
   onProgress?: (totalFetched: number) => void
 ): Promise<any[]> {
   const allData: any[] = [];
+  const size = Math.max(1, Math.min(batchSize || POSTGREST_MAX_ROWS, POSTGREST_MAX_ROWS));
   let from = 0;
-  let hasMore = true;
 
-  while (hasMore) {
-    const to = from + batchSize - 1;
+  while (true) {
+    const to = from + size - 1;
     const { data: chunk, error } = await baseQuery.range(from, to);
     if (error) throw error;
 
@@ -577,11 +614,11 @@ export async function fetchAllInChunks(
       onProgress(allData.length);
     }
 
-    if (chunk.length < batchSize) {
-      hasMore = false;
-    } else {
-      from += batchSize;
+    // Bloque incompleto = último bloque. Si viene lleno se sigue pidiendo.
+    if (chunk.length < size) {
+      break;
     }
+    from += chunk.length;
   }
 
   return allData;

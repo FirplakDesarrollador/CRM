@@ -56,7 +56,6 @@ describe('Filtros internos de tabla de oportunidades', () => {
             account: null,
             actividades: null,
             fase_data: null,
-            estado_data: null,
             created_at: null,
             fecha_cierre_estimada: null,
             vendedor: null
@@ -105,8 +104,8 @@ describe('Filtros internos de tabla de oportunidades', () => {
             'ciudad',
             'canal',
             'origen',
+            'setter',
             'fase',
-            'estado',
             'creada',
             'categoria',
             'valor',
@@ -232,7 +231,6 @@ describe('Filtros internos de tabla de oportunidades', () => {
         expect(isColumnFilterActive('canal', stateEmpty)).toBe(false);
         expect(isColumnFilterActive('fase', stateEmpty)).toBe(false);
         expect(isColumnFilterActive('vendedor', stateEmpty)).toBe(false);
-        expect(isColumnFilterActive('estado', stateEmpty)).toBe(false); // 'open' is default
         expect(isColumnFilterActive('creada', stateEmpty)).toBe(false);
 
         const stateFiltered = {
@@ -252,7 +250,6 @@ describe('Filtros internos de tabla de oportunidades', () => {
         expect(isColumnFilterActive('canal', stateFiltered)).toBe(true);
         expect(isColumnFilterActive('fase', stateFiltered)).toBe(true);
         expect(isColumnFilterActive('vendedor', stateFiltered)).toBe(true);
-        expect(isColumnFilterActive('estado', stateFiltered)).toBe(true);
         expect(isColumnFilterActive('origen', stateFiltered)).toBe(true);
         expect(isColumnFilterActive('pais', stateFiltered)).toBe(true);
         expect(isColumnFilterActive('ciudad', stateFiltered)).toBe(true);
@@ -267,7 +264,7 @@ describe('Filtros internos de tabla de oportunidades', () => {
         expect(isColumnFilterActive('fase', { ...stateEmpty, phase: -1 })).toBe(true);
     });
 
-    it('getAvailablePhasesForChannel debe filtrar por canal, descartar cerradas y deduplicar por nombre', async () => {
+    it('getAvailablePhasesForChannel debe filtrar por canal, incluir fases cerradas (ganada y perdida) y deduplicar por nombre', async () => {
         const { getAvailablePhasesForChannel, getEquivalentPhaseIds, PROSPECTO_PHASE_ID } = await import('@/lib/opportunityColumnFilterHelpers');
 
         const mockPhases = [
@@ -275,12 +272,13 @@ describe('Filtros internos de tabla de oportunidades', () => {
             { id: 56, nombre: 'Visita', canal_id: 'OBRAS_NAC', orden: 1 },
             { id: 97, nombre: 'Visita', canal_id: 'OBRAS_NAC', orden: 1 }, // Duplicado en BD
             { id: 57, nombre: 'Presentación de propuesta', canal_id: 'OBRAS_NAC', orden: 2 },
-            { id: 61, nombre: 'Cerrada Ganada', canal_id: 'OBRAS_NAC', orden: 6 }, // Estado cerrado (excluir de embudo)
-            { id: 62, nombre: 'Cerrada Perdida', canal_id: 'OBRAS_NAC', orden: 7 }, // Estado cerrado (excluir de embudo)
+            { id: 61, nombre: 'Cerrada Ganada', canal_id: 'OBRAS_NAC', orden: 6 }, // Estado cerrado incluido en fases
+            { id: 62, nombre: 'Cerrada Perdida', canal_id: 'OBRAS_NAC', orden: 7 }, // Estado cerrado incluido en fases
 
             // PROPIO
             { id: 82, nombre: 'Primer contacto', canal_id: 'PROPIO', orden: 1 },
             { id: 83, nombre: 'Presentación de propuesta', canal_id: 'PROPIO', orden: 2 },
+            { id: 87, nombre: 'Cerrada ganada', canal_id: 'PROPIO', orden: 6 },
             { id: 88, nombre: 'Cerrada Perdida', canal_id: 'PROPIO', orden: 7 },
 
             // FERIA
@@ -290,17 +288,27 @@ describe('Filtros internos de tabla de oportunidades', () => {
         // 1. Si no hay canal seleccionado, no debe devolver fases mezcladas
         expect(getAvailablePhasesForChannel(mockPhases, null)).toEqual([]);
 
-        // 2. Para OBRAS_NAC: debe incluir solo fases de OBRAS_NAC, sin cerradas, y 'Visita' una sola vez
+        // 2. Para OBRAS_NAC: debe incluir fases de OBRAS_NAC, incluyendo cerradas, y 'Visita' una sola vez
         const obrasNacPhases = getAvailablePhasesForChannel(mockPhases, 'OBRAS_NAC');
-        expect(obrasNacPhases.length).toBe(2);
-        expect(obrasNacPhases.map(p => p.nombre)).toEqual(['Visita', 'Presentación de propuesta']);
-        expect(obrasNacPhases.some(p => p.nombre.toLowerCase().includes('cerrada'))).toBe(false);
+        expect(obrasNacPhases.length).toBe(4);
+        expect(obrasNacPhases.map(p => p.nombre)).toEqual([
+            'Visita',
+            'Presentación de propuesta',
+            'Cerrada Ganada',
+            'Cerrada Perdida'
+        ]);
+        expect(obrasNacPhases.some(p => p.nombre.toLowerCase().includes('ganada'))).toBe(true);
+        expect(obrasNacPhases.some(p => p.nombre.toLowerCase().includes('perdida'))).toBe(true);
 
-        // 3. Para PROPIO: debe incluir solo fases de PROPIO, sin cerradas
+        // 3. Para PROPIO: debe incluir fases de PROPIO con Cerrada ganada y Cerrada Perdida
         const propioPhases = getAvailablePhasesForChannel(mockPhases, 'PROPIO');
-        expect(propioPhases.length).toBe(2);
-        expect(propioPhases.map(p => p.nombre)).toEqual(['Primer contacto', 'Presentación de propuesta']);
-        expect(propioPhases.some(p => p.nombre.toLowerCase().includes('cerrada'))).toBe(false);
+        expect(propioPhases.length).toBe(4);
+        expect(propioPhases.map(p => p.nombre)).toEqual([
+            'Primer contacto',
+            'Presentación de propuesta',
+            'Cerrada ganada',
+            'Cerrada Perdida'
+        ]);
 
         // 4. getEquivalentPhaseIds debe mapear IDs duplicados (56 y 97 para Visita en OBRAS_NAC)
         const equivalentVisita = getEquivalentPhaseIds(mockPhases, 56);

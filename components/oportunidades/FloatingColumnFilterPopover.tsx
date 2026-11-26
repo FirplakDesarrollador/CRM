@@ -13,9 +13,6 @@ import {
     Building2,
     Layers,
     Tag,
-    CircleDot,
-    Trophy,
-    XCircle,
     Activity,
     RotateCcw
 } from 'lucide-react';
@@ -24,12 +21,12 @@ import { matchesSearchTokens } from '@/lib/utils';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import {
     SALES_CHANNEL_OPTIONS,
-    OPPORTUNITY_STATUS_OPTIONS,
     ACTIVITY_STATUS_OPTIONS,
     PROSPECTO_PHASE_ID,
     getAvailablePhasesForChannel,
     PhaseCatalogItem
 } from '@/lib/opportunityColumnFilterHelpers';
+import { SETTER_FILTER_OPTIONS, SetterFilter } from '@/lib/opportunityStatusFilter';
 
 export interface FloatingColumnFilterAnchor {
     top: number;
@@ -44,14 +41,14 @@ export interface FloatingColumnFilterPopoverProps {
     // Current filter states
     selectedChannel: string | null;
     onSelectChannel: (channel: string | null) => void;
-    selectedPhase: number | null;
+    selectedPhaseIds: number[];
     onSelectPhase: (phaseId: number | null) => void;
     selectedAccountOwnerIds: string[];
     onSelectAccountOwners: (ownerIds: string[]) => void;
-    statusFilter: 'all' | 'open' | 'won' | 'lost';
-    onSelectStatus: (status: 'all' | 'open' | 'won' | 'lost') => void;
     selectedOrigin: string | null;
     onSelectOrigin: (origin: string | null) => void;
+    selectedSetter?: SetterFilter | null;
+    onSelectSetter?: (setter: SetterFilter | null) => void;
     selectedCountry: number | null;
     onSelectCountry: (countryId: number | null) => void;
     selectedCity: string | null;
@@ -65,14 +62,14 @@ export function FloatingColumnFilterPopover({
     onClose,
     selectedChannel,
     onSelectChannel,
-    selectedPhase,
+    selectedPhaseIds,
     onSelectPhase,
     selectedAccountOwnerIds,
     onSelectAccountOwners,
-    statusFilter,
-    onSelectStatus,
     selectedOrigin,
     onSelectOrigin,
+    selectedSetter = null,
+    onSelectSetter,
     selectedCountry,
     onSelectCountry,
     selectedCity,
@@ -212,10 +209,6 @@ export function FloatingColumnFilterPopover({
         matchesSearchTokens([ch.id, ch.label], searchText)
     );
 
-    const filteredStatuses = OPPORTUNITY_STATUS_OPTIONS.filter(st =>
-        matchesSearchTokens([st.label, st.description], searchText)
-    );
-
     const filteredPhases = channelPhases.filter(p =>
         matchesSearchTokens(p.nombre, searchText)
     );
@@ -340,12 +333,12 @@ export function FloatingColumnFilterPopover({
                         {/* Botón directo para filtrar por Prospectos */}
                         <button
                             onClick={() => {
-                                onSelectPhase(selectedPhase === PROSPECTO_PHASE_ID ? null : PROSPECTO_PHASE_ID);
+                                onSelectPhase(selectedPhaseIds.includes(PROSPECTO_PHASE_ID) ? null : PROSPECTO_PHASE_ID);
                                 onClose();
                             }}
                             className={cn(
                                 "w-full px-3 py-2 text-left text-xs font-semibold rounded-xl transition-all flex items-center justify-between cursor-pointer border",
-                                selectedPhase === PROSPECTO_PHASE_ID
+                                selectedPhaseIds.includes(PROSPECTO_PHASE_ID)
                                     ? "bg-purple-50 text-purple-700 border-purple-200 font-bold"
                                     : "bg-slate-50 text-slate-700 border-slate-200/80 hover:bg-slate-100"
                             )}
@@ -356,7 +349,7 @@ export function FloatingColumnFilterPopover({
                                 </span>
                                 <span>Prospectos (Sin fase asignada)</span>
                             </div>
-                            {selectedPhase === PROSPECTO_PHASE_ID && <Check className="w-4 h-4 text-purple-600 shrink-0" />}
+                            {selectedPhaseIds.includes(PROSPECTO_PHASE_ID) && <Check className="w-4 h-4 text-purple-600 shrink-0" />}
                         </button>
 
                         {/* Canales disponibles para el usuario */}
@@ -434,22 +427,22 @@ export function FloatingColumnFilterPopover({
                                     }}
                                     className={cn(
                                         "w-full px-2.5 py-1.5 text-left text-xs font-medium rounded-lg transition-colors flex items-center justify-between cursor-pointer",
-                                        !selectedPhase ? "bg-blue-50 text-blue-700 font-bold" : "hover:bg-slate-50 text-slate-600"
+                                        selectedPhaseIds.length === 0 ? "bg-blue-50 text-blue-700 font-bold" : "hover:bg-slate-50 text-slate-600"
                                     )}
                                 >
                                     <span>Todas las etapas de {activeFunnelChannel}</span>
-                                    {!selectedPhase && <Check className="w-3.5 h-3.5 text-blue-600" />}
+                                    {selectedPhaseIds.length === 0 && <Check className="w-3.5 h-3.5 text-blue-600" />}
                                 </button>
 
                                 {/* Opción: Prospecto (Sin fase) */}
                                 <button
                                     onClick={() => {
-                                        onSelectPhase(selectedPhase === PROSPECTO_PHASE_ID ? null : PROSPECTO_PHASE_ID);
+                                        onSelectPhase(selectedPhaseIds.includes(PROSPECTO_PHASE_ID) ? null : PROSPECTO_PHASE_ID);
                                         onClose();
                                     }}
                                     className={cn(
                                         "w-full px-2.5 py-1.5 text-left text-xs font-medium rounded-lg transition-colors flex items-center justify-between cursor-pointer border border-transparent",
-                                        selectedPhase === PROSPECTO_PHASE_ID
+                                        selectedPhaseIds.includes(PROSPECTO_PHASE_ID)
                                             ? "bg-purple-50 text-purple-700 font-bold border-purple-200/60"
                                             : "hover:bg-slate-50 text-slate-700"
                                     )}
@@ -460,12 +453,15 @@ export function FloatingColumnFilterPopover({
                                         </span>
                                         <span>Prospecto (Sin fase)</span>
                                     </div>
-                                    {selectedPhase === PROSPECTO_PHASE_ID && <Check className="w-3.5 h-3.5 text-purple-600 shrink-0" />}
+                                    {selectedPhaseIds.includes(PROSPECTO_PHASE_ID) && <Check className="w-3.5 h-3.5 text-purple-600 shrink-0" />}
                                 </button>
 
                                 {/* Etapas activas del embudo del canal */}
                                 {filteredPhases.map((ph, idx) => {
-                                    const isSelected = selectedPhase === ph.id;
+                                    const isSelected = selectedPhaseIds.includes(ph.id);
+                                    const lowerName = ph.nombre.toLowerCase();
+                                    const isWon = lowerName.includes('ganad');
+                                    const isLost = lowerName.includes('perdid');
                                     return (
                                         <button
                                             key={ph.id}
@@ -475,16 +471,33 @@ export function FloatingColumnFilterPopover({
                                             }}
                                             className={cn(
                                                 "w-full px-2.5 py-1.5 text-left text-xs font-medium rounded-lg transition-colors flex items-center justify-between cursor-pointer",
-                                                isSelected ? "bg-blue-50 text-blue-700 font-bold" : "hover:bg-slate-50 text-slate-700"
+                                                isSelected 
+                                                    ? (isWon ? "bg-emerald-50 text-emerald-800 font-bold" : isLost ? "bg-rose-50 text-rose-800 font-bold" : "bg-blue-50 text-blue-700 font-bold")
+                                                    : (isWon ? "hover:bg-emerald-50/60 text-slate-700 hover:text-emerald-800" : isLost ? "hover:bg-rose-50/60 text-slate-700 hover:text-rose-800" : "hover:bg-slate-50 text-slate-700")
                                             )}
                                         >
                                             <div className="flex items-center gap-2 truncate pr-2">
-                                                <span className="w-4 h-4 rounded-full bg-slate-100 flex items-center justify-center text-[9px] font-bold text-slate-500 shrink-0">
-                                                    {idx + 1}
-                                                </span>
+                                                {isWon ? (
+                                                    <span className="w-4 h-4 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-[9px] font-bold shrink-0">
+                                                        ✓
+                                                    </span>
+                                                ) : isLost ? (
+                                                    <span className="w-4 h-4 rounded-full bg-rose-100 text-rose-700 flex items-center justify-center text-[9px] font-bold shrink-0">
+                                                        ✕
+                                                    </span>
+                                                ) : (
+                                                    <span className="w-4 h-4 rounded-full bg-slate-100 flex items-center justify-center text-[9px] font-bold text-slate-500 shrink-0">
+                                                        {idx + 1}
+                                                    </span>
+                                                )}
                                                 <span className="truncate">{ph.nombre}</span>
                                             </div>
-                                            {isSelected && <Check className="w-3.5 h-3.5 text-blue-600 shrink-0" />}
+                                            {isSelected && (
+                                                <Check className={cn(
+                                                    "w-3.5 h-3.5 shrink-0",
+                                                    isWon ? "text-emerald-600" : isLost ? "text-rose-600" : "text-blue-600"
+                                                )} />
+                                            )}
                                         </button>
                                     );
                                 })}
@@ -576,51 +589,6 @@ export function FloatingColumnFilterPopover({
                     </div>
                 )}
 
-                {/* 4. ESTADO */}
-                {anchor.colKey === 'estado' && (
-                    <div className="space-y-2">
-                        <div className="relative">
-                            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
-                            <input
-                                type="text"
-                                placeholder="Buscar estado..."
-                                value={searchText}
-                                onChange={(e) => setSearchText(e.target.value)}
-                                className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-white"
-                            />
-                        </div>
-                        <div className="space-y-1.5">
-                        {filteredStatuses.map((st) => {
-                            const isSelected = statusFilter === st.id;
-                            return (
-                                <button
-                                    key={st.id}
-                                    onClick={() => {
-                                        onSelectStatus(st.id as any);
-                                        onClose();
-                                    }}
-                                    className={cn(
-                                        "w-full px-3 py-2 text-left text-xs font-semibold rounded-xl transition-all flex items-center justify-between cursor-pointer border",
-                                        isSelected
-                                            ? "bg-blue-50 text-blue-700 font-bold border-blue-200"
-                                            : "hover:bg-slate-50 text-slate-700 border-slate-100"
-                                    )}
-                                >
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-sm">{st.icon}</span>
-                                        <div>
-                                            <p className="font-bold text-slate-800">{st.label}</p>
-                                            <p className="text-[10px] text-slate-400 font-normal">{st.description}</p>
-                                        </div>
-                                    </div>
-                                    {isSelected && <Check className="w-4 h-4 text-blue-600 shrink-0" />}
-                                </button>
-                            );
-                        })}
-                        </div>
-                    </div>
-                )}
-
                 {/* 5. ORIGEN */}
                 {anchor.colKey === 'origen' && (
                     <div className="space-y-2">
@@ -673,6 +641,31 @@ export function FloatingColumnFilterPopover({
                                 })}
                             </div>
                         )}
+                    </div>
+                )}
+
+                {/* 5b. SETTER (se filtra en el servidor, no solo sobre las filas cargadas) */}
+                {anchor.colKey === 'setter' && (
+                    <div className="space-y-1">
+                        {[{ id: null as SetterFilter | null, label: 'Todas' }, ...SETTER_FILTER_OPTIONS].map((opt) => {
+                            const isSelected = (selectedSetter ?? null) === opt.id;
+                            return (
+                                <button
+                                    key={opt.id ?? 'ALL'}
+                                    onClick={() => {
+                                        onSelectSetter?.(opt.id);
+                                        onClose();
+                                    }}
+                                    className={cn(
+                                        "w-full px-2.5 py-1.5 text-left text-xs font-medium rounded-lg transition-colors flex items-center justify-between cursor-pointer",
+                                        isSelected ? "bg-blue-50 text-blue-700 font-bold" : "hover:bg-slate-50 text-slate-700"
+                                    )}
+                                >
+                                    <span>{opt.label}</span>
+                                    {isSelected && <Check className="w-3.5 h-3.5 text-blue-600 shrink-0" />}
+                                </button>
+                            );
+                        })}
                     </div>
                 )}
 

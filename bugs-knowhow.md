@@ -2042,3 +2042,113 @@ Al añadir helpers visuales en bucles o funciones de renderizado JSX (como `.map
 
 Tags:
 [channel] [reference-error] [wizard] [oportunidades] [cotizaciones] [pedidos] [sales-channels]
+
+---
+
+## [Bug ID: 20261103-01]
+
+Context:
+Ingreso de leads desde la web Firplak (`supabase/functions/wordpress-lead-intake/index.ts`, `leadNaming.ts`, `lib/leadDeduplication.ts`). Caso Caralina / `3162572644`.
+
+Problem:
+La cuenta, el contacto y la oportunidad se creaban como **Consumidor Final**. En MySQL/vTiger el contacto era **Caralina** y la oportunidad **Por definir**.
+
+Root Cause:
+La Edge Function solo leía `contacto.nombre`. WordPress/vTiger suelen mandar el nombre en `lastname`/`apellido` y la oportunidad como `Por definir`. El fallback `Consumidor Final` tapaba el nombre real.
+
+Fix Applied:
+1. Helper `resolveLeadPersonName` / `resolveLeadOpportunityName` que ignora placeholders y usa firstname+lastname.
+2. La Edge Function crea y, si hace falta, corrige cuenta/contacto/oportunidad placeholder cuando llega un nombre real.
+3. Pruebas permanentes en `tests/leadDeduplication.test.ts` (10/10).
+4. Registro `INC-2026-013` (R7).
+
+Prevention Rule:
+**No persistir Consumidor Final si hay cualquier campo de nombre real**: al ingerir leads web, resolver el nombre de persona concatenando `nombre`/`firstname` y `apellido`/`lastname`, tratar `Por definir`, `-` y `Consumidor Final` como vacíos, y usar ese valor para cuenta, contacto y oportunidad.
+
+Tags:
+[wordpress] [lead-intake] [consumidor-final] [vtiger] [nombres] [r7]
+
+---
+
+## [Bug ID: 20261105-01]
+
+Context:
+Actividades vencidas y notificaciones para asesores (rol `VENDEDOR`) en canal B2C (`PROPIO`) donde el setter crea actividades en oportunidades asignadas al asesor (`supabase/migrations/20261105120000_fix_check_overdue_activities_assigned_user.sql`, `lib/sellerVisibility.ts`, `lib/hooks/useNotifications.ts`, `lib/hooks/useOpportunitiesServer.ts`, `lib/hooks/useActivitiesServer.ts`, `app/actividades/page.tsx`, `app/oportunidades/[id]/page.tsx`).
+
+Problem:
+Los asesores comerciales veían actividades vencidas que no eran suyas, generando alarma. Al ingresar, encontraban que la actividad estaba a nombre del setter (e.g. Christian Alvarez Roman / canalpropio). La campana in-app (`CRM_Notifications`) les generaba notificaciones de tipo `ACTIVITY_OVERDUE` ("La actividad '2. Seguimiento Setter' está vencida..."), el badge de oportunidades marcaba "1 atrasada", la pestaña de actividades de la oportunidad mostraba la tarea del setter y el contador de vencidas en `/actividades` subía.
+
+Root Cause:
+1. En la base de datos, la función periódica `check_overdue_activities()` enlazaba `CRM_Oportunidades o` y usaba `o.owner_user_id` (el asesor dueño de la oportunidad) como destinatario de la notificación de actividad vencida en lugar del usuario asignado a la actividad (`a.user_id`). Esto causó 13,264 falsas notificaciones a asesores por tareas del setter.
+2. En `lib/hooks/useOpportunitiesServer.ts`, en modo offline `itemActs` no se filtraba con `activitiesVisibleToViewer`, y en modo online `o.actividades` no se filtraba por visor, permitiendo que las actividades del setter contaminaran los conteos y badges del asesor.
+3. En `app/actividades/page.tsx`, la condición `isCollaborator` permitía a los asesores ver actividades de terceros en oportunidades colaborativas, y el contador `overdueCount` no exigía estrictamente `act.user_id === effectiveUserId`.
+4. En `app/oportunidades/[id]/page.tsx`, `ActivitiesTab` dependía únicamente de la carga asíncrona de `viewerRole`, pudiendo exponer temporalmente actividades del setter.
+5. En `useNotifications.ts`, no existía filtro de defensa en profundidad para omitir notificaciones de actividades asignadas a otros usuarios si llegaban a la campana.
+
+Fix Applied:
+1. Migración `20261105120000_fix_check_overdue_activities_assigned_user.sql`: `check_overdue_activities()` ahora asigna la notificación al usuario de la actividad (`a.user_id`), no al dueño de la oportunidad. Se eliminaron las 13,264 notificaciones erróneas acumuladas en `CRM_Notifications`.
+2. En `lib/sellerVisibility.ts`, se añadió y exportó `shouldShowActivityNotification()`.
+3. En `lib/hooks/useNotifications.ts`, se aplicó `shouldShowActivityNotification()` para filtrar en cliente cualquier notificación `ACTIVITY_OVERDUE` no asignada al asesor.
+4. En `lib/hooks/useOpportunitiesServer.ts`, se filtran `actividades` y `activity_summary` con `activitiesVisibleToViewer` tanto online como offline, y se previene ejecución con rol no resuelto.
+5. En `app/actividades/page.tsx`, se restringió la visibilidad y el contador `overdueCount` para que `VENDEDOR` solo compute actividades con `act.user_id === effectiveUserId`.
+6. En `app/oportunidades/[id]/page.tsx`, `ActivitiesTab` aplica `activitiesVisibleToViewer` explícitamente en `sortedActivities`.
+7. En `tests/sellerVisibility.test.ts`, se agregaron pruebas unitarias (8/8 GREEN).
+
+Prevention Rule:
+**Las actividades de un setter nunca deben atribuirse al asesor**:
+Toda consulta, contador (`overdueCount`, `activity_summary`), pestaña de detalle y notificación relacionada con actividades para el rol `VENDEDOR` debe evaluar estrictamente `activity.user_id === currentUserId`. Una actividad pertenece a quien la ejecuta, nunca al dueño de la oportunidad ni de la cuenta si son personas distintas.
+
+Tags:
+[setter] [b2c] [actividades-vencidas] [notificaciones] [seller-visibility] [oportunidades] [cuentas]
+
+---
+
+## [Bug ID: 20261110-01]
+
+Context:
+`/actividades` (`app/actividades/page.tsx`, `components/activities/CreateActivityModal.tsx`, `lib/serverHydration.ts`). Un asesor en `?user=` no podia abrir el popup y no veia las actividades de hoy.
+
+Problem:
+1. Clic en la lista o en el mes: el popup no queda abierto y la URL pierde `?user=` y los demas filtros.
+2. Deep link `?id=` no abre si la actividad no esta en Dexie.
+3. El encabezado del modal solo enlazaba cuenta y oportunidad si ambas ya estaban en la copia local.
+4. "Hasta la fecha" + orden "proxima" lista de la mas vieja a la mas nueva, de 20 en 20. Con 127 atrasadas, las de hoy empiezan en la 128.
+
+Root Cause:
+El `href` era `/actividades?id=` sin filtros. El `router.replace` debounced reescribia la query sin `id` y el efecto de deep link cerraba el modal. Ese efecto no consultaba Supabase. Los links del modal exigian `relatedOpportunity && relatedAccount`. El orden `soonest` no separaba el dia de hoy.
+
+Fix Applied:
+1. `lib/activityListParams.ts`: el enlace conserva filtros; la sync de la URL respeta el id fijado y no cierra el modal por un replace atrasado.
+2. `hydrateActivityById` / `hydrateActivityReferences`: lectura de la actividad, su oportunidad y su cuenta. No pisa Dexie ni escribe en Supabase.
+3. `activityEntityHrefs`: "Ir a la cuenta" y "Ir a la oportunidad" con los ids, y se deja el detalle que el modal ya mostraba.
+4. `splitUpToDateSections`: en "Hasta la fecha", Hoy va antes de Atrasadas.
+
+Prevention Rule:
+**El id del popup y los filtros de /actividades viajan juntos.** Un replace de filtros no puede borrar `id` mientras el modal sigue abierto, y el href de la fila tiene que copiar la query actual. "Hasta la fecha" muestra primero el bloque de hoy y despues las atrasadas; no se esconden las vencidas.
+
+Tags:
+[actividades] [modal] [deep-link] [filtros] [hasta-la-fecha] [dexie] [r6]
+
+---
+
+## [Bug ID: 20261124-01]
+
+Context:
+Desplegable «Razón de Pérdida» en el detalle de oportunidad (`app/oportunidades/[id]/page.tsx`), al marcar Cerrada Perdida. Catálogo `CRM_RazonesPerdida` en Supabase (`lnphhmowklqiomownurw`).
+
+Problem:
+«Cliente abandonado» (id 35, activa, creada 2026-11-24) no aparecía. Tampoco «INT - Cliente abandonado » (id 34, con espacio final). El desplegable mostraba una lista fija: N-, RED-, INT- y Duplicado. No mostraba Precio, Diseño ni el resto de ids 1-7.
+
+Root Cause:
+`LOSS_REASONS` estaba hardcodeado en el detalle. No era un filtro por canal ni un catálogo Dexie vencido. `CRM_RazonesPerdida` no tiene `canal_id`. Dexie sí recibe el catálogo en la hidratación, pero el select no lo leía. El sync de catálogos tampoco pedía esa tabla.
+
+Fix Applied:
+1. `lib/lossReasonCatalog.ts` elige filas con `is_active !== false` y descripción no vacía, ordenadas por id. El valor es el texto exacto; la etiqueta se recorta.
+2. El detalle consulta Supabase al abrir el resumen y usa Dexie si no hay red. La hidratación y el refresh de catálogos reemplazan la copia local.
+3. Prueba permanente `tests/lossReasonCatalog.test.ts`. Registro `INC-2026-021` (R3).
+
+Prevention Rule:
+**Las razones de pérdida del desplegable salen de `CRM_RazonesPerdida`.** No volver a copiar descripciones en un array. Ocultar una razón es `is_active = false` en el catálogo, no un cambio de código. El texto guardado en `razon_perdida` tiene que ser el `descripcion` exacto.
+
+Tags:
+[razon-perdida] [oportunidades] [catalogo] [dexie] [propio] [r3]

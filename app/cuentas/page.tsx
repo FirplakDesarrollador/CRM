@@ -10,7 +10,8 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db, LocalPais } from "@/lib/db";
 import { Plus, Search, Building, User, Pencil, Medal, Trash2, ArrowUpDown, ChevronUp, ChevronDown, MapPin, Briefcase, DollarSign, Globe } from "lucide-react";
 import { UserPickerFilter } from "@/components/cuentas/UserPickerFilter";
-import { sellerCanSeeAccount } from "@/lib/sellerVisibility";
+import { canViewAllAccountsContactsOpportunities, sellerCanSeeAccount } from "@/lib/sellerVisibility";
+import { isTiendaUser, shouldScopeAccountsByRole } from "@/lib/tiendaVisibility";
 import { AccountFilters } from "@/components/cuentas/AccountFilters";
 import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
@@ -20,6 +21,7 @@ import { DataListToolbar } from "@/components/ui/DataListToolbar";
 import { SearchableSelect } from "@/components/ui/SearchableSelect";
 import { handleEntityLinkClick } from "@/lib/utils/navigation";
 import { formatColombiaDateTime } from "@/lib/date-utils";
+import { isToolbarOwnedTableColumn } from "@/lib/tableFilterPolicy";
 import dynamic from 'next/dynamic';
 
 const HotTable = dynamic(() => import('@/components/HotTableWrapper'), { ssr: false });
@@ -249,7 +251,7 @@ function AccountsContent() {
 
                 if (account && !error) {
                     // Asesor (VENDEDOR): solo abre cuentas propias o donde colabora en alguna oportunidad.
-                    if (isVendedor && currentUser?.id && !sellerCanSeeAccount(account, currentUser.id, new Set())) {
+                    if (shouldScopeAccountsByRole(currentUser, 'VENDEDOR', canViewAllAccountsContactsOpportunities(currentUser)) && isVendedor && currentUser?.id && !sellerCanSeeAccount(account, currentUser.id, new Set())) {
                         const { data: collabRows } = await supabase
                             .from('CRM_Oportunidades_Colaboradores')
                             .select('oportunidad_id, CRM_Oportunidades!inner(account_id)')
@@ -546,7 +548,7 @@ function AccountsContent() {
                 onFiltersOpenChange={setShowFilters}
                 activeFilterCount={(selectedUserId ? 1 : 0) + (webFilter ? 1 : 0) + (currentChannel ? 1 : 0) + (currentSubclass ? 1 : 0) + (currentNivel ? 1 : 0) + (currentStartDate ? 1 : 0) + (currentEndDate ? 1 : 0)}
                 quickFilters={<>
-                    {hasCoordinatorAccess && <UserPickerFilter selectedUserId={selectedUserId} onUserSelect={handleUserSelect} />}
+                    {(hasCoordinatorAccess || isTiendaUser(currentUser) || canViewAllAccountsContactsOpportunities(currentUser)) && <UserPickerFilter selectedUserId={selectedUserId} onUserSelect={handleUserSelect} />}
                     <div className="flex rounded-lg bg-slate-100 p-1">
                         <button onClick={() => setWebFilter(false)} className={cn("rounded-md px-2.5 py-1.5 text-xs font-semibold", !webFilter ? "bg-white text-blue-700 shadow-sm" : "text-slate-500")}>Todas</button>
                         <button onClick={() => setWebFilter(true)} className={cn("rounded-md px-2.5 py-1.5 text-xs font-semibold", webFilter ? "bg-white text-blue-700 shadow-sm" : "text-slate-500")}>Web{webFilter && !loading ? ` (${count})` : ''}</button>
@@ -570,7 +572,7 @@ function AccountsContent() {
                             {editingAccount ? `Editando: ${editingAccount.nombre}` : 'Crear Nueva Cuenta'}
                         </h3>
                         <div className="flex items-center gap-2">
-                            {isAdmin && editingAccount && (
+                            {editingAccount && (isAdmin || hasCoordinatorAccess || (!!currentUser?.id && (editingAccount.owner_user_id === currentUser.id || editingAccount.created_by === currentUser.id))) && (
                                 <button
                                     onClick={() => setAccountToDelete(editingAccount)}
                                     className="px-2.5 py-1 text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-lg transition-colors flex items-center gap-1 text-xs font-semibold"
@@ -835,6 +837,15 @@ function AccountsContent() {
                             colHeaders={true}
                             filters={true}
                             dropdownMenu={true}
+                            beforeDropdownMenuShow={(instance: any) => {
+                                const activeRange = instance.hot?.getSelectedRangeActive();
+                                const col = activeRange ? activeRange.highlight?.col : -1;
+                                const colKey = hotColumns[col]?.data;
+                                if (isToolbarOwnedTableColumn('cuentas', colKey)) {
+                                    setShowFilters(true);
+                                    setTimeout(() => instance.close(), 0);
+                                }
+                            }}
                             manualColumnResize={true}
                             afterColumnResize={(width: number, col: number) => handleColumnResize(width, col)}
                             afterScrollVertically={triggerLoadMore}
@@ -881,11 +892,15 @@ function AccountsContent() {
                                 }
                             }}
                             afterGetColHeader={(column: number, TH: HTMLTableCellElement) => {
+                                const colDef = hotColumns[column];
+                                if (colDef?.data) TH.setAttribute('data-col-key', colDef.data);
                                 const fields: Record<number, string> = { 0: 'nombre', 1: 'pais', 2: 'ciudad', 3: 'canal_id', 5: 'potencial_venta', 8: 'created_at', 9: 'updated_at' };
                                 const labels: Record<number, string> = { 0: 'Cuenta', 1: 'País', 2: 'Ciudad', 3: 'Canal', 5: 'Potencial Venta', 8: 'Creación', 9: 'Actualizado' };
                                 if (fields[column]) {
                                     TH.style.cursor = 'pointer';
-                                    TH.title = 'Clic para ordenar ascendente o descendente';
+                                    TH.title = isToolbarOwnedTableColumn('cuentas', colDef?.data)
+                                        ? 'Use la barra de filtros para este criterio. Clic en el título para ordenar.'
+                                        : 'Clic para ordenar ascendente o descendente';
                                     const header = TH.querySelector('.colHeader');
                                     if (header) header.textContent = `${labels[column]} ${sortField === fields[column] ? (sortAsc ? '↑' : '↓') : '↕'}`;
                                 }

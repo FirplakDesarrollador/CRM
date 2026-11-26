@@ -75,6 +75,15 @@ export function getMissingPedidoFormalizationFields(pedido: PedidoWithItems): st
 }
 
 /**
+ * Determina si el pedido puede descargarse como PDF (F-V-29 / pedido facturable).
+ * Permite descargar el documento siempre que tenga al menos un producto con cantidad > 0,
+ * sin bloquear la visualización si faltan datos logísticos requeridos para emisión formal a SAP.
+ */
+export function canDownloadPedidoPdf(pedido: PedidoWithItems): boolean {
+    return Boolean(pedido.items && pedido.items.some(item => Number(item.cantidad) > 0));
+}
+
+/**
  * Genera el modelo del documento formal a partir del pedido seleccionado.
  * Así el PDF/correo usa cantidades parciales y datos logísticos del pedido,
  * sin depender de los valores generales que pueda conservar la cotización.

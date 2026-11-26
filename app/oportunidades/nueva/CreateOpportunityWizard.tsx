@@ -17,6 +17,9 @@ import { ExpandableTextarea } from "@/components/ui/ExpandableTextarea";
 import { db } from "@/lib/db";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { supabase } from "@/lib/supabase";
+import { isB2COpportunity } from "@/lib/b2c";
+import { LEAD_MIN_AMOUNT_CONFIG_KEY, fetchLeadMinimumAmountConfig, parseLeadMinimumAmountConfig, resolveLeadMinimumAmount, shouldApplyLeadMinimum } from "@/lib/leadMinimumAmount";
 import { useConfig } from "@/lib/hooks/useConfig";
 import { getPriceClarification } from "@/lib/salesChannels";
 import { CollaboratorSelector, CollaboratorEntry } from "@/components/oportunidades/CollaboratorSelector";
@@ -25,6 +28,8 @@ import { useFormDraft } from "@/lib/hooks/useFormDraft";
 import { MultiSelect } from "@/components/ui/MultiSelect";
 import { SearchableSelect } from "@/components/ui/SearchableSelect";
 import { OPPORTUNITY_CATEGORIES, parseOpportunityCategories, formatOpportunityCategories } from "@/lib/opportunityCategories";
+import { selectPhasesForPicker } from "@/lib/opportunityPhaseCatalog";
+import { readFullPhaseCatalog } from "@/lib/phaseCatalogStore";
 
 const STEP_LABELS = ["Cuenta", "Datos del Negocio", "Productos", "Equipo"];
 const LAST_STEP_INDEX = STEP_LABELS.length - 1;
@@ -34,7 +39,6 @@ const schema = z.object({
     nombre: z.string().min(3, "Nombre requerido (mín. 3 caracteres)"),
     amount: z.coerce.number().min(0),
     currency_id: z.enum(["COP", "USD"]),
-    estado_id: z.coerce.number().default(1), // 1 = Abierta
     fase_id: z.coerce.number().min(1, "Fase requerida").default(1),
     segmento_id: z.coerce.number().nullable().optional(),
     pais_id: z.coerce.number().nullable().optional(),
@@ -189,7 +193,6 @@ export default function CreateOpportunityWizard() {
             account_id: '',
             nombre: '',
             currency_id: 'COP' as 'COP' | 'USD',
-            estado_id: 1,
             fase_id: 1,
             amount: 0,
             pais_id: null,
@@ -409,7 +412,7 @@ export default function CreateOpportunityWizard() {
 
         console.log('[Phases] Filtering phases for canal_id:', channelId, 'Account:', selectedAccount?.nombre || selectedAccountId);
 
-        const phases = await db.phases.where('canal_id').equals(channelId).sortBy('orden');
+        const phases = selectPhasesForPicker(await readFullPhaseCatalog(), channelId);
         console.log('[Phases] Filtered phases count:', phases.length, 'for channel:', channelId);
 
         if (phases.length === 0) {
@@ -555,6 +558,22 @@ export default function CreateOpportunityWizard() {
                 setter: data.setter || null,
                 collaborators: collaborators
             };
+
+            // B2C: si el prospecto entra sin valor, usar el monto mínimo de su categoría
+            // (tabla en CRM_Configuracion → lead_monto_minimo_por_categoria).
+            if (
+                shouldApplyLeadMinimum(sanitizedData.amount) &&
+                (!Array.isArray(data.items) || data.items.length === 0) &&
+                sanitizedData.categoria_oportunidad &&
+                isB2COpportunity(selectedAccount, sanitizedData, user)
+            ) {
+                const loadedValue = config?.[LEAD_MIN_AMOUNT_CONFIG_KEY];
+                const minConfig = loadedValue !== undefined
+                    ? parseLeadMinimumAmountConfig(loadedValue)
+                    : await fetchLeadMinimumAmountConfig(supabase);
+                const minimo = resolveLeadMinimumAmount(sanitizedData.categoria_oportunidad, minConfig);
+                if (minimo !== null) sanitizedData.amount = minimo;
+            }
 
             // Maintain legacy 'ciudad' string for list views
             if (sanitizedData.ciudad_id) {

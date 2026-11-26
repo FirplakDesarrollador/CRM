@@ -21,6 +21,8 @@ import { ArrowUpDown, ChevronDown, ChevronUp, X } from "lucide-react";
 import { DataListToolbar } from "@/components/ui/DataListToolbar";
 import { handleEntityLinkClick } from "@/lib/utils/navigation";
 import { formatColombiaDateTime } from "@/lib/date-utils";
+import { isToolbarOwnedTableColumn } from "@/lib/tableFilterPolicy";
+import { canViewAllAccountsContactsOpportunities } from "@/lib/sellerVisibility";
 
 const HotTable = dynamic(() => import('@/components/HotTableWrapper'), { ssr: false });
 
@@ -125,7 +127,7 @@ function ContactsContent() {
 
             // Asesor (VENDEDOR): solo contactos de sus cuentas visibles.
             const canOpen = (contact: { account_id?: string | null }) => {
-                if (!isVendedor) return true;
+                if (!isVendedor || canViewAllAccountsContactsOpportunities(user)) return true;
                 return !!contact.account_id && (accounts || []).some(a => a.id === contact.account_id);
             };
 
@@ -159,7 +161,7 @@ function ContactsContent() {
         };
 
         findAndOpen();
-    }, [searchParams, contacts, accounts, isVendedor]);
+    }, [searchParams, contacts, accounts, isVendedor, user]);
 
     // Restore state from sessionStorage if navigating from sidebar (empty query)
     useEffect(() => {
@@ -809,6 +811,15 @@ function ContactsContent() {
                                 afterScrollVertically={triggerLoadMore}
                                 filters={true}
                                 dropdownMenu={true}
+                                beforeDropdownMenuShow={(instance: any) => {
+                                    const activeRange = instance.hot?.getSelectedRangeActive();
+                                    const col = activeRange ? activeRange.highlight?.col : -1;
+                                    const colKey = hotColumns[col]?.data;
+                                    if (isToolbarOwnedTableColumn('contactos', colKey)) {
+                                        setShowFilters(true);
+                                        setTimeout(() => instance.close(), 0);
+                                    }
+                                }}
                                 width="100%"
                                 height={showFilters ? "calc(100vh - 490px)" : "calc(100vh - 280px)"}
                                 autoColumnSize={false}
@@ -858,6 +869,8 @@ function ContactsContent() {
                                     }
                                 }}
                                 afterGetColHeader={(column: number, TH: HTMLTableCellElement) => {
+                                    const colDef = hotColumns[column];
+                                    if (colDef?.data) TH.setAttribute('data-col-key', colDef.data);
                                     const fields: Record<number, 'nombre' | 'email' | 'created_at'> = { 0: 'nombre', 4: 'email', 6: 'created_at' };
                                     const labels: Record<number, string> = { 0: 'Contacto', 4: 'Email', 6: 'Creación' };
                                     if (fields[column]) {
@@ -865,6 +878,8 @@ function ContactsContent() {
                                         TH.title = fields[column] === 'created_at' ? 'Clic para ordenar por fecha de creación' : 'Clic para ordenar A–Z o Z–A';
                                         const header = TH.querySelector('.colHeader');
                                         if (header) header.textContent = `${labels[column]} ${sortField === fields[column] ? (sortAsc ? '↑' : '↓') : '↕'}`;
+                                    } else if (isToolbarOwnedTableColumn('contactos', colDef?.data)) {
+                                        TH.title = 'Use la barra de filtros para este criterio.';
                                     }
                                 }}
                                 stretchH="all"

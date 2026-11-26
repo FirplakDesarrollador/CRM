@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { sellerCanSeeAccount } from '@/lib/sellerVisibility';
+import { canViewAllAccountsContactsOpportunities, sellerCanSeeAccount } from '@/lib/sellerVisibility';
+import { shouldScopeAccountsByRole } from '@/lib/tiendaVisibility';
 import { supabase } from '@/lib/supabase';
-import { syncEngine } from '@/lib/sync';
 import { db } from '@/lib/db';
+import { buildPhaseOutcomeMap, getPhaseOutcome } from '@/lib/opportunityPhase';
+import { readFullPhaseCatalog } from '@/lib/phaseCatalogStore';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useSyncStore } from '@/lib/stores/useSyncStore';
 import { matchesSearchTokens, getSearchTokens, getPhoneIlikePatterns } from '@/lib/utils';
@@ -84,6 +86,8 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
     // User Context
     const { user, role: userRole, isVendedor } = useCurrentUser();
     const currentUserId = user?.id;
+    const seesAllPortfolio = canViewAllAccountsContactsOpportunities(user);
+    const scopeAccounts = shouldScopeAccountsByRole(user, userRole, seesAllPortfolio);
 
     const [subordinateIds, setSubordinateIds] = useState<string[]>([]);
 
@@ -116,6 +120,8 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                 console.log("[useAccountsServer] Device is offline or server failed. Executing local Dexie fallback...");
                 let localAccounts = await db.accounts.toArray();
                 const allOpps = await db.opportunities.toArray();
+                // Potencial = oportunidades ABIERTAS por fase (el estado ya no se usa).
+                const phaseOutcomeMap = buildPhaseOutcomeMap(await readFullPhaseCatalog());
 
                 // Role filtering
                 const localCollabs = await db.opportunityCollaborators
@@ -127,10 +133,10 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                 const collabOpps = await db.opportunities.where('id').anyOf(collabOppIds).toArray();
                 const collabAccIds = collabOpps.filter(o => !o.is_deleted).map(o => o.account_id);
 
-                if (isVendedor && currentUserId) {
+                if (scopeAccounts && isVendedor && currentUserId) {
                     const collabAccIdSet = new Set(collabAccIds);
                     localAccounts = localAccounts.filter(a => sellerCanSeeAccount(a, currentUserId, collabAccIdSet));
-                } else if (userRole === 'COORDINADOR' && currentUserId) {
+                } else if (scopeAccounts && userRole === 'COORDINADOR' && currentUserId) {
                     localAccounts = localAccounts.filter((a: any) => 
                         a.owner_user_id === currentUserId || 
                         a.created_by === currentUserId ||
@@ -238,7 +244,7 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                         .filter(o => 
                             o.account_id === item.id && 
                             !o.is_deleted && 
-                            ![11, 14, 2, 3, 4].includes(o.estado_id)
+                            getPhaseOutcome(o.fase_id, phaseOutcomeMap) === 'open'
                         )
                         .reduce((sum, o) => sum + (o.amount || o.valor || 0), 0)
                 }));
@@ -286,7 +292,7 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
             }
 
             // Role filtering
-            if ((isVendedor || userRole === 'COORDINADOR') && currentUserId) {
+            if (scopeAccounts && (isVendedor || userRole === 'COORDINADOR') && currentUserId) {
                 // Fetch accounts where user is collaborator
                 const { data: collabData } = await supabase
                     .from('CRM_Oportunidades_Colaboradores')
@@ -327,16 +333,23 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
 
             if (searchTerm && searchTerm.trim()) {
                 const tokens = phoneDigits ? [phoneDigits] : getSearchTokens(searchTerm);
-                const orParts = tokens.flatMap(token => [
-                    `nombre.ilike.%${token}%`,
-                    `nit_base.ilike.%${token}%`,
-                    `telefono.ilike.%${token}%`,
-                    ...getPhoneIlikePatterns(token).map(pattern => `telefono.ilike.${pattern}`)
-                ]);
-                if (phoneAccountIds.size > 0) {
-                    orParts.push(`id.in.(${Array.from(phoneAccountIds).join(',')})`);
+                // Cada palabra debe coincidir (AND entre palabras, OR entre campos).
+                // Antes se unían todas las palabras con OR y el filtro AND se hacía en el
+                // cliente sobre la primera página, por lo que cuentas válidas no aparecían.
+                for (const token of tokens) {
+                    const orParts = [
+                        `nombre.ilike.%${token}%`,
+                        `nit_base.ilike.%${token}%`,
+                        `telefono.ilike.%${token}%`,
+                        `ciudad.ilike.%${token}%`,
+                        `email.ilike.%${token}%`,
+                        ...getPhoneIlikePatterns(token).map(pattern => `telefono.ilike.${pattern}`)
+                    ];
+                    if (phoneAccountIds.size > 0) {
+                        orParts.push(`id.in.(${Array.from(phoneAccountIds).join(',')})`);
+                    }
+                    query = query.or(orParts.join(','));
                 }
-                query = query.or(orParts.join(','));
             }
 
             if (assignedUserId) {
@@ -481,7 +494,7 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
             setLoading(false);
             useSyncStore.getState().setIsLoadingData(false);
         }
-    }, [currentUserId, pageSize, searchTerm, assignedUserId, isVendedor, userRole, subordinateIds, channelFilter, subclassificationFilter, nivelPremiumFilter, startDate, endDate, sortField, sortAsc, webFilter]);
+    }, [currentUserId, user?.email, user?.es_tienda, seesAllPortfolio, scopeAccounts, pageSize, searchTerm, assignedUserId, isVendedor, userRole, subordinateIds, channelFilter, subclassificationFilter, nivelPremiumFilter, startDate, endDate, sortField, sortAsc, webFilter]);
 
     // Initial Fetch & Filter Fetch
     useEffect(() => {

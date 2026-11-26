@@ -5,10 +5,13 @@ import { useQuotes, useQuoteItems } from "@/lib/hooks/useOpportunities";
 import { useProductSearch, PriceListProduct } from "@/lib/hooks/useProducts";
 import { DetailHeader } from "@/components/ui/DetailHeader";
 import { generateQuotePdf } from "@/lib/pdfGenerator";
+import { generateQuoteExcel } from "@/lib/quoteExcelGenerator";
+import { QuotePreviewModal } from "@/components/quotes/QuotePreviewModal";
 import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { db, LocalQuote } from "@/lib/db";
-import { Save, AlertTriangle, Truck, Receipt, Calendar, Search, Plus, Trash2, Loader2, Package, Download, Send } from "lucide-react";
+import { hydrateQuoteDetailFromSupabase } from "@/lib/supabaseDirect";
+import { Save, AlertTriangle, Truck, Receipt, Calendar, Search, Plus, Trash2, Loader2, Package, Download, Send, Eye, FileSpreadsheet } from "lucide-react";
 import { ExpandableTextarea } from "@/components/ui/ExpandableTextarea";
 import { SearchableSelect } from "@/components/ui/SearchableSelect";
 import { cn } from "@/components/ui/utils";
@@ -33,12 +36,19 @@ export default function QuoteEditorPage() {
     const router = useRouter();
     const quoteId = params.quoteId as string;
     const oppId = params.id as string;
+    const { user: currentUser } = useCurrentUser();
 
     const { quotes, updateQuote, updateQuoteTotal } = useQuotes(oppId);
     const quote = quotes?.find(q => q.id === quoteId);
 
+    useEffect(() => {
+        if (!quoteId) return;
+        void hydrateQuoteDetailFromSupabase(oppId, quoteId);
+    }, [oppId, quoteId]);
+
     const [activeSection, setActiveSection] = useState<'items' | 'sap'>('items');
     const [isSendModalOpen, setIsSendModalOpen] = useState(false);
+    const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false);
 
     const sendContext = useLiveQuery(async () => {
         if (!quote) return null;
@@ -47,13 +57,15 @@ export default function QuoteEditorPage() {
         const qItems = await db.quoteItems.where('cotizacion_id').equals(quoteId).toArray();
         
         let advisorName = "";
+        let advisorEmail = "";
         let enrichedItems = qItems;
 
         try {
             const { supabase } = await import('@/lib/supabase');
             if (opp?.owner_user_id) {
-                const { data: uData } = await supabase.from('CRM_Usuarios').select('full_name').eq('id', opp.owner_user_id).single();
+                const { data: uData } = await supabase.from('CRM_Usuarios').select('full_name, email').eq('id', opp.owner_user_id).single();
                 advisorName = uData?.full_name || "";
+                advisorEmail = uData?.email || "";
             }
             const productIds = qItems.map(i => i.producto_id).filter(Boolean);
             if (productIds.length > 0) {
@@ -69,12 +81,20 @@ export default function QuoteEditorPage() {
             console.error("Error pre-fetching PDF data", e);
         }
 
-        return { opp, acc, qItems: enrichedItems, advisorName };
+        return { opp, acc, qItems: enrichedItems, advisorName, advisorEmail };
     }, [quote]);
+
+    const effectiveAdvisorName = currentUser?.full_name || currentUser?.user_metadata?.full_name || (currentUser as any)?.name || sendContext?.advisorName || "Asesor Firplak";
+    const effectiveAdvisorEmail = currentUser?.email || sendContext?.advisorEmail || "";
 
     const handleDownloadPdf = () => {
         if (!quote || !sendContext) return;
-        generateQuotePdf(quote, sendContext.qItems, sendContext.acc, sendContext.opp, true, sendContext.advisorName);
+        generateQuotePdf(quote, sendContext.qItems, sendContext.acc, sendContext.opp, true, effectiveAdvisorName, effectiveAdvisorEmail);
+    };
+
+    const handleDownloadExcel = () => {
+        if (!quote || !sendContext) return;
+        generateQuoteExcel(quote, sendContext.qItems, sendContext.acc, sendContext.opp, effectiveAdvisorName);
     };
 
     if (!quote) return <div className="p-8">Cargando cotización...</div>;
@@ -93,8 +113,10 @@ export default function QuoteEditorPage() {
                     }
                 }}
                 actions={[
-                    { label: "Enviar Cotización", icon: Send, onClick: () => setIsSendModalOpen(true) },
-                    { label: "Descargar PDF", icon: Download, onClick: handleDownloadPdf }
+                    { label: "Previsualizar", icon: Eye, onClick: () => setIsPreviewModalOpen(true) },
+                    { label: "Descargar Excel", icon: FileSpreadsheet, onClick: handleDownloadExcel },
+                    { label: "Descargar PDF", icon: Download, onClick: handleDownloadPdf },
+                    { label: "Enviar Cotización", icon: Send, onClick: () => setIsSendModalOpen(true) }
                 ]}
             />
 
@@ -147,7 +169,22 @@ export default function QuoteEditorPage() {
                         account={sendContext.acc || undefined} 
                         opportunity={sendContext.opp} 
                         quoteItems={sendContext.qItems}
-                        advisorName={sendContext.advisorName}
+                        advisorName={effectiveAdvisorName}
+                        advisorEmail={effectiveAdvisorEmail}
+                    />
+                )}
+
+                {isPreviewModalOpen && sendContext && (
+                    <QuotePreviewModal
+                        isOpen={isPreviewModalOpen}
+                        onClose={() => setIsPreviewModalOpen(false)}
+                        quote={quote}
+                        account={sendContext.acc || undefined}
+                        opportunity={sendContext.opp}
+                        quoteItems={sendContext.qItems}
+                        advisorName={effectiveAdvisorName}
+                        advisorEmail={effectiveAdvisorEmail}
+                        onSendEmail={() => setIsSendModalOpen(true)}
                     />
                 )}
             </div>
