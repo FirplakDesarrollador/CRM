@@ -1018,6 +1018,9 @@ function OpportunitiesContent() {
                     </div>
                     <div className="shrink-0">
                         <QuickDateFilter
+                            idleLabel="Fecha de creación"
+                            title="Fecha de creación"
+                            todayLabel="Creadas hoy"
                             startDate={startDate}
                             endDate={endDate}
                             statusFilter={statusFilter}
@@ -1026,6 +1029,19 @@ function OpportunitiesContent() {
                                 setStartDate(sD);
                                 setEndDateState(eD);
                                 setEndDate(eD);
+                            }}
+                        />
+                        <QuickDateFilter
+                            idleLabel="Fecha de cierre"
+                            title="Fecha de cierre"
+                            todayLabel="Cierre hoy"
+                            startDate={startClosingDate}
+                            endDate={endClosingDate}
+                            onDateChange={({ startDate: sD, endDate: eD }) => {
+                                setStartClosingDateState(sD);
+                                setStartClosingDate(sD);
+                                setEndClosingDateState(eD);
+                                setEndClosingDate(eD);
                             }}
                         />
                     </div>
@@ -1756,14 +1772,21 @@ function OpportunitiesContent() {
                                 {/* Popover flotante intuitivo anclado a la cabecera de la columna Creada / Cierre */}
                                 <FloatingDateFilterPopover
                                     anchor={headerDateFilterAnchor}
-                                    startDate={startDate}
-                                    endDate={endDate}
+                                    startDate={headerDateFilterAnchor?.colKey === 'cierre' ? startClosingDate : startDate}
+                                    endDate={headerDateFilterAnchor?.colKey === 'cierre' ? endClosingDate : endDate}
                                     statusFilter={statusFilter}
                                     onDateChange={({ startDate: sD, endDate: eD }) => {
-                                        setStartDateState(sD);
-                                        setStartDate(sD);
-                                        setEndDateState(eD);
-                                        setEndDate(eD);
+                                        if (headerDateFilterAnchor?.colKey === 'cierre') {
+                                            setStartClosingDateState(sD);
+                                            setStartClosingDate(sD);
+                                            setEndClosingDateState(eD);
+                                            setEndClosingDate(eD);
+                                        } else {
+                                            setStartDateState(sD);
+                                            setStartDate(sD);
+                                            setEndDateState(eD);
+                                            setEndDate(eD);
+                                        }
                                     }}
                                     onClose={() => setHeaderDateFilterAnchor(null)}
                                 />

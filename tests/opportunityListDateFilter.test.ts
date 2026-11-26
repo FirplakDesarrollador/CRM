@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { calculateTotalAmount } from '@/lib/opportunityColumnFilterHelpers';
-import { toStartOfDayISO } from '@/lib/dateFilterHelpers';
+import { toBogotaStartOfDayISO } from '@/lib/dateFilterHelpers';
 import {
     buildWonCloseDateOrFilter,
     listDateFilterTitle,
@@ -126,7 +126,7 @@ describe('Rango superior del listado de oportunidades', () => {
         expect(filter).toMatch(/created_at\.lte\."[^"]+"/);
         expect(filter).not.toContain('fecha_cierre_estimada.gte.2026-11-01T');
 
-        const startIso = toStartOfDayISO(START);
+        const startIso = toBogotaStartOfDayISO(START);
         expect(startIso).toBeTruthy();
         expect(buildWonCloseDateOrFilter('2026-11-01', null)).toBe(
             `fecha_cierre_estimada.gte.2026-11-01,and(fecha_cierre_estimada.is.null,created_at.gte."${startIso}")`,

@@ -7,7 +7,7 @@ import { matchesSearchTokens, getSearchTokens, getPhoneIlikePatterns, accentInse
 import { getCellphoneSearchDigits, findPhoneMatchesServer, findPhoneMatchesLocal, opportunityMatchesPhone, PhoneSearchMatches } from '@/lib/phoneSearch';
 import { computeOpportunityActivitySummary, OpportunityActivitySummary, ActivityItem } from '@/lib/opportunityActivities';
 import { PhaseCatalogItem, calculateTotalAmount, DEFAULT_OPPORTUNITIES_PAGE_SIZE } from '@/lib/opportunityColumnFilterHelpers';
-import { toStartOfDayISO, toEndOfDayISO, toDateOnly, isDateOnlyInRange } from '@/lib/dateFilterHelpers';
+import { toBogotaStartOfDayISO, toBogotaEndOfDayISO, toDateOnly, isDateOnlyInRange } from '@/lib/dateFilterHelpers';
 import { buildWonCloseDateOrFilter, matchesOpportunityListDateRange } from '@/lib/opportunityListDateFilter';
 import { isClosedPhaseName, splitPhaseIdsByOutcome } from '@/lib/opportunityPhase';
 import { buildClosedStatusOrCondition, buildOpenPhaseOrCondition, matchesStatusFilter, matchesSetterFilter, normalizeSetterFilter, SetterFilter } from '@/lib/opportunityStatusFilter';
@@ -718,17 +718,18 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                     q = q.or(wonDateOr);
                 } else {
                     if (startDate) {
-                        const startISO = toStartOfDayISO(startDate);
+                        const startISO = toBogotaStartOfDayISO(startDate);
                         if (startISO) q = q.gte('created_at', startISO);
                     }
 
                     if (endDate) {
-                        const endISO = toEndOfDayISO(endDate);
+                        const endISO = toBogotaEndOfDayISO(endDate);
                         if (endISO) q = q.lte('created_at', endISO);
                     }
                 }
 
-                // fecha_cierre_estimada es columna date: se filtra con YYYY-MM-DD (sin convertir a UTC).
+                // Fecha de cierre del listado: solo fecha_cierre_estimada (columna date, día inclusive).
+                // No hay columna de cierre real filtrable; resolveOpportunityCloseDate es solo de presentación.
                 if (startClosingDate) {
                     const startCloseDay = toDateOnly(startClosingDate);
                     if (startCloseDay) q = q.gte('fecha_cierre_estimada', startCloseDay);

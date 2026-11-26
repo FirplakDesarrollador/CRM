@@ -7,7 +7,7 @@
  * ocultar una ganada sin cierre. Todas, Abiertas y Perdidas siguen en `created_at`.
  */
 
-import { isDateOnlyInRange, toDateOnly, toEndOfDayISO, toStartOfDayISO } from './dateFilterHelpers';
+import { isDateOnlyInRange, toBogotaEndOfDayISO, toBogotaStartOfDayISO, toDateOnly } from './dateFilterHelpers';
 import { calculateTotalAmount } from './opportunityColumnFilterHelpers';
 import type { OpportunityStatusFilter } from './opportunityStatusFilter';
 
@@ -37,11 +37,11 @@ function matchesCreatedAtRange(
     const createdMs = new Date(createdAt).getTime();
     if (Number.isNaN(createdMs)) return false;
     if (startDate) {
-        const startISO = toStartOfDayISO(startDate);
+        const startISO = toBogotaStartOfDayISO(startDate);
         if (startISO && createdMs < new Date(startISO).getTime()) return false;
     }
     if (endDate) {
-        const endISO = toEndOfDayISO(endDate);
+        const endISO = toBogotaEndOfDayISO(endDate);
         if (endISO && createdMs > new Date(endISO).getTime()) return false;
     }
     return true;
@@ -103,12 +103,12 @@ export function buildWonCloseDateOrFilter(
 
     if (startDay) {
         closeConds.push(`fecha_cierre_estimada.gte.${startDay}`);
-        const startISO = toStartOfDayISO(startDay);
+        const startISO = toBogotaStartOfDayISO(startDay);
         if (startISO) createdConds.push(`created_at.gte.${quotePostgrestValue(startISO)}`);
     }
     if (endDay) {
         closeConds.push(`fecha_cierre_estimada.lte.${endDay}`);
-        const endISO = toEndOfDayISO(endDay);
+        const endISO = toBogotaEndOfDayISO(endDay);
         if (endISO) createdConds.push(`created_at.lte.${quotePostgrestValue(endISO)}`);
     }
 

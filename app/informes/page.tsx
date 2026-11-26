@@ -12,6 +12,7 @@ import { FileSpreadsheet, Loader2, Download, TableProperties, Users, Briefcase, 
 import { cn } from '@/components/ui/utils';
 import { MiInformeCard } from '@/components/informes/MiInformeCard';
 import { userHasB2CAccess } from '@/lib/b2c';
+import { toBogotaEndOfDayISO, toBogotaStartOfDayISO } from '@/lib/dateFilterHelpers';
 
 // Constantes para filtros
 const ENTIDADES = [
@@ -50,6 +51,8 @@ export default function InformesPage() {
     // Filtros Generales
     const [dateFrom, setDateFrom] = useState('');
     const [dateTo, setDateTo] = useState('');
+    const [closeDateFrom, setCloseDateFrom] = useState('');
+    const [closeDateTo, setCloseDateTo] = useState('');
     const [dueDateFrom, setDueDateFrom] = useState('');
     const [dueDateTo, setDueDateTo] = useState('');
     const [selectedUser, setSelectedUser] = useState('');
@@ -154,6 +157,8 @@ export default function InformesPage() {
     const handleResetFilters = () => {
         setDateFrom('');
         setDateTo('');
+        setCloseDateFrom('');
+        setCloseDateTo('');
         setDueDateFrom('');
         setDueDateTo('');
         setSelectedUser('');
@@ -431,6 +436,16 @@ export default function InformesPage() {
                     .eq('is_deleted', false);
 
                 if (scopeUserId) oppQuery = oppQuery.eq('owner_user_id', scopeUserId);
+                if (dateFrom) {
+                    const startISO = toBogotaStartOfDayISO(dateFrom);
+                    if (startISO) oppQuery = oppQuery.gte('created_at', startISO);
+                }
+                if (dateTo) {
+                    const endISO = toBogotaEndOfDayISO(dateTo);
+                    if (endISO) oppQuery = oppQuery.lte('created_at', endISO);
+                }
+                if (closeDateFrom) oppQuery = oppQuery.gte('fecha_cierre_estimada', closeDateFrom);
+                if (closeDateTo) oppQuery = oppQuery.lte('fecha_cierre_estimada', closeDateTo);
 
                 oppQuery = oppQuery.order('created_at', { ascending: false }).order('id', { ascending: false });
                 const opps = await fetchAllInChunks(oppQuery, 1000, (total) => {
@@ -886,8 +901,20 @@ export default function InformesPage() {
 
             let query = supabase.from(entidadDef.table).select(selectStr);
 
-            if (dateFrom) query = query.gte('created_at', `${dateFrom}T00:00:00Z`);
-            if (dateTo) query = query.lte('created_at', `${dateTo}T23:59:59Z`);
+            if (dateFrom) {
+                const startISO = toBogotaStartOfDayISO(dateFrom);
+                if (startISO) query = query.gte('created_at', startISO);
+            }
+            if (dateTo) {
+                const endISO = toBogotaEndOfDayISO(dateTo);
+                if (endISO) query = query.lte('created_at', endISO);
+            }
+            if (selectedEntidad === 'oportunidades' && closeDateFrom) {
+                query = query.gte('fecha_cierre_estimada', closeDateFrom);
+            }
+            if (selectedEntidad === 'oportunidades' && closeDateTo) {
+                query = query.lte('fecha_cierre_estimada', closeDateTo);
+            }
 
             if (selectedEntidad === 'actividades') {
                 if (dueDateFrom) query = query.gte('fecha_fin', `${dueDateFrom}T00:00:00Z`);
@@ -1093,7 +1120,7 @@ export default function InformesPage() {
                         <div className="space-y-3 col-span-1 lg:col-span-2">
                             <label className="text-sm font-semibold text-slate-700 flex items-center gap-2">
                                 <CalendarIcon className="w-4 h-4 text-slate-400" />
-                                Rango de Fechas (Creación)
+                                Fecha de creación
                             </label>
                             <div className="grid grid-cols-2 gap-3">
                                 <div className="relative">
@@ -1116,6 +1143,36 @@ export default function InformesPage() {
                                 </div>
                             </div>
                         </div>
+
+                        {(selectedEntidad === 'oportunidades' || selectedEntidad === 'sop') && (
+                            <div className="space-y-3 col-span-1 lg:col-span-2">
+                                <label className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+                                    <CalendarIcon className="w-4 h-4 text-slate-400" />
+                                    Fecha de cierre
+                                </label>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div className="relative">
+                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-500 font-medium">Desde</span>
+                                        <input
+                                            type="date"
+                                            value={closeDateFrom}
+                                            onChange={e => setCloseDateFrom(e.target.value)}
+                                            className="w-full pl-12 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:bg-white transition-all text-sm"
+                                        />
+                                    </div>
+                                    <div className="relative">
+                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-500 font-medium">Hasta</span>
+                                        <input
+                                            type="date"
+                                            value={closeDateTo}
+                                            onChange={e => setCloseDateTo(e.target.value)}
+                                            className="w-full pl-12 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 focus:bg-white transition-all text-sm"
+                                        />
+                                    </div>
+                                </div>
+                                <p className="text-[11px] text-slate-400">Usa la fecha estimada de cierre. El día «hasta» queda incluido.</p>
+                            </div>
+                        )}
 
                         {/* Rango de Fechas (Vencimiento) - Solo para Actividades */}
                         {selectedEntidad === 'actividades' && (

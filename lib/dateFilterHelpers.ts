@@ -28,6 +28,49 @@ export function parseHandsontableDate(dateStr: string | null | undefined): strin
     return null;
 }
 
+/** Día calendario YYYY-MM-DD en America/Bogota. Colombia no tiene horario de verano (UTC-5 fijo). */
+export function bogotaYMD(date: Date = new Date()): string {
+    return new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Bogota',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+    }).format(date);
+}
+
+/** Suma días a una fecha calendario YYYY-MM-DD, sin pasar por la zona local. */
+export function addCalendarDays(ymd: string, days: number): string {
+    const [year, month, day] = ymd.split('-').map(Number);
+    const utc = new Date(Date.UTC(year, month - 1, day + days));
+    const y = utc.getUTCFullYear();
+    const m = String(utc.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(utc.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+}
+
+/**
+ * Inicio del día calendario en America/Bogota, en ISO UTC.
+ * 2026-11-26 → 2026-11-26T05:00:00.000Z
+ */
+export function toBogotaStartOfDayISO(dateStr: string | null | undefined): string | null {
+    const day = toDateOnly(dateStr);
+    if (!day) return null;
+    const parsed = new Date(`${day}T00:00:00.000-05:00`);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+/**
+ * Fin del día calendario en America/Bogota, en ISO UTC.
+ * "Hasta" incluye las 23:59:59.999 de ese día en Colombia.
+ * 2026-11-26 → 2026-11-27T04:59:59.999Z
+ */
+export function toBogotaEndOfDayISO(dateStr: string | null | undefined): string | null {
+    const day = toDateOnly(dateStr);
+    if (!day) return null;
+    const parsed = new Date(`${day}T23:59:59.999-05:00`);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
 /**
  * Convierte una fecha YYYY-MM-DD al inicio exacto de ese día (00:00:00.000) en la zona horaria local en formato ISO UTC.
  */
@@ -75,7 +118,7 @@ export const DATE_FILTER_PRESETS: DateRangePreset[] = [
         id: 'up_to_today',
         label: 'Hasta la fecha (Anteriores a hoy)',
         getRange: (now = new Date()) => {
-            const todayStr = formatLocalDateToYMD(now);
+            const todayStr = bogotaYMD(now);
             return { startDate: null, endDate: todayStr };
         }
     },
@@ -83,7 +126,7 @@ export const DATE_FILTER_PRESETS: DateRangePreset[] = [
         id: 'today',
         label: 'Hoy',
         getRange: (now = new Date()) => {
-            const todayStr = formatLocalDateToYMD(now);
+            const todayStr = bogotaYMD(now);
             return { startDate: todayStr, endDate: todayStr };
         }
     },
@@ -91,41 +134,34 @@ export const DATE_FILTER_PRESETS: DateRangePreset[] = [
         id: 'last_7_days',
         label: 'Últimos 7 días',
         getRange: (now = new Date()) => {
-            const todayStr = formatLocalDateToYMD(now);
-            const d = new Date(now);
-            d.setDate(d.getDate() - 7);
-            return { startDate: formatLocalDateToYMD(d), endDate: todayStr };
+            const todayStr = bogotaYMD(now);
+            return { startDate: addCalendarDays(todayStr, -7), endDate: todayStr };
         }
     },
     {
         id: 'last_30_days',
         label: 'Últimos 30 días',
         getRange: (now = new Date()) => {
-            const todayStr = formatLocalDateToYMD(now);
-            const d = new Date(now);
-            d.setDate(d.getDate() - 30);
-            return { startDate: formatLocalDateToYMD(d), endDate: todayStr };
+            const todayStr = bogotaYMD(now);
+            return { startDate: addCalendarDays(todayStr, -30), endDate: todayStr };
         }
     },
     {
         id: 'this_month',
         label: 'Este mes',
         getRange: (now = new Date()) => {
-            const year = now.getFullYear();
-            const month = String(now.getMonth() + 1).padStart(2, '0');
-            const startOfMonth = `${year}-${month}-01`;
-            const todayStr = formatLocalDateToYMD(now);
-            return { startDate: startOfMonth, endDate: todayStr };
+            const todayStr = bogotaYMD(now);
+            const [year, month] = todayStr.split('-');
+            return { startDate: `${year}-${month}-01`, endDate: todayStr };
         }
     },
     {
         id: 'this_year',
         label: 'Año actual',
         getRange: (now = new Date()) => {
-            const year = now.getFullYear();
-            const startOfYear = `${year}-01-01`;
-            const todayStr = formatLocalDateToYMD(now);
-            return { startDate: startOfYear, endDate: todayStr };
+            const todayStr = bogotaYMD(now);
+            const year = todayStr.slice(0, 4);
+            return { startDate: `${year}-01-01`, endDate: todayStr };
         }
     },
     {
