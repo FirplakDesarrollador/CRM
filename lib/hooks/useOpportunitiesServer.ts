@@ -17,6 +17,7 @@ import { FlatQuoteItemProduct, getOpportunityIdsByProductFilters } from '@/lib/o
 import { fetchFullCatalog, PriceListProduct } from '@/lib/hooks/useProducts';
 import { readFullPhaseCatalog } from '@/lib/phaseCatalogStore';
 import { normalizePhaseFilterValue, opportunityMatchesPhaseIds, readPersistedPhaseIds, resolvePhaseIdQuery } from '@/lib/opportunityPhaseListFilter';
+import { sameArrayValues } from '@/lib/listQueryHelpers';
 
 export type OpportunityServer = {
     id: string;
@@ -73,10 +74,15 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
     // Filters
     const [searchTerm, setSearchTerm] = useState<string>(() => getInitialParam('search') || "");
     const [userFilter, setUserFilter] = useState<'mine' | 'team' | 'collab' | 'all' | 'unrestricted' | 'web'>(() => (getInitialParam('tab') as 'mine' | 'team' | 'collab' | 'all' | 'unrestricted' | 'web' | null) || 'all');
-    const [accountOwnerIds, setAccountOwnerIds] = useState<string[]>(() => {
+    const [accountOwnerIds, setAccountOwnerIdsState] = useState<string[]>(() => {
         const owner = getInitialParam('owner');
         return owner ? owner.split(',').filter(Boolean) : [];
     });
+    // PERF: la página re-sincroniza filtros en cada cambio de URL con arrays nuevos.
+    // Conservamos la misma referencia si el contenido no cambió para no repetir la consulta.
+    const setAccountOwnerIds = useCallback((value: string[]) => {
+        setAccountOwnerIdsState(prev => sameArrayValues(prev, value) ? prev : value);
+    }, []);
 
     // New Hierarchical Filters
     const [channelFilter, setChannelFilter] = useState<string | null>(() => getInitialParam('channel'));
@@ -90,7 +96,8 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
     });
     const [phaseFilter, setPhaseFilterState] = useState<number[]>(() => readPersistedPhaseIds(getInitialParam('phases'), getInitialParam('phase')));
     const setPhaseFilter = useCallback((value: number | number[] | null) => {
-        setPhaseFilterState(normalizePhaseFilterValue(value));
+        const next = normalizePhaseFilterValue(value);
+        setPhaseFilterState(prev => sameArrayValues(prev, next) ? prev : next);
     }, []);
     const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => {
         if (!ignorePersistedStatus) {
@@ -142,24 +149,37 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
     const seesAllPortfolio = canViewAllAccountsContactsOpportunities(user);
     const tiendaScoped = isTiendaUser(user);
     const [subordinateIds, setSubordinateIds] = useState<string[]>([]);
+    const [subordinatesLoadedFor, setSubordinatesLoadedFor] = useState<string | null>(null);
+    // Un coordinador no consulta hasta conocer su equipo: así no se muestra primero una lista incompleta
+    // ni se hace una consulta extra que luego se descarta.
+    const subordinatesReady = userRole !== 'COORDINADOR' || subordinatesLoadedFor === currentUserId;
 
     // PERF FIX: Use ref for page to avoid including it in useCallback deps
     const pageRef = useRef(1);
+    // Descarta respuestas de consultas viejas (filtros cambiados mientras cargaba).
+    const requestIdRef = useRef(0);
 
     // USER ID is now retrieved directly from useCurrentUser
 
     // Fetch subordinates for team view if user is a coordinator
     useEffect(() => {
         if (userRole === 'COORDINADOR' && currentUserId) {
+            let cancelled = false;
             supabase
                 .from('CRM_Usuarios')
                 .select('id')
                 .contains('coordinadores', [currentUserId])
                 .then(({ data, error }) => {
+                    if (cancelled) return;
                     if (!error && data) {
-                        setSubordinateIds(data.map(u => u.id));
+                        const ids = data.map(u => u.id);
+                        setSubordinateIds(prev => sameArrayValues(prev, ids) ? prev : ids);
                     }
+                    setSubordinatesLoadedFor(currentUserId);
+                }, () => {
+                    if (!cancelled) setSubordinatesLoadedFor(currentUserId);
                 });
+            return () => { cancelled = true; };
         }
     }, [userRole, currentUserId]);
 
@@ -210,7 +230,10 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
     const fetchOpportunities = useCallback(async (isLoadMore = false) => {
         if (!currentUserId || !userRole) return; // Wait for user and role
         if (!phasesLoadedRef.current) return; // Wait for phases to load
+        if (!subordinatesReady) return; // Coordinador: esperar a conocer su equipo
 
+        const requestId = ++requestIdRef.current;
+        const isStale = () => requestId !== requestIdRef.current;
         const setIsLoadingData = useSyncStore.getState().setIsLoadingData;
         setLoading(true);
         setIsLoadingData(true);
@@ -483,6 +506,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 };
             });
 
+            if (isStale()) return;
             if (isLoadMore) {
                 setData(prev => {
                     const existingIds = new Set(prev.map(i => i.id));
@@ -502,30 +526,27 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
             try {
                 await fetchOffline();
             } finally {
-                setLoading(false);
-                useSyncStore.getState().setIsLoadingData(false);
+                if (!isStale()) {
+                    setLoading(false);
+                    useSyncStore.getState().setIsLoadingData(false);
+                }
             }
             return;
         }
 
         try {
-
-            let searchAccountIds: string[] = [];
-            let searchUserIds: string[] = [];
             // Cuando la búsqueda completa es un celular/teléfono: cuentas cuyo teléfono (o el de alguno de sus contactos) coincide
             const phoneDigits = getCellphoneSearchDigits(searchTerm);
             const searchIsPhone = Boolean(phoneDigits);
-            const phoneAccountIds = new Set<string>();
-            const phoneContactIds = new Set<string>();
 
-            if (phoneDigits) {
-                const matches = await findPhoneMatchesServer(supabase, phoneDigits);
-                matches.accountIds.forEach(id => phoneAccountIds.add(id));
-                matches.contactIds.forEach(id => phoneContactIds.add(id));
-            }
-            const serverPhoneMatches: PhoneSearchMatches = { accountIds: phoneAccountIds, contactIds: phoneContactIds };
+            // PERF: las consultas previas son independientes entre sí; antes se esperaban una por una
+            // (hasta 5 viajes al servidor en serie). Ahora salen todas a la vez.
+            const phoneMatchesPromise: Promise<PhoneSearchMatches | null> = phoneDigits
+                ? findPhoneMatchesServer(supabase, phoneDigits)
+                : Promise.resolve(null);
 
-            if (searchTerm && searchTerm.trim() && !searchIsPhone) {
+            const searchIdsPromise = (async (): Promise<{ accountIds: string[]; userIds: string[] }> => {
+                if (!(searchTerm && searchTerm.trim() && !searchIsPhone)) return { accountIds: [], userIds: [] };
                 const tokens = getSearchTokens(searchTerm);
                 let accQuery = supabase.from('CRM_Cuentas').select('id').eq('is_deleted', false);
                 let userQuery = supabase.from('CRM_Usuarios').select('id');
@@ -538,23 +559,24 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                     accQuery.limit(100),
                     userQuery.limit(100)
                 ]);
+                return {
+                    accountIds: accountsRes.data ? accountsRes.data.map(a => a.id) : [],
+                    userIds: usersRes.data ? usersRes.data.map(u => u.id) : [],
+                };
+            })();
 
-                if (accountsRes.data) searchAccountIds = accountsRes.data.map(a => a.id);
-                if (usersRes.data) searchUserIds = usersRes.data.map(u => u.id);
-            }
-
-            let collabOppIds: string[] = [];
-            if (isVendedor || userFilter === 'collab' || (userFilter === 'all' && userRole !== 'ADMIN')) {
+            const collabPromise = (async (): Promise<string[]> => {
+                if (!(isVendedor || userFilter === 'collab' || (userFilter === 'all' && userRole !== 'ADMIN'))) return [];
                 const { data: collabRows } = await supabase
                     .from('CRM_Oportunidades_Colaboradores')
                     .select('oportunidad_id')
                     .eq('usuario_id', currentUserId)
                     .eq('is_deleted', false);
-                collabOppIds = Array.from(new Set((collabRows || []).map(row => row.oportunidad_id).filter(Boolean)));
-            }
+                return Array.from(new Set((collabRows || []).map(row => row.oportunidad_id).filter(Boolean)));
+            })();
 
-            let matchedProductOppIds: string[] | null = null;
-            if (plantaFilter || familiaFilter) {
+            const productPromise = (async (): Promise<string[] | null> => {
+                if (!(plantaFilter || familiaFilter)) return null;
                 let quoteItemsQuery = supabase
                     .from('CRM_CotizacionItems')
                     .select('cotizacion:CRM_Cotizaciones!inner(opportunity_id), producto:CRM_ListaDePrecios!inner(planta, familia)')
@@ -571,31 +593,39 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 if (qiError) {
                     console.warn('[useOpportunitiesServer] Error al filtrar por planta/familia:', qiError);
                 }
-                matchedProductOppIds = Array.from(new Set((quoteItemsData || []).map((it: { cotizacion?: { opportunity_id?: string } | Array<{ opportunity_id?: string }> | null }) => {
+                return Array.from(new Set((quoteItemsData || []).map((it: { cotizacion?: { opportunity_id?: string } | Array<{ opportunity_id?: string }> | null }) => {
                     const oppId = Array.isArray(it.cotizacion) ? it.cotizacion[0]?.opportunity_id : it.cotizacion?.opportunity_id;
                     return oppId;
                 }).filter(Boolean))) as string[];
-            }
+            })();
 
-            let matchedIdOppIds: string[] | null = null;
-            if (idFilter && idFilter.trim()) {
+            const idPromise = (async (): Promise<string[] | null> => {
+                if (!(idFilter && idFilter.trim())) return null;
                 const cleanId = idFilter.trim();
                 const isFullUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanId);
-                if (isFullUuid) {
-                    matchedIdOppIds = [cleanId];
-                } else {
-                    try {
-                        const { data: rpcIds, error: rpcErr } = await supabase.rpc('search_opportunities_by_id', { search_term: cleanId });
-                        if (!rpcErr && Array.isArray(rpcIds)) {
-                            matchedIdOppIds = rpcIds;
-                        } else {
-                            matchedIdOppIds = [];
-                        }
-                    } catch {
-                        matchedIdOppIds = [];
-                    }
+                if (isFullUuid) return [cleanId];
+                try {
+                    const { data: rpcIds, error: rpcErr } = await supabase.rpc('search_opportunities_by_id', { search_term: cleanId });
+                    return !rpcErr && Array.isArray(rpcIds) ? rpcIds : [];
+                } catch {
+                    return [];
                 }
-            }
+            })();
+
+            const [phoneMatches, searchIds, collabOppIds, matchedProductOppIds, matchedIdOppIds] = await Promise.all([
+                phoneMatchesPromise,
+                searchIdsPromise,
+                collabPromise,
+                productPromise,
+                idPromise,
+            ]);
+            if (isStale()) return;
+
+            const phoneAccountIds = new Set<string>(phoneMatches?.accountIds ?? []);
+            const phoneContactIds = new Set<string>(phoneMatches?.contactIds ?? []);
+            const serverPhoneMatches: PhoneSearchMatches = { accountIds: phoneAccountIds, contactIds: phoneContactIds };
+            const searchAccountIds = searchIds.accountIds;
+            const searchUserIds = searchIds.userIds;
 
             const useInnerJoin = Boolean(channelFilter || subclassificationFilter || countryFilter || (cityFilter && cityFilter.trim() !== ''));
             const accountRelation = useInnerJoin ? 'account:CRM_Cuentas!inner(nombre, canal_id, subclasificacion_id, ciudad, pais_id)' : 'account:CRM_Cuentas(nombre, canal_id, subclasificacion_id, ciudad, pais_id)';
@@ -820,9 +850,10 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                     setter,
                     ${accountRelation},
                     fase_data:CRM_FasesOportunidad(nombre),
-                    vendedor:CRM_Usuarios!owner_user_id(full_name),
-                    actividades:CRM_Actividades(id, user_id, fecha_inicio, fecha_fin, tipo_actividad, is_completed, is_deleted)
+                    vendedor:CRM_Usuarios!owner_user_id(full_name)
                 `);
+            // PERF: se quitó `actividades_count:CRM_Actividades(count)`. Era un conteo de actividades
+            // por cada fila (×100 por página) y la lista nunca lo mostraba (activity_summary va fijo abajo).
 
             dataQuery = applyCommonFilters(dataQuery);
 
@@ -861,18 +892,20 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 countPromise = Promise.resolve(null);
             }
 
-            // Ejecución en paralelo
-            const [{ data: result, error }, totalCount] = await Promise.all([
+            // Ejecución en paralelo (datos, conteo y cambios locales pendientes)
+            const pendingChangesPromise = db.outbox
+                .where('entity_type').equals('CRM_Oportunidades')
+                .and(item => item.status === 'PENDING' || item.status === 'SYNCING')
+                .toArray()
+                .catch(() => []);
+            const [{ data: result, error }, totalCount, pendingChanges] = await Promise.all([
                 dataQuery,
-                countPromise
+                countPromise,
+                pendingChangesPromise
             ]);
 
             if (error) throw error;
-
-            const pendingChanges = await db.outbox
-                .where('entity_type').equals('CRM_Oportunidades')
-                .and(item => item.status === 'PENDING' || item.status === 'SYNCING')
-                .toArray();
+            if (isStale()) return;
 
             const resultIds = result ? (result as any[]).map(r => r.id) : [];
             const missingPendingIds = new Set<string>();
@@ -907,12 +940,13 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 }));
             }
 
+            // actividades_count es un array de un elemento con { count: N } devuelto por Supabase embedded count.
+            // Usamos un activity_summary stub "none" para evitar cargar todos los registros de actividades en la lista.
             let combinedResults = [...pendingLocalOpps, ...(result as any[])].map((o: any) => {
-                const visibleActs = activitiesVisibleToViewer<ActivityItem>(o.actividades, userRole, currentUserId, user);
                 return {
                     ...o,
-                    actividades: visibleActs,
-                    activity_summary: computeOpportunityActivitySummary(visibleActs)
+                    actividades: [],
+                    activity_summary: { status: 'none', label: 'Sin actividad', total: 0, overdue: 0, pending: 0 }
                 };
             });
             if (searchTerm && searchTerm.trim()) {
@@ -928,6 +962,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 );
             }
 
+            if (isStale()) return;
             if (isLoadMore) {
                 setData(prev => {
                     const existingIds = new Set(prev.map(i => i.id));
@@ -950,6 +985,7 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
             }
 
         } catch (err: any) {
+            if (isStale()) return;
             console.error("Error fetching opportunities, executing fallback:", err?.message || err, err?.details, err?.hint, err?.code, JSON.stringify(err));
             try {
                 await fetchOffline();
@@ -957,10 +993,12 @@ export function useOpportunitiesServer({ pageSize = DEFAULT_OPPORTUNITIES_PAGE_S
                 console.error("Fallback error:", fallbackErr);
             }
         } finally {
-            setLoading(false);
-            useSyncStore.getState().setIsLoadingData(false);
+            if (!isStale()) {
+                setLoading(false);
+                useSyncStore.getState().setIsLoadingData(false);
+            }
         }
-    }, [currentUserId, user, user?.email, user?.es_tienda, seesAllPortfolio, tiendaScoped, isVendedor, subordinateIds, pageSize, userFilter, searchTerm, accountIdFilter, idFilter, accountOwnerIds, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, originFilter, plantaFilter, familiaFilter, countryFilter, cityFilter, setterFilter, phasesReady, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc]);
+    }, [currentUserId, user, user?.email, user?.es_tienda, seesAllPortfolio, tiendaScoped, isVendedor, subordinateIds, subordinatesReady, pageSize, userFilter, searchTerm, accountIdFilter, idFilter, accountOwnerIds, userRole, channelFilter, subclassificationFilter, segmentFilter, phaseFilter, statusFilter, originFilter, plantaFilter, familiaFilter, countryFilter, cityFilter, setterFilter, phasesReady, startDate, endDate, startClosingDate, endClosingDate, sortField, sortAsc]);
 
     useEffect(() => {
         fetchOpportunities(false);

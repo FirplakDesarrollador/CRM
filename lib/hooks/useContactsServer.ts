@@ -7,6 +7,7 @@ import { matchesSearchTokens, getSearchTokens, getPhoneIlikePatterns } from '@/l
 import { getCellphoneSearchDigits, phoneMatchesDigits } from '@/lib/phoneSearch';
 import { shouldRestrictContactsByAccountOwner, filterContactsForUser } from '@/lib/contactVisibility';
 import { canViewAllAccountsContactsOpportunities } from '@/lib/sellerVisibility';
+import { sameArrayValues } from '@/lib/listQueryHelpers';
 
 export type ContactServer = {
     id: string;
@@ -49,23 +50,39 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
     const seesAllPortfolio = canViewAllAccountsContactsOpportunities(user);
 
     const [subordinateIds, setSubordinateIds] = useState<string[]>([]);
+    const [subordinatesLoadedFor, setSubordinatesLoadedFor] = useState<string | null>(null);
+    // Coordinador con restricción por cuenta: esperar a conocer su equipo para no mostrar una lista incompleta.
+    const needsTeamForScope = !seesAllPortfolio && shouldRestrictContactsByAccountOwner(userRole) && userRole === 'COORDINADOR';
+    const subordinatesReady = !needsTeamForScope || subordinatesLoadedFor === currentUserId;
+    // Descarta respuestas de consultas viejas (filtros/búsqueda cambiados mientras cargaba).
+    const requestIdRef = useRef(0);
 
     useEffect(() => {
         if (userRole === 'COORDINADOR' && currentUserId) {
+            let cancelled = false;
             supabase
                 .from('CRM_Usuarios')
                 .select('id')
                 .contains('coordinadores', [currentUserId])
                 .then(({ data, error }) => {
+                    if (cancelled) return;
                     if (!error && data) {
-                        setSubordinateIds(data.map(u => u.id));
+                        const ids = data.map(u => u.id);
+                        setSubordinateIds(prev => sameArrayValues(prev, ids) ? prev : ids);
                     }
+                    setSubordinatesLoadedFor(currentUserId);
+                }, () => {
+                    if (!cancelled) setSubordinatesLoadedFor(currentUserId);
                 });
+            return () => { cancelled = true; };
         }
     }, [userRole, currentUserId]);
 
     const fetchContacts = useCallback(async (isLoadMore = false) => {
         if (!currentUserId) return; // Prevent leak while user loads
+        if (!subordinatesReady) return; // Coordinador: esperar a conocer su equipo
+        const requestId = ++requestIdRef.current;
+        const isStale = () => requestId !== requestIdRef.current;
         const setIsLoadingData = useSyncStore.getState().setIsLoadingData;
         setLoading(true);
         setIsLoadingData(true);
@@ -134,6 +151,7 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
             const totalCount = localContacts.length;
             const paginatedContacts = localContacts.slice(from, to + 1);
 
+            if (isStale()) return;
             if (isLoadMore) {
                 setData(prev => {
                     const existingIds = new Set(prev.map(i => i.id));
@@ -184,22 +202,24 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
                 const idsToMatch = isVendedor ? [currentUserId] : [currentUserId, ...subordinateIds].filter(Boolean);
                 const idsString = idsToMatch.join(',');
 
-                // Fetch IDs of accounts where user is owner OR (unassigned and user is creator)
-                const { data: myAccounts } = await supabase
-                    .from('CRM_Cuentas')
-                    .select('id')
-                    .or(`owner_user_id.in.(${idsString}),and(owner_user_id.is.null,created_by.in.(${idsString}))`)
-                    .eq('is_deleted', false);
-                
+                // PERF: ambas consultas en paralelo (antes en serie).
+                // Cuentas donde el usuario es dueño O (sin dueño y él es el creador) + cuentas donde colabora.
+                const [{ data: myAccounts }, { data: collabData }] = await Promise.all([
+                    supabase
+                        .from('CRM_Cuentas')
+                        .select('id')
+                        .or(`owner_user_id.in.(${idsString}),and(owner_user_id.is.null,created_by.in.(${idsString}))`)
+                        .eq('is_deleted', false),
+                    supabase
+                        .from('CRM_Oportunidades_Colaboradores')
+                        .select('CRM_Oportunidades!inner(account_id)')
+                        .eq('usuario_id', currentUserId)
+                        .eq('is_deleted', false),
+                ]);
+                if (isStale()) return;
+
                 let myAccountIds = myAccounts?.map(a => a.id) || [];
 
-                // Also fetch accounts where user is collaborator in opportunities
-                const { data: collabData } = await supabase
-                    .from('CRM_Oportunidades_Colaboradores')
-                    .select('CRM_Oportunidades!inner(account_id)')
-                    .eq('usuario_id', currentUserId)
-                    .eq('is_deleted', false);
-                
                 const collabAccountIds = (collabData as any[])
                     ?.map((c: any) => {
                         const opp = Array.isArray(c.CRM_Oportunidades) ? c.CRM_Oportunidades[0] : c.CRM_Oportunidades;
@@ -243,15 +263,20 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
             // Paging
             query = query.range(from, to);
 
-            // Fetch pending local changes
-            const pendingChanges = await db.outbox
+            // Cambios locales pendientes y consulta al servidor en paralelo
+            const pendingChangesPromise = db.outbox
                 .where('entity_type').equals('CRM_Contactos')
                 .and(item => item.status === 'PENDING' || item.status === 'SYNCING')
-                .toArray();
+                .toArray()
+                .catch(() => []);
 
-            const { data: result, error, count: totalCount } = await query;
+            const [{ data: result, error, count: totalCount }, pendingChanges] = await Promise.all([
+                query,
+                pendingChangesPromise,
+            ]);
 
             if (error) throw error;
+            if (isStale()) return;
 
             const resultIds = result ? (result as any[]).map(r => r.id) : [];
             const optimisticUpdates: Record<string, Record<string, any>> = {};
@@ -340,6 +365,7 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
                 );
             }
 
+            if (isStale()) return;
             if (isLoadMore) {
                 setData(prev => {
                     const existingIds = new Set(prev.map(i => i.id));
@@ -360,6 +386,7 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
             }
 
         } catch (err) {
+            if (isStale()) return;
             console.error("Error fetching contacts from server, executing local Dexie fallback:", err);
             try {
                 await fetchOffline();
@@ -367,10 +394,12 @@ export function useContactsServer({ pageSize = 20, accountId }: UseContactsServe
                 console.error("Dexie fallback exception:", fallbackErr);
             }
         } finally {
-            setLoading(false);
-            useSyncStore.getState().setIsLoadingData(false);
+            if (!isStale()) {
+                setLoading(false);
+                useSyncStore.getState().setIsLoadingData(false);
+            }
         }
-    }, [pageSize, searchTerm, accountId, accountFilter, principalFilter, sortField, sortAsc, isVendedor, userRole, currentUserId, user?.email, seesAllPortfolio, subordinateIds]);
+    }, [pageSize, searchTerm, accountId, accountFilter, principalFilter, sortField, sortAsc, isVendedor, userRole, currentUserId, user?.email, seesAllPortfolio, subordinateIds, subordinatesReady]);
 
     // Initial Fetch & Filter Fetch
     useEffect(() => {

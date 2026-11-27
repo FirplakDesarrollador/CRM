@@ -3,6 +3,35 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-11-27 - Optimización de Carga de Listas (`useOpportunitiesServer`, `useAccountsServer`, `useContactsServer`)
+
+- **Requerimiento:** Que las listas carguen más rápido sin perder información.
+- **Causas encontradas:**
+  1. Oportunidades pedía `actividades_count:CRM_Actividades(count)` por cada fila (×100 por página) y el valor nunca se mostraba.
+  2. La página de oportunidades re-sincroniza filtros en cada cambio de URL (incluida la búsqueda) con arrays nuevos (`owner`, `phases`), lo que disparaba una segunda consulta idéntica.
+  3. Consultas previas independientes (celular, cuentas/usuarios por búsqueda, colaboraciones, planta/familia, ID; en cuentas: web/colaboraciones/celular; en contactos: cuentas propias/colaboraciones) se ejecutaban en serie.
+  4. Coordinadores: primera carga sin su equipo (lista incompleta) y luego una segunda carga.
+  5. Oportunidades y contactos no descartaban respuestas viejas: una respuesta lenta podía pisar la lista de un filtro más reciente.
+- **Cambios:** se quitó el conteo de actividades no usado; setters de arrays conservan la referencia si el contenido no cambia (`lib/listQueryHelpers.ts`, `sameArrayValues`); consultas previas y lectura de `db.outbox` en paralelo con `Promise.all`; espera de subordinados antes de la primera consulta del coordinador; control `requestIdRef` en oportunidades y contactos.
+- **Índices propuestos (no aplicados):** `supabase/migrations/20261127090000_list_sort_indexes.sql`.
+- **Pruebas:** `tests/listQueryHelpers.test.ts` (nuevo). Suite `tests/` 388/390; las 2 fallas son previas (`b2cCrmFeatures` espera `telefono.ilike` en `useAccountsServer.ts`, movido a `accountSearchHelpers.ts`; `cuentaOportunidadesFiltros` espera una línea de `status` ya reemplazada por `ignorePersistedStatus`).
+- **Páginas afectadas:** `wiki/LOG.md`.
+
+## 2026-11-26 - Corrección del Buscador de Cuentas en Móvil (`AccountCombobox`, `useAccountsServer`, `CreateActivityModal`)
+
+- **Requerimiento:** Corregir el fallo del buscador de cuentas en celular ("se queda buscando y a veces no carga la que es") y el solapamiento del modal de actividades con la barra inferior móvil.
+- **Causa Raíz:**
+  1. `useAccountsServer` heredaba filtros persistidos de URL (`?user=`) y `sessionStorage('crm_cuentas_state')`, carecía de control de secuencia (`requestIdRef`) para descartar respuestas fuera de orden en redes móviles lentas, ejecutaba consultas pesadas (`CRM_VistaCuentasConPotencial`, `count: 'exact'`, `db.outbox`) en el combobox y usaba `ilike` sensible a tildes después de `getSearchTokens()` (que sí elimina tildes, causando fallos con teclados móviles que autocorrijen acentos).
+  2. `AccountCombobox` y `OpportunityCombobox` usaban `w-[--radix-popover-trigger-width]` (inválido en Tailwind v4), `side="bottom"` + `avoidCollisions={false}` (sacando el listado por debajo del viewport y teclado móvil) y `text-sm` en el input.
+  3. `CreateActivityModal` (`z-50`) quedaba parcialmente cubierto por `MobileNav` (`z-50`).
+- **Cambios Implementados:**
+  - `lib/accountSearchHelpers.ts`: helpers `sanitizePostgrestToken`, `buildAccountTokenOrFilter` (con `imatch` insensible a tildes en `nombre`/`ciudad`) y `resolveAccountComboboxLabel`.
+  - `lib/hooks/useAccountsServer.ts`: soporte para `ignorePersistedFilters`, modo `lightweight` directo sobre `CRM_Cuentas` y control de concurrencia `requestIdRef`.
+  - `components/accounts/AccountCombobox.tsx` y `components/contactos/AccountSelector.tsx`: uso de `ignorePersistedFilters: true` + `lightweight: true`, `avoidCollisions={true}`, `z-[80]`, ancho válido, limpieza rápida de búsqueda y botón respaldo «Cargar más cuentas».
+  - `components/opportunities/OpportunityCombobox.tsx` y `components/activities/CreateActivityModal.tsx`: ajuste de `z-[60]` en modal y `z-[80]` + `avoidCollisions={true}` en popovers.
+- **Pruebas y Verificación:** `tests/accountComboboxMobileSearch.test.ts` (4/4 GREEN), `tests/supabaseDirectHooks.test.ts` (8/8 GREEN) y `lib/actividadesUi.test.ts` (19/19 GREEN).
+- **Páginas afectadas:** `wiki/pages/actividades.md`, `wiki/LOG.md`.
+
 ## 2026-11-19 - Fase 4 Desmontaje de Base de Datos Local: Modales, Formularios de Contacto/Usuario, Indicadores y Notificaciones Directos a Supabase
 
 - **Requerimiento:** Completar la Fase 4 migrando los componentes y hooks restantes (`LossReasonModal`, `ContactForm`, `CreateContactWizard`, `UserForm`, `useIndicadoresLookups`, `VentasGanadasTile` y `useNotifications`) a consultas directas a Supabase sin usar `dexie-react-hooks` ni `db.*` (sin subir a `main`).
