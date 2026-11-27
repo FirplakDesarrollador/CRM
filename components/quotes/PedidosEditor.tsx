@@ -10,6 +10,7 @@ import { cn } from "@/components/ui/utils";
 import { useFormAutoSave } from "@/lib/hooks/useFormAutoSave";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { AutoSaveIndicator } from "@/components/ui/AutoSaveIndicator";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 import { executeDirectMutations, fetchRecordDirect } from "@/lib/supabaseDirect";
 import { SendQuoteModal } from "@/components/quotes/SendQuoteModal";
 import { QuotePreviewModal } from "@/components/quotes/QuotePreviewModal";
@@ -892,22 +893,34 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
                         <label className="text-sm font-medium flex items-center gap-2 mb-1">
                             <Receipt className="w-4 h-4 text-slate-400" /> Tipo Facturación
                         </label>
-                        <select {...register("tipo_facturacion")} className="w-full p-2 border rounded-lg">
-                            <option value="">Seleccione...</option>
-                            <option value="Standard">Estándar</option>
-                            <option value="Anticipo">Anticipo</option>
-                        </select>
+                        <SearchableSelect
+                            value={watch("tipo_facturacion") || ""}
+                            onChange={(val) => setValue("tipo_facturacion", val, { shouldDirty: true, shouldValidate: true })}
+                            placeholder="Seleccione..."
+                            searchPlaceholder="Buscar tipo de facturación..."
+                            options={[
+                                { value: "Standard", label: "Estándar", searchValue: "Standard" },
+                                { value: "Anticipo", label: "Anticipo" },
+                            ]}
+                        />
                     </div>
 
                     <div>
                         <label className="text-sm font-medium flex items-center gap-2 mb-1">
                             <Truck className="w-4 h-4 text-slate-400" /> Tipo POD
                         </label>
-                        <select {...register("tipo_pod")} className="w-full p-2 border rounded-lg">
-                            <option value="POD Total">POD Total</option>
-                            <option value="POD Parcial">POD Parcial</option>
-                            <option value="Sin POD">Sin POD</option>
-                        </select>
+                        <SearchableSelect
+                            value={watch("tipo_pod") || "POD Total"}
+                            allowClear={false}
+                            onChange={(val) => setValue("tipo_pod", val, { shouldDirty: true, shouldValidate: true })}
+                            placeholder="Seleccione tipo POD..."
+                            searchPlaceholder="Buscar tipo POD..."
+                            options={[
+                                { value: "POD Total", label: "POD Total" },
+                                { value: "POD Parcial", label: "POD Parcial" },
+                                { value: "Sin POD", label: "Sin POD" },
+                            ]}
+                        />
                     </div>
 
                     <div className="flex items-center gap-8 md:col-span-2 bg-slate-50 p-3 rounded-lg border">
@@ -998,12 +1011,17 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
                     </div>
 
                     <div>
-                        <label className="text-sm font-medium">Tipo Dirección Factura (Oficina / Tienda) <span className="text-red-500 font-bold">*</span></label>
-                        <select {...register("dir_envio_factura_tipo")} className="w-full mt-1 p-2 border rounded-lg" required>
-                            <option value="">Seleccione...</option>
-                            <option value="OFICINA">Oficina</option>
-                            <option value="TIENDA">Tienda</option>
-                        </select>
+                        <label className="text-sm font-medium block mb-1">Tipo Dirección Factura (Oficina / Tienda) <span className="text-red-500 font-bold">*</span></label>
+                        <SearchableSelect
+                            value={watch("dir_envio_factura_tipo") || ""}
+                            onChange={(val) => setValue("dir_envio_factura_tipo", val, { shouldDirty: true, shouldValidate: true })}
+                            placeholder="Seleccione..."
+                            searchPlaceholder="Buscar tipo de dirección..."
+                            options={[
+                                { value: "OFICINA", label: "Oficina" },
+                                { value: "TIENDA", label: "Tienda" },
+                            ]}
+                        />
                     </div>
 
                     <div>
@@ -1012,11 +1030,18 @@ function PedidoEditorForm({ quote, pedidoUuid, onClose }: { quote: LocalQuote, p
                     </div>
 
                     <div>
-                        <label className="text-sm font-medium">Medio de Acceso (Ascensor o Escalera) <span className="text-red-500 font-bold">*</span></label>
-                        <select {...register("medio_acceso")} className="w-full mt-1 p-2 border rounded-lg" required>
-                            <option value="ASCENSOR">Ascensor</option>
-                            <option value="ESCALERA">Escalera</option>
-                        </select>
+                        <label className="text-sm font-medium block mb-1">Medio de Acceso (Ascensor o Escalera) <span className="text-red-500 font-bold">*</span></label>
+                        <SearchableSelect
+                            value={watch("medio_acceso") || "ASCENSOR"}
+                            allowClear={false}
+                            onChange={(val) => setValue("medio_acceso", val, { shouldDirty: true, shouldValidate: true })}
+                            placeholder="Seleccione medio de acceso..."
+                            searchPlaceholder="Buscar medio de acceso..."
+                            options={[
+                                { value: "ASCENSOR", label: "Ascensor" },
+                                { value: "ESCALERA", label: "Escalera" },
+                            ]}
+                        />
                     </div>
 
                     <div className="md:col-span-2 flex flex-wrap gap-6 bg-slate-50 p-3 rounded-lg border">

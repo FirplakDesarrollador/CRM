@@ -13,6 +13,7 @@ import { db, LocalQuote } from "@/lib/db";
 import { hydrateQuoteDetailFromSupabase } from "@/lib/supabaseDirect";
 import { Save, AlertTriangle, Truck, Receipt, Calendar, Search, Plus, Trash2, Loader2, Package, Download, Send, Eye, FileSpreadsheet } from "lucide-react";
 import { ExpandableTextarea } from "@/components/ui/ExpandableTextarea";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 import { cn } from "@/components/ui/utils";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useConfig } from "@/lib/hooks/useConfig";
@@ -466,16 +467,20 @@ function QuoteItemsEditor({ quote, onItemsChange, onSaveQuote }: {
                 {/* Add Product Search */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4 mb-5 sm:mb-6">
                     <div className="md:col-span-1">
-                        <select
-                            className="w-full p-2.5 sm:p-3 border border-slate-200 rounded-xl bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500 transition-all text-xs sm:text-sm outline-none"
+                        <SearchableSelect
                             value={selectedPrefix}
-                            onChange={(e) => setSelectedPrefix(e.target.value)}
-                        >
-                            <option value="">Todas las categorías</option>
-                            {categories.filter(c => c.is_active).map(c => (
-                                <option key={c.id} value={c.prefijo}>{c.nombre}</option>
-                            ))}
-                        </select>
+                            onChange={setSelectedPrefix}
+                            placeholder="Todas las categorías"
+                            searchPlaceholder="Buscar categoría..."
+                            triggerClassName="border-slate-200 rounded-xl bg-slate-50 text-xs sm:text-sm"
+                            options={categories
+                                .filter(c => c.is_active)
+                                .map(c => ({
+                                    value: c.prefijo,
+                                    label: c.nombre,
+                                    searchValue: `${c.prefijo} ${c.nombre}`,
+                                }))}
+                        />
                     </div>
                     
                     <div className="md:col-span-2 relative">
@@ -811,27 +816,24 @@ function QuotationSegmentSelector({ opportunity_id, initialValue, onSave }: { op
 
     return (
         <div>
-            <label className="text-sm font-medium text-slate-700">Segmento del Pedido</label>
-            <select
-                className="w-full mt-1 p-2 border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500 transition-all outline-none disabled:opacity-50"
+            <label className="text-sm font-medium text-slate-700 block mb-1">Segmento del Pedido</label>
+            <SearchableSelect
                 value={localValue}
-                onChange={(e) => {
-                    const val = e.target.value;
+                onChange={(val) => {
                     setLocalValue(val);
                     onSave(val ? Number(val) : null);
                 }}
                 disabled={!account.subclasificacion_id}
-            >
-                <option value="">Seleccione un segmento...</option>
-                {segments
+                placeholder="Seleccione un segmento..."
+                searchPlaceholder="Buscar segmento..."
+                triggerClassName="border-slate-200 bg-slate-50"
+                options={segments
                     .filter(seg => account.subclasificacion_id && seg.subclasificacion_id === Number(account.subclasificacion_id))
-                    .map(seg => (
-                        <option key={seg.id} value={String(seg.id)}>
-                            {seg.nombre}
-                        </option>
-                    ))
-                }
-            </select>
+                    .map(seg => ({
+                        value: String(seg.id),
+                        label: seg.nombre,
+                    }))}
+            />
             {!account.subclasificacion_id && (
                 <p className="text-[10px] text-orange-600 mt-1 italic font-medium">
                     La cuenta no tiene subclasificación. Edite la cuenta para habilitar segmentos.

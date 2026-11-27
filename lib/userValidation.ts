@@ -17,6 +17,7 @@ export const userSchema = z.object({
     paises: z.array(z.string()).optional(),
     departamentos: z.array(z.string()).optional(),
     canales: z.array(z.string()).optional(),
+    zona_id: z.string().optional().nullable(),
 });
 
 export type UserFormData = z.infer<typeof userSchema>;

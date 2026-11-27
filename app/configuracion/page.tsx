@@ -47,6 +47,11 @@ const OpportunityOriginsManager = dynamic(() => import('@/components/config/Oppo
     ssr: false
 });
 
+const ZonesManager = dynamic(() => import('@/components/config/ZonesManager').then(mod => mod.ZonesManager), {
+    loading: () => <div className="animate-pulse bg-slate-100 h-20 rounded-2xl" />,
+    ssr: false
+});
+
 const BulkAccountUploader = dynamic(() => import('@/components/config/BulkAccountUploader').then(mod => mod.BulkAccountUploader), {
     loading: () => <div className="animate-pulse bg-slate-100 h-20 rounded-2xl" />,
     ssr: false
@@ -826,6 +831,7 @@ function ConfigPageContent() {
             {role === 'ADMIN' && (
                 <>
                     <PriceListUploader />
+                    <ZonesManager />
                     <OpportunityOriginsManager />
                     <ActivityClassificationManager />
                     <BulkAccountUploader />

@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { X, Save, AlertCircle, CheckCircle2, Target, BarChart, Users, DollarSign } from "lucide-react";
 import { cn } from "@/components/ui/utils";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 interface GoalsConfigModalProps {
     isOpen: boolean;
@@ -203,19 +204,19 @@ export function GoalsConfigModal({ isOpen, onClose, initialUserId }: GoalsConfig
                     {/* User Select */}
                     <div>
                         <label className="block text-sm font-bold text-slate-700 mb-1.5">Usuario Responsable <span className="text-red-500">*</span></label>
-                        <select
-                            className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                        <SearchableSelect
                             value={selectedUserId}
-                            onChange={(e) => setSelectedUserId(e.target.value)}
+                            onChange={setSelectedUserId}
                             disabled={isLoading}
-                        >
-                            <option value="">Seleccionar Usuario...</option>
-                            {users.map(u => (
-                                <option key={u.id} value={u.id}>
-                                    {u.full_name || u.email}
-                                </option>
-                            ))}
-                        </select>
+                            placeholder="Seleccionar Usuario..."
+                            searchPlaceholder="Buscar usuario por nombre o correo..."
+                            triggerClassName="rounded-xl border-slate-200 bg-slate-50 font-medium text-slate-900"
+                            options={users.map(u => ({
+                                value: u.id,
+                                label: u.full_name || u.email,
+                                searchValue: `${u.full_name || ""} ${u.email || ""}`,
+                            }))}
+                        />
                     </div>
 
                     {/* Goal Type Select */}
@@ -255,19 +256,18 @@ export function GoalsConfigModal({ isOpen, onClose, initialUserId }: GoalsConfig
                         {goalType === 'SPECIFIC_OPPORTUNITY' ? (
                             <div>
                                 <label className="block text-sm font-bold text-slate-700 mb-1.5">Oportunidad Objetivo <span className="text-red-500">*</span></label>
-                                <select
-                                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                                <SearchableSelect
                                     value={selectedOppId}
-                                    onChange={(e) => setSelectedOppId(e.target.value)}
+                                    onChange={setSelectedOppId}
                                     disabled={isLoading}
-                                >
-                                    <option value="">Seleccionar Oportunidad...</option>
-                                    {opportunities.map(o => (
-                                        <option key={o.id} value={o.id}>
-                                            {o.nombre}
-                                        </option>
-                                    ))}
-                                </select>
+                                    placeholder="Seleccionar Oportunidad..."
+                                    searchPlaceholder="Buscar oportunidad..."
+                                    triggerClassName="rounded-xl border-slate-200 bg-slate-50 font-medium text-slate-900"
+                                    options={opportunities.map(o => ({
+                                        value: o.id,
+                                        label: o.nombre,
+                                    }))}
+                                />
                             </div>
                         ) : (
                             <div>

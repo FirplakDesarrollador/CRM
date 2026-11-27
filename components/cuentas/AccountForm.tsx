@@ -6,7 +6,7 @@ import * as z from "zod";
 import { useLiveQuery } from "dexie-react-hooks";
 import { db, LocalCuenta } from "@/lib/db";
 import { useAccounts } from "@/lib/hooks/useAccounts";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Loader2, User, Building2, Medal, Trash2, Check } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useFormDraft } from "@/lib/hooks/useFormDraft";
@@ -23,16 +23,15 @@ import { ListTodo, History } from "lucide-react";
 import { EntityAuditHistoryTab } from "@/components/shared/EntityAuditHistoryTab";
 import { useFormAutoSave } from "@/lib/hooks/useFormAutoSave";
 import { AutoSaveIndicator } from "@/components/ui/AutoSaveIndicator";
-import { isProvisionalNit } from "@/lib/nitUtils";
+import { isProvisionalNit, sanitizeNitInput, validateColombianNit, buildBranchNit } from "@/lib/nitUtils";
 import { DuplicateAccountModal, type DuplicateAccountInfo } from "./DuplicateAccountModal";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
+import { ParentAccountCombobox, type ParentAccountOption } from "@/components/accounts/ParentAccountCombobox";
 
-// Schema
-const accountSchema = z.object({
+// Schema factory: permite conservar NIT legado sin romper edición de otros campos, pero valida estrictamente cualquier NIT nuevo o modificado
+const buildAccountSchema = (existingNit?: string | null) => z.object({
     nombre: z.string().min(2, "Nombre requerido"),
-    nit_base: z.string().optional().nullable().refine(val => {
-        if (!val || val.trim() === "") return true;
-        return val.trim().length >= 5;
-    }, { message: "NIT debe tener al menos 5 caracteres" }),
+    nit_base: z.string().optional().nullable(),
     is_child: z.boolean(),
     id_cuenta_principal: z.string().nullable().optional(),
     canal_id: z.string().min(1, "Canal de venta requerido"),
@@ -52,7 +51,23 @@ const accountSchema = z.object({
     ignorar_limites_descuento: z.boolean().optional(),
     comentarios: z.string().nullable().optional(),
     origen_cuenta: z.string().nullable().optional(),
+}).superRefine((data, ctx) => {
+    const val = data.nit_base;
+    if (!val || val.trim() === "") return;
+    if (isProvisionalNit(val)) return;
+    if (existingNit && val.trim() === existingNit.trim()) return;
+    if (!validateColombianNit(val, { allowBranchSuffix: data.is_child })) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["nit_base"],
+            message: data.is_child
+                ? "NIT de sucursal inválido (ej. 900510728-6#2)"
+                : "NIT inválido: solo números y máximo un guion con 1 dígito de verificación (ej. 900123456-7)",
+        });
+    }
 });
+
+const accountSchema = buildAccountSchema();
 
 type AccountFormData = z.infer<typeof accountSchema>;
 
@@ -205,8 +220,13 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
     // Tab State
     // Tab State moved to top
 
+    const activeAccountSchema = useMemo(
+        () => buildAccountSchema(account?.nit_base),
+        [account?.nit_base]
+    );
+
     const form = useForm<AccountFormData>({
-        resolver: zodResolver(accountSchema),
+        resolver: zodResolver(activeAccountSchema),
         shouldUnregister: false,
         defaultValues: {
             nombre: account?.nombre || "",
@@ -352,14 +372,27 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
         }
     }, [selectedChannel, lastProcessedChannel, subclassifications, displaySubclassifications, setValue, watch]);
 
-    // Filter possible parents (exclude self)
-    const potentialParents = parents.filter(p => p.id !== account?.id);
+    const [selectedParentOption, setSelectedParentOption] = useState<ParentAccountOption | null>(null);
 
-    const handleParentChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        const parentId = e.target.value;
-        const parent = parents.find(a => a.id === parentId);
+    const handleParentSelect = (parentId: string, parent: ParentAccountOption | null) => {
+        setValue("id_cuenta_principal", parentId, { shouldDirty: true, shouldValidate: true });
+        setSelectedParentOption(parent);
         if (parent) {
-            setValue("nit_base", parent.nit_base || "");
+            setParents((prev) => (prev.some((p) => p.id === parent.id) ? prev : [parent, ...prev]));
+            const optimisticNit = buildBranchNit(parent.nit_base || "", []);
+            setValue("nit_base", optimisticNit || parent.nit_base || "", { shouldDirty: true, shouldValidate: true });
+            void (async () => {
+                try {
+                    const { data: nextNit, error } = await supabase.rpc("get_next_branch_nit", {
+                        p_parent_id: parent.id,
+                    });
+                    if (!error && typeof nextNit === "string" && nextNit.trim() !== "") {
+                        setValue("nit_base", nextNit.trim(), { shouldDirty: true, shouldValidate: true });
+                    }
+                } catch {
+                    // Keep optimistic branch NIT when offline
+                }
+            })();
         }
     };
 
@@ -448,8 +481,12 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
             }
 
             if (formData.is_child && formData.id_cuenta_principal) {
-                const parent = parents.find(a => a.id === formData.id_cuenta_principal);
-                if (parent) formData.nit_base = parent.nit_base || "";
+                const parent =
+                    (selectedParentOption?.id === formData.id_cuenta_principal ? selectedParentOption : null) ||
+                    parents.find(a => a.id === formData.id_cuenta_principal);
+                if ((!formData.nit_base || !formData.nit_base.includes("#")) && parent?.nit_base) {
+                    formData.nit_base = buildBranchNit(parent.nit_base, []);
+                }
             }
 
             const payload: any = {
@@ -751,66 +788,80 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
                             Canal de Venta <span className="text-red-500">*</span>
                         </label>
                         <p className="text-xs text-slate-500 mb-2">Define las listas de precios y fases de oportunidad disponibles.</p>
-                        <select
-                            {...register("canal_id")}
-                            className="w-full border p-2 rounded bg-white font-medium text-slate-900 border-slate-300 focus:ring-2 focus:ring-blue-500"
-                        >
-                            <option value="OBRAS_NAC">Obras Nacional</option>
-                            <option value="OBRAS_INT">Obras Internacional</option>
-                            <option value="DIST_NAC">Distribución Nacional (Default)</option>
-                            <option value="DIST_INT">Distribución Internacional</option>
-                            <option value="PROPIO">Canal Propio</option>
-                        </select>
+                        <SearchableSelect
+                            value={selectedChannel || ""}
+                            onChange={(val) => setValue("canal_id", val, { shouldDirty: true, shouldValidate: true })}
+                            allowClear={false}
+                            placeholder="Seleccione canal..."
+                            searchPlaceholder="Buscar canal de venta..."
+                            triggerClassName="border-slate-300 font-medium text-slate-900"
+                            options={[
+                                { value: "OBRAS_NAC", label: "Obras Nacional", searchValue: "OBRAS_NAC" },
+                                { value: "OBRAS_INT", label: "Obras Internacional", searchValue: "OBRAS_INT" },
+                                { value: "DIST_NAC", label: "Distribución Nacional (Default)", searchValue: "DIST_NAC" },
+                                { value: "DIST_INT", label: "Distribución Internacional", searchValue: "DIST_INT" },
+                                { value: "PROPIO", label: "Canal Propio", searchValue: "PROPIO" },
+                            ]}
+                        />
                         {errors.canal_id && <span className="text-red-500 text-xs">{errors.canal_id.message}</span>}
                     </div>
 
                     <div className="space-y-1">
                         <label className="text-sm font-medium">Subclasificación</label>
-                        <select
-                            key={`sub-${displaySubclassifications.length}-${selectedChannel}`}
-                            {...register("subclasificacion_id")}
-                            className="w-full border p-2 rounded bg-white disabled:bg-slate-100 disabled:text-slate-400"
+                        <SearchableSelect
+                            value={watch("subclasificacion_id") || ""}
+                            onChange={(val) => setValue("subclasificacion_id", val, { shouldDirty: true, shouldValidate: true })}
                             disabled={!selectedChannel}
-                        >
-                            <option value="">Seleccione...</option>
-                            {displaySubclassifications.length > 0 ? (
-                                displaySubclassifications
-                                    .filter(sub => sub.canal_id === selectedChannel)
-                                    .map(sub => (
-                                        <option key={sub.id} value={String(sub.id)}>
-                                            {sub.nombre}
-                                        </option>
-                                    ))
-                            ) : (
-                                <option disabled>Cargando opciones...</option>
-                            )}
-                        </select>
+                            placeholder={displaySubclassifications.length > 0 ? "Seleccione..." : "Cargando opciones..."}
+                            searchPlaceholder="Buscar subclasificación..."
+                            options={displaySubclassifications
+                                .filter(sub => sub.canal_id === selectedChannel)
+                                .map(sub => ({
+                                    value: String(sub.id),
+                                    label: sub.nombre,
+                                }))}
+                        />
                         <p className="text-xs text-slate-500">Opciones disponibles según el canal seleccionado.</p>
                     </div>
 
                     {isChild ? (
-                        <div className="space-y-1 bg-slate-50 p-3 rounded border border-slate-200">
-                            <label className="text-sm font-medium text-blue-700">Cuenta Principal (Padre)</label>
-                            <select
-                                {...register("id_cuenta_principal")}
-                                onChange={handleParentChange}
-                                className="w-full border p-2 rounded bg-white"
-                            >
-                                <option value="">Seleccione...</option>
-                                {potentialParents.map(p => (
-                                    <option key={p.id} value={p.id}>
-                                        {p.nombre} ({p.nit})
-                                    </option>
-                                ))}
-                            </select>
-                            <p className="text-xs text-slate-500">
-                                Heredará el NIT base: {selectedParentId ? parents.find(a => a.id === selectedParentId)?.nit_base : "..."}
-                            </p>
+                        <div className="space-y-3 bg-slate-50 p-3 rounded border border-slate-200">
+                            <div className="space-y-1">
+                                <label className="text-sm font-medium text-blue-700">Cuenta Principal (Padre)</label>
+                                <ParentAccountCombobox
+                                    value={selectedParentId || ""}
+                                    onChange={handleParentSelect}
+                                    excludeAccountId={account?.id}
+                                    initialParent={selectedParentOption}
+                                    placeholder="Seleccione cuenta principal..."
+                                    searchPlaceholder="Buscar cuenta principal por nombre o NIT..."
+                                    dataTestId="accounts-parent-combobox"
+                                />
+                            </div>
+                            <div className="space-y-1">
+                                <label className="text-sm font-medium text-blue-700">NIT de Sucursal (con #)</label>
+                                <input
+                                    data-testid="accounts-input-nit"
+                                    {...register("nit_base")}
+                                    className="w-full border p-2 rounded bg-white font-mono border-slate-200"
+                                    placeholder="Ej. 900510728-6#2"
+                                    onChange={(e) => {
+                                        const sanitized = sanitizeNitInput(e.target.value, { allowBranchSuffix: true });
+                                        e.target.value = sanitized;
+                                        setValue("nit_base", sanitized, { shouldDirty: true, shouldValidate: true });
+                                        if (nitError) setNitError(null);
+                                    }}
+                                />
+                                <p className="text-xs text-slate-500">
+                                    Formato de sucursal: NIT padre + <strong>#2</strong> (o consecutivo).
+                                </p>
+                                {errors.nit_base && <span className="text-red-500 text-xs">{errors.nit_base.message}</span>}
+                            </div>
                         </div>
                     ) : (
                         <div className="space-y-1">
                             <div className="flex items-center justify-between">
-                                <label className="text-sm font-medium">NIT (Sin dígito de verificación)</label>
+                                <label className="text-sm font-medium">NIT (Opcional · ej. 900123456-7)</label>
                                 {isProvisionalNit(watch("nit_base")) && (
                                     <span className="text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-full">
                                         Provisional (Requerirá NIT real para pedidos)
@@ -819,14 +870,20 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
                             </div>
                             <input
                                 data-testid="accounts-input-nit"
+                                inputMode="numeric"
                                 {...register("nit_base")}
                                 className={cn("w-full border p-2 rounded", nitError ? "border-red-500 bg-red-50" : "border-slate-200")}
-                                placeholder="Ej. 890900123 (opcional, autogenera provisional si se omite)"
+                                placeholder="Ej. 900123456-7 (solo números, guion y DV opcional)"
                                 onChange={(e) => {
-                                    register("nit_base").onChange(e);
+                                    const sanitized = sanitizeNitInput(e.target.value);
+                                    e.target.value = sanitized;
+                                    setValue("nit_base", sanitized, { shouldDirty: true, shouldValidate: true });
                                     if (nitError) setNitError(null);
                                 }}
                             />
+                            <p className="text-[11px] text-slate-500">
+                                Solo números y máximo un guion con 1 dígito de verificación. Sin puntos ni espacios.
+                            </p>
                             {errors.nit_base && <span className="text-red-500 text-xs">{errors.nit_base.message}</span>}
                             {nitError && <div className="text-red-600 text-xs font-bold mt-1 bg-red-50 p-2 rounded border border-red-100">{nitError}</div>}
                         </div>
@@ -834,59 +891,56 @@ export function AccountForm({ onSuccess, onCancel, onDelete, account }: AccountF
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div>
-                            <label className="text-sm font-medium">País</label>
-                            <select
-                                key={`pais-${displayCountries.length}-${account?.id || 'new'}`}
-                                {...register("pais_id")}
-                                className="w-full border p-2 rounded bg-white"
-                                onChange={(e) => {
-                                    register("pais_id").onChange(e);
-                                    setValue("departamento_id", "");
-                                    setValue("ciudad_id", "");
+                            <label className="text-sm font-medium block mb-1">País</label>
+                            <SearchableSelect
+                                value={watch("pais_id") || ""}
+                                onChange={(val) => {
+                                    setValue("pais_id", val, { shouldDirty: true, shouldValidate: true });
+                                    setValue("departamento_id", "", { shouldDirty: true });
+                                    setValue("ciudad_id", "", { shouldDirty: true });
                                 }}
-                            >
-                                <option value="">Seleccione País...</option>
-                                {displayCountries.map(p => (
-                                    <option key={p.id} value={String(p.id)}>{p.nombre}</option>
-                                ))}
-                            </select>
+                                placeholder="Seleccione País..."
+                                searchPlaceholder="Buscar país..."
+                                options={displayCountries.map(p => ({
+                                    value: String(p.id),
+                                    label: p.nombre,
+                                }))}
+                            />
                         </div>
                         <div>
-                            <label className="text-sm font-medium">Departamento</label>
-                            <select
-                                key={`dep-${displayDepartments.length}-${watch("pais_id")}-${account?.id || 'new'}`}
-                                {...register("departamento_id")}
-                                className="w-full border p-2 rounded bg-white disabled:bg-slate-50"
+                            <label className="text-sm font-medium block mb-1">Departamento</label>
+                            <SearchableSelect
+                                value={watch("departamento_id") || ""}
                                 disabled={!watch("pais_id")}
-                                onChange={(e) => {
-                                    register("departamento_id").onChange(e);
-                                    setValue("ciudad_id", "");
+                                onChange={(val) => {
+                                    setValue("departamento_id", val, { shouldDirty: true, shouldValidate: true });
+                                    setValue("ciudad_id", "", { shouldDirty: true });
                                 }}
-                            >
-                                <option value="">Seleccione Departamento...</option>
-                                {displayDepartments
-                                    .filter(dep => String(dep.pais_id) === watch("pais_id") || (!dep.pais_id && watch("pais_id") === "1")) // Fallback local logic just in case
-                                    .map(dep => (
-                                        <option key={dep.id} value={String(dep.id)}>{dep.nombre}</option>
-                                    ))}
-                            </select>
+                                placeholder="Seleccione Departamento..."
+                                searchPlaceholder="Buscar departamento..."
+                                options={displayDepartments
+                                    .filter(dep => String(dep.pais_id) === watch("pais_id") || (!dep.pais_id && watch("pais_id") === "1"))
+                                    .map(dep => ({
+                                        value: String(dep.id),
+                                        label: dep.nombre,
+                                    }))}
+                            />
                         </div>
                         <div>
-                            <label className="text-sm font-medium">Ciudad</label>
-                            <select
-                                key={`city-${displayCities.length}-${watch("departamento_id")}-${account?.id || 'new'}`}
-                                {...register("ciudad_id")}
-                                className="w-full border p-2 rounded bg-white disabled:bg-slate-50"
+                            <label className="text-sm font-medium block mb-1">Ciudad</label>
+                            <SearchableSelect
+                                value={watch("ciudad_id") || ""}
                                 disabled={!watch("departamento_id")}
-                            >
-                                <option value="">Seleccione Ciudad...</option>
-                                {displayCities
+                                onChange={(val) => setValue("ciudad_id", val, { shouldDirty: true, shouldValidate: true })}
+                                placeholder="Seleccione Ciudad..."
+                                searchPlaceholder="Buscar ciudad..."
+                                options={displayCities
                                     .filter(c => String(c.departamento_id) === watch("departamento_id"))
-                                    .map(city => (
-                                        <option key={city.id} value={String(city.id)}>{city.nombre}</option>
-                                    ))
-                                }
-                            </select>
+                                    .map(city => ({
+                                        value: String(city.id),
+                                        label: city.nombre,
+                                    }))}
+                            />
                         </div>
                     </div>
 

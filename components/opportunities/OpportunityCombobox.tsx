@@ -157,7 +157,11 @@ export function OpportunityCombobox({
                             onChange={(e) => setSearch(e.target.value)}
                         />
                     </div>
-                    <CommandList className="max-h-[min(280px,calc(var(--radix-popover-content-available-height,280px)-56px))] overflow-y-auto overflow-x-hidden overscroll-contain p-1">
+                    <CommandList
+                        className="max-h-[min(280px,calc(var(--radix-popover-content-available-height,280px)-56px))] overflow-y-auto overflow-x-hidden overscroll-contain p-1"
+                        onWheel={(e) => e.stopPropagation()}
+                        onTouchMove={(e) => e.stopPropagation()}
+                    >
                         <CommandEmpty>
                             {loading ? (
                                 <div className="flex justify-center p-4">

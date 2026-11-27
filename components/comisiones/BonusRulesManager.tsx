@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { formatCurrency, matchesSearchTokens } from '@/lib/utils';
 import { Loader2 } from 'lucide-react';
+import { SearchableSelect } from '@/components/ui/SearchableSelect';
 
 export function BonusRulesManager() {
     const { rules, loading, createRule, updateRule, deleteRule, toggleActive } = useBonusRules();
@@ -173,16 +174,21 @@ export function BonusRulesManager() {
                         <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-2">
                                 <Label htmlFor="periodo">Periodo</Label>
-                                <select
+                                <SearchableSelect
                                     id="periodo"
-                                    className="w-full h-10 px-3 rounded-md border border-input bg-background text-sm"
+                                    allowClear={false}
                                     value={editingRule?.periodo || 'MENSUAL'}
-                                    onChange={e => setEditingRule(prev => ({ ...prev, periodo: e.target.value as any }))}
-                                >
-                                    <option value="MENSUAL">Mensual</option>
-                                    <option value="TRIMESTRAL">Trimestral</option>
-                                    <option value="ANUAL">Anual</option>
-                                </select>
+                                    onChange={(val) => {
+                                        if (val) setEditingRule(prev => ({ ...prev, periodo: val as any }));
+                                    }}
+                                    placeholder="Seleccionar periodo..."
+                                    searchPlaceholder="Buscar periodo..."
+                                    options={[
+                                        { value: "MENSUAL", label: "Mensual" },
+                                        { value: "TRIMESTRAL", label: "Trimestral" },
+                                        { value: "ANUAL", label: "Anual" },
+                                    ]}
+                                />
                             </div>
                             <div className="space-y-2">
                                 <Label htmlFor="vendedor">Vendedor (Opcional)</Label>

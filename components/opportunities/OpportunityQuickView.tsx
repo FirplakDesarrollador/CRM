@@ -8,6 +8,7 @@ import { toInputDate } from "@/lib/date-utils";
 import { X, TrendingUp, Calendar, Hash, Percent } from "lucide-react";
 import { ProbabilityDonut } from "@/components/ui/ProbabilityDonut";
 import { formatNumberCO } from "@/lib/utils";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 import { estadoIdForPhaseName, getPhaseOutcomeByName, isClosedPhaseName } from "@/lib/opportunityPhase";
 import { resolveStepperPhaseId, selectPhasesForPicker, type PhaseCatalogItem } from "@/lib/opportunityPhaseCatalog";
 
@@ -231,26 +232,27 @@ export function OpportunityQuickView({ opportunityId, isOpen, onClose, onUpdate 
                             {/* Fase (el resultado abierta / ganada / perdida sale de la fase) */}
                             <div>
                                 <label className="block text-sm font-bold text-slate-700 mb-2">Fase</label>
-                                <select
-                                    className="w-full p-2.5 rounded-xl border border-slate-200 bg-slate-50 font-medium text-slate-900"
-                                    value={phaseId ?? ""}
-                                    onChange={(e) => {
+                                <SearchableSelect
+                                    value={phaseId != null ? String(phaseId) : ""}
+                                    onChange={(val) => {
                                         setPhaseTouched(true);
-                                        setPhaseId(e.target.value ? parseInt(e.target.value) : null);
+                                        setPhaseId(val ? parseInt(val, 10) : null);
                                     }}
                                     disabled={phaseOptions.length === 0}
-                                >
-                                    {phaseId == null && <option value="">Sin fase</option>}
-                                    {phaseOptions.map(phase => {
+                                    allowClear={false}
+                                    placeholder="Sin fase"
+                                    searchPlaceholder="Buscar fase..."
+                                    triggerClassName="rounded-xl border-slate-200 bg-slate-50 font-medium text-slate-900"
+                                    options={phaseOptions.map(phase => {
                                         // Cerrar como perdida exige razón y comentarios: se hace desde el detalle.
                                         const lockLost = getPhaseOutcomeByName(phase.nombre) === 'lost' && phase.id !== opportunity?.fase_id;
-                                        return (
-                                            <option key={phase.id} value={phase.id} disabled={lockLost}>
-                                                {phase.nombre}{lockLost ? ' (desde el detalle)' : ''}
-                                            </option>
-                                        );
+                                        return {
+                                            value: String(phase.id),
+                                            label: `${phase.nombre}${lockLost ? ' (desde el detalle)' : ''}`,
+                                            disabled: lockLost,
+                                        };
                                     })}
-                                </select>
+                                />
                             </div>
                         </>
                     )}

@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 import { downloadExcel } from "@/lib/utils/informes";
 import { ArchiveRestore, Download, Eye, Loader2, RefreshCw, X } from "lucide-react";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 type Tipo = "CUENTA" | "OPORTUNIDAD" | "CONTACTO";
 
@@ -157,28 +158,52 @@ export default function EliminacionesPage() {
             </div>
 
             <div className="flex flex-wrap gap-2 items-end">
-                <label className="text-xs text-slate-500 flex flex-col gap-1">Asesor
-                    <select className={sel} value={asesor} onChange={e => setAsesor(e.target.value)}>
-                        <option value="">Todos</option>
-                        <option value="__SISTEMA__">SISTEMA (sin usuario)</option>
-                        {asesores.map(a => <option key={a.id} value={a.id}>{a.nombre}</option>)}
-                    </select>
-                </label>
-                <label className="text-xs text-slate-500 flex flex-col gap-1">Tipo
-                    <select className={sel} value={tipo} onChange={e => setTipo(e.target.value)}>
-                        <option value="">Todos</option>
-                        <option value="CUENTA">Cuentas</option>
-                        <option value="OPORTUNIDAD">Oportunidades</option>
-                        <option value="CONTACTO">Contactos</option>
-                    </select>
-                </label>
-                <label className="text-xs text-slate-500 flex flex-col gap-1">Resultado
-                    <select className={sel} value={resultado} onChange={e => setResultado(e.target.value)}>
-                        <option value="">Todos</option>
-                        <option value="EXITOSO">Exitoso</option>
-                        <option value="FALLIDO">Fallido</option>
-                    </select>
-                </label>
+                <div className="text-xs text-slate-500 flex flex-col gap-1 min-w-[200px]">
+                    <span>Asesor</span>
+                    <SearchableSelect
+                        compact
+                        value={asesor}
+                        onChange={setAsesor}
+                        placeholder="Todos"
+                        searchPlaceholder="Buscar asesor..."
+                        triggerClassName={sel}
+                        options={[
+                            { value: "__SISTEMA__", label: "SISTEMA (sin usuario)" },
+                            ...asesores.map(a => ({ value: a.id, label: a.nombre })),
+                        ]}
+                    />
+                </div>
+                <div className="text-xs text-slate-500 flex flex-col gap-1 min-w-[160px]">
+                    <span>Tipo</span>
+                    <SearchableSelect
+                        compact
+                        value={tipo}
+                        onChange={setTipo}
+                        placeholder="Todos"
+                        searchPlaceholder="Buscar tipo..."
+                        triggerClassName={sel}
+                        options={[
+                            { value: "CUENTA", label: "Cuentas" },
+                            { value: "OPORTUNIDAD", label: "Oportunidades" },
+                            { value: "CONTACTO", label: "Contactos" },
+                        ]}
+                    />
+                </div>
+                <div className="text-xs text-slate-500 flex flex-col gap-1 min-w-[150px]">
+                    <span>Resultado</span>
+                    <SearchableSelect
+                        compact
+                        value={resultado}
+                        onChange={setResultado}
+                        placeholder="Todos"
+                        searchPlaceholder="Buscar resultado..."
+                        triggerClassName={sel}
+                        options={[
+                            { value: "EXITOSO", label: "Exitoso" },
+                            { value: "FALLIDO", label: "Fallido" },
+                        ]}
+                    />
+                </div>
                 <label className="text-xs text-slate-500 flex flex-col gap-1">Desde
                     <input type="date" className={sel} value={desde} onChange={e => setDesde(e.target.value)} />
                 </label>

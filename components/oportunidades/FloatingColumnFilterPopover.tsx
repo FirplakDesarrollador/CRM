@@ -17,6 +17,7 @@ import {
     RotateCcw
 } from 'lucide-react';
 import { cn } from '@/components/ui/utils';
+import { matchesSearchTokens } from '@/lib/utils';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import {
     SALES_CHANNEL_OPTIONS,
@@ -203,27 +204,26 @@ export function FloatingColumnFilterPopover({
 
     if (!anchor) return null;
 
-    // Filter phases if search text is applied
-    const filteredPhases = channelPhases.filter(p => {
-        if (!searchText.trim()) return true;
-        return p.nombre.toLowerCase().includes(searchText.toLowerCase());
-    });
+    // Filter lists with accent-insensitive multi-token search
+    const filteredChannels = SALES_CHANNEL_OPTIONS.filter(ch =>
+        matchesSearchTokens([ch.id, ch.label], searchText)
+    );
 
-    const filteredUsers = users.filter(u => {
-        if (!searchText.trim()) return true;
-        const q = searchText.toLowerCase();
-        return (u.full_name && u.full_name.toLowerCase().includes(q)) || (u.email && u.email.toLowerCase().includes(q));
-    });
+    const filteredPhases = channelPhases.filter(p =>
+        matchesSearchTokens(p.nombre, searchText)
+    );
 
-    const filteredOrigins = origins.filter(o => {
-        if (!searchText.trim()) return true;
-        return o.nombre && o.nombre.toLowerCase().includes(searchText.toLowerCase());
-    });
+    const filteredUsers = users.filter(u =>
+        matchesSearchTokens([u.full_name, u.email], searchText)
+    );
 
-    const filteredCountries = displayCountries.filter(c => {
-        if (!searchText.trim()) return true;
-        return c.nombre && c.nombre.toLowerCase().includes(searchText.toLowerCase());
-    });
+    const filteredOrigins = origins.filter(o =>
+        matchesSearchTokens(o.nombre, searchText)
+    );
+
+    const filteredCountries = displayCountries.filter(c =>
+        matchesSearchTokens(c.nombre, searchText)
+    );
 
     const POPULAR_CITIES = ['Medellín', 'Bogotá', 'Cali', 'Barranquilla', 'Cartagena', 'Bucaramanga', 'Pereira', 'Manizales'];
 
@@ -260,7 +260,18 @@ export function FloatingColumnFilterPopover({
             <div className="p-3 max-h-80 overflow-y-auto">
                 {/* 1. CANAL */}
                 {anchor.colKey === 'canal' && (
-                    <div className="space-y-1.5">
+                    <div className="space-y-2">
+                        <div className="relative">
+                            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                            <input
+                                type="text"
+                                placeholder="Buscar canal..."
+                                value={searchText}
+                                onChange={(e) => setSearchText(e.target.value)}
+                                className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-white"
+                            />
+                        </div>
+                        <div className="space-y-1.5">
                         <button
                             onClick={() => {
                                 onSelectChannel(null);
@@ -276,7 +287,7 @@ export function FloatingColumnFilterPopover({
                             <span>Todos los canales</span>
                             {!selectedChannel && <Check className="w-3.5 h-3.5 text-blue-600" />}
                         </button>
-                        {SALES_CHANNEL_OPTIONS.map((ch) => {
+                        {filteredChannels.map((ch) => {
                             const isSelected = selectedChannel === ch.id;
                             return (
                                 <button
@@ -302,6 +313,7 @@ export function FloatingColumnFilterPopover({
                                 </button>
                             );
                         })}
+                        </div>
                     </div>
                 )}
 

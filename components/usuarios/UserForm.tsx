@@ -5,8 +5,10 @@ import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useUsers, User, CreateUserData, UpdateUserData } from '@/lib/hooks/useUsers';
+import { useZones } from '@/lib/hooks/useZones';
 import { X, Loader2 } from 'lucide-react';
 import { MultiSelect } from '@/components/ui/MultiSelect';
+import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { SALES_CHANNELS } from '@/lib/salesChannels';
 import { userSchema, UserFormData } from '@/lib/userValidation';
 import { supabase } from '@/lib/supabase';
@@ -36,6 +38,7 @@ const AVAILABLE_MODULES = [
 
 export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
     const { createUser, updateUser, updateUserPassword, users } = useUsers();
+    const { zones } = useZones(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -81,6 +84,7 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
             paises: user.paises || (user.pais ? [user.pais] : []),
             departamentos: user.departamentos || (user.departamento ? [user.departamento] : []),
             canales: user.canales || [],
+            zona_id: user.zona_id || '',
         } : {
             password: '',
             full_name: '',
@@ -93,6 +97,7 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
             paises: [],
             departamentos: [],
             canales: [],
+            zona_id: '',
         },
     });
 
@@ -132,6 +137,7 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
                     paises: paisesArray,
                     departamentos: deptsArray,
                     canales: canalesArray,
+                    zona_id: data.zona_id ? data.zona_id : null,
                 };
 
                 const result = await updateUser(user.id, updates);
@@ -169,6 +175,7 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
                     paises: paisesArray,
                     departamentos: deptsArray,
                     canales: canalesArray,
+                    zona_id: data.zona_id ? data.zona_id : null,
                 };
 
                 const result = await createUser(createData);
@@ -281,19 +288,57 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
                         <label className="block text-sm font-semibold text-slate-700 mb-2">
                             Rol
                         </label>
-                        <select
-                            {...register('role')}
-                            className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#254153] focus:border-transparent"
-                        >
-                            <option value="VENDEDOR">Vendedor</option>
-                            <option value="COORDINADOR">Coordinador</option>
-                            <option value="ADMIN">Administrador</option>
-                        </select>
+                        <Controller
+                            control={control}
+                            name="role"
+                            render={({ field }) => (
+                                <SearchableSelect
+                                    value={field.value || 'VENDEDOR'}
+                                    allowClear={false}
+                                    onChange={(val) => {
+                                        if (val) field.onChange(val as 'ADMIN' | 'COORDINADOR' | 'VENDEDOR');
+                                    }}
+                                    placeholder="Seleccionar rol..."
+                                    searchPlaceholder="Buscar rol..."
+                                    options={[
+                                        { value: 'VENDEDOR', label: 'Vendedor' },
+                                        { value: 'COORDINADOR', label: 'Coordinador' },
+                                        { value: 'ADMIN', label: 'Administrador' },
+                                    ]}
+                                />
+                            )}
+                        />
                         {errors.role && (
                             <p className="mt-1 text-sm text-red-600">{errors.role.message}</p>
                         )}
                         <p className="mt-1 text-xs text-slate-500">
                             Define los permisos y accesos del usuario en el sistema
+                        </p>
+                    </div>
+
+                    {/* Zona Comercial */}
+                    <div>
+                        <label className="block text-sm font-semibold text-slate-700 mb-2">
+                            Zona Comercial
+                        </label>
+                        <Controller
+                            control={control}
+                            name="zona_id"
+                            render={({ field }) => (
+                                <SearchableSelect
+                                    value={field.value || ''}
+                                    onChange={(val) => field.onChange(val || '')}
+                                    placeholder="Sin zona asignada"
+                                    searchPlaceholder="Buscar zona comercial..."
+                                    options={zones.map(z => ({
+                                        value: z.id,
+                                        label: z.nombre,
+                                    }))}
+                                />
+                            )}
+                        />
+                        <p className="mt-1 text-xs text-slate-500">
+                            Se usa automáticamente al crear sucursales de cuentas existentes (ej. Nombre Matriz - Zona). Administrable en Configuración.
                         </p>
                     </div>
 

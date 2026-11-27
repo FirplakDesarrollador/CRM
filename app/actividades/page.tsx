@@ -1158,18 +1158,23 @@ function ActivitiesContent() {
                                 <div className="px-2 text-slate-400">
                                     <Zap className="w-4 h-4" />
                                 </div>
-                                <select
-                                    value={filterChannel}
-                                    onChange={(e) => setFilterChannel(e.target.value)}
-                                    className="bg-transparent text-sm font-semibold text-slate-600 focus:outline-none p-1.5"
-                                >
-                                    <option value="">Canal...</option>
-                                    <option value="OBRAS_NAC">Obras Nac</option>
-                                    <option value="OBRAS_INT">Obras Int</option>
-                                    <option value="DIST_NAC">Dist Nac</option>
-                                    <option value="DIST_INT">Dist Int</option>
-                                    <option value="PROPIO">Propio</option>
-                                </select>
+                                <div className="w-[130px]">
+                                    <SearchableSelect
+                                        compact
+                                        value={filterChannel}
+                                        onChange={setFilterChannel}
+                                        placeholder="Canal..."
+                                        searchPlaceholder="Buscar canal..."
+                                        triggerClassName="min-h-0 h-8 border-none bg-transparent px-1.5 py-0 text-sm font-semibold text-slate-600 focus:ring-0 shadow-none"
+                                        options={[
+                                            { value: "OBRAS_NAC", label: "Obras Nac", searchValue: "Obras Nacional OBRAS_NAC" },
+                                            { value: "OBRAS_INT", label: "Obras Int", searchValue: "Obras Internacional OBRAS_INT" },
+                                            { value: "DIST_NAC", label: "Dist Nac", searchValue: "Distribución Nacional DIST_NAC" },
+                                            { value: "DIST_INT", label: "Dist Int", searchValue: "Distribución Internacional DIST_INT" },
+                                            { value: "PROPIO", label: "Propio", searchValue: "Canal Propio PROPIO" },
+                                        ]}
+                                    />
+                                </div>
                             </div>
 
                             {/* Status Toggle */}
@@ -1216,73 +1221,94 @@ function ActivitiesContent() {
                             </div>
 
                             {/* Type/Clasif Pill */}
-                            <div className="flex bg-slate-50 p-1 rounded-xl border border-slate-100 items-center shadow-sm">
+                            <div className="flex flex-wrap bg-slate-50 p-1 rounded-xl border border-slate-100 items-center shadow-sm">
                                 <div className="px-2 text-slate-400">
                                     {classifications.length === 0 ? <Loader2 className="w-4 h-4 animate-spin" /> : <Filter className="w-4 h-4" />}
                                 </div>
-                                <select
-                                    data-testid="activities-filter-type"
-                                    value={filterType}
-                                    onChange={(e) => {
-                                        setFilterType(e.target.value);
-                                        setFilterClassification("");
-                                        setFilterSubclassification("");
-                                    }}
-                                    className="bg-transparent text-sm font-semibold text-slate-600 focus:outline-none p-1.5"
-                                >
-                                    <option value="">Tipo...</option>
-                                    <option value="EVENTO">Evento</option>
-                                    <option value="TAREA">Tarea</option>
-                                </select>
+                                <div className="w-[110px]">
+                                    <SearchableSelect
+                                        compact
+                                        dataTestId="activities-filter-type"
+                                        value={filterType}
+                                        onChange={(val) => {
+                                            setFilterType(val);
+                                            setFilterClassification("");
+                                            setFilterSubclassification("");
+                                        }}
+                                        placeholder="Tipo..."
+                                        searchPlaceholder="Buscar tipo..."
+                                        triggerClassName="min-h-0 h-8 border-none bg-transparent px-1.5 py-0 text-sm font-semibold text-slate-600 focus:ring-0 shadow-none"
+                                        options={[
+                                            { value: "EVENTO", label: "Evento" },
+                                            { value: "TAREA", label: "Tarea" },
+                                        ]}
+                                    />
+                                </div>
 
                                 {(filterType || availableClassifications.length > 0) && (
                                     <>
                                         <div className="w-px h-4 bg-slate-200 mx-1"></div>
-                                        <select
-                                            value={filterClassification}
-                                            onChange={(e) => {
-                                                setFilterClassification(e.target.value);
-                                                setFilterSubclassification("");
-                                            }}
-                                            className="bg-transparent text-sm font-semibold text-slate-600 focus:outline-none p-1.5 max-w-[150px] truncate"
-                                        >
-                                            <option value="">Clasificación...</option>
-                                            {availableClassifications.map(c => (
-                                                <option key={c.id} value={String(c.id)}>{c.nombre}</option>
-                                            ))}
-                                        </select>
+                                        <div className="w-[165px]">
+                                            <SearchableSelect
+                                                compact
+                                                value={filterClassification}
+                                                onChange={(val) => {
+                                                    setFilterClassification(val);
+                                                    setFilterSubclassification("");
+                                                }}
+                                                placeholder="Clasificación..."
+                                                searchPlaceholder="Buscar clasificación..."
+                                                triggerClassName="min-h-0 h-8 border-none bg-transparent px-1.5 py-0 text-sm font-semibold text-slate-600 focus:ring-0 shadow-none"
+                                                options={availableClassifications.map(c => ({
+                                                    value: String(c.id),
+                                                    label: c.nombre,
+                                                }))}
+                                            />
+                                        </div>
                                     </>
                                 )}
 
                                 {availableSubclassifications.length > 0 && (
                                     <>
                                         <div className="w-px h-4 bg-slate-200 mx-1"></div>
-                                        <select
-                                            value={filterSubclassification}
-                                            onChange={(e) => setFilterSubclassification(e.target.value)}
-                                            className="bg-transparent text-sm font-semibold text-slate-600 focus:outline-none p-1.5 max-w-[150px] truncate"
-                                        >
-                                            <option value="">Subclasificación...</option>
-                                            {availableSubclassifications.map(s => (
-                                                <option key={s.id} value={String(s.id)}>{s.nombre}</option>
-                                            ))}
-                                        </select>
+                                        <div className="w-[165px]">
+                                            <SearchableSelect
+                                                compact
+                                                value={filterSubclassification}
+                                                onChange={setFilterSubclassification}
+                                                placeholder="Subclasificación..."
+                                                searchPlaceholder="Buscar subclasificación..."
+                                                triggerClassName="min-h-0 h-8 border-none bg-transparent px-1.5 py-0 text-sm font-semibold text-slate-600 focus:ring-0 shadow-none"
+                                                options={availableSubclassifications.map(s => ({
+                                                    value: String(s.id),
+                                                    label: s.nombre,
+                                                }))}
+                                            />
+                                        </div>
                                     </>
                                 )}
                             </div>
 
                             <div className="flex bg-slate-50 p-1 rounded-xl border border-slate-100 items-center shadow-sm">
-                                <select
-                                    value={sortOrder}
-                                    onChange={(e) => setSortOrder(e.target.value as 'soonest' | 'latest' | 'title' | 'title_desc')}
-                                    className="bg-transparent p-1.5 text-sm font-semibold text-slate-600 focus:outline-none"
-                                    aria-label="Orden de actividades"
-                                >
-                                    <option value="soonest">Fecha: próxima</option>
-                                    <option value="latest">Fecha: reciente</option>
-                                    <option value="title">Asunto: A–Z</option>
-                                    <option value="title_desc">Asunto: Z–A</option>
-                                </select>
+                                <div className="w-[160px]">
+                                    <SearchableSelect
+                                        compact
+                                        allowClear={false}
+                                        ariaLabel="Orden de actividades"
+                                        value={sortOrder}
+                                        onChange={(val) => {
+                                            if (val) setSortOrder(val as 'soonest' | 'latest' | 'title' | 'title_desc');
+                                        }}
+                                        searchPlaceholder="Buscar orden..."
+                                        triggerClassName="min-h-0 h-8 border-none bg-transparent px-1.5 py-0 text-sm font-semibold text-slate-600 focus:ring-0 shadow-none"
+                                        options={[
+                                            { value: "soonest", label: "Fecha: próxima" },
+                                            { value: "latest", label: "Fecha: reciente" },
+                                            { value: "title", label: "Asunto: A–Z" },
+                                            { value: "title_desc", label: "Asunto: Z–A" },
+                                        ]}
+                                    />
+                                </div>
                             </div>
                     </div>
                 </div>

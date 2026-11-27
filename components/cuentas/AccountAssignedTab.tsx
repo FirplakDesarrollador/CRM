@@ -3,6 +3,7 @@ import { useAccounts } from "@/lib/hooks/useAccounts";
 import { Loader2, User, Check } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 interface AccountAssignedTabProps {
     accountId: string;
@@ -98,18 +99,18 @@ export function AccountAssignedTab({ accountId, currentOwnerId }: AccountAssigne
                 <div className="max-w-md space-y-4">
                     <div>
                         <label className="text-sm font-bold text-slate-700 block mb-2">Comercial Asignado</label>
-                        <select
+                        <SearchableSelect
                             value={selectedUserId}
-                            onChange={(e) => setSelectedUserId(e.target.value)}
-                            className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 focus:ring-2 focus:ring-purple-500 focus:bg-white transition-all outline-none"
-                        >
-                            <option value="">Seleccionar usuario...</option>
-                            {users.map(user => (
-                                <option key={user.id} value={user.id}>
-                                    {user.full_name || user.email} ({user.role})
-                                </option>
-                            ))}
-                        </select>
+                            onChange={setSelectedUserId}
+                            placeholder="Seleccionar usuario..."
+                            searchPlaceholder="Buscar por nombre, correo o rol..."
+                            triggerClassName="bg-slate-50 border-slate-200 rounded-xl text-slate-900"
+                            options={users.map(user => ({
+                                value: user.id,
+                                label: `${user.full_name || user.email} (${user.role})`,
+                                searchValue: `${user.full_name || ""} ${user.email || ""} ${user.role || ""}`,
+                            }))}
+                        />
                     </div>
 
                     {selectedUser && (

@@ -26,6 +26,7 @@ import { CollaboratorSelector, CollaboratorEntry } from "@/components/oportunida
 import { useUsers } from "@/lib/hooks/useUsers";
 import { useFormDraft } from "@/lib/hooks/useFormDraft";
 import { MultiSelect } from "@/components/ui/MultiSelect";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 import { OPPORTUNITY_CATEGORIES, parseOpportunityCategories, formatOpportunityCategories } from "@/lib/opportunityCategories";
 import { selectPhasesForPicker } from "@/lib/opportunityPhaseCatalog";
 import { readFullPhaseCatalog } from "@/lib/phaseCatalogStore";
@@ -760,23 +761,29 @@ export default function CreateOpportunityWizard() {
 
                             {/* Phase Selector (Dynamic) */}
                             <div>
-                                <label className="text-sm font-medium">Fase Inicial</label>
-                                <select
-                                    {...register("fase_id")}
-                                    className="w-full p-2 border rounded-lg"
+                                <label className="text-sm font-medium block mb-1">Fase Inicial</label>
+                                <SearchableSelect
+                                    value={watch("fase_id") ? String(watch("fase_id")) : ""}
+                                    onChange={(val) => setValue("fase_id", val ? Number(val) : 0, { shouldDirty: true, shouldValidate: true })}
+                                    allowClear={false}
                                     disabled={phasesLoading || (!filteredPhases || filteredPhases.length === 0)}
-                                >
-                                    {phasesLoading && <option value="">Cargando fases...</option>}
-                                    {phasesError && <option value="">Error al cargar fases</option>}
-                                    {!phasesLoading && !phasesError && filteredPhases?.map(phase => (
-                                        <option key={phase.id} value={phase.id}>
-                                            {phase.nombre}
-                                        </option>
-                                    ))}
-                                    {!phasesLoading && !phasesError && (!filteredPhases || filteredPhases.length === 0) && (
-                                        <option value="">No hay fases disponibles para este canal</option>
-                                    )}
-                                </select>
+                                    placeholder={
+                                        phasesLoading
+                                            ? "Cargando fases..."
+                                            : phasesError
+                                                ? "Error al cargar fases"
+                                                : (!filteredPhases || filteredPhases.length === 0)
+                                                    ? "No hay fases disponibles para este canal"
+                                                    : "Seleccione fase..."
+                                    }
+                                    searchPlaceholder="Buscar fase..."
+                                    options={(!phasesLoading && !phasesError && filteredPhases
+                                        ? filteredPhases.map(phase => ({
+                                            value: String(phase.id),
+                                            label: phase.nombre,
+                                        }))
+                                        : [])}
+                                />
                                 {phasesError && (
                                     <p className="text-xs text-red-500 mt-1">{phasesError}</p>
                                 )}
@@ -790,21 +797,20 @@ export default function CreateOpportunityWizard() {
 
                         {/* SEGMENT SELECTOR */}
                         <div>
-                            <label className="text-sm font-medium">Segmento</label>
-                            <select
-                                {...register("segmento_id")}
-                                className="w-full p-2 border rounded-lg disabled:bg-slate-100 disabled:text-slate-400"
+                            <label className="text-sm font-medium block mb-1">Segmento</label>
+                            <SearchableSelect
+                                value={watch("segmento_id") ? String(watch("segmento_id")) : ""}
+                                onChange={(val) => setValue("segmento_id", val ? Number(val) : null, { shouldDirty: true, shouldValidate: true })}
                                 disabled={!selectedAccount?.subclasificacion_id}
-                            >
-                                <option value="">Seleccione un segmento...</option>
-                                {displaySegments
+                                placeholder="Seleccione un segmento..."
+                                searchPlaceholder="Buscar segmento..."
+                                options={displaySegments
                                     .filter((seg: any) => selectedAccount?.subclasificacion_id && seg.subclasificacion_id === Number(selectedAccount.subclasificacion_id))
-                                    .map((seg: any) => (
-                                        <option key={seg.id} value={seg.id}>
-                                            {seg.nombre}
-                                        </option>
-                                    ))}
-                            </select>
+                                    .map((seg: any) => ({
+                                        value: String(seg.id),
+                                        label: seg.nombre,
+                                    }))}
+                            />
                             {!selectedAccount?.subclasificacion_id && (
                                 <p className="text-xs text-orange-500 mt-1">
                                     La cuenta seleccionada no tiene subclasificación configurada.
@@ -815,56 +821,56 @@ export default function CreateOpportunityWizard() {
                         {/* CITY SELECTION */}
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <div>
-                                <label className="text-sm font-medium">País</label>
-                                <select
-                                    {...register("pais_id")}
-                                    className="w-full p-2 border rounded-lg"
-                                    onChange={(e) => {
-                                        register("pais_id").onChange(e);
-                                        setValue("departamento_id", null);
-                                        setValue("ciudad_id", null);
+                                <label className="text-sm font-medium block mb-1">País</label>
+                                <SearchableSelect
+                                    value={watch("pais_id") ? String(watch("pais_id")) : ""}
+                                    onChange={(val) => {
+                                        setValue("pais_id", val ? Number(val) : null, { shouldDirty: true, shouldValidate: true });
+                                        setValue("departamento_id", null, { shouldDirty: true });
+                                        setValue("ciudad_id", null, { shouldDirty: true });
                                     }}
-                                >
-                                    <option value="">Seleccione País...</option>
-                                    {displayCountries.map(p => (
-                                        <option key={p.id} value={p.id}>{p.nombre}</option>
-                                    ))}
-                                </select>
+                                    placeholder="Seleccione País..."
+                                    searchPlaceholder="Buscar país..."
+                                    options={displayCountries.map(p => ({
+                                        value: String(p.id),
+                                        label: p.nombre,
+                                    }))}
+                                />
                             </div>
                             <div>
-                                <label className="text-sm font-medium">Departamento</label>
-                                <select
-                                    {...register("departamento_id")}
-                                    className="w-full p-2 border rounded-lg disabled:bg-slate-50"
+                                <label className="text-sm font-medium block mb-1">Departamento</label>
+                                <SearchableSelect
+                                    value={watch("departamento_id") ? String(watch("departamento_id")) : ""}
                                     disabled={!watch("pais_id")}
-                                    onChange={(e) => {
-                                        register("departamento_id").onChange(e);
-                                        setValue("ciudad_id", null);
+                                    onChange={(val) => {
+                                        setValue("departamento_id", val ? Number(val) : null, { shouldDirty: true, shouldValidate: true });
+                                        setValue("ciudad_id", null, { shouldDirty: true });
                                     }}
-                                >
-                                    <option value="">Seleccione Departamento...</option>
-                                    {displayDepartments
+                                    placeholder="Seleccione Departamento..."
+                                    searchPlaceholder="Buscar departamento..."
+                                    options={displayDepartments
                                         .filter(dep => String(dep.pais_id) === String(watch("pais_id")) || (!dep.pais_id && String(watch("pais_id")) === "1"))
-                                        .map(dep => (
-                                            <option key={dep.id} value={dep.id}>{dep.nombre}</option>
-                                        ))}
-                                </select>
+                                        .map(dep => ({
+                                            value: String(dep.id),
+                                            label: dep.nombre,
+                                        }))}
+                                />
                             </div>
                             <div>
-                                <label className="text-sm font-medium">Ciudad</label>
-                                <select
-                                    {...register("ciudad_id")}
-                                    className="w-full p-2 border rounded-lg disabled:bg-slate-50"
+                                <label className="text-sm font-medium block mb-1">Ciudad</label>
+                                <SearchableSelect
+                                    value={watch("ciudad_id") ? String(watch("ciudad_id")) : ""}
                                     disabled={!watch("departamento_id")}
-                                >
-                                    <option value="">Seleccione Ciudad...</option>
-                                    {displayCities
+                                    onChange={(val) => setValue("ciudad_id", val ? Number(val) : null, { shouldDirty: true, shouldValidate: true })}
+                                    placeholder="Seleccione Ciudad..."
+                                    searchPlaceholder="Buscar ciudad..."
+                                    options={displayCities
                                         .filter(c => c.departamento_id === Number(watch("departamento_id")))
-                                        .map(city => (
-                                            <option key={city.id} value={city.id}>{city.nombre}</option>
-                                        ))
-                                    }
-                                </select>
+                                        .map(city => ({
+                                            value: String(city.id),
+                                            label: city.nombre,
+                                        }))}
+                                />
                             </div>
                         </div>
 
@@ -939,16 +945,17 @@ export default function CreateOpportunityWizard() {
                         </div>
                         
                         <div>
-                            <label className="text-sm font-medium">Setter (Opcional)</label>
-                            <select
-                                {...register("setter")}
-                                className="w-full p-2 border rounded-lg bg-white"
-                            >
-                                <option value="">Ninguna</option>
-                                {OPPORTUNITY_SETTER_OPTIONS.map(opt => (
-                                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                ))}
-                            </select>
+                            <label className="text-sm font-medium block mb-1">Setter (Opcional)</label>
+                            <SearchableSelect
+                                value={watch("setter") || ""}
+                                onChange={(val) => setValue("setter", val || null, { shouldDirty: true, shouldValidate: true })}
+                                placeholder="Ninguna"
+                                searchPlaceholder="Buscar setter..."
+                                options={OPPORTUNITY_SETTER_OPTIONS.map(opt => ({
+                                    value: opt.value,
+                                    label: opt.label,
+                                }))}
+                            />
                             <p className="text-[10px] text-slate-500 mt-0.5">
                                 Clasificación de prospección comercial. Se puede cambiar luego desde el detalle de la oportunidad.
                             </p>

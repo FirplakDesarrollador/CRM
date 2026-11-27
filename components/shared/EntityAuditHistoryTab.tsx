@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useEntityAuditHistory } from '@/lib/hooks/useEntityAuditHistory';
 import { History, ArrowRight, User, Calendar, RefreshCw, Filter, Search } from 'lucide-react';
+import { SearchableSelect } from '@/components/ui/SearchableSelect';
 
 function formatTimestamp(isoString: string): string {
     try {
@@ -126,18 +127,22 @@ export function EntityAuditHistoryTab({
                     </div>
 
                     {fieldsList.length > 1 && (
-                        <div className="relative flex items-center">
-                            <Filter className="w-3.5 h-3.5 absolute left-2.5 text-slate-400" />
-                            <select
-                                value={selectedField}
-                                onChange={(e) => setSelectedField(e.target.value)}
-                                className="pl-8 pr-4 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-700 font-medium cursor-pointer"
-                            >
-                                <option value="ALL">Todos los campos ({fieldsList.length})</option>
-                                {fieldsList.map((f) => (
-                                    <option key={f} value={f}>{f}</option>
-                                ))}
-                            </select>
+                        <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-lg px-2">
+                            <Filter className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <div className="w-[185px]">
+                                <SearchableSelect
+                                    compact
+                                    allowClear={false}
+                                    value={selectedField}
+                                    onChange={(val) => setSelectedField(val || 'ALL')}
+                                    searchPlaceholder="Buscar campo..."
+                                    triggerClassName="min-h-0 h-7 border-none bg-transparent px-1 py-0 text-xs font-medium text-slate-700 focus:ring-0 shadow-none"
+                                    options={[
+                                        { value: 'ALL', label: `Todos los campos (${fieldsList.length})` },
+                                        ...fieldsList.map((f) => ({ value: f, label: f })),
+                                    ]}
+                                />
+                            </div>
                         </div>
                     )}
                 </div>

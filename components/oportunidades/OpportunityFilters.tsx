@@ -2,8 +2,10 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { Filter, X, ChevronDown } from "lucide-react";
 import { cn } from "@/components/ui/utils";
+import { matchesSearchTokens } from "@/lib/utils";
 import { useFullCatalog } from "@/lib/hooks/useProducts";
 import { buildPhaseFilterOptions } from "@/lib/opportunityPhaseListFilter";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 type Channel = {
     id: string;
@@ -190,7 +192,7 @@ export function OpportunityFilters({
 
                 // If initial filters were set (e.g., from URL on back navigation),
                 // notify the parent so the hook fetches with correct filters
-                if (initialChannelId || initialSubclassId || initialSegmentId || (initialPhaseIds && initialPhaseIds.length > 0) || initialOrigin || initialPlanta || initialFamilia || initialDates) {
+                if (initialChannelId || initialSubclassId || initialSegmentId || (initialPhaseIds && initialPhaseIds.length > 0) || initialOrigin || initialPlanta || initialFamilia || initialIdFilter || initialDates) {
                     onFilterChange({
                         channelId: initialChannelId || null,
                         subclassificationId: initialSubclassId || null,
@@ -202,7 +204,8 @@ export function OpportunityFilters({
                         endClosingDate: initialDates?.endClosingDate || null,
                         origin: initialOrigin || null,
                         planta: initialPlanta || null,
-                        familia: initialFamilia || null
+                        familia: initialFamilia || null,
+                        idFilter: initialIdFilter || null
                     });
                 }
 
@@ -241,9 +244,8 @@ export function OpportunityFilters({
     );
 
     const visiblePhaseOptions = useMemo(() => {
-        const term = phaseSearch.trim().toLowerCase();
-        if (!term) return phaseOptions;
-        return phaseOptions.filter(option => option.label.toLowerCase().includes(term));
+        if (!phaseSearch.trim()) return phaseOptions;
+        return phaseOptions.filter(option => matchesSearchTokens([option.label], phaseSearch));
     }, [phaseOptions, phaseSearch]);
 
     useEffect(() => {
@@ -295,8 +297,8 @@ export function OpportunityFilters({
     };
 
     // Handle Changes
-    const handleChannelChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        const val = e.target.value || null;
+    const handleChannelChange = (valRaw: string) => {
+        const val = valRaw || null;
         setSelectedChannel(val);
         setSelectedSubclass(null);
         setSelectedSegment(null);
@@ -318,8 +320,8 @@ export function OpportunityFilters({
         });
     };
 
-    const handleSubclassChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        const val = e.target.value ? Number(e.target.value) : null;
+    const handleSubclassChange = (valRaw: string) => {
+        const val = valRaw ? Number(valRaw) : null;
         setSelectedSubclass(val);
         setSelectedSegment(null);
 
@@ -339,8 +341,8 @@ export function OpportunityFilters({
         });
     };
 
-    const handleSegmentChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        const val = e.target.value ? Number(e.target.value) : null;
+    const handleSegmentChange = (valRaw: string) => {
+        const val = valRaw ? Number(valRaw) : null;
         setSelectedSegment(val);
         onFilterChange({
             channelId: selectedChannel,
@@ -358,8 +360,8 @@ export function OpportunityFilters({
         });
     };
 
-    const handleOriginChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        const val = e.target.value || null;
+    const handleOriginChange = (valRaw: string) => {
+        const val = valRaw || null;
         setSelectedOrigin(val);
         onFilterChange({
             channelId: selectedChannel,
@@ -377,8 +379,8 @@ export function OpportunityFilters({
         });
     };
 
-    const handlePlantaChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        const val = e.target.value || null;
+    const handlePlantaChange = (valRaw: string) => {
+        const val = valRaw || null;
         setSelectedPlanta(val);
         let nextFamilia = selectedFamilia;
         if (val && selectedFamilia) {
@@ -404,8 +406,8 @@ export function OpportunityFilters({
         });
     };
 
-    const handleFamiliaChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        const val = e.target.value || null;
+    const handleFamiliaChange = (valRaw: string) => {
+        const val = valRaw || null;
         setSelectedFamilia(val);
         onFilterChange({
             channelId: selectedChannel,
@@ -546,23 +548,27 @@ export function OpportunityFilters({
                 )}
             </div>
 
-            {/* Hierarchical Filters */}
-            <div className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 bg-white shadow-sm">
-                <Filter className="w-4 h-4 text-slate-400" />
-
+                {/* Hierarchical Filters */}
+                <div className="flex flex-wrap items-center gap-2 border border-slate-200 rounded-lg px-2.5 py-1 bg-white shadow-sm">
+                    <Filter className="w-4 h-4 text-slate-400 shrink-0" />
 
                     {/* Channel Select */}
-                    <select
-                        data-testid="opportunities-filter-channel"
-                        className="text-sm bg-transparent border-none focus:ring-0 cursor-pointer text-slate-700 font-medium max-w-[180px]"
-                        value={selectedChannel || ""}
-                        onChange={handleChannelChange}
-                    >
-                        <option value="">Todos los Canales</option>
-                        {channels.map(c => (
-                            <option key={c.id} value={c.id}>{c.nombre}</option>
-                        ))}
-                    </select>
+                    <div className="w-[175px]">
+                        <SearchableSelect
+                            compact
+                            dataTestId="opportunities-filter-channel"
+                            value={selectedChannel || ""}
+                            onChange={handleChannelChange}
+                            placeholder="Todos los Canales"
+                            searchPlaceholder="Buscar canal..."
+                            triggerClassName="min-h-0 h-8 border-none bg-transparent px-1 py-0 text-sm font-medium text-slate-700 focus:ring-0 shadow-none"
+                            options={channels.map(c => ({
+                                value: c.id,
+                                label: c.nombre || c.id,
+                                searchValue: c.id,
+                            }))}
+                        />
+                    </div>
 
                     {/* Separator if Channel Selected */}
                     {selectedChannel && (
@@ -570,83 +576,103 @@ export function OpportunityFilters({
                             <span className="text-slate-300">|</span>
 
                             {/* Subclassification Select */}
-                            <select
-                                data-testid="opportunities-filter-subclass"
-                                className="text-sm bg-transparent border-none focus:ring-0 cursor-pointer text-slate-700 max-w-[160px]"
-                                value={selectedSubclass || ""}
-                                onChange={handleSubclassChange}
-                            >
-                                <option value="">Todos los Tipos</option>
-                                {availableSubclasses.map(s => (
-                                    <option key={s.id} value={s.id}>{s.nombre}</option>
-                                ))}
-                            </select>
+                            <div className="w-[155px]">
+                                <SearchableSelect
+                                    compact
+                                    dataTestId="opportunities-filter-subclass"
+                                    value={selectedSubclass ? String(selectedSubclass) : ""}
+                                    onChange={handleSubclassChange}
+                                    placeholder="Todos los Tipos"
+                                    searchPlaceholder="Buscar tipo..."
+                                    triggerClassName="min-h-0 h-8 border-none bg-transparent px-1 py-0 text-sm text-slate-700 focus:ring-0 shadow-none"
+                                    options={availableSubclasses.map(s => ({
+                                        value: String(s.id),
+                                        label: s.nombre,
+                                    }))}
+                                />
+                            </div>
 
                             <span className="text-slate-300">|</span>
 
                             {/* Segment Select */}
-                            <select
-                                data-testid="opportunities-filter-segment"
-                                className="text-sm bg-transparent border-none focus:ring-0 cursor-pointer text-slate-700 max-w-[160px]"
-                                value={selectedSegment || ""}
-                                onChange={handleSegmentChange}
-                            >
-                                <option value="">Todos los Segmentos</option>
-                                {availableSegments.map(s => (
-                                    <option key={s.id} value={s.id}>{s.nombre}</option>
-                                ))}
-                            </select>
-
+                            <div className="w-[160px]">
+                                <SearchableSelect
+                                    compact
+                                    dataTestId="opportunities-filter-segment"
+                                    value={selectedSegment ? String(selectedSegment) : ""}
+                                    onChange={handleSegmentChange}
+                                    placeholder="Todos los Segmentos"
+                                    searchPlaceholder="Buscar segmento..."
+                                    triggerClassName="min-h-0 h-8 border-none bg-transparent px-1 py-0 text-sm text-slate-700 focus:ring-0 shadow-none"
+                                    options={availableSegments.map(s => ({
+                                        value: String(s.id),
+                                        label: s.nombre,
+                                    }))}
+                                />
+                            </div>
                         </>
                     )}
                 </div>
 
                 {/* Origin Filter */}
-                <div className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 bg-white shadow-sm">
-                    <span className="text-xs font-bold text-slate-500 uppercase tracking-tight">Origen:</span>
-                    <select
-                        data-testid="opportunities-filter-origin"
-                        className="text-sm bg-transparent border-none focus:ring-0 cursor-pointer text-slate-700 font-medium max-w-[170px]"
-                        value={selectedOrigin || ""}
-                        onChange={handleOriginChange}
-                    >
-                        <option value="">Todos los Orígenes</option>
-                        {origins.map(o => (
-                            <option key={o.id} value={o.codigo}>{o.nombre}</option>
-                        ))}
-                    </select>
+                <div className="flex items-center gap-1.5 border border-slate-200 rounded-lg px-2.5 py-1 bg-white shadow-sm">
+                    <span className="text-xs font-bold text-slate-500 uppercase tracking-tight shrink-0">Origen:</span>
+                    <div className="w-[165px]">
+                        <SearchableSelect
+                            compact
+                            dataTestId="opportunities-filter-origin"
+                            value={selectedOrigin || ""}
+                            onChange={handleOriginChange}
+                            placeholder="Todos los Orígenes"
+                            searchPlaceholder="Buscar origen..."
+                            triggerClassName="min-h-0 h-8 border-none bg-transparent px-1 py-0 text-sm font-medium text-slate-700 focus:ring-0 shadow-none"
+                            options={origins.map(o => ({
+                                value: o.codigo,
+                                label: o.nombre,
+                                searchValue: o.codigo,
+                            }))}
+                        />
+                    </div>
                 </div>
 
                 {/* Planta Filter */}
-                <div className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 bg-white shadow-sm">
-                    <span className="text-xs font-bold text-slate-500 uppercase tracking-tight">Planta:</span>
-                    <select
-                        data-testid="opportunities-filter-planta"
-                        className="text-sm bg-transparent border-none focus:ring-0 cursor-pointer text-slate-700 font-medium max-w-[160px]"
-                        value={selectedPlanta || ""}
-                        onChange={handlePlantaChange}
-                    >
-                        <option value="">Todas las Plantas</option>
-                        {availablePlants.map(p => (
-                            <option key={p} value={p}>{p}</option>
-                        ))}
-                    </select>
+                <div className="flex items-center gap-1.5 border border-slate-200 rounded-lg px-2.5 py-1 bg-white shadow-sm">
+                    <span className="text-xs font-bold text-slate-500 uppercase tracking-tight shrink-0">Planta:</span>
+                    <div className="w-[155px]">
+                        <SearchableSelect
+                            compact
+                            dataTestId="opportunities-filter-planta"
+                            value={selectedPlanta || ""}
+                            onChange={handlePlantaChange}
+                            placeholder="Todas las Plantas"
+                            searchPlaceholder="Buscar planta..."
+                            triggerClassName="min-h-0 h-8 border-none bg-transparent px-1 py-0 text-sm font-medium text-slate-700 focus:ring-0 shadow-none"
+                            options={availablePlants.map(p => ({
+                                value: p,
+                                label: p,
+                            }))}
+                        />
+                    </div>
                 </div>
 
                 {/* Familia Filter */}
-                <div className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 bg-white shadow-sm">
-                    <span className="text-xs font-bold text-slate-500 uppercase tracking-tight">Familia:</span>
-                    <select
-                        data-testid="opportunities-filter-familia"
-                        className="text-sm bg-transparent border-none focus:ring-0 cursor-pointer text-slate-700 font-medium max-w-[200px]"
-                        value={selectedFamilia || ""}
-                        onChange={handleFamiliaChange}
-                    >
-                        <option value="">Todas las Familias</option>
-                        {availableFamilies.map(f => (
-                            <option key={f} value={f}>{f}</option>
-                        ))}
-                    </select>
+                <div className="flex items-center gap-1.5 border border-slate-200 rounded-lg px-2.5 py-1 bg-white shadow-sm">
+                    <span className="text-xs font-bold text-slate-500 uppercase tracking-tight shrink-0">Familia:</span>
+                    <div className="w-[185px]">
+                        <SearchableSelect
+                            compact
+                            dataTestId="opportunities-filter-familia"
+                            value={selectedFamilia || ""}
+                            onChange={handleFamiliaChange}
+                            placeholder="Todas las Familias"
+                            searchPlaceholder="Buscar familia..."
+                            triggerClassName="min-h-0 h-8 border-none bg-transparent px-1 py-0 text-sm font-medium text-slate-700 focus:ring-0 shadow-none"
+                            options={availableFamilies.map(f => ({
+                                value: f,
+                                label: f,
+                            }))}
+                        />
+                    </div>
                 </div>
 
                 {/* ID Filter */}

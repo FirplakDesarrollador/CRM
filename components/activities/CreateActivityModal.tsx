@@ -1868,39 +1868,44 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                     Clasificación <span className="text-red-500">*</span>
                                 </label>
                                 <div className="relative">
-                                    <select
+                                    <input
+                                        type="hidden"
                                         {...register('clasificacion_id', {
                                             required: "La clasificación es obligatoria",
-                                            onChange: (e) => {
-                                                console.log("[CreateActivityModal] Classification Selected:", e.target.value);
-                                                setValue('subclasificacion_id', "");
-                                                if (!getValues('asunto')?.trim()) {
-                                                    const auto = getAutoAsunto(e.target.value);
-                                                    setValue('asunto', auto, { shouldDirty: true, shouldValidate: true });
-                                                }
-                                            }
                                         })}
-                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all appearance-none"
-                                    >
-                                        <option value="">{classifications.length === 0 ? 'Sincronizando...' : 'Seleccione...'}</option>
-                                        {filteredClassifications.map(c => (
-                                            <option key={c.id} value={String(c.id)}>{c.nombre}</option>
-                                        ))}
-                                        {/* If current classification is not in filtered list, show it anyway (historical data) */}
-                                        {initialData?.clasificacion_id &&
-                                            !filteredClassifications.some(c => String(c.id) === String(initialData.clasificacion_id)) &&
-                                            classifications.find(c => String(c.id) === String(initialData.clasificacion_id)) && (
-                                                <option
-                                                    key={initialData.clasificacion_id}
-                                                    value={String(initialData.clasificacion_id)}
-                                                    className="text-amber-600"
-                                                >
-                                                    {classifications.find(c => String(c.id) === String(initialData.clasificacion_id))?.nombre} (otro tipo)
-                                                </option>
-                                            )}
-                                    </select>
+                                    />
+                                    <SearchableSelect
+                                        dataTestId="activity-classification-select"
+                                        value={String(watch('clasificacion_id') || '')}
+                                        onChange={(val) => {
+                                            console.log("[CreateActivityModal] Classification Selected:", val);
+                                            setValue('clasificacion_id', val, { shouldDirty: true, shouldValidate: true });
+                                            setValue('subclasificacion_id', "", { shouldDirty: true });
+                                            if (val && !getValues('asunto')?.trim()) {
+                                                const auto = getAutoAsunto(val);
+                                                setValue('asunto', auto, { shouldDirty: true, shouldValidate: true });
+                                            }
+                                        }}
+                                        placeholder={classifications.length === 0 ? 'Sincronizando...' : 'Seleccione...'}
+                                        searchPlaceholder="Buscar clasificación..."
+                                        triggerClassName="bg-slate-50 border-slate-200 rounded-xl px-4 py-3"
+                                        options={[
+                                            ...filteredClassifications.map(c => ({
+                                                value: String(c.id),
+                                                label: c.nombre,
+                                            })),
+                                            ...(initialData?.clasificacion_id &&
+                                                !filteredClassifications.some(c => String(c.id) === String(initialData.clasificacion_id)) &&
+                                                classifications.find(c => String(c.id) === String(initialData.clasificacion_id))
+                                                ? [{
+                                                    value: String(initialData.clasificacion_id),
+                                                    label: `${classifications.find(c => String(c.id) === String(initialData.clasificacion_id))?.nombre} (otro tipo)`,
+                                                }]
+                                                : []),
+                                        ]}
+                                    />
                                     {classifications.length === 0 && (
-                                        <div className="absolute right-10 top-1/2 -translate-y-1/2">
+                                        <div className="absolute right-10 top-1/2 -translate-y-1/2 pointer-events-none">
                                             <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
                                         </div>
                                     )}
@@ -1913,15 +1918,18 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                     <label className="text-xs font-bold text-slate-500 uppercase">
                                         Subclasificación
                                     </label>
-                                    <select
-                                        {...register('subclasificacion_id')}
-                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all appearance-none"
-                                    >
-                                        <option value="">Seleccione (opcional)...</option>
-                                        {filteredSubclassifications.map(s => (
-                                            <option key={s.id} value={String(s.id)}>{s.nombre}</option>
-                                        ))}
-                                    </select>
+                                    <SearchableSelect
+                                        dataTestId="activity-subclassification-select"
+                                        value={String(watch('subclasificacion_id') || '')}
+                                        onChange={(val) => setValue('subclasificacion_id', val, { shouldDirty: true, shouldValidate: true })}
+                                        placeholder="Seleccione (opcional)..."
+                                        searchPlaceholder="Buscar subclasificación..."
+                                        triggerClassName="bg-slate-50 border-slate-200 rounded-xl px-4 py-3"
+                                        options={filteredSubclassifications.map(s => ({
+                                            value: String(s.id),
+                                            label: s.nombre,
+                                        }))}
+                                    />
                                 </div>
                             )}
                         </div>
@@ -2218,19 +2226,18 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                                         <label className="text-xs font-bold text-slate-500 uppercase">
                                                             Bucket <span className="text-red-500">*</span>
                                                         </label>
-                                                        <select
+                                                        <SearchableSelect
                                                             value={selectedBucketId}
-                                                            onChange={(e) => setSelectedBucketId(e.target.value)}
+                                                            onChange={setSelectedBucketId}
                                                             disabled={loadingPlanner}
-                                                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-                                                        >
-                                                            <option value="">
-                                                                {loadingPlanner ? 'Cargando buckets...' : plannerBuckets.length === 0 ? 'No hay buckets en este plan' : 'Seleccione un bucket...'}
-                                                            </option>
-                                                            {plannerBuckets.map((b) => (
-                                                                <option key={b.id} value={b.id}>{b.name}</option>
-                                                            ))}
-                                                        </select>
+                                                            placeholder={loadingPlanner ? 'Cargando buckets...' : plannerBuckets.length === 0 ? 'No hay buckets en este plan' : 'Seleccione un bucket...'}
+                                                            searchPlaceholder="Buscar bucket..."
+                                                            triggerClassName="bg-slate-50 border-slate-200 rounded-xl px-4 py-3"
+                                                            options={plannerBuckets.map((b) => ({
+                                                                value: b.id,
+                                                                label: b.name,
+                                                            }))}
+                                                        />
                                                     </div>
                                                 )}
 

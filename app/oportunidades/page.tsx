@@ -304,7 +304,6 @@ function OpportunitiesContent() {
         }
         return null;
     });
-
     // Synchronize initial & restored filter values from URL or sessionStorage to the server hook
     useEffect(() => {
         const savedState = typeof window !== 'undefined' ? sessionStorage.getItem('crm_oportunidades_state') : null;
