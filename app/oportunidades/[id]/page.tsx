@@ -11,7 +11,7 @@ import { cn, formatNumberCO, formatOpportunityAmount } from "@/lib/utils";
 import { db, LocalCuenta } from "@/lib/db";
 import { ProbabilityDonut } from "@/components/ui/ProbabilityDonut";
 import { hydrateActivityCatalogsFromSupabase, hydrateOpportunityDetailFromSupabase, refreshLossReasonsFromSupabase } from "@/lib/supabaseDirect";
-import { lossReasonOptionLabel, selectLossReasonsForPicker, type LossReasonCatalogItem } from "@/lib/lossReasonCatalog";
+import { filterLossReasonsForChannel, lossReasonOptionLabel, selectLossReasonsForPicker, type LossReasonCatalogItem } from "@/lib/lossReasonCatalog";
 import { useLiveQuery } from "dexie-react-hooks";
 import { formatColombiaDate, formatColombiaDateTime, isDateOverdue, toInputDate } from "@/lib/date-utils";
 import {
@@ -364,7 +364,8 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
             cancelled = true;
         };
     }, []);
-    const lossReasonOptions = useMemo(
+    // Todas las activas; el filtro por canal (B2C) se aplica más abajo, cuando ya se conoce la cuenta.
+    const lossReasonCatalogOptions = useMemo(
         () => selectLossReasonsForPicker(remoteLossReasons ?? cachedLossReasons ?? []),
         [remoteLossReasons, cachedLossReasons],
     );
@@ -529,6 +530,14 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
         direccion: "",
         ciudad: ""
     } : null);
+
+    // B2C (Canal Propio) solo ve sus razones de pérdida (prefijos N-, INT-, RED-); el resto ve todas.
+    // La razón ya guardada sigue apareciendo aunque no esté en la lista (ver el <select>).
+    const isB2CForLossReasons = isB2COpportunity(effectiveAccount, opportunity, user);
+    const lossReasonOptions = useMemo(
+        () => filterLossReasonsForChannel(lossReasonCatalogOptions, isB2CForLossReasons),
+        [lossReasonCatalogOptions, isB2CForLossReasons],
+    );
 
     // Catálogo completo (incluye inactivas) para el nombre; el stepper solo ofrece activas.
     const phaseCatalog = useLiveQuery(() => readFullPhaseCatalog(), [effectiveAccount?.canal_id]);
@@ -1575,6 +1584,7 @@ function SummaryTab({ opportunity }: { opportunity: any }) {
                     setPendingPhaseId(null);
                 }}
                 onConfirm={confirmLossReason}
+                isB2C={isB2CForLossReasons}
             />
 
             {isAccountModalOpen && effectiveAccount && (

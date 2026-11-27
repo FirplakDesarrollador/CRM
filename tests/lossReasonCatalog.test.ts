@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+    filterLossReasonsForChannel,
+    isB2CLossReason,
     lossReasonOptionLabel,
     planLossReasonCatalogWrite,
     selectLossReasonsForPicker,
@@ -55,12 +57,28 @@ describe('Razones de pérdida activas para el desplegable', () => {
         expect(picked.find(reason => reason.id === 37)?.descripcion).toBe('Otra razón futura');
     });
 
-    it('la misma lista vale para PROPIO/B2C: el catálogo no se parte por canal ni por prefijo', () => {
-        const picked = selectLossReasonsForPicker(CATALOG);
-        expect(picked.some(reason => reason.descripcion.startsWith('N '))).toBe(true);
-        expect(picked.some(reason => reason.descripcion.startsWith('INT '))).toBe(true);
-        expect(picked.some(reason => reason.descripcion.startsWith('RED-'))).toBe(true);
-        expect(picked.some(reason => reason.descripcion === 'Cliente abandonado')).toBe(true);
+    it('B2C (PROPIO) solo ve las razones con prefijo N-, INT- o RED-', () => {
+        const picked = filterLossReasonsForChannel(selectLossReasonsForPicker(CATALOG), true);
+        expect(picked.map(reason => reason.id)).toEqual([9, 17, 18, 34]);
+        expect(picked.some(reason => reason.descripcion === 'Cliente abandonado')).toBe(false);
+        expect(picked.some(reason => reason.descripcion === 'Precio')).toBe(false);
+        expect(picked.some(reason => reason.descripcion === 'Duplicado')).toBe(false);
+    });
+
+    it('los demás canales siguen viendo todas las activas, con y sin prefijo', () => {
+        const all = selectLossReasonsForPicker(CATALOG);
+        expect(filterLossReasonsForChannel(all, false)).toEqual(all);
+    });
+
+    it('reconoce los prefijos con o sin espacios y no confunde N/A ni palabras que empiezan igual', () => {
+        expect(isB2CLossReason('N - No responde 1mer contacto')).toBe(true);
+        expect(isB2CLossReason('INT - Abandona Conversación')).toBe(true);
+        expect(isB2CLossReason('RED- MAC')).toBe(true);
+        expect(isB2CLossReason('int-algo')).toBe(true);
+        expect(isB2CLossReason('N/A')).toBe(false);
+        expect(isB2CLossReason('No responde')).toBe(false);
+        expect(isB2CLossReason('Redes sociales')).toBe(false);
+        expect(isB2CLossReason(null)).toBe(false);
     });
 
     it('al reemplazar el catálogo local borra ids que ya no vienen y conserva el texto exacto', () => {
@@ -88,6 +106,7 @@ describe('El detalle lee el catálogo y no la lista fija', () => {
             page.indexOf('data-testid="comentarios-perdida-textarea"'),
         );
         expect(select).toContain('lossReasonOptions.map');
+        expect(page).toContain('filterLossReasonsForChannel(lossReasonCatalogOptions, isB2CForLossReasons)');
         expect(select).toContain('lossReasonOptionLabel');
         expect(select).not.toContain('LOSS_REASONS');
     });

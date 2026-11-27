@@ -1,13 +1,32 @@
 /**
  * Catálogo de razones de pérdida (`CRM_RazonesPerdida`).
  *
- * La tabla no tiene canal. Los prefijos N-, RED- e INT- viven en `descripcion`;
- * no parten el desplegable. El detalle de la oportunidad —también en PROPIO/B2C,
- * donde ya se ven juntas las razones N- e INT-— ofrece todas las filas activas.
- * Una razón nueva sin prefijo, como «Cliente abandonado», entra por `is_active`.
+ * La tabla no tiene canal. Los prefijos N-, RED- e INT- viven en `descripcion`
+ * y marcan las razones del canal B2C (PROPIO):
+ * - Oportunidad B2C: el desplegable ofrece SOLO las activas con prefijo N-, INT- o RED-.
+ *   Una razón nueva para B2C debe crearse con uno de esos prefijos.
+ * - Resto de canales: ofrece todas las filas activas (con y sin prefijo), como antes.
  * `is_active = false` permanece oculta. El valor guardado es el texto exacto
  * (el id 34 conserva el espacio final); la etiqueta visible se recorta.
  */
+
+/** Prefijos de `descripcion` que identifican una razón de pérdida del canal B2C. */
+export const B2C_LOSS_REASON_PREFIXES = ['N', 'INT', 'RED'] as const;
+
+const B2C_LOSS_REASON_PATTERN = /^\s*(N|INT|RED)\s*-/i;
+
+/** true si la razón es de B2C: empieza por «N -», «INT -» o «RED-» (con o sin espacios). «N/A» no cuenta. */
+export function isB2CLossReason(descripcion: string | null | undefined): boolean {
+    return B2C_LOSS_REASON_PATTERN.test(String(descripcion ?? ''));
+}
+
+/** Opciones del desplegable según el canal: B2C solo ve sus razones con prefijo; el resto ve todas. */
+export function filterLossReasonsForChannel<T extends { descripcion?: string | null }>(
+    reasons: readonly T[],
+    isB2C: boolean,
+): T[] {
+    return isB2C ? reasons.filter(reason => isB2CLossReason(reason.descripcion)) : [...reasons];
+}
 
 export interface LossReasonCatalogItem {
     id: number | string;

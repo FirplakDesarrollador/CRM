@@ -5,7 +5,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Loader2 } from "lucide-react";
 import type { LocalLossReason } from "@/lib/db";
-import { selectLossReasonsForPicker } from "@/lib/lossReasonCatalog";
+import { filterLossReasonsForChannel, selectLossReasonsForPicker } from "@/lib/lossReasonCatalog";
 import { supabase } from "@/lib/supabase";
 
 interface LossReasonModalProps {
@@ -13,9 +13,11 @@ interface LossReasonModalProps {
     onClose: () => void;
     onConfirm: (reasonId: number) => Promise<void>;
     isLoading?: boolean;
+    /** Oportunidad B2C: solo razones con prefijo N-, INT- o RED-. */
+    isB2C?: boolean;
 }
 
-export function LossReasonModal({ isOpen, onClose, onConfirm, isLoading = false }: LossReasonModalProps) {
+export function LossReasonModal({ isOpen, onClose, onConfirm, isLoading = false, isB2C = false }: LossReasonModalProps) {
     const [selectedReasonId, setSelectedReasonId] = useState<number | null>(null);
     const [isFetching, setIsFetching] = useState(false);
     const [reasons, setReasons] = useState<LocalLossReason[]>([]);
@@ -33,7 +35,7 @@ export function LossReasonModal({ isOpen, onClose, onConfirm, isLoading = false 
                     .eq('is_active', true)
                     .order('id', { ascending: true });
                 if (!cancelled && data && !error) {
-                    setReasons(selectLossReasonsForPicker(data as LocalLossReason[]));
+                    setReasons(filterLossReasonsForChannel(selectLossReasonsForPicker(data as LocalLossReason[]), isB2C));
                 }
             } catch (e) {
                 console.error("Error fetching loss reasons:", e);
@@ -48,7 +50,7 @@ export function LossReasonModal({ isOpen, onClose, onConfirm, isLoading = false 
         return () => {
             cancelled = true;
         };
-    }, [isOpen]);
+    }, [isOpen, isB2C]);
 
     const handleConfirm = async () => {
         if (selectedReasonId) {
