@@ -16,6 +16,11 @@ interface UserPickerFilterProps {
     multiple?: boolean;
     selectedUserIds?: string[];
     onUsersSelect?: (userIds: string[]) => void;
+    /** Texto del botón cuando no hay nadie seleccionado */
+    placeholder?: string;
+    /** Prefijo opcional cuando hay un usuario seleccionado (p. ej. "Asignado a") */
+    selectedPrefix?: string;
+    testId?: string;
 }
 
 export function UserPickerFilter({ 
@@ -23,7 +28,10 @@ export function UserPickerFilter({
     selectedUserId, 
     multiple = false, 
     selectedUserIds = [], 
-    onUsersSelect 
+    onUsersSelect,
+    placeholder = "Filtrar por usuario",
+    selectedPrefix,
+    testId = "accounts-user-picker-filter"
 }: UserPickerFilterProps) {
     const { users, isLoading } = useUsers();
     const { user: currentUser, role } = useCurrentUser();
@@ -43,13 +51,13 @@ export function UserPickerFilter({
 
     const buttonText = multiple
         ? selectedUserIds.length === 0
-            ? "Filtrar por usuario"
+            ? placeholder
             : selectedUserIds.length === 1 && selectedUser
                 ? selectedUser.full_name
                 : `${selectedUserIds.length} usuarios`
         : selectedUser
-            ? selectedUser.full_name
-            : "Filtrar por usuario";
+            ? (selectedPrefix ? `${selectedPrefix}: ${selectedUser.full_name}` : selectedUser.full_name)
+            : placeholder;
 
     const availableUsers = useMemo(() => {
         if (role === 'ADMIN') return users;
@@ -67,7 +75,7 @@ export function UserPickerFilter({
     );
 
     return (
-        <div className="relative" ref={containerRef as any} data-testid="accounts-user-picker-filter">
+        <div className="relative" ref={containerRef as any} data-testid={testId}>
             <button
                 onClick={() => setIsOpen(!isOpen)}
                 className={cn(

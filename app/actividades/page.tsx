@@ -203,6 +203,16 @@ function ActivitiesContent() {
         }
         return "";
     });
+    // Responsable: dueño de la oportunidad (o de la cuenta, si no hay oportunidad) de la actividad
+    const [filterOwner, setFilterOwner] = useState<string>(() => {
+        const fromUrl = searchParams.get('owner');
+        if (fromUrl) return fromUrl;
+        if (typeof window !== 'undefined') {
+            const saved = sessionStorage.getItem('crm_actividades_state');
+            if (saved) return new URLSearchParams(saved).get('owner') || "";
+        }
+        return "";
+    });
     const [filterStatus, setFilterStatus] = useState<ActivityStatus>(() => {
         const fromUrl = searchParams.get('status');
         if (fromUrl) return (fromUrl as any);
@@ -268,6 +278,7 @@ function ActivitiesContent() {
     useEffect(() => {
         const saved = new URLSearchParams(typeof window !== 'undefined' ? sessionStorage.getItem('crm_actividades_state') || '' : '');
         const user = searchParams.get('user') || saved.get('user') || '';
+        const owner = searchParams.get('owner') || saved.get('owner') || '';
         const search = searchParams.get('search') || saved.get('search') || '';
         const type = searchParams.get('type') || saved.get('type') || '';
         const classification = searchParams.get('classification') || saved.get('classification') || '';
@@ -281,6 +292,7 @@ function ActivitiesContent() {
         const omit = searchParams.get('omitCompleted') ?? saved.get('omitCompleted');
 
         setFilterUser(user);
+        setFilterOwner(owner);
         setSearchQuery(search);
         setFilterType(type);
         setFilterClassification(classification);
@@ -303,6 +315,7 @@ function ActivitiesContent() {
         filterClassification,
         filterSubclassification,
         filterUser,
+        filterOwner,
         filterStatus,
         filterChannel,
         filterDateFrom,
@@ -310,7 +323,7 @@ function ActivitiesContent() {
         sortOrder,
         agendaDateMode,
         omitCompleted,
-    }), [view, searchQuery, filterType, filterClassification, filterSubclassification, filterUser, filterStatus, filterChannel, filterDateFrom, filterDateTo, sortOrder, agendaDateMode, omitCompleted]);
+    }), [view, searchQuery, filterType, filterClassification, filterSubclassification, filterUser, filterOwner, filterStatus, filterChannel, filterDateFrom, filterDateTo, sortOrder, agendaDateMode, omitCompleted]);
 
     const listSearch = useMemo(() => {
         const merged = mergeActivityListSearchParams(new URLSearchParams(searchParams.toString()), listUrlState, undefined);
@@ -446,7 +459,7 @@ function ActivitiesContent() {
     // Reset display limit when search or filters change to improve perceived performance
     useEffect(() => {
         setDisplayLimit(20);
-    }, [debouncedSearchQuery, filterType, filterClassification, filterSubclassification, filterUser, filterStatus, filterChannel, filterDateFrom, filterDateTo]);
+    }, [debouncedSearchQuery, filterType, filterClassification, filterSubclassification, filterUser, filterOwner, filterStatus, filterChannel, filterDateFrom, filterDateTo]);
 
     const handlePrev = () => {
         const newDate = new Date(selectedDate);
@@ -545,8 +558,16 @@ function ActivitiesContent() {
             if (filterClassification && act.clasificacion_id != filterClassification) return false;
             if (filterSubclassification && act.subclasificacion_id != filterSubclassification) return false;
 
-            // 3. NEW: Vendedor (Usuario)
+            // 3. Asignado a (usuario de la actividad)
             if (filterUser && act.user_id !== filterUser) return false;
+
+            // 3b. Responsable: dueño de la oportunidad; si no tiene oportunidad, dueño de la cuenta
+            if (filterOwner) {
+                const opp = act.opportunity_id ? oppMap.get(act.opportunity_id) : null;
+                const acc = act.account_id ? accMap.get(act.account_id) : (opp?.account_id ? accMap.get(opp.account_id) : null);
+                const ownerId = opp?.owner_user_id || acc?.owner_user_id || null;
+                if (ownerId !== filterOwner) return false;
+            }
 
             // 4. NEW: Estado
             if (omitCompleted && filterStatus !== "completed" && act.is_completed) return false;
@@ -582,7 +603,7 @@ function ActivitiesContent() {
         });
 
         return filtered;
-    }, [activities, filterType, filterClassification, filterSubclassification, debouncedSearchQuery, canViewAll, activeUserId, collaborativeOppIds, filterUser, filterStatus, omitCompleted, filterChannel, filterDateFrom, filterDateTo, opportunities, accounts, contacts, serverPhoneMatches]);
+    }, [activities, filterType, filterClassification, filterSubclassification, debouncedSearchQuery, canViewAll, activeUserId, collaborativeOppIds, filterUser, filterOwner, filterStatus, omitCompleted, filterChannel, filterDateFrom, filterDateTo, opportunities, accounts, contacts, serverPhoneMatches]);
 
     // Count overdue activities for badge (computed from role-filtered but ignoring current status filter)
     const overdueCount = useMemo(() => {
@@ -727,6 +748,40 @@ function ActivitiesContent() {
         return () => { cancelled = true; };
     }, [filterUser, canViewAll]);
 
+    // Filtro por responsable: la copia local puede no tener todas sus oportunidades/actividades,
+    // así que en línea se traen de Supabase sus oportunidades y cuentas, y las actividades de estas.
+    useEffect(() => {
+        if (!filterOwner || !canViewAll || typeof navigator === 'undefined' || !navigator.onLine) return;
+        let cancelled = false;
+        const chunk = <T,>(arr: T[], size: number): T[][] =>
+            Array.from({ length: Math.ceil(arr.length / size) }, (_, i) => arr.slice(i * size, i * size + size));
+        (async () => {
+            try {
+                const [oppsRes, accsRes] = await Promise.all([
+                    supabase.from('CRM_Oportunidades').select('*').eq('owner_user_id', filterOwner).order('updated_at', { ascending: false }).limit(500),
+                    supabase.from('CRM_Cuentas').select('*').eq('owner_user_id', filterOwner).order('updated_at', { ascending: false }).limit(500),
+                ]);
+                if (cancelled) return;
+                const opps = (!oppsRes.error && Array.isArray(oppsRes.data)) ? oppsRes.data : [];
+                const accs = (!accsRes.error && Array.isArray(accsRes.data)) ? accsRes.data : [];
+                if (opps.length) await db.opportunities.bulkPut(opps);
+                if (accs.length) await db.accounts.bulkPut(accs);
+                const results = await Promise.all([
+                    ...chunk(opps.map(o => o.id as string), 100).map(ids =>
+                        supabase.from('CRM_Actividades').select('*').in('opportunity_id', ids).eq('is_deleted', false).limit(1000)),
+                    ...chunk(accs.map(a => a.id as string), 100).map(ids =>
+                        supabase.from('CRM_Actividades').select('*').in('account_id', ids).is('opportunity_id', null).eq('is_deleted', false).limit(1000)),
+                ]);
+                if (cancelled) return;
+                const acts = results.flatMap(r => (!r.error && Array.isArray(r.data)) ? r.data : []);
+                if (acts.length) await db.activities.bulkPut(acts as LocalActivity[]);
+            } catch (err) {
+                console.warn('[ActivitiesPage] Direct owner activities fetch warning:', err);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [filterOwner, canViewAll]);
+
     // JIT Hydration: Cuando las actividades visibles tienen oportunidad o cuenta
     // que no está en la caché local (por ej. registros más antiguos que el límite
     // inicial de 3.000), las consultamos en Supabase y las guardamos en Dexie para
@@ -861,10 +916,22 @@ function ActivitiesContent() {
                         </div>
 
                         {canViewAll && (
-                            <UserPickerFilter 
-                                selectedUserId={filterUser} 
-                                onUserSelect={(id) => setFilterUser(id || "")} 
-                            />
+                            <>
+                                <UserPickerFilter
+                                    selectedUserId={filterUser}
+                                    onUserSelect={(id) => setFilterUser(id || "")}
+                                    placeholder="Asignado a"
+                                    selectedPrefix="Asignado a"
+                                    testId="activities-assigned-filter"
+                                />
+                                <UserPickerFilter
+                                    selectedUserId={filterOwner}
+                                    onUserSelect={(id) => setFilterOwner(id || "")}
+                                    placeholder="Responsable"
+                                    selectedPrefix="Responsable"
+                                    testId="activities-owner-filter"
+                                />
+                            </>
                         )}
 
                         {/* Overdue Quick Filter */}
@@ -900,7 +967,7 @@ function ActivitiesContent() {
                         </button>
 
                         {/* Clear Filters Button */}
-                        {(searchQuery || filterType || filterClassification || filterSubclassification || filterUser || filterStatus !== "all" || filterChannel || filterDateFrom || filterDateTo) && (
+                        {(searchQuery || filterType || filterClassification || filterSubclassification || filterUser || filterOwner || filterStatus !== "all" || filterChannel || filterDateFrom || filterDateTo) && (
                             <button
                                 onClick={() => {
                                     setSearchQuery("");
@@ -908,6 +975,7 @@ function ActivitiesContent() {
                                     setFilterClassification("");
                                     setFilterSubclassification("");
                                     setFilterUser("");
+                                    setFilterOwner("");
                                     setFilterStatus("all");
                                     setFilterChannel("");
                                     setFilterDateFrom("");

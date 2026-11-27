@@ -5,6 +5,8 @@ export interface ActivityListUrlState {
     filterClassification: string;
     filterSubclassification: string;
     filterUser: string;
+    /** Responsable: dueño de la oportunidad (o de la cuenta) de la actividad */
+    filterOwner?: string;
     filterStatus: 'all' | 'completed' | 'pending' | 'overdue';
     filterChannel: string;
     filterDateFrom: string;
@@ -45,6 +47,9 @@ export function mergeActivityListSearchParams(
 
     if (state.filterUser) params.set('user', state.filterUser);
     else params.delete('user');
+
+    if (state.filterOwner) params.set('owner', state.filterOwner);
+    else params.delete('owner');
 
     if (state.filterStatus !== 'all') params.set('status', state.filterStatus);
     else params.delete('status');

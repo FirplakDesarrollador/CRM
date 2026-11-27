@@ -3,6 +3,21 @@
 > Orden cronológico inverso (lo más reciente arriba). Una entrada por operación
 > de ingest/lint significativa. Formato: fecha — operación — resumen.
 
+## 2026-11-27 - Actividades: filtros «Asignado a» y «Responsable» (`/actividades`)
+
+- **Requerimiento:** Filtrar actividades por usuario asignado y por responsable.
+- **Regla:** «Asignado a» = `CRM_Actividades.user_id` (antes «Filtrar por usuario»). «Responsable» = `owner_user_id` de la oportunidad de la actividad; si no tiene oportunidad, el de su cuenta. Se combinan entre sí. Parámetro de URL `owner`. Visibles solo para quien ya veía el filtro de usuario (no asesor ni tienda). En línea, al elegir responsable se traen de Supabase sus oportunidades y cuentas (hasta 500 c/u) y sus actividades.
+- **Archivos:** `app/actividades/page.tsx`, `components/cuentas/UserPickerFilter.tsx` (props `placeholder`, `selectedPrefix`, `testId`), `lib/activityListParams.ts`.
+- **Pruebas:** `tsc` sin errores; eslint sin problemas nuevos.
+
+## 2026-11-27 - Razones de Pérdida por Canal: B2C solo ve las suyas (`lossReasonCatalog`, detalle de oportunidad)
+
+- **Requerimiento:** Que B2C (Canal Propio, `PROPIO`) solo vea las razones de pérdida de su canal.
+- **Regla:** `CRM_RazonesPerdida` no tiene canal; se identifica por prefijo en `descripcion`. Oportunidad B2C (`isB2COpportunity`) → solo activas con prefijo `N -`, `INT -` o `RED-` (`isB2CLossReason`, `filterLossReasonsForChannel`). Resto de canales → todas las activas, sin cambios. Una razón nueva para B2C debe crearse con uno de esos prefijos. La razón ya guardada sigue visible en el `<select>` aunque quede fuera de la lista.
+- **Archivos:** `lib/lossReasonCatalog.ts`, `app/oportunidades/[id]/page.tsx`, `components/oportunidades/LossReasonModal.tsx` (heredado, prop `isB2C`), `tests/lossReasonCatalog.test.ts` (reemplaza la regla anterior «B2C ve todas»).
+- **Pruebas:** `tests/lossReasonCatalog.test.ts` 9/9 y 7 suites relacionadas (85/85) en GREEN.
+- **Páginas afectadas:** `wiki/LOG.md`.
+
 ## 2026-11-27 - Optimización de Carga de Listas (`useOpportunitiesServer`, `useAccountsServer`, `useContactsServer`)
 
 - **Requerimiento:** Que las listas carguen más rápido sin perder información.
