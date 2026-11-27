@@ -6,21 +6,30 @@ import * as z from "zod";
 import { useOpportunities } from "@/lib/hooks/useOpportunities";
 import { useAccounts } from "@/lib/hooks/useAccounts";
 import { useState, useEffect, useMemo } from "react";
+import { OPPORTUNITY_SETTER_OPTIONS } from "@/lib/opportunitySetter";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronRight, Check } from "lucide-react";
 import { cn } from "@/components/ui/utils";
 import { AccountForm } from "@/components/cuentas/AccountForm";
 import { useProductSearch, PriceListProduct } from "@/lib/hooks/useProducts";
 import { Trash2, PlusCircle, Search, Loader2 } from "lucide-react";
+import { ExpandableTextarea } from "@/components/ui/ExpandableTextarea";
 import { db } from "@/lib/db";
 import { useLiveQuery } from "dexie-react-hooks";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { supabase } from "@/lib/supabase";
+import { isB2COpportunity } from "@/lib/b2c";
+import { LEAD_MIN_AMOUNT_CONFIG_KEY, fetchLeadMinimumAmountConfig, parseLeadMinimumAmountConfig, resolveLeadMinimumAmount, shouldApplyLeadMinimum } from "@/lib/leadMinimumAmount";
 import { useConfig } from "@/lib/hooks/useConfig";
+import { getPriceClarification } from "@/lib/salesChannels";
 import { CollaboratorSelector, CollaboratorEntry } from "@/components/oportunidades/CollaboratorSelector";
 import { useUsers } from "@/lib/hooks/useUsers";
 import { useFormDraft } from "@/lib/hooks/useFormDraft";
 import { MultiSelect } from "@/components/ui/MultiSelect";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 import { OPPORTUNITY_CATEGORIES, parseOpportunityCategories, formatOpportunityCategories } from "@/lib/opportunityCategories";
+import { selectPhasesForPicker } from "@/lib/opportunityPhaseCatalog";
+import { readFullPhaseCatalog } from "@/lib/phaseCatalogStore";
 
 const STEP_LABELS = ["Cuenta", "Datos del Negocio", "Productos", "Equipo"];
 const LAST_STEP_INDEX = STEP_LABELS.length - 1;
@@ -30,13 +39,13 @@ const schema = z.object({
     nombre: z.string().min(3, "Nombre requerido (mín. 3 caracteres)"),
     amount: z.coerce.number().min(0),
     currency_id: z.enum(["COP", "USD"]),
-    estado_id: z.coerce.number().default(1), // 1 = Abierta
     fase_id: z.coerce.number().min(1, "Fase requerida").default(1),
     segmento_id: z.coerce.number().nullable().optional(),
     pais_id: z.coerce.number().nullable().optional(),
     departamento_id: z.coerce.number().nullable().optional(),
     ciudad_id: z.coerce.number().nullable().optional(),
     fecha_cierre_estimada: z.string().optional().nullable(),
+    fecha_entrega: z.string().optional().nullable(),
     origen_oportunidad: z.string().optional().nullable(),
     url_origen: z.string().optional().nullable(),
     fuente_conversion: z.string().optional().nullable(),
@@ -53,7 +62,8 @@ const schema = z.object({
         nombre: z.string(),
         descuento_porcentaje: z.union([z.number(), z.string()]).optional().nullable()
     })).default([]),
-    owner_user_id: z.string().optional()
+    owner_user_id: z.string().optional(),
+    setter: z.string().optional().nullable()
 });
 
 export default function CreateOpportunityWizard() {
@@ -183,7 +193,6 @@ export default function CreateOpportunityWizard() {
             account_id: '',
             nombre: '',
             currency_id: 'COP' as 'COP' | 'USD',
-            estado_id: 1,
             fase_id: 1,
             amount: 0,
             pais_id: null,
@@ -199,7 +208,8 @@ export default function CreateOpportunityWizard() {
             contactos_ids: [],
             clientes_atendidos: 1,
             items: [],
-            owner_user_id: ''
+            owner_user_id: '',
+            setter: ''
         },
         shouldUnregister: false
     });
@@ -322,6 +332,16 @@ export default function CreateOpportunityWizard() {
         resolveAccount();
     }, [searchParams, accounts, setValue, step]);
 
+    // Pre-select the contact when coming from a contact (?contact_id=...), once the account's contacts are loaded
+    useEffect(() => {
+        const contactId = searchParams.get('contact_id');
+        if (!contactId || !selectedAccount) return;
+        if (!localAccountContacts.some(c => c.id === contactId)) return;
+        if ((form.getValues("contactos_ids") || []).length > 0) return;
+        setValue("contactos_ids", [contactId]);
+        setValue("clientes_atendidos", 1);
+    }, [searchParams, selectedAccount, localAccountContacts, form, setValue]);
+
     const { products: searchResults, isLoading: isSearching } = useProductSearch(searchTerm);
 
     // Filtrar cuentas para el buscador
@@ -392,7 +412,7 @@ export default function CreateOpportunityWizard() {
 
         console.log('[Phases] Filtering phases for canal_id:', channelId, 'Account:', selectedAccount?.nombre || selectedAccountId);
 
-        const phases = await db.phases.where('canal_id').equals(channelId).sortBy('orden');
+        const phases = selectPhasesForPicker(await readFullPhaseCatalog(), channelId);
         console.log('[Phases] Filtered phases count:', phases.length, 'for channel:', channelId);
 
         if (phases.length === 0) {
@@ -462,7 +482,7 @@ export default function CreateOpportunityWizard() {
                 price = Number(product.lista_base_exportaciones) || 0;
                 break;
             case 'PROPIO':
-                price = Number(product.distribuidor_pvp_iva) || 0;
+                price = Number(product.pvp_sin_iva) || 0;
                 break;
             case 'DIST_NAC':
             default:
@@ -533,8 +553,27 @@ export default function CreateOpportunityWizard() {
                 categoria_oportunidad: formatOpportunityCategories(data.categoria_oportunidad as any) || undefined,
                 contactos_ids: data.contactos_ids || [],
                 clientes_atendidos: data.clientes_atendidos !== undefined && data.clientes_atendidos !== null && data.clientes_atendidos !== "" ? Number(data.clientes_atendidos) : 0,
+                fecha_entrega: data.fecha_entrega || null,
+                fecha_cierre_estimada: data.fecha_cierre_estimada || null,
+                setter: data.setter || null,
                 collaborators: collaborators
             };
+
+            // B2C: si el prospecto entra sin valor, usar el monto mínimo de su categoría
+            // (tabla en CRM_Configuracion → lead_monto_minimo_por_categoria).
+            if (
+                shouldApplyLeadMinimum(sanitizedData.amount) &&
+                (!Array.isArray(data.items) || data.items.length === 0) &&
+                sanitizedData.categoria_oportunidad &&
+                isB2COpportunity(selectedAccount, sanitizedData, user)
+            ) {
+                const loadedValue = config?.[LEAD_MIN_AMOUNT_CONFIG_KEY];
+                const minConfig = loadedValue !== undefined
+                    ? parseLeadMinimumAmountConfig(loadedValue)
+                    : await fetchLeadMinimumAmountConfig(supabase);
+                const minimo = resolveLeadMinimumAmount(sanitizedData.categoria_oportunidad, minConfig);
+                if (minimo !== null) sanitizedData.amount = minimo;
+            }
 
             // Maintain legacy 'ciudad' string for list views
             if (sanitizedData.ciudad_id) {
@@ -722,23 +761,29 @@ export default function CreateOpportunityWizard() {
 
                             {/* Phase Selector (Dynamic) */}
                             <div>
-                                <label className="text-sm font-medium">Fase Inicial</label>
-                                <select
-                                    {...register("fase_id")}
-                                    className="w-full p-2 border rounded-lg"
+                                <label className="text-sm font-medium block mb-1">Fase Inicial</label>
+                                <SearchableSelect
+                                    value={watch("fase_id") ? String(watch("fase_id")) : ""}
+                                    onChange={(val) => setValue("fase_id", val ? Number(val) : 0, { shouldDirty: true, shouldValidate: true })}
+                                    allowClear={false}
                                     disabled={phasesLoading || (!filteredPhases || filteredPhases.length === 0)}
-                                >
-                                    {phasesLoading && <option value="">Cargando fases...</option>}
-                                    {phasesError && <option value="">Error al cargar fases</option>}
-                                    {!phasesLoading && !phasesError && filteredPhases?.map(phase => (
-                                        <option key={phase.id} value={phase.id}>
-                                            {phase.nombre}
-                                        </option>
-                                    ))}
-                                    {!phasesLoading && !phasesError && (!filteredPhases || filteredPhases.length === 0) && (
-                                        <option value="">No hay fases disponibles para este canal</option>
-                                    )}
-                                </select>
+                                    placeholder={
+                                        phasesLoading
+                                            ? "Cargando fases..."
+                                            : phasesError
+                                                ? "Error al cargar fases"
+                                                : (!filteredPhases || filteredPhases.length === 0)
+                                                    ? "No hay fases disponibles para este canal"
+                                                    : "Seleccione fase..."
+                                    }
+                                    searchPlaceholder="Buscar fase..."
+                                    options={(!phasesLoading && !phasesError && filteredPhases
+                                        ? filteredPhases.map(phase => ({
+                                            value: String(phase.id),
+                                            label: phase.nombre,
+                                        }))
+                                        : [])}
+                                />
                                 {phasesError && (
                                     <p className="text-xs text-red-500 mt-1">{phasesError}</p>
                                 )}
@@ -752,21 +797,20 @@ export default function CreateOpportunityWizard() {
 
                         {/* SEGMENT SELECTOR */}
                         <div>
-                            <label className="text-sm font-medium">Segmento</label>
-                            <select
-                                {...register("segmento_id")}
-                                className="w-full p-2 border rounded-lg disabled:bg-slate-100 disabled:text-slate-400"
+                            <label className="text-sm font-medium block mb-1">Segmento</label>
+                            <SearchableSelect
+                                value={watch("segmento_id") ? String(watch("segmento_id")) : ""}
+                                onChange={(val) => setValue("segmento_id", val ? Number(val) : null, { shouldDirty: true, shouldValidate: true })}
                                 disabled={!selectedAccount?.subclasificacion_id}
-                            >
-                                <option value="">Seleccione un segmento...</option>
-                                {segments
+                                placeholder="Seleccione un segmento..."
+                                searchPlaceholder="Buscar segmento..."
+                                options={displaySegments
                                     .filter((seg: any) => selectedAccount?.subclasificacion_id && seg.subclasificacion_id === Number(selectedAccount.subclasificacion_id))
-                                    .map((seg: any) => (
-                                        <option key={seg.id} value={seg.id}>
-                                            {seg.nombre}
-                                        </option>
-                                    ))}
-                            </select>
+                                    .map((seg: any) => ({
+                                        value: String(seg.id),
+                                        label: seg.nombre,
+                                    }))}
+                            />
                             {!selectedAccount?.subclasificacion_id && (
                                 <p className="text-xs text-orange-500 mt-1">
                                     La cuenta seleccionada no tiene subclasificación configurada.
@@ -777,56 +821,56 @@ export default function CreateOpportunityWizard() {
                         {/* CITY SELECTION */}
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <div>
-                                <label className="text-sm font-medium">País</label>
-                                <select
-                                    {...register("pais_id")}
-                                    className="w-full p-2 border rounded-lg"
-                                    onChange={(e) => {
-                                        register("pais_id").onChange(e);
-                                        setValue("departamento_id", null);
-                                        setValue("ciudad_id", null);
+                                <label className="text-sm font-medium block mb-1">País</label>
+                                <SearchableSelect
+                                    value={watch("pais_id") ? String(watch("pais_id")) : ""}
+                                    onChange={(val) => {
+                                        setValue("pais_id", val ? Number(val) : null, { shouldDirty: true, shouldValidate: true });
+                                        setValue("departamento_id", null, { shouldDirty: true });
+                                        setValue("ciudad_id", null, { shouldDirty: true });
                                     }}
-                                >
-                                    <option value="">Seleccione País...</option>
-                                    {displayCountries.map(p => (
-                                        <option key={p.id} value={p.id}>{p.nombre}</option>
-                                    ))}
-                                </select>
+                                    placeholder="Seleccione País..."
+                                    searchPlaceholder="Buscar país..."
+                                    options={displayCountries.map(p => ({
+                                        value: String(p.id),
+                                        label: p.nombre,
+                                    }))}
+                                />
                             </div>
                             <div>
-                                <label className="text-sm font-medium">Departamento</label>
-                                <select
-                                    {...register("departamento_id")}
-                                    className="w-full p-2 border rounded-lg disabled:bg-slate-50"
+                                <label className="text-sm font-medium block mb-1">Departamento</label>
+                                <SearchableSelect
+                                    value={watch("departamento_id") ? String(watch("departamento_id")) : ""}
                                     disabled={!watch("pais_id")}
-                                    onChange={(e) => {
-                                        register("departamento_id").onChange(e);
-                                        setValue("ciudad_id", null);
+                                    onChange={(val) => {
+                                        setValue("departamento_id", val ? Number(val) : null, { shouldDirty: true, shouldValidate: true });
+                                        setValue("ciudad_id", null, { shouldDirty: true });
                                     }}
-                                >
-                                    <option value="">Seleccione Departamento...</option>
-                                    {displayDepartments
+                                    placeholder="Seleccione Departamento..."
+                                    searchPlaceholder="Buscar departamento..."
+                                    options={displayDepartments
                                         .filter(dep => String(dep.pais_id) === String(watch("pais_id")) || (!dep.pais_id && String(watch("pais_id")) === "1"))
-                                        .map(dep => (
-                                            <option key={dep.id} value={dep.id}>{dep.nombre}</option>
-                                        ))}
-                                </select>
+                                        .map(dep => ({
+                                            value: String(dep.id),
+                                            label: dep.nombre,
+                                        }))}
+                                />
                             </div>
                             <div>
-                                <label className="text-sm font-medium">Ciudad</label>
-                                <select
-                                    {...register("ciudad_id")}
-                                    className="w-full p-2 border rounded-lg disabled:bg-slate-50"
+                                <label className="text-sm font-medium block mb-1">Ciudad</label>
+                                <SearchableSelect
+                                    value={watch("ciudad_id") ? String(watch("ciudad_id")) : ""}
                                     disabled={!watch("departamento_id")}
-                                >
-                                    <option value="">Seleccione Ciudad...</option>
-                                    {displayCities
+                                    onChange={(val) => setValue("ciudad_id", val ? Number(val) : null, { shouldDirty: true, shouldValidate: true })}
+                                    placeholder="Seleccione Ciudad..."
+                                    searchPlaceholder="Buscar ciudad..."
+                                    options={displayCities
                                         .filter(c => c.departamento_id === Number(watch("departamento_id")))
-                                        .map(city => (
-                                            <option key={city.id} value={city.id}>{city.nombre}</option>
-                                        ))
-                                    }
-                                </select>
+                                        .map(city => ({
+                                            value: String(city.id),
+                                            label: city.nombre,
+                                        }))}
+                                />
                             </div>
                         </div>
 
@@ -842,7 +886,7 @@ export default function CreateOpportunityWizard() {
                             </p>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                             <div>
                                 <label className="text-sm font-medium">Valor Estimado</label>
                                 <input type="number" {...register("amount")} className="w-full p-2 border rounded-lg" />
@@ -851,6 +895,10 @@ export default function CreateOpportunityWizard() {
                             <div>
                                 <label className="text-sm font-medium">Fecha Cierre Estimada</label>
                                 <input type="date" {...register("fecha_cierre_estimada")} className="w-full p-2 border rounded-lg" />
+                            </div>
+                            <div>
+                                <label className="text-sm font-medium">Fecha de Entrega</label>
+                                <input type="date" {...register("fecha_entrega")} className="w-full p-2 border rounded-lg" />
                             </div>
                         </div>
 
@@ -897,10 +945,27 @@ export default function CreateOpportunityWizard() {
                         </div>
                         
                         <div>
+                            <label className="text-sm font-medium block mb-1">Setter (Opcional)</label>
+                            <SearchableSelect
+                                value={watch("setter") || ""}
+                                onChange={(val) => setValue("setter", val || null, { shouldDirty: true, shouldValidate: true })}
+                                placeholder="Ninguna"
+                                searchPlaceholder="Buscar setter..."
+                                options={OPPORTUNITY_SETTER_OPTIONS.map(opt => ({
+                                    value: opt.value,
+                                    label: opt.label,
+                                }))}
+                            />
+                            <p className="text-[10px] text-slate-500 mt-0.5">
+                                Clasificación de prospección comercial. Se puede cambiar luego desde el detalle de la oportunidad.
+                            </p>
+                        </div>
+
+                        <div>
                             <label className="text-sm font-medium">Comentarios / Observaciones</label>
-                            <textarea 
-                                {...register("comentarios")} 
-                                className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-none" 
+                            <ExpandableTextarea
+                                {...register("comentarios")}
+                                className="w-full p-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                                 rows={3} 
                                 placeholder="Notas adicionales sobre esta oportunidad..."
                             />
@@ -947,7 +1012,7 @@ export default function CreateOpportunityWizard() {
                                                 case 'OBRAS_NAC': displayPrice = Number(product.lista_base_obras) || 0; break;
                                                 case 'OBRAS_INT':
                                                 case 'DIST_INT': displayPrice = Number(product.lista_base_exportaciones) || 0; break;
-                                                case 'PROPIO': displayPrice = Number(product.distribuidor_pvp_iva) || 0; break;
+                                                case 'PROPIO': displayPrice = Number(product.pvp_sin_iva) || 0; break;
                                                 default: displayPrice = Number(product.lista_base_cop) || 0;
                                             }
                                             if (Number(displayPrice) === 0) displayPrice = Number(product.lista_base_cop) || Number(product.pvp_sin_iva) || 0;
@@ -965,10 +1030,10 @@ export default function CreateOpportunityWizard() {
                                                     className="w-full text-left px-3 py-2 sm:px-4 sm:py-2.5 hover:bg-blue-50/70 flex items-center justify-between gap-2 border-b last:border-0 transition-colors group cursor-pointer"
                                                 >
                                                     <div className="flex-1 min-w-0 pr-2">
-                                                        <div className="font-medium text-xs sm:text-sm text-slate-900 line-clamp-2 leading-snug group-hover:text-blue-700">
+                                                        <div className="font-medium text-[15px] sm:text-sm text-slate-900 leading-snug break-words sm:line-clamp-2 group-hover:text-blue-700" title={product.descripcion}>
                                                             {product.descripcion}
                                                         </div>
-                                                        <div className="text-[11px] text-slate-400 mt-0.5">
+                                                        <div className="text-xs sm:text-[11px] text-slate-500 sm:text-slate-400 mt-0.5">
                                                             {product.numero_articulo}
                                                         </div>
                                                     </div>
@@ -993,7 +1058,8 @@ export default function CreateOpportunityWizard() {
                                     <div className="text-xs text-slate-400">Usa la búsqueda para agregar productos desde la primera fase.</div>
                                 </div>
                             ) : (
-                                items.map((item: any, idx: number) => {
+                                items.map((item: any) => {
+                                    const channel = selectedAccount?.canal_id || 'DIST_NAC';
                                     const basePriceFormatted = new Intl.NumberFormat('es-CO', { maximumFractionDigits: 0 }).format(Math.round(item.precio || 0));
                                     const discountedPrice = (item.precio || 0) * (1 - (Number(item.descuento_porcentaje) || 0) / 100);
                                     const discountedPriceFormatted = new Intl.NumberFormat('es-CO', { maximumFractionDigits: 0 }).format(Math.round(discountedPrice));
@@ -1001,8 +1067,9 @@ export default function CreateOpportunityWizard() {
                                     return (
                                         <div key={item.product_id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-white border border-slate-200 rounded-xl shadow-sm">
                                             <div className="flex-1 min-w-0">
-                                                <div className="font-medium text-xs sm:text-sm text-slate-800 line-clamp-2 leading-snug">{item.nombre}</div>
+                                                <div className="font-medium text-[15px] sm:text-sm text-slate-800 leading-snug break-words sm:line-clamp-2" title={item.nombre}>{item.nombre}</div>
                                                 <div className="text-[11px] sm:text-xs text-slate-500 mt-0.5">{currencyId} {basePriceFormatted} c/u base</div>
+                                                <div className="text-[10px] text-slate-400">{getPriceClarification(channel, currencyId === 'USD', false)}</div>
                                                 {(Number(item.descuento_porcentaje) || 0) > 0 && (
                                                     <div className="text-[11px] sm:text-xs text-emerald-600 font-medium mt-0.5">
                                                         Precio con desc: {currencyId} {discountedPriceFormatted} c/u

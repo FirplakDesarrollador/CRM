@@ -2,10 +2,13 @@
 
 import React, { useMemo, useState, useRef, useEffect } from "react";
 import { useOpportunities } from "@/lib/hooks/useOpportunities";
-import { useLiveQuery } from "dexie-react-hooks";
-import { db } from "@/lib/db";
+import type { LocalPhase } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 import { DollarSign, Calendar as CalendarIcon, TrendingUp, Filter, Check, ChevronDown } from "lucide-react";
 import { cn } from "@/components/ui/utils";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
+import { buildPhaseOutcomeMap, getPhaseOutcome } from "@/lib/opportunityPhase";
+import { expandSelectedPhaseIds, selectPhasesForPicker } from "@/lib/opportunityPhaseCatalog";
 
 
 export const VentasGanadasTile = () => {
@@ -21,7 +24,25 @@ export const VentasGanadasTile = () => {
 
     // 2. Fetch opportunities and phases
     const { opportunities } = useOpportunities();
-    const phases = useLiveQuery(() => db.phases.toArray());
+    const [phases, setPhases] = useState<LocalPhase[] | undefined>(undefined);
+
+    useEffect(() => {
+        let cancelled = false;
+        supabase
+            .from("CRM_FasesOportunidad")
+            .select("*")
+            .then(({ data }) => {
+                if (!cancelled && data) {
+                    setPhases(data as LocalPhase[]);
+                }
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    // Ganada = fase "Cerrada ganada" (el resultado se calcula solo por la fase).
+    const outcomeMap = useMemo(() => buildPhaseOutcomeMap(phases), [phases]);
 
     const channels = useMemo(() => {
         if (!phases) return [];
@@ -32,6 +53,11 @@ export const VentasGanadasTile = () => {
         if (!phases || selectedChannel === "ALL") return [];
         return phases.filter(p => p.canal_id === selectedChannel).sort((a, b) => a.orden - b.orden);
     }, [phases, selectedChannel]);
+
+    const phasePickerOptions = useMemo(
+        () => selectPhasesForPicker(phasesForSelectedChannel, selectedChannel === "ALL" ? null : selectedChannel),
+        [phasesForSelectedChannel, selectedChannel]
+    );
 
     // Close popover when clicking outside
     useEffect(() => {
@@ -53,19 +79,19 @@ export const VentasGanadasTile = () => {
                 // fecha_cierre_estimada must be in the selected month/year
                 if (!opp.fecha_cierre_estimada) return false;
 
-                const fechaCierre = new Date(opp.fecha_cierre_estimada);
-                // Adjust for timezone differences if necessary
-                const isCorrectDate = fechaCierre.getFullYear() === selectedYear &&
-                                      fechaCierre.getMonth() === selectedMonth;
+                // fecha_cierre_estimada es 'YYYY-MM-DD': se leen año y mes del texto (evita desfase UTC).
+                const [y, m] = String(opp.fecha_cierre_estimada).slice(0, 10).split('-').map(Number);
+                const isCorrectDate = y === selectedYear && (m - 1) === selectedMonth;
                 if (!isCorrectDate) return false;
 
                 if (selectedChannel === "ALL") {
                     // Default logic: sum all won opportunities
-                    return opp.estado_id === 2;
+                    return getPhaseOutcome(opp.fase_id, outcomeMap) === "won";
                 } else {
                     // Filter by specific channel's phases
                     if (selectedPhases.length > 0) {
-                        return selectedPhases.includes(opp.fase_id);
+                        const expanded = expandSelectedPhaseIds(selectedPhases, phases || []);
+                        return expanded.includes(Number(opp.fase_id));
                     } else if (phasesForSelectedChannel.length > 0) {
                         // if channel selected but no specific phases, include all phases of that channel
                         const channelPhaseIds = phasesForSelectedChannel.map(p => p.id);
@@ -76,7 +102,7 @@ export const VentasGanadasTile = () => {
             })
             .reduce((sum, opp) => sum + (Number(opp.amount || opp.valor) || 0), 0);
 
-    }, [opportunities, selectedYear, selectedMonth, selectedChannel, selectedPhases, phasesForSelectedChannel]);
+    }, [opportunities, selectedYear, selectedMonth, selectedChannel, selectedPhases, phases, phasesForSelectedChannel, outcomeMap]);
 
     const formatCurrency = (amount: number) => {
         return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(amount);
@@ -98,14 +124,15 @@ export const VentasGanadasTile = () => {
         return options;
     }, [today.getFullYear(), today.getMonth()]);
 
-    const handleMonthChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        const [yearStr, monthStr] = e.target.value.split('-');
+    const handleMonthChange = (val: string) => {
+        if (!val) return;
+        const [yearStr, monthStr] = val.split('-');
         setSelectedYear(parseInt(yearStr, 10));
         setSelectedMonth(parseInt(monthStr, 10));
     };
 
-    const handleChannelChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        setSelectedChannel(e.target.value);
+    const handleChannelChange = (val: string) => {
+        setSelectedChannel(val || "ALL");
         setSelectedPhases([]); // Reset selected phases when channel changes
     };
 
@@ -116,7 +143,7 @@ export const VentasGanadasTile = () => {
     };
 
     const selectAllPhases = () => {
-        setSelectedPhases(phasesForSelectedChannel.map(p => p.id));
+        setSelectedPhases(phasePickerOptions.map(p => p.id));
     };
 
     const clearPhaseSelection = () => {
@@ -154,19 +181,22 @@ export const VentasGanadasTile = () => {
 
                 <div className="flex flex-col sm:flex-row gap-2 items-end sm:items-center">
                     {/* Date Selector */}
-                    <div className="relative bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 flex items-center gap-2 hover:bg-slate-100 transition-colors shadow-sm">
-                        <CalendarIcon className="w-4 h-4 text-slate-500" />
-                        <select
-                            className="bg-transparent text-sm font-bold text-slate-700 outline-none cursor-pointer appearance-none pr-4"
-                            value={`${selectedYear}-${selectedMonth}`}
-                            onChange={handleMonthChange}
-                        >
-                            {monthOptions.map(opt => (
-                                <option key={`${opt.year}-${opt.month}`} value={`${opt.year}-${opt.month}`} className="capitalize">
-                                    {opt.label}
-                                </option>
-                            ))}
-                        </select>
+                    <div className="relative bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1 flex items-center gap-1.5 hover:bg-slate-100 transition-colors shadow-sm">
+                        <CalendarIcon className="w-4 h-4 text-slate-500 shrink-0" />
+                        <div className="w-[155px]">
+                            <SearchableSelect
+                                compact
+                                allowClear={false}
+                                value={`${selectedYear}-${selectedMonth}`}
+                                onChange={handleMonthChange}
+                                searchPlaceholder="Buscar mes..."
+                                triggerClassName="min-h-0 h-7 border-none bg-transparent px-1 py-0 text-sm font-bold text-slate-700 capitalize focus:ring-0 shadow-none"
+                                options={monthOptions.map(opt => ({
+                                    value: `${opt.year}-${opt.month}`,
+                                    label: opt.label,
+                                }))}
+                            />
+                        </div>
                     </div>
 
                     {/* Filter Popover Container */}
@@ -202,19 +232,18 @@ export const VentasGanadasTile = () => {
                                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5 ml-1">
                                             Seleccionar Canal
                                         </label>
-                                        <div className="relative">
-                                            <select
-                                                className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500/50 appearance-none cursor-pointer"
-                                                value={selectedChannel}
-                                                onChange={handleChannelChange}
-                                            >
-                                                <option value="ALL">Todos los Canales (Solo Ganadas)</option>
-                                                {channels.map(c => (
-                                                    <option key={c} value={c}>{c}</option>
-                                                ))}
-                                            </select>
-                                            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-                                        </div>
+                                        <SearchableSelect
+                                            compact
+                                            allowClear={false}
+                                            value={selectedChannel}
+                                            onChange={handleChannelChange}
+                                            searchPlaceholder="Buscar canal..."
+                                            triggerClassName="bg-slate-50 border-slate-200 rounded-xl font-bold text-slate-700"
+                                            options={[
+                                                { value: "ALL", label: "Todos los Canales (Solo Ganadas)" },
+                                                ...channels.map(c => ({ value: c, label: c })),
+                                            ]}
+                                        />
                                     </div>
 
                                     {/* Phases Multi-Select */}
@@ -251,7 +280,7 @@ export const VentasGanadasTile = () => {
                                                         background: #cbd5e1;
                                                     }
                                                 `}</style>
-                                                {phasesForSelectedChannel.map(phase => {
+                                                {phasePickerOptions.map(phase => {
                                                     const isSelected = selectedPhases.includes(phase.id);
                                                     return (
                                                         <label 

@@ -4,8 +4,8 @@ import { Button } from "@/components/ui/button";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Loader2 } from "lucide-react";
-import { db, LocalLossReason } from "@/lib/db";
-import { useLiveQuery } from "dexie-react-hooks";
+import type { LocalLossReason } from "@/lib/db";
+import { filterLossReasonsForChannel, selectLossReasonsForPicker } from "@/lib/lossReasonCatalog";
 import { supabase } from "@/lib/supabase";
 
 interface LossReasonModalProps {
@@ -13,34 +13,44 @@ interface LossReasonModalProps {
     onClose: () => void;
     onConfirm: (reasonId: number) => Promise<void>;
     isLoading?: boolean;
+    /** Oportunidad B2C: solo razones con prefijo N-, INT- o RED-. */
+    isB2C?: boolean;
 }
 
-export function LossReasonModal({ isOpen, onClose, onConfirm, isLoading = false }: LossReasonModalProps) {
+export function LossReasonModal({ isOpen, onClose, onConfirm, isLoading = false, isB2C = false }: LossReasonModalProps) {
     const [selectedReasonId, setSelectedReasonId] = useState<number | null>(null);
     const [isFetching, setIsFetching] = useState(false);
+    const [reasons, setReasons] = useState<LocalLossReason[]>([]);
 
-    // Fetch from local Dexie first
-    const reasons = useLiveQuery(() => db.lossReasons.filter(r => r.is_active === true).toArray());
-
-    // JIT Sync: If local is empty, try fetch from server and seed local
     useEffect(() => {
-        const syncReasons = async () => {
-            if (isOpen && (!reasons || reasons.length === 0) && !isFetching) {
-                setIsFetching(true);
-                try {
-                    const { data, error } = await supabase.from('CRM_RazonesPerdida').select('*').eq('is_active', true);
-                    if (data && !error) {
-                        await db.lossReasons.bulkPut(data);
-                    }
-                } catch (e) {
-                    console.error("Error fetching loss reasons:", e);
-                } finally {
+        if (!isOpen) return;
+        let cancelled = false;
+
+        const fetchReasons = async () => {
+            setIsFetching(true);
+            try {
+                const { data, error } = await supabase
+                    .from('CRM_RazonesPerdida')
+                    .select('*')
+                    .eq('is_active', true)
+                    .order('id', { ascending: true });
+                if (!cancelled && data && !error) {
+                    setReasons(filterLossReasonsForChannel(selectLossReasonsForPicker(data as LocalLossReason[]), isB2C));
+                }
+            } catch (e) {
+                console.error("Error fetching loss reasons:", e);
+            } finally {
+                if (!cancelled) {
                     setIsFetching(false);
                 }
             }
         };
-        syncReasons();
-    }, [isOpen, reasons, isFetching]);
+
+        fetchReasons();
+        return () => {
+            cancelled = true;
+        };
+    }, [isOpen, isB2C]);
 
     const handleConfirm = async () => {
         if (selectedReasonId) {

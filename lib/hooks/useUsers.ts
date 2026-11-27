@@ -6,6 +6,7 @@ export interface User {
     id: string;
     email: string;
     full_name: string | null;
+    telefono?: string | null;
     role: UserRole;
     is_active: boolean;
     allowed_modules?: string[] | null;
@@ -15,6 +16,8 @@ export interface User {
     paises?: string[] | null;
     departamentos?: string[] | null;
     canales?: string[] | null;
+    zona_id?: string | null;
+    zona_nombre?: string | null;
     created_at: string;
     updated_at: string;
 }
@@ -23,6 +26,7 @@ export interface CreateUserData {
     email: string;
     password: string;
     full_name: string;
+    telefono?: string | null;
     role: UserRole;
     allowed_modules?: string[];
     coordinadores?: string[];
@@ -31,10 +35,12 @@ export interface CreateUserData {
     paises?: string[];
     departamentos?: string[];
     canales?: string[];
+    zona_id?: string | null;
 }
 
 export interface UpdateUserData {
     full_name?: string;
+    telefono?: string | null;
     role?: UserRole;
     is_active?: boolean;
     allowed_modules?: string[] | null;
@@ -44,6 +50,7 @@ export interface UpdateUserData {
     paises?: string[] | null;
     departamentos?: string[] | null;
     canales?: string[] | null;
+    zona_id?: string | null;
 }
 
 const USERS_CACHE_KEY = 'crm_cached_users';
@@ -86,14 +93,20 @@ export function useUsers() {
 
             const { data, error: fetchError } = await supabase
                 .from('CRM_Usuarios')
-                .select('*')
+                .select('*, zona:CRM_Zonas(nombre)')
                 .order('created_at', { ascending: false });
 
             if (fetchError) throw fetchError;
 
             if (data) {
-                setUsers(data);
-                setCachedUsers(data);
+                const normalized = data.map((row: any) => {
+                    const rawZona = row.zona;
+                    const zonaNombre = Array.isArray(rawZona) ? (rawZona[0]?.nombre ?? null) : (rawZona?.nombre ?? null);
+                    const { zona: _zona, ...rest } = row;
+                    return { ...rest, zona_nombre: zonaNombre } as User;
+                });
+                setUsers(normalized);
+                setCachedUsers(normalized);
             }
         } catch (err: any) {
             console.error('[useUsers] Error fetching users:', err);
@@ -128,6 +141,7 @@ export function useUsers() {
             // But we need to update the role, allowed_modules AND coordinadores
             // We'll prepare the update object
             const updates: any = { full_name: userData.full_name };
+            if (userData.telefono !== undefined) updates.telefono = userData.telefono;
             if (userData.role) updates.role = userData.role;
             if (userData.allowed_modules) updates.allowed_modules = userData.allowed_modules;
             if (userData.coordinadores) updates.coordinadores = userData.coordinadores;
@@ -136,6 +150,7 @@ export function useUsers() {
             if (userData.paises !== undefined) updates.paises = userData.paises;
             if (userData.departamentos !== undefined) updates.departamentos = userData.departamentos;
             if (userData.canales !== undefined) updates.canales = userData.canales;
+            if (userData.zona_id !== undefined) updates.zona_id = userData.zona_id || null;
 
             // Only update if there are extra fields beyond the basic trigger defaults
             if (Object.keys(updates).length > 1 || updates.role !== 'VENDEDOR') {
@@ -219,6 +234,24 @@ export function useUsers() {
         return updateUser(userId, { role: newRole });
     };
 
+    // Update user password via RPC (requires Admin)
+    const updateUserPassword = async (userId: string, newPassword: string): Promise<{ success: boolean; error?: string }> => {
+        try {
+            const { error } = await supabase.rpc('admin_change_password', {
+                target_user_id: userId,
+                new_password: newPassword
+            });
+
+            if (error) {
+                throw new Error(error.message || 'Error al cambiar contraseña');
+            }
+            return { success: true };
+        } catch (err: any) {
+            console.error('[useUsers] Error updating password:', err);
+            return { success: false, error: err.message || 'Error al cambiar contraseña' };
+        }
+    };
+
     // Toggle user active status
     const toggleUserStatus = async (userId: string, isActive: boolean): Promise<{ success: boolean; error?: string }> => {
         return updateUser(userId, { is_active: isActive });
@@ -242,6 +275,7 @@ export function useUsers() {
         createUser,
         updateUser,
         updateUserRole,
+        updateUserPassword,
         toggleUserStatus,
         deleteUser,
     };

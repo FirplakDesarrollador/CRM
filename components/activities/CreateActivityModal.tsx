@@ -7,24 +7,48 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { cn } from "@/components/ui/utils";
 import { toInputDate, toInputDateTime, parseColombiaDate } from "@/lib/date-utils";
-import { db, LocalActivity, LocalActivityClassification, LocalActivitySubclassification } from "@/lib/db";
-import { syncEngine } from "@/lib/sync";
+import { db, LocalActivity, LocalActivityClassification, LocalActivitySubclassification, useActiveLocalUserId, useActiveDatabaseVersion } from "@/lib/db";
+import { hydrateActivityCatalogsFromSupabase } from "@/lib/supabaseDirect";
 import { supabase } from "@/lib/supabase";
 import { DateTimePicker } from "@/components/ui/DateTimePicker";
 import { useActivities } from "@/lib/hooks/useActivities";
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { useUserStore } from "@/lib/stores/useUserStore";
 import { OpportunityCombobox } from "@/components/opportunities/OpportunityCombobox";
 import { AccountCombobox } from "@/components/accounts/AccountCombobox";
 import { useFormAutoSave } from "@/lib/hooks/useFormAutoSave";
+import { useFormDraft } from "@/lib/hooks/useFormDraft";
 import { AutoSaveIndicator } from "@/components/ui/AutoSaveIndicator";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
+import { isB2COnlyActivityClassification, userHasB2CAccess } from "@/lib/b2c";
+import { getRecentSubjects, rememberSubject, nextNumberedSubjects, uniqueSubjects } from "@/lib/activitySubjects";
+import { activityContactIdFrom, activityEntityHrefs, resolveActivityContactId } from "@/lib/activityModalLinks";
+import { buildActivityUserOptions, resolveDefaultActivityUserId } from "@/lib/activityAssignee";
+import { hydrateActivityContacts, hydrateActivityReferences } from "@/lib/serverHydration";
 
 interface CreateActivityModalProps {
     onClose: () => void;
-    onSubmit: (data: any) => void;
+    onSubmit: (data: any) => void | Promise<void>;
     opportunities?: unknown[];
     initialOpportunityId?: string;
     initialAccountId?: string;
     initialData?: any;
+    /**
+     * Pre-filled values for a NEW activity (e.g. a follow-up of a completed one).
+     * Ignored when `initialData` is present (edit mode).
+     */
+    initialValues?: Partial<{
+        asunto: string;
+        descripcion: string;
+        tipo_actividad: 'TAREA' | 'EVENTO';
+        clasificacion_id: number | string | null;
+        subclasificacion_id: number | string | null;
+        fecha_inicio: string | Date;
+        fecha_fin: string | Date;
+        prioridad: 'Alta' | 'Media' | 'Baja';
+    }>;
+    /** Called once when the activity being edited is marked as completed from inside the modal. */
+    onActivityCompleted?: (activity: { id: string; [key: string]: unknown }) => void;
 }
 
 const ACTIVITY_WIZARD_LAST_STEP = 2;
@@ -45,31 +69,45 @@ const normalizePlannerChecklist = (items: PlannerChecklistItem[]) => {
         .filter((item) => item.title.length > 0);
 };
 
-export function CreateActivityModal({ onClose, onSubmit, opportunities, initialOpportunityId, initialAccountId, initialData }: CreateActivityModalProps) {
+export function CreateActivityModal({ onClose, onSubmit, opportunities, initialOpportunityId, initialAccountId, initialData, initialValues, onActivityCompleted }: CreateActivityModalProps) {
     const isEditing = !!initialData;
     const [wizardStep, setWizardStep] = useState(0);
     const [canSubmitFinalStep, setCanSubmitFinalStep] = useState(false);
     const form = useForm({
         defaultValues: {
-            asunto: initialData?.asunto || '',
-            descripcion: initialData?.descripcion || '',
-            tipo_actividad: (initialData?.tipo_actividad || 'EVENTO') as 'TAREA' | 'EVENTO',
-            clasificacion_id: initialData?.clasificacion_id ? String(initialData.clasificacion_id) : "",
-            subclasificacion_id: initialData?.subclasificacion_id ? String(initialData.subclasificacion_id) : "",
+            asunto: initialData?.asunto || initialValues?.asunto || '',
+            descripcion: initialData?.descripcion || initialValues?.descripcion || '',
+            tipo_actividad: (initialData?.tipo_actividad || initialValues?.tipo_actividad || 'EVENTO') as 'TAREA' | 'EVENTO',
+            clasificacion_id: initialData?.clasificacion_id ? String(initialData.clasificacion_id) : (!initialData && initialValues?.clasificacion_id ? String(initialValues.clasificacion_id) : ""),
+            subclasificacion_id: initialData?.subclasificacion_id ? String(initialData.subclasificacion_id) : (!initialData && initialValues?.subclasificacion_id ? String(initialValues.subclasificacion_id) : ""),
             fecha_inicio: initialData?.fecha_inicio
                 ? (initialData.tipo_actividad === 'TAREA' ? toInputDate(initialData.fecha_inicio) : toInputDateTime(initialData.fecha_inicio))
-                : (initialData?.tipo_actividad === 'TAREA' ? toInputDate(new Date()) : toInputDateTime(new Date())),
+                : initialValues?.fecha_inicio
+                    ? (initialValues.tipo_actividad === 'TAREA' ? toInputDate(initialValues.fecha_inicio) : toInputDateTime(initialValues.fecha_inicio))
+                    : (initialData?.tipo_actividad === 'TAREA' ? toInputDate(new Date()) : toInputDateTime(new Date())),
             fecha_fin: initialData?.fecha_fin
                 ? toInputDateTime(initialData.fecha_fin)
-                : toInputDateTime(new Date(Date.now() + 3600000)),
+                : initialValues?.fecha_fin
+                    ? toInputDateTime(initialValues.fecha_fin)
+                    : toInputDateTime(new Date(Date.now() + 3600000)),
             opportunity_id: initialData?.opportunity_id || initialOpportunityId || '',
             account_id: initialData?.account_id || initialAccountId || '',
             is_completed: !!initialData?.is_completed,
-            prioridad: initialData?.prioridad || 'Media'
+            prioridad: initialData?.prioridad || initialValues?.prioridad || 'Media'
         }
     });
 
     const { register, handleSubmit, watch, setValue, getValues, reset, formState: { dirtyFields } } = form;
+
+    // Borrador local de una actividad NUEVA: si el asesor recibe una llamada o cambia de
+    // app y el navegador descarta la pestaña, al volver a abrir "Nueva actividad" en el
+    // mismo contexto se recupera lo que llevaba escrito.
+    const activityDraftKey = `crm_draft_activity:${initialOpportunityId || initialAccountId || 'general'}`;
+    const { hasDraft: hasActivityDraft, clearDraft: clearActivityDraft } = useFormDraft(
+        form,
+        activityDraftKey,
+        !isEditing && !initialValues
+    );
 
     const watchedAccountId = watch('account_id');
     const watchedOpportunityId = watch('opportunity_id');
@@ -92,10 +130,28 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         [relatedOpportunity?.account_id, watchedAccountId]
     );
 
-    const relatedContact = useLiveQuery(
-        () => relatedAccount?.id ? db.contacts.where('account_id').equals(relatedAccount.id).first() : undefined,
-        [relatedAccount?.id]
+    const contactAccountId = relatedOpportunity?.account_id || watchedAccountId || '';
+    const activityContactId = activityContactIdFrom(initialData);
+    const accountContacts = useLiveQuery(
+        async () => {
+            if (!contactAccountId) return [];
+            const rows = await db.contacts.where('account_id').equals(contactAccountId).toArray();
+            return rows.filter(contact => !contact.is_deleted);
+        },
+        [contactAccountId]
+    ) || [];
+    const resolvedContactId = resolveActivityContactId({
+        activityContactId,
+        opportunityContactIds: relatedOpportunity?.contactos_ids,
+        accountContacts,
+    });
+    const resolvedContactRecord = useLiveQuery(
+        () => resolvedContactId ? db.contacts.get(resolvedContactId) : undefined,
+        [resolvedContactId]
     );
+    const relatedContact = resolvedContactRecord && !resolvedContactRecord.is_deleted
+        ? resolvedContactRecord
+        : accountContacts.find(contact => contact.id === resolvedContactId);
 
     const [resolvedAccountName, setResolvedAccountName] = useState<string>("");
     const opportunityAccountRef = useRef<string | null>(null);
@@ -137,26 +193,39 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         return parsed ? parsed.toISOString() : null;
     };
 
+    const completedNotifiedRef = useRef(false);
+
     const onAutoSave = async (data: any) => {
         if (!isEditing || !initialData?.id) return;
         const autoAsunto = data.asunto?.trim() || getAutoAsunto(data.clasificacion_id, data.opportunity_id, data.account_id);
         if (!data.asunto?.trim()) {
             setValue('asunto', autoAsunto);
         }
-        const payload = {
+        const payload: Partial<LocalActivity> = {
             asunto: autoAsunto,
             descripcion: data.descripcion || null,
             tipo_actividad: data.tipo_actividad,
             clasificacion_id: data.clasificacion_id ? Number(data.clasificacion_id) : null,
             subclasificacion_id: data.subclasificacion_id ? Number(data.subclasificacion_id) : null,
-            fecha_inicio: safeToISO(data.fecha_inicio),
-            fecha_fin: safeToISO(data.fecha_fin),
-            opportunity_id: data.opportunity_id || null,
-            account_id: data.account_id || null,
+            fecha_inicio: safeToISO(data.fecha_inicio) || undefined,
+            fecha_fin: safeToISO(data.fecha_fin) || undefined,
+            opportunity_id: (data.opportunity_id && typeof data.opportunity_id === 'string' && data.opportunity_id.trim() && data.opportunity_id.trim() !== 'null') ? data.opportunity_id.trim() : null,
+            account_id: (data.account_id && typeof data.account_id === 'string' && data.account_id.trim() && data.account_id.trim() !== 'null') ? data.account_id.trim() : null,
             is_completed: !!data.is_completed,
             prioridad: data.prioridad || 'Media'
         };
-        await updateActivity(initialData.id, payload as Partial<LocalActivity>);
+        if (reassignUserId) {
+            payload.user_id = reassignUserId;
+        }
+        await updateActivity(initialData.id, payload);
+
+        // Notify the parent once when the activity transitions to completed from inside the modal
+        if (payload.is_completed && !completedNotifiedRef.current && !initialData.is_completed) {
+            completedNotifiedRef.current = true;
+            onActivityCompleted?.({ ...initialData, ...payload });
+        } else if (!payload.is_completed) {
+            completedNotifiedRef.current = false;
+        }
     };
 
     const { status: autoSaveStatus, errorMessage: autoSaveErrorMessage } = useFormAutoSave({
@@ -186,34 +255,50 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
             let accountId = null;
 
             // 1. Try local cache for Opportunity
-            const localOpp = await db.opportunities.get(watchedOpportunityId);
+            let localOpp = await db.opportunities.get(watchedOpportunityId);
+            if (!localOpp && navigator.onLine) {
+                // 2. Fallback to Supabase for Opportunity (JIT sync full record into Dexie)
+                try {
+                    const { data } = await supabase
+                        .from('CRM_Oportunidades')
+                        .select('*')
+                        .eq('id', watchedOpportunityId)
+                        .maybeSingle();
+                    if (data) {
+                        await db.opportunities.put(data);
+                        localOpp = data;
+                    }
+                } catch (e) {
+                    console.warn('[CreateActivityModal] Failed to fetch opportunity from server:', e);
+                }
+            }
             if (localOpp?.account_id) {
                 accountId = localOpp.account_id;
-            } else if (navigator.onLine) {
-                // 2. Fallback to Supabase for Opportunity
-                const { data } = await supabase
-                    .from('CRM_Oportunidades')
-                    .select('account_id')
-                    .eq('id', watchedOpportunityId)
-                    .maybeSingle();
-                if (data?.account_id) accountId = data.account_id;
             }
 
             if (accountId) {
                 opportunityAccountRef.current = accountId;
                 setValue('account_id', accountId, { shouldDirty: true });
 
-                // Resolve account name independently
-                const localAcc = await db.accounts.get(accountId);
-                if (localAcc) {
+                // Resolve account name independently & JIT sync into Dexie
+                let localAcc = await db.accounts.get(accountId);
+                if (!localAcc && navigator.onLine) {
+                    try {
+                        const { data } = await supabase
+                            .from('CRM_Cuentas')
+                            .select('*')
+                            .eq('id', accountId)
+                            .maybeSingle();
+                        if (data) {
+                            await db.accounts.put(data);
+                            localAcc = data;
+                        }
+                    } catch (e) {
+                        console.warn('[CreateActivityModal] Failed to fetch account from server:', e);
+                    }
+                }
+                if (localAcc?.nombre) {
                     setResolvedAccountName(localAcc.nombre);
-                } else if (navigator.onLine) {
-                    const { data } = await supabase
-                        .from('CRM_Cuentas')
-                        .select('nombre')
-                        .eq('id', accountId)
-                        .maybeSingle();
-                    if (data?.nombre) setResolvedAccountName(data.nombre);
                 }
             }
         };
@@ -221,14 +306,67 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         fillAccount();
     }, [watchedOpportunityId, setValue]);
 
+    useEffect(() => {
+        const opportunityId = initialData?.opportunity_id || initialOpportunityId || '';
+        const accountId = initialData?.account_id || initialAccountId || '';
+        if (!opportunityId && !accountId) return;
+        let cancelled = false;
+        const profile = useUserStore.getState().user;
+        hydrateActivityReferences(
+            { opportunity_id: opportunityId, account_id: accountId },
+            { viewerId: profile?.id, esTienda: profile?.es_tienda === true }
+        )
+            .catch(error => {
+                if (!cancelled) console.warn('[CreateActivityModal] no se pudo traer la cuenta o la oportunidad', error);
+            });
+        return () => { cancelled = true; };
+    }, [initialData?.opportunity_id, initialData?.account_id, initialOpportunityId, initialAccountId]);
+
+    const opportunityContactIds = relatedOpportunity?.contactos_ids;
+
+    useEffect(() => {
+        const accountId = relatedOpportunity?.account_id || watchedAccountId || initialData?.account_id || initialAccountId || '';
+        const contactIds = [
+            activityContactId,
+            ...(Array.isArray(opportunityContactIds) ? opportunityContactIds : []),
+        ];
+        if (!accountId && !contactIds.some(id => typeof id === 'string' && id.trim())) return;
+        let cancelled = false;
+        hydrateActivityContacts({ accountId, contactIds })
+            .catch(error => {
+                if (!cancelled) console.warn('[CreateActivityModal] no se pudieron traer los contactos', error);
+            });
+        return () => { cancelled = true; };
+    }, [
+        relatedOpportunity?.account_id,
+        opportunityContactIds,
+        watchedAccountId,
+        activityContactId,
+        initialData?.account_id,
+        initialAccountId,
+    ]);
+
     // Pre-resolve initial account name
     useEffect(() => {
-        if (initialAccountId) {
-            db.accounts.get(initialAccountId).then(acc => {
-                if (acc) setResolvedAccountName(acc.nombre);
+        const accId = initialAccountId || initialData?.account_id;
+        if (accId) {
+            db.accounts.get(accId).then(async (acc) => {
+                if (acc) {
+                    setResolvedAccountName(acc.nombre);
+                } else if (navigator.onLine) {
+                    try {
+                        const { data } = await supabase.from('CRM_Cuentas').select('*').eq('id', accId).maybeSingle();
+                        if (data) {
+                            await db.accounts.put(data);
+                            setResolvedAccountName(data.nombre);
+                        }
+                    } catch (e) {
+                        console.warn('[CreateActivityModal] Failed initial account fetch:', e);
+                    }
+                }
             });
         }
-    }, [initialAccountId]);
+    }, [initialAccountId, initialData?.account_id]);
 
     // Sync props to form if they change after mount (e.g. late loading from parent)
     useEffect(() => {
@@ -383,35 +521,66 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         updateActivity
     ]);
 
-    // Reassignment state (ADMIN / COORDINADOR only)
+    // Assignment & Reassignment state
+    const activeLocalUserId = useActiveLocalUserId();
+    const activeDbVersion = useActiveDatabaseVersion();
     const { user: currentUser, role: currentRole } = useCurrentUser();
     const canReassign = isEditing && (currentRole === 'ADMIN' || currentRole === 'COORDINADOR');
-    const [reassignUserId, setReassignUserId] = useState<string>(initialData?.user_id || '');
+    const hasManuallySelectedUserRef = useRef(false);
+    const [reassignUserId, setReassignUserId] = useState<string>(() =>
+        resolveDefaultActivityUserId({
+            initialDataUserId: initialData?.user_id,
+            currentUserId: currentUser?.id,
+            activeLocalUserId,
+        })
+    );
     const [reassignableUsers, setReassignableUsers] = useState<{ id: string; full_name: string | null; email: string }[]>([]);
 
     useEffect(() => {
-        if (!canReassign || !currentUser) return;
+        if (hasManuallySelectedUserRef.current) return;
+        const resolved = resolveDefaultActivityUserId({
+            initialDataUserId: initialData?.user_id,
+            currentUserId: currentUser?.id,
+            activeLocalUserId,
+        });
+        if (resolved && (!reassignUserId || (isEditing && initialData?.user_id && reassignUserId !== initialData.user_id))) {
+            setReassignUserId(resolved);
+        }
+    }, [isEditing, initialData?.user_id, currentUser?.id, activeLocalUserId, reassignUserId]);
+
+    useEffect(() => {
+        if (isEditing && !canReassign) return;
+        let cancelled = false;
         const fetchReassignableUsers = async () => {
-            if (currentRole === 'ADMIN') {
-                const { data } = await supabase
-                    .from('CRM_Usuarios')
-                    .select('id, full_name, email')
-                    .eq('is_active', true)
-                    .order('full_name');
-                if (data) setReassignableUsers(data);
-            } else {
-                // COORDINADOR: only themselves + their subordinates
-                const { data } = await supabase
-                    .from('CRM_Usuarios')
-                    .select('id, full_name, email')
-                    .eq('is_active', true)
-                    .or(`id.eq.${currentUser.id},coordinadores.cs.{${currentUser.id}}`)
-                    .order('full_name');
-                if (data) setReassignableUsers(data);
+            try {
+                if (isEditing && currentRole === 'COORDINADOR' && currentUser?.id) {
+                    // COORDINADOR on edit: only themselves + their subordinates
+                    const { data } = await supabase
+                        .from('CRM_Usuarios')
+                        .select('id, full_name, email')
+                        .eq('is_active', true)
+                        .or(`id.eq.${currentUser.id},coordinadores.cs.{${currentUser.id}}`)
+                        .order('full_name');
+                    if (!cancelled && data) setReassignableUsers(data);
+                } else {
+                    const { data } = await supabase
+                        .from('CRM_Usuarios')
+                        .select('id, full_name, email')
+                        .eq('is_active', true)
+                        .order('full_name');
+                    if (!cancelled && data) setReassignableUsers(data);
+                }
+            } catch (err) {
+                console.warn('[CreateActivityModal] Failed to load platform users:', err);
             }
         };
         fetchReassignableUsers();
-    }, [canReassign, currentUser, currentRole]);
+        return () => { cancelled = true; };
+    }, [isEditing, canReassign, currentUser?.id, currentRole]);
+
+    const reassignOptions = useMemo(() => {
+        return buildActivityUserOptions(reassignableUsers, currentUser);
+    }, [reassignableUsers, currentUser]);
 
     // Check Microsoft Connection
     useEffect(() => {
@@ -663,18 +832,13 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         }
     }, [initialData, setValue, onSubmit]); // Fixed dependencies
 
-    // PROACTIVE SYNC: If catalogs are empty, trigger a pull
+    // PROACTIVE LOAD: If catalogs are empty, fetch them directly from Supabase
     useEffect(() => {
         if (classifications.length === 0 && navigator.onLine) {
-            console.log("[CreateActivityModal] Catalogs empty, triggering sync...");
-            syncEngine.triggerSync();
+            void hydrateActivityCatalogsFromSupabase();
         }
     }, [classifications.length]);
 
-    // DEBUG: Log initialData to diagnose classification issue
-    console.log("[CreateActivityModal] initialData received:", initialData);
-    console.log("[CreateActivityModal] clasificacion_id:", initialData?.clasificacion_id, "type:", typeof initialData?.clasificacion_id);
-    console.log("[CreateActivityModal] Available classifications:", classifications.length);
 
 
 
@@ -767,25 +931,50 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         return () => clearTimeout(delayDebounceFn);
     }, [userSearch]);
 
-    const addAttendee = (user: any) => {
-        console.log("[CreateActivityModal] Selecting attendee:", user);
+    const addAttendee = async (user: any) => {
+        let nextAttendees = attendees;
         if (!attendees.find(a => a.id === user.id)) {
             const newAttendee = {
                 id: user.id,
                 name: user.displayName,
                 email: user.mail || user.userPrincipalName
             };
-            console.log("[CreateActivityModal] Adding new attendee:", newAttendee);
-            setAttendees([...attendees, newAttendee]);
-        } else {
-            console.log("[CreateActivityModal] Attendee already in list");
+            nextAttendees = [...attendees, newAttendee];
+            setAttendees(nextAttendees);
+
+            if (isEditing && initialData?.id) {
+                const nextMetadata = {
+                    ...(initialData._sync_metadata || {}),
+                    assigneeIds: nextAttendees.map(a => a.id),
+                    attendees: nextAttendees,
+                    last_modified: Date.now()
+                };
+                await updateActivity(initialData.id, {
+                    microsoft_attendees: nextAttendees,
+                    _sync_metadata: nextMetadata
+                } as any);
+            }
         }
         setUserSearch("");
         setSearchResults([]);
     };
 
-    const removeAttendee = (id: string) => {
-        setAttendees(attendees.filter(a => a.id !== id));
+    const removeAttendee = async (id: string) => {
+        const nextAttendees = attendees.filter(a => a.id !== id);
+        setAttendees(nextAttendees);
+
+        if (isEditing && initialData?.id) {
+            const nextMetadata = {
+                ...(initialData._sync_metadata || {}),
+                assigneeIds: nextAttendees.map(a => a.id),
+                attendees: nextAttendees,
+                last_modified: Date.now()
+            };
+            await updateActivity(initialData.id, {
+                microsoft_attendees: nextAttendees,
+                _sync_metadata: nextMetadata
+            } as any);
+        }
     };
 
     const addChecklistItem = () => {
@@ -997,6 +1186,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
             const currentAsunto = data.asunto?.trim() || getAutoAsunto(data.clasificacion_id, data.opportunity_id, data.account_id);
             data.asunto = currentAsunto;
             setValue('asunto', currentAsunto);
+            if (!isEditing) rememberSubject(currentAsunto, currentUser?.id);
 
             console.log("[CreateActivityModal] Raw Submit Data:", data);
 
@@ -1220,6 +1410,8 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
 
             const processed: any = {
                 ...dataToSubmit,
+                opportunity_id: (dataToSubmit.opportunity_id && typeof dataToSubmit.opportunity_id === 'string' && dataToSubmit.opportunity_id.trim() && dataToSubmit.opportunity_id.trim() !== 'null') ? dataToSubmit.opportunity_id.trim() : null,
+                account_id: (dataToSubmit.account_id && typeof dataToSubmit.account_id === 'string' && dataToSubmit.account_id.trim() && dataToSubmit.account_id.trim() !== 'null') ? dataToSubmit.account_id.trim() : null,
                 teams_meeting_url: teamsMeetingUrl,
                 ms_planner_id: plannerId,
                 ms_event_id: eventId,
@@ -1227,8 +1419,10 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                 _sync_metadata: initialData?._sync_metadata ? { ...initialData._sync_metadata } : {}
             };
 
-            // Include user_id reassignment if changed
-            if (canReassign && reassignUserId && reassignUserId !== initialData?.user_id) {
+            // Include assigned user_id on creation, or reassignment on edit if changed
+            if (!isEditing && reassignUserId) {
+                processed.user_id = reassignUserId;
+            } else if (canReassign && reassignUserId && reassignUserId !== initialData?.user_id) {
                 processed.user_id = reassignUserId;
             }
 
@@ -1278,7 +1472,10 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                 await new Promise(resolve => setTimeout(resolve, 800)); // Brief delay to show feedback
             }
 
-            onSubmit(processed);
+            // Se espera el guardado: si falla (p. ej. sesión local no lista), antes el error
+            // quedaba como promesa rechazada sin aviso y la actividad no se guardaba.
+            await onSubmit(processed);
+            if (!isEditing) clearActivityDraft();
         } catch (e: any) {
             console.error("[CreateActivityModal] Uncaught error in submit:", e);
             alert(`Error interno: ${e.message}`);
@@ -1341,18 +1538,43 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
     };
 
     const tipo = watch('tipo_actividad');
+    const watchedAsunto = watch('asunto');
+
+    // Asuntos previos de la misma oportunidad (más recientes primero) para sugerirlos
+    const opportunitySubjects = useLiveQuery(async () => {
+        if (isEditing || !watchedOpportunityId) return [] as string[];
+        const acts = await db.activities.where('opportunity_id').equals(watchedOpportunityId).toArray();
+        return acts
+            .filter(a => !a.is_deleted && a.asunto && a.id !== initialData?.id)
+            .sort((a, b) => String(b.created_at || b.fecha_inicio || '').localeCompare(String(a.created_at || a.fecha_inicio || '')))
+            .map(a => a.asunto);
+    }, [isEditing, watchedOpportunityId, initialData?.id, activeLocalUserId, activeDbVersion]);
+
+    const [recentSubjects, setRecentSubjects] = useState<string[]>([]);
+    useEffect(() => {
+        if (!isEditing) setRecentSubjects(getRecentSubjects(currentUser?.id));
+    }, [isEditing, currentUser?.id]);
+
+    const subjectSuggestions = useMemo(() => {
+        if (isEditing) return [] as string[];
+        return uniqueSubjects(
+            [nextNumberedSubjects(opportunitySubjects ?? []), opportunitySubjects ?? [], recentSubjects],
+            watchedAsunto
+        );
+    }, [isEditing, opportunitySubjects, recentSubjects, watchedAsunto]);
     const fechaInicio = watch('fecha_inicio');
     const selectedClasificacionId = watch('clasificacion_id');
 
     // Filtered Lists
+    // 'SETTER' / 'Cliente frecuente' are B2C-only: hide them from other channels
+    // (an already-assigned one stays visible so existing activities keep rendering).
+    const canUseB2CClassifications = userHasB2CAccess(currentUser);
     const filteredClassifications = useMemo(() => {
-        console.log("[CreateActivityModal] Filtering classifications for type:", tipo);
-        console.log("[CreateActivityModal] All classifications:", classifications.map(c => ({ id: c.id, nombre: c.nombre, tipo: c.tipo_actividad })));
-        const filtered = classifications.filter(c => c.tipo_actividad === tipo);
-        console.log("[CreateActivityModal] Filtered classifications:", filtered.map(c => ({ id: c.id, nombre: c.nombre })));
-        console.log("[CreateActivityModal] Looking for ID:", initialData?.clasificacion_id, "Is it in filtered?", filtered.some(c => c.id === initialData?.clasificacion_id || String(c.id) === String(initialData?.clasificacion_id)));
-        return filtered;
-    }, [classifications, tipo, initialData?.clasificacion_id]);
+        return classifications.filter(c =>
+            c.tipo_actividad === tipo &&
+            (canUseB2CClassifications || !isB2COnlyActivityClassification(c.nombre) || String(c.id) === String(selectedClasificacionId))
+        );
+    }, [classifications, tipo, canUseB2CClassifications, selectedClasificacionId]);
 
     const filteredSubclassifications = useMemo(() => {
         if (!selectedClasificacionId) return [];
@@ -1360,8 +1582,12 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
     }, [subclassifications, selectedClasificacionId]);
 
     // Auto-set fecha_fin: +1 hour for EVENTO, and sync with fecha_inicio for TAREA
+    // When editing, do not overwrite existing fecha_fin unless user actively modified fecha_inicio or tipo_actividad
     useEffect(() => {
         if (!fechaInicio) return;
+        if (isEditing && !form.formState.dirtyFields.fecha_inicio && !form.formState.dirtyFields.tipo_actividad) {
+            return;
+        }
         try {
             if (tipo === 'EVENTO') {
                 const start = new Date(fechaInicio);
@@ -1378,23 +1604,60 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
         } catch (e) {
             console.error("Error setting end date", e);
         }
-    }, [fechaInicio, tipo, setValue]);
+    }, [fechaInicio, tipo, setValue, isEditing, form.formState.dirtyFields.fecha_inicio, form.formState.dirtyFields.tipo_actividad]);
+
+    const entityHrefs = activityEntityHrefs({
+        opportunityId: watchedOpportunityId || initialOpportunityId || initialData?.opportunity_id,
+        accountId: watchedAccountId || initialAccountId || initialData?.account_id || relatedOpportunity?.account_id || opportunityAccountRef.current,
+        contactId: resolvedContactId,
+    });
 
     return (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl md:rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col max-h-[95vh] md:max-h-[90vh]">
                 <div className="p-6 border-b border-slate-100 flex justify-between items-center shrink-0">
                     <div>
                         <h2 className="text-xl font-bold text-slate-900">{isEditing ? 'Editar Actividad' : 'Programar Actividad'}</h2>
+                        {(entityHrefs.accountHref || entityHrefs.opportunityHref || entityHrefs.contactHref) && (
+                            <div className="flex flex-wrap items-center gap-2 mt-2" data-testid="activity-entity-links">
+                                {entityHrefs.accountHref && (
+                                    <Link
+                                        href={entityHrefs.accountHref}
+                                        data-testid="activity-go-account"
+                                        className="inline-flex items-center rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700 hover:bg-blue-100 transition-colors"
+                                    >
+                                        Ir a la cuenta
+                                    </Link>
+                                )}
+                                {entityHrefs.opportunityHref && (
+                                    <Link
+                                        href={entityHrefs.opportunityHref}
+                                        data-testid="activity-go-opportunity"
+                                        className="inline-flex items-center rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700 hover:bg-blue-100 transition-colors"
+                                    >
+                                        Ir a la oportunidad
+                                    </Link>
+                                )}
+                                {entityHrefs.contactHref && (
+                                    <Link
+                                        href={entityHrefs.contactHref}
+                                        data-testid="activity-go-contact"
+                                        className="inline-flex items-center rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700 hover:bg-blue-100 transition-colors"
+                                    >
+                                        Ir al contacto
+                                    </Link>
+                                )}
+                            </div>
+                        )}
                         {relatedOpportunity && relatedAccount && (
                             <div className="flex items-center gap-1.5 mt-1 text-sm flex-wrap">
                                 <Link href={`/cuentas?id=${relatedAccount.id}`} className="text-blue-600 hover:underline font-semibold transition-colors">
                                     {relatedAccount.nombre}
                                 </Link>
                                 <span className="text-slate-400 font-medium">-</span>
-                                {relatedContact ? (
+                                {relatedContact && entityHrefs.contactHref ? (
                                     <div className="flex items-center gap-1">
-                                        <Link href={`/contactos?id=${relatedContact.id}`} className="text-blue-600 hover:underline font-semibold transition-colors">
+                                        <Link href={entityHrefs.contactHref} data-testid="activity-contact-name" className="text-blue-600 hover:underline font-semibold transition-colors">
                                             {relatedContact.nombre}
                                         </Link>
                                         {relatedContact.telefono && (
@@ -1461,6 +1724,22 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                     }}
                     className="p-4 md:p-6 space-y-4 overflow-y-auto flex-1 overscroll-contain pb-6"
                 >
+                    {!isEditing && hasActivityDraft && (
+                        <div className="flex items-start justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800" data-testid="activity-draft-banner">
+                            <span>Se recuperó lo que estabas escribiendo antes de salir. Revisa y guarda la actividad.</span>
+                            <button
+                                type="button"
+                                className="shrink-0 font-bold underline"
+                                onClick={() => {
+                                    clearActivityDraft();
+                                    reset();
+                                }}
+                            >
+                                Descartar
+                            </button>
+                        </div>
+                    )}
+
                     {/* WIZARD PROGRESS BAR (if not editing) */}
                     {!isEditing && (
                         <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-100 relative">
@@ -1555,17 +1834,24 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                 <UserCog className="w-3.5 h-3.5" />
                                 Reasignar Actividad
                             </label>
-                            <select
+                            <SearchableSelect
+                                options={reassignOptions}
                                 value={reassignUserId}
-                                onChange={(e) => setReassignUserId(e.target.value)}
-                                className="w-full bg-white border border-amber-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all"
-                            >
-                                {reassignableUsers.map(u => (
-                                    <option key={u.id} value={u.id}>
-                                        {u.full_name || u.email}
-                                    </option>
-                                ))}
-                            </select>
+                                onChange={async (newUserId) => {
+                                    if (!newUserId) return;
+                                    hasManuallySelectedUserRef.current = true;
+                                    setReassignUserId(newUserId);
+                                    if (isEditing && initialData?.id) {
+                                        await updateActivity(initialData.id, { user_id: newUserId });
+                                    }
+                                }}
+                                allowClear={false}
+                                placeholder="Seleccionar usuario..."
+                                searchPlaceholder="Buscar usuario por nombre o correo..."
+                                emptyText="No se encontraron usuarios."
+                                triggerClassName="bg-white border-amber-200 rounded-xl px-4 py-3 text-sm focus:ring-amber-500/20 focus:border-amber-500 text-slate-800 font-normal hover:border-amber-300"
+                                className="z-[70]"
+                            />
                             {reassignUserId !== initialData?.user_id && (
                                 <p className="text-[10px] text-amber-700 font-medium">
                                     La actividad se transferirá al usuario seleccionado.
@@ -1582,39 +1868,44 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                     Clasificación <span className="text-red-500">*</span>
                                 </label>
                                 <div className="relative">
-                                    <select
+                                    <input
+                                        type="hidden"
                                         {...register('clasificacion_id', {
                                             required: "La clasificación es obligatoria",
-                                            onChange: (e) => {
-                                                console.log("[CreateActivityModal] Classification Selected:", e.target.value);
-                                                setValue('subclasificacion_id', "");
-                                                if (!getValues('asunto')?.trim()) {
-                                                    const auto = getAutoAsunto(e.target.value);
-                                                    setValue('asunto', auto, { shouldDirty: true, shouldValidate: true });
-                                                }
-                                            }
                                         })}
-                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all appearance-none"
-                                    >
-                                        <option value="">{classifications.length === 0 ? 'Sincronizando...' : 'Seleccione...'}</option>
-                                        {filteredClassifications.map(c => (
-                                            <option key={c.id} value={String(c.id)}>{c.nombre}</option>
-                                        ))}
-                                        {/* If current classification is not in filtered list, show it anyway (historical data) */}
-                                        {initialData?.clasificacion_id &&
-                                            !filteredClassifications.some(c => String(c.id) === String(initialData.clasificacion_id)) &&
-                                            classifications.find(c => String(c.id) === String(initialData.clasificacion_id)) && (
-                                                <option
-                                                    key={initialData.clasificacion_id}
-                                                    value={String(initialData.clasificacion_id)}
-                                                    className="text-amber-600"
-                                                >
-                                                    {classifications.find(c => String(c.id) === String(initialData.clasificacion_id))?.nombre} (otro tipo)
-                                                </option>
-                                            )}
-                                    </select>
+                                    />
+                                    <SearchableSelect
+                                        dataTestId="activity-classification-select"
+                                        value={String(watch('clasificacion_id') || '')}
+                                        onChange={(val) => {
+                                            console.log("[CreateActivityModal] Classification Selected:", val);
+                                            setValue('clasificacion_id', val, { shouldDirty: true, shouldValidate: true });
+                                            setValue('subclasificacion_id', "", { shouldDirty: true });
+                                            if (val && !getValues('asunto')?.trim()) {
+                                                const auto = getAutoAsunto(val);
+                                                setValue('asunto', auto, { shouldDirty: true, shouldValidate: true });
+                                            }
+                                        }}
+                                        placeholder={classifications.length === 0 ? 'Sincronizando...' : 'Seleccione...'}
+                                        searchPlaceholder="Buscar clasificación..."
+                                        triggerClassName="bg-slate-50 border-slate-200 rounded-xl px-4 py-3"
+                                        options={[
+                                            ...filteredClassifications.map(c => ({
+                                                value: String(c.id),
+                                                label: c.nombre,
+                                            })),
+                                            ...(initialData?.clasificacion_id &&
+                                                !filteredClassifications.some(c => String(c.id) === String(initialData.clasificacion_id)) &&
+                                                classifications.find(c => String(c.id) === String(initialData.clasificacion_id))
+                                                ? [{
+                                                    value: String(initialData.clasificacion_id),
+                                                    label: `${classifications.find(c => String(c.id) === String(initialData.clasificacion_id))?.nombre} (otro tipo)`,
+                                                }]
+                                                : []),
+                                        ]}
+                                    />
                                     {classifications.length === 0 && (
-                                        <div className="absolute right-10 top-1/2 -translate-y-1/2">
+                                        <div className="absolute right-10 top-1/2 -translate-y-1/2 pointer-events-none">
                                             <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
                                         </div>
                                     )}
@@ -1627,15 +1918,18 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                     <label className="text-xs font-bold text-slate-500 uppercase">
                                         Subclasificación
                                     </label>
-                                    <select
-                                        {...register('subclasificacion_id')}
-                                        className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all appearance-none"
-                                    >
-                                        <option value="">Seleccione (opcional)...</option>
-                                        {filteredSubclassifications.map(s => (
-                                            <option key={s.id} value={String(s.id)}>{s.nombre}</option>
-                                        ))}
-                                    </select>
+                                    <SearchableSelect
+                                        dataTestId="activity-subclassification-select"
+                                        value={String(watch('subclasificacion_id') || '')}
+                                        onChange={(val) => setValue('subclasificacion_id', val, { shouldDirty: true, shouldValidate: true })}
+                                        placeholder="Seleccione (opcional)..."
+                                        searchPlaceholder="Buscar subclasificación..."
+                                        triggerClassName="bg-slate-50 border-slate-200 rounded-xl px-4 py-3"
+                                        options={filteredSubclassifications.map(s => ({
+                                            value: String(s.id),
+                                            label: s.nombre,
+                                        }))}
+                                    />
                                 </div>
                             )}
                         </div>
@@ -1650,7 +1944,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                     <button
                                         key={p}
                                         type="button"
-                                        onClick={() => setValue('prioridad', p as any)}
+                                        onClick={() => setValue('prioridad', p as any, { shouldDirty: true, shouldValidate: true })}
                                         className={cn(
                                             "flex-1 py-2 text-xs font-bold rounded-lg border transition-all",
                                         watch('prioridad') === p
@@ -1678,13 +1972,72 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
                                 placeholder={tipo === 'TAREA' ? "Ej. Llamar a seguimiento (o autogenerar)" : "Ej. Reunión de presentación (o autogenerar)"}
                             />
+                            {!isEditing && subjectSuggestions.length > 0 && (
+                                <div className="flex flex-wrap items-center gap-1.5 pt-1" data-testid="asunto-sugerencias">
+                                    <span className="text-[10px] text-slate-400 font-semibold uppercase">Usar:</span>
+                                    {subjectSuggestions.map(s => (
+                                        <button
+                                            key={s}
+                                            type="button"
+                                            title={s}
+                                            onClick={() => setValue('asunto', s, { shouldDirty: true, shouldValidate: true })}
+                                            className="max-w-full truncate px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-xs font-medium text-slate-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 transition"
+                                        >
+                                            {s}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     )}
 
                     {/* MICROSOFT INTEGRATION (Teams/Guests for EVENTO, Collaborators/Checklist for TAREA) */}
                     {(isEditing || wizardStep === 2) && msConnected && (
                         <div className="space-y-4 animate-in fade-in slide-in-from-top-4 duration-300">
-
+                            {/* TEAMS MEETING TOGGLE (EVENTO only) */}
+                            {tipo === 'EVENTO' && (
+                                <div className="flex items-center justify-between p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-9 h-9 rounded-lg bg-indigo-50 border border-indigo-200 flex items-center justify-center text-indigo-600 shrink-0">
+                                            <Video className="w-5 h-5" />
+                                        </div>
+                                        <div>
+                                            <p className="text-sm font-bold text-slate-800">Reunión de Microsoft Teams</p>
+                                            <p className="text-xs text-slate-500">
+                                                {currentTeamsMeetingUrl ? (
+                                                    <a href={currentTeamsMeetingUrl} target="_blank" rel="noreferrer" className="text-blue-600 underline font-medium inline-flex items-center gap-1">
+                                                        Enlace de reunión disponible
+                                                    </a>
+                                                ) : (
+                                                    'Genera un enlace de Teams automáticamente al sincronizar con Calendar'
+                                                )}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <label className="relative inline-flex items-center cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={isTeamsMeeting}
+                                            onChange={(e) => {
+                                                const checked = e.target.checked;
+                                                setIsTeamsMeeting(checked);
+                                                if (isEditing && initialData?.id) {
+                                                    const nextMetadata = {
+                                                        ...(initialData._sync_metadata || {}),
+                                                        isOnlineMeeting: checked,
+                                                        last_modified: Date.now()
+                                                    };
+                                                    updateActivity(initialData.id, {
+                                                        _sync_metadata: nextMetadata
+                                                    } as any);
+                                                }
+                                            }}
+                                            className="sr-only peer"
+                                        />
+                                        <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                                    </label>
+                                </div>
+                            )}
 
                             {/* COLLABORATORS / ATTENDEES (Unified search) */}
                             <div className="space-y-2">
@@ -1838,7 +2191,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                         onChange={(val) => setValue('fecha_inicio', val)}
                                         label="Fecha Vencimiento"
                                         required
-                                        minDate={new Date()}
+                                        minDate={isEditing ? undefined : new Date()}
                                         showTime={false}
                                     />
 
@@ -1873,19 +2226,18 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                                         <label className="text-xs font-bold text-slate-500 uppercase">
                                                             Bucket <span className="text-red-500">*</span>
                                                         </label>
-                                                        <select
+                                                        <SearchableSelect
                                                             value={selectedBucketId}
-                                                            onChange={(e) => setSelectedBucketId(e.target.value)}
+                                                            onChange={setSelectedBucketId}
                                                             disabled={loadingPlanner}
-                                                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-                                                        >
-                                                            <option value="">
-                                                                {loadingPlanner ? 'Cargando buckets...' : plannerBuckets.length === 0 ? 'No hay buckets en este plan' : 'Seleccione un bucket...'}
-                                                            </option>
-                                                            {plannerBuckets.map((b) => (
-                                                                <option key={b.id} value={b.id}>{b.name}</option>
-                                                            ))}
-                                                        </select>
+                                                            placeholder={loadingPlanner ? 'Cargando buckets...' : plannerBuckets.length === 0 ? 'No hay buckets en este plan' : 'Seleccione un bucket...'}
+                                                            searchPlaceholder="Buscar bucket..."
+                                                            triggerClassName="bg-slate-50 border-slate-200 rounded-xl px-4 py-3"
+                                                            options={plannerBuckets.map((b) => ({
+                                                                value: b.id,
+                                                                label: b.name,
+                                                            }))}
+                                                        />
                                                     </div>
                                                 )}
 
@@ -1907,14 +2259,14 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                         value={fechaInicio || ''}
                                         onChange={(val) => setValue('fecha_inicio', val)}
                                         label="Fecha Inicio"
-                                        minDate={new Date()}
+                                        minDate={isEditing ? undefined : new Date()}
                                         showTime={true}
                                     />
                                     <DateTimePicker
                                         value={watch('fecha_fin') || ''}
                                         onChange={(val) => setValue('fecha_fin', val)}
                                         label="Fecha Fin"
-                                        minDate={fechaInicio ? new Date(fechaInicio) : new Date()}
+                                        minDate={fechaInicio ? new Date(fechaInicio) : (isEditing ? undefined : new Date())}
                                         showTime={true}
                                     />
                                 </>
@@ -1928,6 +2280,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                 <label className="text-xs font-bold text-slate-500 uppercase">Oportunidad Relacionada</label>
                                 <OpportunityCombobox
                                     value={watch('opportunity_id')}
+                                    initialLabel={relatedOpportunity?.nombre}
                                     accountId={watch('account_id')}
                                     onChange={(val) => {
                                         setValue('opportunity_id', val, { shouldDirty: true, shouldValidate: true });
@@ -1958,6 +2311,27 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
                                     }}
                                 />
                             </div>
+
+                            {!isEditing && (
+                                <div className="space-y-1" data-testid="activity-assigned-user-field">
+                                    <label className="text-xs font-bold text-slate-500 uppercase">Asignar a</label>
+                                    <SearchableSelect
+                                        options={reassignOptions}
+                                        value={reassignUserId}
+                                        onChange={(newUserId) => {
+                                            if (!newUserId) return;
+                                            hasManuallySelectedUserRef.current = true;
+                                            setReassignUserId(newUserId);
+                                        }}
+                                        allowClear={false}
+                                        placeholder="Seleccionar usuario..."
+                                        searchPlaceholder="Buscar usuario por nombre o correo..."
+                                        emptyText="No se encontraron usuarios."
+                                        triggerClassName="bg-slate-50 border-slate-200 rounded-xl px-4 py-3 text-sm focus:ring-blue-500/20 focus:border-blue-500 text-slate-800 font-normal hover:border-slate-300"
+                                        className="z-[70]"
+                                    />
+                                </div>
+                            )}
                         </>
                     )}
 

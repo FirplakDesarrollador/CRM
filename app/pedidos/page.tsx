@@ -2,6 +2,8 @@
 
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/db";
+import { readFullPhaseCatalog } from "@/lib/phaseCatalogStore";
+import { hydratePedidosModuleFromSupabase } from "@/lib/supabaseDirect";
 import { Truck, Search, Calendar, FileText, ChevronRight, Briefcase, Receipt } from "lucide-react";
 import Link from "next/link";
 import { useState, useEffect, Suspense } from "react";
@@ -48,6 +50,11 @@ function PedidosContent() {
         }
     }, [isCoordinador, user?.id]);
 
+    useEffect(() => {
+        if (!user?.id) return;
+        void hydratePedidosModuleFromSupabase();
+    }, [user?.id]);
+
     // Fetch data from CRM_Pedidos
     const data = useLiveQuery(async () => {
         if (!user) return [];
@@ -55,7 +62,7 @@ function PedidosContent() {
         let allPedidos = await db.pedidos.toArray();
         const allQuotes = await db.quotes.toArray();
         const allOpps = await db.opportunities.toArray();
-        const allPhases = await db.phases.toArray();
+        const allPhases = await readFullPhaseCatalog();
         const allPedidoItems = await db.pedidoItems.toArray();
 
         const quotesMap = new Map(allQuotes.map(q => [q.id, q]));

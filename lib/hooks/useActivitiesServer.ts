@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
+import { canViewAllAccountsContactsOpportunities, isSellerRole, sellerCanSeeActivity } from '@/lib/sellerVisibility';
+import { isTiendaUser } from '@/lib/tiendaVisibility';
 import { supabase } from '@/lib/supabase';
-import { syncEngine } from '@/lib/sync';
 import { db } from '@/lib/db';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
-import { matchesSearchTokens, getSearchTokens } from '@/lib/utils';
+import { matchesSearchTokens, getSearchTokens, accentInsensitiveCondition } from '@/lib/utils';
 import { useSyncStore } from '@/lib/stores/useSyncStore';
 
 export type ActivityServer = {
@@ -15,6 +16,7 @@ export type ActivityServer = {
     tipo_actividad: 'TAREA' | 'EVENTO';
     is_completed: boolean;
     opportunity_id?: string;
+    account_id?: string;
     user_id?: string;
     created_at?: string;
     updated_at?: string;
@@ -44,6 +46,8 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
     // User Context
     const { user, role: userRole, isAdmin } = useCurrentUser();
     const currentUserId = user?.id;
+    const seesAllPortfolio = canViewAllAccountsContactsOpportunities(user);
+    const tiendaScoped = isTiendaUser(user);
 
     const [subordinateIds, setSubordinateIds] = useState<string[]>([]);
 
@@ -62,7 +66,7 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
     }, [userRole, currentUserId]);
 
     const fetchActivities = useCallback(async (isLoadMore = false) => {
-        if (!currentUserId) return; // Wait for user
+        if (!currentUserId || !userRole) return; // Wait for user and role
 
         const setIsLoadingData = useSyncStore.getState().setIsLoadingData;
         setLoading(true);
@@ -79,6 +83,11 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
                 const allOpps = await db.opportunities.toArray();
                 const oppMap = new Map(allOpps.map(o => [o.id, o]));
 
+                // Asesor (VENDEDOR) y tienda: solo actividades asignadas a él, en cualquier vista.
+                if ((tiendaScoped || (isSellerRole(userRole) && !seesAllPortfolio)) && currentUserId) {
+                    localActivities = localActivities.filter(a => sellerCanSeeActivity(a, currentUserId));
+                }
+
                 if (opportunityId) {
                     localActivities = localActivities.filter(a => a.opportunity_id === opportunityId);
                 } else if (accountId) {
@@ -92,7 +101,7 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
                         const idsToMatch = [currentUserId, ...subordinateIds];
                         localActivities = localActivities.filter(a => idsToMatch.includes(a.created_by || 'dummy') || (a.user_id && idsToMatch.includes(a.user_id)));
                     } else if (userRole === 'VENDEDOR') {
-                        localActivities = localActivities.filter(a => a.created_by === currentUserId || a.updated_by === currentUserId || a.user_id === currentUserId);
+                        // Ya filtrado arriba: solo user_id = asesor.
                     }
                 }
 
@@ -164,8 +173,13 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
                     created_at,
                     updated_at,
                     opportunity:CRM_Oportunidades(nombre)
-                `, { count: 'exact' })
+                `)
                 .eq('is_deleted', false);
+
+            // Asesor (VENDEDOR) y tienda: solo actividades asignadas a él, en cualquier vista.
+            if ((tiendaScoped || (isSellerRole(userRole) && !seesAllPortfolio)) && currentUserId) {
+                query = query.eq('user_id', currentUserId);
+            }
 
             // Apply Filters
             if (opportunityId) {
@@ -182,15 +196,13 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
                     const idsToMatch = [currentUserId, ...subordinateIds].filter(Boolean);
                     const idsString = idsToMatch.join(',');
                     query = query.or(`user_id.in.(${idsString}),created_by.in.(${idsString})`);
-                } else if (userRole === 'VENDEDOR') {
-                    query = query.or(`user_id.eq.${currentUserId},created_by.eq.${currentUserId}`);
                 }
             }
 
             if (searchTerm && searchTerm.trim()) {
                 const tokens = getSearchTokens(searchTerm);
                 for (const token of tokens) {
-                    query = query.or(`asunto.ilike.%${token}%,descripcion.ilike.%${token}%`);
+                    query = query.or(`${accentInsensitiveCondition('asunto', token)},${accentInsensitiveCondition('descripcion', token)}`);
                 }
             }
 
@@ -203,12 +215,55 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
             }
 
             // Order by date (most recent first)
-            query = query.order('fecha_inicio', { ascending: false });
+            query = query.order('fecha_inicio', { ascending: false }).order('id', { ascending: false });
 
             // Paging
             query = query.range(from, to);
 
-            const { data: result, error, count: totalCount } = await query;
+            // Ejecutamos data y count en paralelo (count solo en carga inicial, no en loadMore)
+            let countPromise: Promise<number | null> = Promise.resolve(null);
+            if (!isLoadMore) {
+                // Clonamos los mismos filtros en un HEAD request (0 bytes de payload)
+                let countQuery = supabase
+                    .from('CRM_Actividades')
+                    .select('id', { count: 'exact', head: true })
+                    .eq('is_deleted', false);
+                // Replicar filtros de rol
+                if ((tiendaScoped || (isSellerRole(userRole) && !seesAllPortfolio)) && currentUserId) {
+                    countQuery = countQuery.eq('user_id', currentUserId) as typeof countQuery;
+                }
+                if (opportunityId) {
+                    countQuery = countQuery.eq('opportunity_id', opportunityId) as typeof countQuery;
+                } else if (accountId) {
+                    // Simplificación: no replicamos el sub-query de opps para el count; usamos estimación de la data
+                    countPromise = Promise.resolve(null);
+                } else if (!isAdmin && userRole === 'COORDINADOR') {
+                    const idsToMatch = [currentUserId, ...subordinateIds].filter(Boolean);
+                    countQuery = countQuery.or(`user_id.in.(${idsToMatch.join(',')}),created_by.in.(${idsToMatch.join(',')})`) as typeof countQuery;
+                }
+                if (typeFilter !== 'all') {
+                    countQuery = countQuery.eq('tipo_actividad', typeFilter) as typeof countQuery;
+                }
+                if (!showCompleted) {
+                    countQuery = countQuery.eq('is_completed', false) as typeof countQuery;
+                }
+                // Solo asignamos si no fue ya resuelto (caso accountId)
+                if (!accountId) {
+                    countPromise = (async () => {
+                        const { count: qCount, error: countErr } = await countQuery;
+                        if (countErr) {
+                            console.warn('[useActivitiesServer] Error en conteo:', countErr);
+                            return null;
+                        }
+                        return qCount ?? null;
+                    })();
+                }
+            }
+
+            const [{ data: result, error }, totalCount] = await Promise.all([
+                query,
+                countPromise!,
+            ]);
 
             if (error) throw error;
 
@@ -248,7 +303,7 @@ export function useActivitiesServer({ pageSize = 20, opportunityId, accountId }:
             setLoading(false);
             setIsLoadingData(false);
         }
-    }, [currentUserId, pageSize, searchTerm, typeFilter, showCompleted, opportunityId, accountId, page, isAdmin, userRole, subordinateIds]);
+    }, [currentUserId, seesAllPortfolio, tiendaScoped, pageSize, searchTerm, typeFilter, showCompleted, opportunityId, accountId, page, isAdmin, userRole, subordinateIds]);
 
     // Initial Fetch & Filter Fetch - Reset on filter change
     useEffect(() => {

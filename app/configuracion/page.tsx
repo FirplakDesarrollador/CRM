@@ -47,11 +47,17 @@ const OpportunityOriginsManager = dynamic(() => import('@/components/config/Oppo
     ssr: false
 });
 
+const ZonesManager = dynamic(() => import('@/components/config/ZonesManager').then(mod => mod.ZonesManager), {
+    loading: () => <div className="animate-pulse bg-slate-100 h-20 rounded-2xl" />,
+    ssr: false
+});
+
 const BulkAccountUploader = dynamic(() => import('@/components/config/BulkAccountUploader').then(mod => mod.BulkAccountUploader), {
     loading: () => <div className="animate-pulse bg-slate-100 h-20 rounded-2xl" />,
     ssr: false
 });
 import { ConfirmationModal } from '@/components/ui/ConfirmationModal';
+import { McpIntegrationCard } from '@/components/config/McpIntegrationCard';
 import packageJson from '../../package.json';
 
 // Use a safe wrapper for version to avoid hydration issues if it changes between environments
@@ -667,11 +673,7 @@ function ConfigPageContent() {
                             </div>
                         </div>
 
-                        <div className="flex flex-col justify-center gap-2">
-                             <p className="text-xs text-slate-500 font-medium bg-slate-50 p-4 rounded-xl border border-slate-100 italic">
-                                Puedes cambiar entre modo Administrador y Vendedor para previsualizar cómo ven la plataforma tus colaboradores.
-                             </p>
-                        </div>
+                        <McpIntegrationCard user={user} role={realRole || role} />
                     </div>
                 </div>
 
@@ -829,6 +831,7 @@ function ConfigPageContent() {
             {role === 'ADMIN' && (
                 <>
                     <PriceListUploader />
+                    <ZonesManager />
                     <OpportunityOriginsManager />
                     <ActivityClassificationManager />
                     <BulkAccountUploader />

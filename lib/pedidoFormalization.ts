@@ -44,6 +44,8 @@ const PEDIDO_DOCUMENT_FIELDS: Array<keyof LocalQuote & keyof LocalPedido> = [
     "entrega_en_obra",
     "bodega_externa",
     "bodega_firplak",
+    "tipo_pod",
+    "pod",
 ];
 
 /**
@@ -70,6 +72,15 @@ export function getMissingPedidoFormalizationFields(pedido: PedidoWithItems): st
     if (!pedido.items?.some(item => Number(item.cantidad) > 0)) missing.push("Productos y cantidades del pedido");
 
     return missing;
+}
+
+/**
+ * Determina si el pedido puede descargarse como PDF (F-V-29 / pedido facturable).
+ * Permite descargar el documento siempre que tenga al menos un producto con cantidad > 0,
+ * sin bloquear la visualización si faltan datos logísticos requeridos para emisión formal a SAP.
+ */
+export function canDownloadPedidoPdf(pedido: PedidoWithItems): boolean {
+    return Boolean(pedido.items && pedido.items.some(item => Number(item.cantidad) > 0));
 }
 
 /**

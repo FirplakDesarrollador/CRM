@@ -1,4 +1,5 @@
 import type { OutboxItem } from './db';
+import { canViewAllAccountsContactsOpportunities, type PortfolioIdentity } from './sellerVisibility';
 
 export const MAX_SYNC_RETRIES = 5;
 export const CATALOG_REFRESH_TTL_MS = 24 * 60 * 60 * 1000;
@@ -39,12 +40,42 @@ export function isSyncLeaseExpired(item: Pick<OutboxItem, 'last_attempt_at'>, no
     return !item.last_attempt_at || item.last_attempt_at < now - SYNCING_LEASE_TIMEOUT_MS;
 }
 
+/**
+ * Errores de red/infraestructura que no dependen del dato (señal móvil intermitente,
+ * llamada entrante, app en segundo plano, token por refrescar, 5xx del gateway).
+ * Estos NO deben agotar los reintentos: antes, 5 fallos seguidos (~30 s de backoff)
+ * mandaban el cambio a DEAD_LETTER y dejaba de subirse hasta un reintento manual.
+ */
+const TRANSIENT_SYNC_ERROR_PATTERNS = [
+    /failed to fetch/i,
+    /fetch failed/i,
+    /load failed/i,
+    /networkerror/i,
+    /network request failed/i,
+    /network error/i,
+    /timed? ?out/i,
+    /aborterror/i,
+    /the user aborted a request/i,
+    /econnreset|econnrefused|enotfound|etimedout/i,
+    /jwt expired/i,
+    /\b(502|503|504)\b/,
+    /bad gateway|service unavailable|gateway time-?out/i
+];
+
+export function isTransientSyncError(error: string | null | undefined): boolean {
+    if (!error) return false;
+    return TRANSIENT_SYNC_ERROR_PATTERNS.some(pattern => pattern.test(error));
+}
+
 export function buildFailureUpdate(
     item: Pick<OutboxItem, 'retry_count'>,
     error: string,
     now = Date.now()
 ): Pick<OutboxItem, 'status' | 'retry_count' | 'error' | 'last_attempt_at' | 'next_attempt_at'> {
-    const retryCount = (item.retry_count || 0) + 1;
+    const attempt = (item.retry_count || 0) + 1;
+    // Un error transitorio nunca convierte el cambio en DEAD_LETTER: se sigue
+    // reintentando con el backoff máximo hasta que vuelva la conexión.
+    const retryCount = isTransientSyncError(error) ? Math.min(attempt, MAX_SYNC_RETRIES - 1) : attempt;
     const isDeadLetter = retryCount >= MAX_SYNC_RETRIES;
 
     return {
@@ -60,6 +91,30 @@ export function syncCursorId(userId: string, tableName: string): string {
     return `${userId}:${tableName}`;
 }
 
+/** Tope de la carga inicial de cuentas, contactos y oportunidades para el resto de usuarios. */
+export const DEFAULT_PORTFOLIO_BOOTSTRAP_LIMIT = 3000;
+
+/** Marca que este usuario ya descargó una vez toda la cartera permitida. */
+export const FULL_PORTFOLIO_CURSOR = '__portfolio_full__';
+
+/** Tope de seguridad solo para quien ve toda la cartera. El resto sigue en 100.000. */
+export const FULL_PORTFOLIO_SYNC_SAFETY_LIMIT = 250_000;
+
+export function portfolioBootstrapLimit(
+    user: PortfolioIdentity | null | undefined,
+    defaultLimit = DEFAULT_PORTFOLIO_BOOTSTRAP_LIMIT
+): number {
+    return canViewAllAccountsContactsOpportunities(user) ? Number.POSITIVE_INFINITY : defaultLimit;
+}
+
+/** Una sola descarga completa; los sync siguientes siguen siendo incrementales. */
+export function needsFullPortfolioPull(
+    user: PortfolioIdentity | null | undefined,
+    fullPortfolioCursor: string | null | undefined
+): boolean {
+    return canViewAllAccountsContactsOpportunities(user) && !fullPortfolioCursor;
+}
+
 export function shouldRefreshCatalogs(
     refreshedAt: string | null | undefined,
     now = Date.now(),
@@ -68,4 +123,22 @@ export function shouldRefreshCatalogs(
     if (!refreshedAt) return true;
     const timestamp = Date.parse(refreshedAt);
     return !Number.isFinite(timestamp) || now - timestamp >= ttlMs;
+}
+
+/**
+ * True cuando el catálogo en el servidor cambió después de la última descarga
+ * (por ejemplo, la probabilidad de una fase). `remoteVersion` es el max(updated_at)
+ * del catálogo en Supabase y `storedVersion` el que se guardó localmente.
+ * Si no se pudo consultar el servidor (sin conexión) no fuerza nada.
+ */
+export function isCatalogVersionNewer(
+    remoteVersion: string | null | undefined,
+    storedVersion: string | null | undefined
+): boolean {
+    if (!remoteVersion) return false;
+    const remote = Date.parse(remoteVersion);
+    if (!Number.isFinite(remote)) return false;
+    if (!storedVersion) return true;
+    const stored = Date.parse(storedVersion);
+    return !Number.isFinite(stored) || remote > stored;
 }

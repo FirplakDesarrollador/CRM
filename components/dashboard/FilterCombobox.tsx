@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Command, CommandInput, CommandEmpty, CommandGroup, CommandItem, CommandList } from "@/components/ui/command";
 import { Check, ChevronDown } from "lucide-react";
-import { cn, includesNormalized } from "@/lib/utils";
+import { cn, matchesSearchTokens } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
 export interface FilterComboboxProps {
@@ -38,10 +38,10 @@ export function FilterCombobox({ options, value, onChange, placeholder, classNam
                     <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                 </Button>
             </PopoverTrigger>
-            <PopoverContent className="w-[250px] p-0" align="start">
-                <Command filter={(value, search) => (includesNormalized(value, search) ? 1 : 0)}>
+            <PopoverContent className="w-[250px] p-0 z-[110]" align="start">
+                <Command filter={(value, search) => (matchesSearchTokens(value, search) ? 1 : 0)}>
                     <CommandInput placeholder={`Buscar ${placeholder.toLowerCase()}...`} />
-                    <CommandList>
+                    <CommandList onWheel={(e) => e.stopPropagation()} onTouchMove={(e) => e.stopPropagation()}>
                         <CommandEmpty>No se encontraron resultados.</CommandEmpty>
                         <CommandGroup>
                             {/* Option to clear visually, or allow clicking the button when selected */}

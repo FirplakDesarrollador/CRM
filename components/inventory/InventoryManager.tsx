@@ -16,6 +16,7 @@ import {
     X,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 import { useProductSearch, type PriceListProduct } from "@/lib/hooks/useProducts";
 import {
     createInventoryMovement,
@@ -325,12 +326,20 @@ export function InventoryManager() {
                     </div>
 
                     {/* Operación */}
-                    <label className="text-xs font-bold text-slate-500">
-                        OPERACION *
-                        <select value={operation} onChange={event => setOperation(event.target.value as InventoryOperation)} className="w-full mt-1 p-2 border border-slate-300 rounded-lg bg-white text-sm">
-                            {Object.entries(OPERATION_META).map(([value, meta]) => <option key={value} value={value}>{meta.label}</option>)}
-                        </select>
-                    </label>
+                    <div className="text-xs font-bold text-slate-500 space-y-1">
+                        <span>OPERACION *</span>
+                        <SearchableSelect
+                            allowClear={false}
+                            value={operation}
+                            onChange={(val) => { if (val) setOperation(val as InventoryOperation); }}
+                            searchPlaceholder="Buscar operación..."
+                            triggerClassName="border-slate-300 font-normal text-slate-800"
+                            options={Object.entries(OPERATION_META).map(([value, meta]) => ({
+                                value,
+                                label: meta.label,
+                            }))}
+                        />
+                    </div>
 
                     {/* Cantidad */}
                     <label className="text-xs font-bold text-slate-500">
@@ -453,13 +462,22 @@ export function InventoryManager() {
                                         </td>
                                         <td className="p-3 text-center">
                                             {isEditing ? (
-                                                <select
-                                                    value={editDraft.operacion}
-                                                    onChange={event => setEditDraft({ ...editDraft, operacion: event.target.value as InventoryOperation })}
-                                                    className="border border-slate-300 rounded p-1 text-xs"
-                                                >
-                                                    {Object.entries(OPERATION_META).map(([value, item]) => <option key={value} value={value}>{item.label}</option>)}
-                                                </select>
+                                                <div className="w-[120px] mx-auto">
+                                                    <SearchableSelect
+                                                        compact
+                                                        allowClear={false}
+                                                        value={editDraft.operacion}
+                                                        onChange={(val) => {
+                                                            if (val) setEditDraft({ ...editDraft, operacion: val as InventoryOperation });
+                                                        }}
+                                                        searchPlaceholder="Buscar operación..."
+                                                        triggerClassName="min-h-0 h-7 text-xs border-slate-300 px-2 py-0.5"
+                                                        options={Object.entries(OPERATION_META).map(([value, item]) => ({
+                                                            value,
+                                                            label: item.label,
+                                                        }))}
+                                                    />
+                                                </div>
                                             ) : (
                                                 <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold ${meta.className}`}>
                                                     <Icon className="w-3 h-3" />{meta.label}
@@ -482,14 +500,22 @@ export function InventoryManager() {
                                         </td>
                                         <td className="p-3 text-center">
                                             {isEditing ? (
-                                                <select
-                                                    value={editDraft.estado}
-                                                    onChange={event => setEditDraft({ ...editDraft, estado: event.target.value as InventoryMovementStatus })}
-                                                    className="border border-slate-300 rounded p-1 text-xs"
-                                                >
-                                                    <option value="ACTIVO">Activo</option>
-                                                    <option value="CANCELADO">Cancelado</option>
-                                                </select>
+                                                <div className="w-[120px] mx-auto">
+                                                    <SearchableSelect
+                                                        compact
+                                                        allowClear={false}
+                                                        value={editDraft.estado}
+                                                        onChange={(val) => {
+                                                            if (val) setEditDraft({ ...editDraft, estado: val as InventoryMovementStatus });
+                                                        }}
+                                                        searchPlaceholder="Buscar estado..."
+                                                        triggerClassName="min-h-0 h-7 text-xs border-slate-300 px-2 py-0.5"
+                                                        options={[
+                                                            { value: "ACTIVO", label: "Activo" },
+                                                            { value: "CANCELADO", label: "Cancelado" },
+                                                        ]}
+                                                    />
+                                                </div>
                                             ) : (
                                                 <span className={`px-2 py-0.5 rounded text-[11px] font-semibold ${movement.estado === "ACTIVO" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : "bg-slate-100 text-slate-500"}`}>
                                                     {movement.estado}

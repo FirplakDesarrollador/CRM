@@ -9,7 +9,6 @@ import {
     CommandItem,
     CommandList,
     CommandInput,
-    CommandEmpty,
 } from "@/components/ui/command";
 import {
     Popover,
@@ -17,10 +16,12 @@ import {
     PopoverTrigger,
 } from "@/components/ui/popover";
 import { cn } from "@/components/ui/utils";
+import { matchesSearchTokens } from "@/lib/utils";
 
 export type Option = {
     label: string;
     value: string;
+    searchValue?: string;
 };
 
 interface MultiSelectProps {
@@ -29,6 +30,8 @@ interface MultiSelectProps {
     onChange: (selected: string[]) => void;
     className?: string;
     placeholder?: string;
+    searchPlaceholder?: string;
+    emptyText?: string;
     badgeClassName?: string;
 }
 
@@ -37,20 +40,39 @@ export function MultiSelect({
     selected,
     onChange,
     className,
-    placeholder = "Select items...",
+    placeholder = "Seleccionar...",
+    searchPlaceholder = "Buscar...",
+    emptyText = "No se encontraron resultados.",
     badgeClassName,
 }: MultiSelectProps) {
+    const listboxId = React.useId();
     const [open, setOpen] = React.useState(false);
+    const [search, setSearch] = React.useState("");
+
+    const filteredOptions = React.useMemo(() => {
+        if (!search.trim()) return options;
+        return options.filter((option) =>
+            matchesSearchTokens([option.label, option.searchValue], search)
+        );
+    }, [options, search]);
 
     const handleUnselect = (item: string) => {
         onChange(selected.filter((i) => i !== item));
     };
 
+    const handleOpenChange = (next: boolean) => {
+        setOpen(next);
+        if (!next) setSearch("");
+    };
+
     return (
-        <Popover open={open} onOpenChange={setOpen}>
+        <Popover open={open} onOpenChange={handleOpenChange}>
             <PopoverTrigger asChild>
                 <button
                     type="button"
+                    role="combobox"
+                    aria-expanded={open}
+                    aria-controls={listboxId}
                     className={cn(
                         "flex min-h-[42px] w-full items-center justify-between rounded-lg border border-slate-300 bg-white px-3 py-2 text-base sm:text-sm ring-offset-white focus:outline-none focus:ring-2 focus:ring-[#254153] focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50",
                         className
@@ -101,44 +123,60 @@ export function MultiSelect({
                     <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50 ml-2 text-slate-500" />
                 </button>
             </PopoverTrigger>
-            <PopoverContent 
-                align="start" 
-                sideOffset={4} 
-                className="w-[var(--radix-popover-trigger-width)] min-w-[260px] max-w-[calc(100vw-2rem)] p-0 z-50 shadow-xl border border-slate-200 rounded-xl overflow-hidden bg-white"
+            <PopoverContent
+                align="start"
+                sideOffset={4}
+                className="w-[var(--radix-popover-trigger-width)] min-w-[260px] max-w-[calc(100vw-2rem)] p-0 z-[110] shadow-xl border border-slate-200 rounded-xl overflow-hidden bg-white"
+                onKeyDown={(e) => {
+                    if (e.key === "Enter") e.preventDefault();
+                }}
             >
-                <Command className="w-full">
-                    <CommandInput placeholder="Buscar categoría..." className="text-base sm:text-sm h-10" />
-                    <CommandList className="max-h-60 overflow-y-auto overscroll-contain">
-                        <CommandEmpty className="py-4 text-center text-xs text-slate-500">
-                            No se encontraron resultados.
-                        </CommandEmpty>
-                        <CommandGroup className="p-1">
-                            {options.map((option) => (
-                                <CommandItem
-                                    key={option.value}
-                                    value={option.label}
-                                    onSelect={() => {
-                                        onChange(
-                                            selected.includes(option.value)
-                                                ? selected.filter((item) => item !== option.value)
-                                                : [...selected, option.value]
-                                        );
-                                        setOpen(true);
-                                    }}
-                                    className="flex items-center justify-between px-3 py-2.5 sm:py-2 text-sm rounded-lg cursor-pointer hover:bg-slate-100/80 active:bg-slate-200/80 transition-colors"
-                                >
-                                    <span className="font-medium text-slate-800">{option.label}</span>
-                                    <Check
-                                        className={cn(
-                                            "h-4 w-4 text-blue-600 shrink-0 ml-2",
-                                            selected.includes(option.value)
-                                                ? "opacity-100"
-                                                : "opacity-0"
-                                        )}
-                                    />
-                                </CommandItem>
-                            ))}
-                        </CommandGroup>
+                <Command className="w-full" shouldFilter={false}>
+                    <CommandInput
+                        value={search}
+                        onValueChange={setSearch}
+                        placeholder={searchPlaceholder}
+                        className="text-base sm:text-sm h-10"
+                    />
+                    <CommandList
+                        id={listboxId}
+                        className="max-h-60 overflow-y-auto overscroll-contain"
+                        onWheel={(e) => e.stopPropagation()}
+                        onTouchMove={(e) => e.stopPropagation()}
+                    >
+                        {filteredOptions.length === 0 ? (
+                            <div className="py-4 text-center text-xs text-slate-500">
+                                {emptyText}
+                            </div>
+                        ) : (
+                            <CommandGroup className="p-1">
+                                {filteredOptions.map((option) => (
+                                    <CommandItem
+                                        key={option.value}
+                                        value={option.value}
+                                        onSelect={() => {
+                                            onChange(
+                                                selected.includes(option.value)
+                                                    ? selected.filter((item) => item !== option.value)
+                                                    : [...selected, option.value]
+                                            );
+                                            setOpen(true);
+                                        }}
+                                        className="flex items-center justify-between px-3 py-2.5 sm:py-2 text-sm rounded-lg cursor-pointer hover:bg-slate-100/80 active:bg-slate-200/80 transition-colors"
+                                    >
+                                        <span className="font-medium text-slate-800">{option.label}</span>
+                                        <Check
+                                            className={cn(
+                                                "h-4 w-4 text-blue-600 shrink-0 ml-2",
+                                                selected.includes(option.value)
+                                                    ? "opacity-100"
+                                                    : "opacity-0"
+                                            )}
+                                        />
+                                    </CommandItem>
+                                ))}
+                            </CommandGroup>
+                        )}
                     </CommandList>
                 </Command>
             </PopoverContent>

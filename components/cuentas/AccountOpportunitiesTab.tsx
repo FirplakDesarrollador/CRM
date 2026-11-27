@@ -3,7 +3,7 @@
 import { useOpportunitiesServer } from "@/lib/hooks/useOpportunitiesServer";
 import { useOpportunities } from "@/lib/hooks/useOpportunities";
 import { useEffect, useState } from "react";
-import { db } from "@/lib/db";
+import { readFullPhaseCatalog } from "@/lib/phaseCatalogStore";
 import { useLiveQuery } from "dexie-react-hooks";
 import Link from "next/link";
 import { Briefcase, ChevronRight, Filter, Trash2, Loader2 } from "lucide-react";
@@ -15,9 +15,10 @@ import { formatNumberCO } from "@/lib/utils";
 type StatusFilter = 'all' | 'open' | 'won' | 'lost';
 
 export default function AccountOpportunitiesTab({ accountId }: { accountId: string }) {
-    const [currentStatus, setCurrentStatus] = useState<StatusFilter>('open');
+    const [currentStatus, setCurrentStatus] = useState<StatusFilter>('all');
     const { deleteOpportunity } = useOpportunities();
-    const { isAdmin } = useCurrentUser();
+    const { isAdmin, isCoordinador, user: currentUser } = useCurrentUser();
+    const canDeleteOpp = (opp: { owner_user_id?: string | null; created_by?: string | null }) => isAdmin || isCoordinador || (!!currentUser?.id && (opp?.owner_user_id === currentUser.id || opp?.created_by === currentUser.id));
     const [oppToDelete, setOppToDelete] = useState<any | null>(null);
     const [isDeleting, setIsDeleting] = useState(false);
     
@@ -27,19 +28,75 @@ export default function AccountOpportunitiesTab({ accountId }: { accountId: stri
         setAccountIdFilter,
         setStatusFilter,
         setUserFilter,
+        setSearchTerm,
+        setChannelFilter,
+        setSubclassificationFilter,
+        setSegmentFilter,
+        setPhaseFilter,
+        setOriginFilter,
+        setAccountOwnerIds,
+        setIdFilter,
+        setPlantaFilter,
+        setFamiliaFilter,
+        setCountryFilter,
+        setCityFilter,
+        setSetterFilter,
+        setStartDate,
+        setEndDate,
+        setStartClosingDate,
+        setEndClosingDate,
         refresh
-    } = useOpportunitiesServer({ pageSize: 100 });
+    } = useOpportunitiesServer({ pageSize: 100, initialStatus: 'all', ignorePersistedFilters: true });
 
     useEffect(() => {
         setAccountIdFilter(accountId);
         setUserFilter('unrestricted'); // Asegurar que vemos todas las oportunidades de la cuenta, sin restricciones de usuario
-    }, [accountId, setAccountIdFilter, setUserFilter]);
+        setSearchTerm('');
+        setChannelFilter(null);
+        setSubclassificationFilter(null);
+        setSegmentFilter(null);
+        setPhaseFilter(null);
+        setOriginFilter(null);
+        setAccountOwnerIds([]);
+        // Filtros que antes se heredaban del listado de Oportunidades y dejaban la pestaña vacía
+        setIdFilter(null);
+        setPlantaFilter(null);
+        setFamiliaFilter(null);
+        setCountryFilter(null);
+        setCityFilter(null);
+        setSetterFilter(null);
+        setStartDate(null);
+        setEndDate(null);
+        setStartClosingDate(null);
+        setEndClosingDate(null);
+    }, [
+        accountId, 
+        setAccountIdFilter, 
+        setUserFilter, 
+        setSearchTerm, 
+        setChannelFilter, 
+        setSubclassificationFilter, 
+        setSegmentFilter, 
+        setPhaseFilter, 
+        setOriginFilter, 
+        setAccountOwnerIds,
+        setIdFilter,
+        setPlantaFilter,
+        setFamiliaFilter,
+        setCountryFilter,
+        setCityFilter,
+        setSetterFilter,
+        setStartDate,
+        setEndDate,
+        setStartClosingDate,
+        setEndClosingDate
+    ]);
 
     useEffect(() => {
         setStatusFilter(currentStatus);
     }, [currentStatus, setStatusFilter]);
 
-    const phases = useLiveQuery(() => db.phases.toArray());
+    const phases = useLiveQuery(() => readFullPhaseCatalog());
     const phaseMap = new Map(phases?.map(p => [p.id, p.nombre]));
 
     const handleDeleteOpportunity = async () => {
@@ -51,7 +108,7 @@ export default function AccountOpportunitiesTab({ accountId }: { accountId: stri
             refresh();
         } catch (error) {
             console.error("Error al eliminar oportunidad:", error);
-            alert("No se pudo eliminar la oportunidad.");
+            alert(error instanceof Error ? error.message : "No se pudo eliminar la oportunidad.");
         } finally {
             setIsDeleting(false);
         }
@@ -125,7 +182,7 @@ export default function AccountOpportunitiesTab({ accountId }: { accountId: stri
                             </Link>
 
                             <div className="flex items-center gap-1 shrink-0">
-                                {isAdmin && (
+                                {canDeleteOpp(opp) && (
                                     <button
                                         type="button"
                                         onClick={(e) => {

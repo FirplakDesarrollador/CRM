@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Check, ChevronsUpDown, Loader2, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/lib/supabase";
 import { useOpportunitiesServer } from "@/lib/hooks/useOpportunitiesServer";
 import {
     Popover,
@@ -23,13 +24,15 @@ interface OpportunityComboboxProps {
     accountId?: string;
     onChange: (value: string) => void;
     disabled?: boolean;
+    initialLabel?: string;
 }
 
 export function OpportunityCombobox({
     value,
     accountId,
     onChange,
-    disabled = false
+    disabled = false,
+    initialLabel
 }: OpportunityComboboxProps) {
     const [open, setOpen] = React.useState(false);
     const [search, setSearch] = React.useState("");
@@ -43,7 +46,7 @@ export function OpportunityCombobox({
         setSearchTerm,
         setUserFilter,
         setAccountIdFilter
-    } = useOpportunitiesServer({ pageSize: 20 });
+    } = useOpportunitiesServer({ pageSize: 20, ignorePersistedFilters: true });
 
     const observer = React.useRef<IntersectionObserver | null>(null);
     const lastElementRef = React.useCallback((node: HTMLDivElement | null) => {
@@ -75,6 +78,50 @@ export function OpportunityCombobox({
         return opportunities.find(o => o.id === value);
     }, [value, opportunities]);
 
+    const [resolvedName, setResolvedName] = React.useState<string>("");
+
+    React.useEffect(() => {
+        const currentId = String(value || "");
+        if (!currentId || currentId === "undefined" || currentId === "null") {
+            setResolvedName("");
+            return;
+        }
+
+        // 1. Check in currently loaded opportunities
+        const found = opportunities.find(o => String(o.id) === currentId);
+        if (found) {
+            setResolvedName(found.nombre);
+            return;
+        }
+
+        // 2. Use initialLabel if provided
+        if (initialLabel) {
+            setResolvedName(initialLabel);
+            return;
+        }
+
+        // 3. Direct Supabase lookup by ID
+        let isCancelled = false;
+        (async () => {
+            try {
+                if (typeof navigator !== 'undefined' && navigator.onLine) {
+                    const { data } = await supabase
+                        .from('CRM_Oportunidades')
+                        .select('id, nombre')
+                        .eq('id', currentId)
+                        .maybeSingle();
+                    if (!isCancelled && data?.nombre) {
+                        setResolvedName(data.nombre);
+                    }
+                }
+            } catch (e: unknown) {
+                console.warn('[OpportunityCombobox] Failed lookup for opp', e);
+            }
+        })();
+
+        return () => { isCancelled = true; };
+    }, [value, opportunities, initialLabel]);
+
     return (
         <Popover open={open} onOpenChange={setOpen}>
             <PopoverTrigger asChild>
@@ -88,29 +135,33 @@ export function OpportunityCombobox({
                     )}
                 >
                     <span className="truncate">
-                        {value && selectedOpp ? selectedOpp.nombre : "Seleccione una oportunidad..."}
+                        {value ? (selectedOpp?.nombre || resolvedName || initialLabel || "Cargando...") : "Seleccione una oportunidad..."}
                     </span>
                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                 </button>
             </PopoverTrigger>
             <PopoverContent
-                className="w-[--radix-popover-trigger-width] p-0"
+                className="w-[var(--radix-popover-trigger-width)] min-w-[260px] max-w-[calc(100vw-2rem)] p-0 z-[80] bg-white shadow-xl border border-slate-200 rounded-xl overflow-hidden"
                 align="start"
-                side="bottom"
                 sideOffset={4}
-                avoidCollisions={false}
+                collisionPadding={12}
+                avoidCollisions={true}
             >
                 <Command shouldFilter={false}>
                     <div className="flex items-center border-b px-3">
                         <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
                         <input
-                            className="flex h-11 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                            className="flex h-11 w-full rounded-md bg-transparent py-3 text-base sm:text-sm outline-none placeholder:text-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
                             placeholder="Buscar oportunidad..."
                             value={search}
                             onChange={(e) => setSearch(e.target.value)}
                         />
                     </div>
-                    <CommandList className="max-h-[300px] overflow-y-auto overflow-x-hidden p-1">
+                    <CommandList
+                        className="max-h-[min(280px,calc(var(--radix-popover-content-available-height,280px)-56px))] overflow-y-auto overflow-x-hidden overscroll-contain p-1"
+                        onWheel={(e) => e.stopPropagation()}
+                        onTouchMove={(e) => e.stopPropagation()}
+                    >
                         <CommandEmpty>
                             {loading ? (
                                 <div className="flex justify-center p-4">

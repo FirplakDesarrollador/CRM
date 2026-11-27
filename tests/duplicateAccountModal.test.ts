@@ -25,4 +25,31 @@ describe("DuplicateAccountModal Data Formatting", () => {
         expect(mockDuplicate.owner?.email).toBe("blanca.ordonez@firplak.com");
         expect(mockDuplicate.conflicts).toContain('NIT "901806059" ya existe');
     });
+
+    it("soporta metadatos de cuenta matriz y zona del propietario para crear sucursal", () => {
+        const mockBranchDuplicate: DuplicateAccountInfo = {
+            account: {
+                id: "branch-1",
+                nombre: "ACABADOS & MOBILIARIO S.A.S - ANTIOQUIA",
+                nit_base: "901806059-1",
+                canal_id: "OBRAS_NAC",
+                id_cuenta_principal: "root-1",
+                owner_user_id: "advisor-1",
+            },
+            rootAccount: {
+                id: "root-1",
+                nombre: "ACABADOS & MOBILIARIO S.A.S",
+                nit_base: "901806059-1",
+                canal_id: "OBRAS_NAC",
+            },
+            owner: {
+                full_name: "Blanca Ordoñez",
+                zona: "Antioquia",
+            },
+            conflicts: ['NIT "901806059" coincide con "901806059-1"'],
+        };
+
+        expect(mockBranchDuplicate.rootAccount?.id).toBe("root-1");
+        expect(mockBranchDuplicate.owner?.zona).toBe("Antioquia");
+    });
 });

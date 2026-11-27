@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { LocalQuote, LocalQuoteItem } from "@/lib/db";
 import {
     buildPedidoDocumentData,
+    canDownloadPedidoPdf,
     getMissingPedidoFormalizationFields,
     PedidoWithItems,
 } from "@/lib/pedidoFormalization";
@@ -85,5 +86,43 @@ describe("formalización de cotizaciones desde pedidos", () => {
             subtotal: 214_200,
             numero_articulo: "SAP-001",
         })]);
+    });
+
+    it("habilita la descarga de PDF si el pedido tiene productos con cantidad, incluso si es borrador o faltan campos de formalización", () => {
+        const borradorConItems: PedidoWithItems = {
+            uuid_generado: "pedido-borrador",
+            cotizacion_id: "quote-1",
+            estado_pedido: "PLANEADO",
+            items: [{
+                id: "pi-1",
+                pedido_uuid: "pedido-borrador",
+                producto_id: "prod-1",
+                cantidad: 1,
+            }],
+        };
+
+        expect(getMissingPedidoFormalizationFields(borradorConItems).length).toBeGreaterThan(0);
+        expect(canDownloadPedidoPdf(borradorConItems)).toBe(true);
+
+        const sinItems: PedidoWithItems = {
+            uuid_generado: "pedido-vacio",
+            cotizacion_id: "quote-1",
+            estado_pedido: "PLANEADO",
+            items: [],
+        };
+        expect(canDownloadPedidoPdf(sinItems)).toBe(false);
+
+        const conCantidadCero: PedidoWithItems = {
+            uuid_generado: "pedido-cero",
+            cotizacion_id: "quote-1",
+            estado_pedido: "PLANEADO",
+            items: [{
+                id: "pi-2",
+                pedido_uuid: "pedido-cero",
+                producto_id: "prod-1",
+                cantidad: 0,
+            }],
+        };
+        expect(canDownloadPedidoPdf(conCantidadCero)).toBe(false);
     });
 });

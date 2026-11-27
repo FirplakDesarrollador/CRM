@@ -14,12 +14,17 @@ import {
     Layers, 
     Loader2, 
     Palette, 
+    Pencil, 
+    Plus, 
     Search, 
 } from "lucide-react";
-import { useFullCatalog, useProductFilterOptions } from "@/lib/hooks/useProducts";
+import { useFullCatalog, useProductFilterOptions, PriceListProduct } from "@/lib/hooks/useProducts";
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { ProductAdminModal } from "@/components/catalogo/ProductAdminModal";
 import { useInventorySummary } from "@/lib/hooks/useInventory";
 import { matchesSearchTokens } from "@/lib/utils";
 import { groupProductsByColor } from "@/lib/productGrouping";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 const money = new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP", maximumFractionDigits: 0 });
 
@@ -36,7 +41,28 @@ export default function CatalogPage() {
     const [copiedSku, setCopiedSku] = useState<string | null>(null);
 
     const { plants, families } = useProductFilterOptions();
-    const { products: allProducts, isLoading: isLoadingCatalog } = useFullCatalog();
+    const { products: allProducts, isLoading: isLoadingCatalog, applyLocalChange } = useFullCatalog();
+    // Edición de precios y creación de productos: SOLO administradores (la BD también lo exige vía RLS)
+    const { isAdmin } = useCurrentUser();
+    const [adminModal, setAdminModal] = useState<{ mode: "create" | "edit"; product: PriceListProduct | null } | null>(null);
+    const [adminNotice, setAdminNotice] = useState<string | null>(null);
+    const productsById = useMemo(() => new Map(allProducts.map(p => [p.id, p])), [allProducts]);
+    const tableColumns = isAdmin ? 11 : 10;
+
+    const openEditProduct = (productId: string) => {
+        const product = productsById.get(productId);
+        if (product) setAdminModal({ mode: "edit", product });
+    };
+
+    const handleProductSaved = (product: PriceListProduct, mode: "create" | "edit") => {
+        applyLocalChange(product);
+        setAdminModal(null);
+        setAdminNotice(mode === "create"
+            ? `Producto ${product.numero_articulo} creado correctamente.`
+            : `Precios de ${product.numero_articulo} actualizados correctamente.`);
+        if (mode === "create") setSearch(product.numero_articulo);
+        setTimeout(() => setAdminNotice(null), 6000);
+    };
     const { summary, isLoading: isLoadingInventory } = useInventorySummary();
 
     const inventory = useMemo(() => new Map(summary.map(item => [item.producto_id, item])), [summary]);
@@ -164,6 +190,18 @@ export default function CatalogPage() {
                 </div>
 
                 <div className="flex items-center gap-3">
+                    {isAdmin && (
+                        <button
+                            type="button"
+                            data-testid="catalog-new-product"
+                            onClick={() => setAdminModal({ mode: "create", product: null })}
+                            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm transition-all shadow-sm border bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700 shadow-emerald-200"
+                            title="Crear un producto nuevo sin cargar el Excel (solo administradores)"
+                        >
+                            <Plus className="w-4 h-4" />
+                            <span>Nuevo producto</span>
+                        </button>
+                    )}
                     <button
                         type="button"
                         onClick={() => setGroupByColor(!groupByColor)}
@@ -180,6 +218,24 @@ export default function CatalogPage() {
                 </div>
             </header>
 
+            {adminNotice && (
+                <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl px-4 py-3 text-sm font-semibold">
+                    <Check className="w-4 h-4" /> {adminNotice}
+                </div>
+            )}
+
+            {isAdmin && (
+                <ProductAdminModal
+                    open={!!adminModal}
+                    mode={adminModal?.mode || "create"}
+                    product={adminModal?.product || null}
+                    plants={plants}
+                    families={families}
+                    onClose={() => setAdminModal(null)}
+                    onSaved={handleProductSaved}
+                />
+            )}
+
             <section className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-4">
                 <div className="relative">
                     <Search className="absolute left-3 top-3 w-5 h-5 text-slate-400" />
@@ -191,20 +247,28 @@ export default function CatalogPage() {
                     />
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-                    <label className="space-y-1 text-xs font-bold text-slate-500">
+                    <div className="space-y-1 text-xs font-bold text-slate-500">
                         <span>FAMILIA</span>
-                        <select value={family} onChange={event => setFamily(event.target.value)} className="w-full p-2.5 border rounded-lg bg-white text-sm text-slate-800">
-                            <option value="">Todas</option>
-                            {families.map(item => <option key={item} value={item}>{item}</option>)}
-                        </select>
-                    </label>
-                    <label className="space-y-1 text-xs font-bold text-slate-500">
+                        <SearchableSelect
+                            value={family}
+                            onChange={setFamily}
+                            placeholder="Todas"
+                            searchPlaceholder="Buscar familia..."
+                            triggerClassName="border-slate-300 text-slate-800 font-normal"
+                            options={families.map(item => ({ value: item, label: item }))}
+                        />
+                    </div>
+                    <div className="space-y-1 text-xs font-bold text-slate-500">
                         <span>PLANTA</span>
-                        <select value={plant} onChange={event => setPlant(event.target.value)} className="w-full p-2.5 border rounded-lg bg-white text-sm text-slate-800">
-                            <option value="">Todas</option>
-                            {plants.map(item => <option key={item} value={item}>{item}</option>)}
-                        </select>
-                    </label>
+                        <SearchableSelect
+                            value={plant}
+                            onChange={setPlant}
+                            placeholder="Todas"
+                            searchPlaceholder="Buscar planta..."
+                            triggerClassName="border-slate-300 text-slate-800 font-normal"
+                            options={plants.map(item => ({ value: item, label: item }))}
+                        />
+                    </div>
                     <label className="flex items-center gap-2 mt-5 text-sm font-semibold text-slate-700 cursor-pointer select-none">
                         <input type="checkbox" checked={onlyAvailable} onChange={event => setOnlyAvailable(event.target.checked)} className="w-4 h-4 rounded text-cyan-600 focus:ring-cyan-500" /> 
                         Solo disponibles
@@ -263,6 +327,7 @@ export default function CatalogPage() {
                                     <th className="py-3.5 px-4 text-right">PVP Sin IVA</th>
                                     <th className="py-3.5 px-4 text-right">Precio Feria</th>
                                     <th className="py-3.5 px-4 text-center">Disponible</th>
+                                    {isAdmin && <th className="py-3.5 px-4 text-center sticky right-0 bg-slate-50 shadow-[-6px_0_8px_-6px_rgba(15,23,42,0.15)]">Acciones</th>}
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
@@ -331,12 +396,29 @@ export default function CatalogPage() {
                                                         {group.totalDisponible > 0 ? `${group.totalDisponible} disp.` : "Agotado"}
                                                     </span>
                                                 </td>
+                                                {isAdmin && (
+                                                    <td className={`py-3 px-4 text-center whitespace-nowrap sticky right-0 shadow-[-6px_0_8px_-6px_rgba(15,23,42,0.15)] ${isExpanded ? "bg-cyan-50" : "bg-white"}`}>
+                                                        {hasMultipleVariants ? (
+                                                            <span className="text-[11px] text-slate-400" title="Despliega la fila para editar cada color">Ver colores</span>
+                                                        ) : (
+                                                            <button
+                                                                type="button"
+                                                                data-testid="catalog-edit-product"
+                                                                onClick={(e) => { e.stopPropagation(); openEditProduct(group.variants[0].id); }}
+                                                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-cyan-200 bg-cyan-50 text-cyan-800 hover:bg-cyan-100"
+                                                                title="Editar precios (solo administradores)"
+                                                            >
+                                                                <Pencil className="w-3.5 h-3.5" /> Editar
+                                                            </button>
+                                                        )}
+                                                    </td>
+                                                )}
                                             </tr>
 
                                             {/* Sub-tabla desplegable con las variantes de color */}
                                             {isExpanded && (
                                                 <tr className="bg-slate-50/70 border-b border-slate-200">
-                                                    <td colSpan={10} className="py-3 px-6">
+                                                    <td colSpan={tableColumns} className="py-3 px-6">
                                                         <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-3">
                                                             <div className="flex items-center justify-between border-b border-slate-100 pb-2">
                                                                 <div className="flex items-center gap-2 text-xs font-bold text-slate-700 uppercase tracking-wider">
@@ -392,6 +474,17 @@ export default function CatalogPage() {
                                                                                                 <Copy className="w-3 h-3" />
                                                                                             )}
                                                                                         </button>
+                                                                                        {isAdmin && (
+                                                                                            <button
+                                                                                                type="button"
+                                                                                                data-testid="catalog-edit-variant"
+                                                                                                onClick={(e) => { e.stopPropagation(); openEditProduct(variant.id); }}
+                                                                                                className="ml-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-semibold border border-cyan-200 bg-cyan-50 text-cyan-800 hover:bg-cyan-100"
+                                                                                                title="Editar precios de este color (solo administradores)"
+                                                                                            >
+                                                                                                <Pencil className="w-3 h-3" /> Editar
+                                                                                            </button>
+                                                                                        )}
                                                                                     </div>
                                                                                 </td>
                                                                                 <td className="py-2.5 px-3 text-slate-600 max-w-[320px]">
@@ -466,13 +559,26 @@ export default function CatalogPage() {
                                                     {available > 0 ? `${available} disp.` : "Agotado"}
                                                 </span>
                                             </td>
+                                            {isAdmin && (
+                                                <td className="py-3 px-4 text-center whitespace-nowrap sticky right-0 bg-white shadow-[-6px_0_8px_-6px_rgba(15,23,42,0.15)]">
+                                                    <button
+                                                        type="button"
+                                                        data-testid="catalog-edit-product"
+                                                        onClick={() => setAdminModal({ mode: "edit", product })}
+                                                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-cyan-200 bg-cyan-50 text-cyan-800 hover:bg-cyan-100"
+                                                        title="Editar precios (solo administradores)"
+                                                    >
+                                                        <Pencil className="w-3.5 h-3.5" /> Editar
+                                                    </button>
+                                                </td>
+                                            )}
                                         </tr>
                                     );
                                 })}
 
                                 {totalItems === 0 && (
                                     <tr>
-                                        <td colSpan={10} className="py-12 text-center text-slate-400">
+                                        <td colSpan={tableColumns} className="py-12 text-center text-slate-400">
                                             No se encontraron productos que coincidan con la búsqueda.
                                         </td>
                                     </tr>
@@ -485,17 +591,26 @@ export default function CatalogPage() {
                         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-2 py-1 text-sm text-slate-600">
                             <div className="flex items-center gap-2">
                                 <span>Filas por página:</span>
-                                <select 
-                                    value={pageSize} 
-                                    onChange={e => setPageSize(Number(e.target.value))}
-                                    className="border border-slate-300 rounded-lg px-2 py-1 bg-white text-slate-700 font-medium outline-none focus:ring-1 focus:ring-cyan-500"
-                                >
-                                    <option value={25}>25</option>
-                                    <option value={50}>50</option>
-                                    <option value={100}>100</option>
-                                    <option value={250}>250</option>
-                                    <option value={0}>Todos ({totalItems})</option>
-                                </select>
+                                <div className="w-[130px]">
+                                    <SearchableSelect
+                                        compact
+                                        allowClear={false}
+                                        ariaLabel="Filas por página"
+                                        value={String(pageSize)}
+                                        onChange={(val) => {
+                                            if (val !== "") setPageSize(Number(val));
+                                        }}
+                                        searchPlaceholder="Buscar cantidad..."
+                                        triggerClassName="min-h-0 h-8 border-slate-300 text-slate-700 font-medium"
+                                        options={[
+                                            { value: "25", label: "25" },
+                                            { value: "50", label: "50" },
+                                            { value: "100", label: "100" },
+                                            { value: "250", label: "250" },
+                                            { value: "0", label: `Todos (${totalItems})` },
+                                        ]}
+                                    />
+                                </div>
                                 <span className="text-slate-400">|</span>
                                 <span>
                                     Mostrando {pageSize === 0 ? 1 : Math.min((page - 1) * pageSize + 1, totalItems)} a {pageSize === 0 ? totalItems : Math.min(page * pageSize, totalItems)} de {totalItems}

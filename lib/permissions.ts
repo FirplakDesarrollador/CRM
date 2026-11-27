@@ -97,6 +97,7 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
 
         // Reportes - solo propios
         'view_reports',
+        'export_reports',
 
         // Comisiones - solo propias
         'view_own_commissions',
@@ -248,3 +249,10 @@ export function hasAllPermissions(role: UserRole | null, permissions: Permission
 export function getRolePermissions(role: UserRole): Permission[] {
     return ROLE_PERMISSIONS[role] || [];
 }
+
+/**
+ * Excepción por identidad, no por rol. El rol VENDEDOR no gana
+ * view_all_opportunities ni permisos de administración.
+ * La lista canónica está en sellerVisibility.
+ */
+export { canViewAllAccountsContactsOpportunities } from './sellerVisibility';

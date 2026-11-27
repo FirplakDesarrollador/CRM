@@ -11,7 +11,9 @@ test.describe('Create activity wizard', () => {
         await page.getByRole('button', { name: /Siguiente/i }).click();
 
         await expect(page.getByText('Clasificación & Fechas')).toBeVisible();
-        await page.locator('select').first().selectOption('990001');
+        await page.getByTestId('activity-classification-select').click();
+        await page.getByPlaceholder('Buscar clasificación...').fill('Seguimiento E2E');
+        await page.getByRole('option', { name: 'Seguimiento E2E' }).click();
 
         const nextButton = page.getByRole('button', { name: /Siguiente/i });
         await nextButton.dblclick();

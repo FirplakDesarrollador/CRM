@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { Loader2, Shield, X } from 'lucide-react';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { getSearchTokens, matchesSearchTokens } from '@/lib/utils';
+import { SearchableSelect } from '@/components/ui/SearchableSelect';
 
 type RuleFormProps = {
     onSubmit: (rule: {
@@ -190,16 +191,17 @@ export function CommissionRuleForm({ onSubmit, initialData, onCancel }: RuleForm
                 {/* Vendedor */}
                 <div>
                     <label className="block text-xs font-semibold text-slate-600 mb-1">Vendedor <span className="text-slate-400">(+8 prioridad)</span></label>
-                    <select
+                    <SearchableSelect
                         value={form.vendedor_id}
-                        onChange={e => setForm(f => ({ ...f, vendedor_id: e.target.value }))}
-                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                    >
-                        <option value="">Todos los vendedores</option>
-                        {vendedores.map(v => (
-                            <option key={v.id} value={v.id}>{v.full_name}</option>
-                        ))}
-                    </select>
+                        onChange={(val) => setForm(f => ({ ...f, vendedor_id: val }))}
+                        placeholder="Todos los vendedores"
+                        searchPlaceholder="Buscar vendedor..."
+                        triggerClassName="border-slate-200 rounded-xl"
+                        options={vendedores.map(v => ({
+                            value: v.id,
+                            label: v.full_name,
+                        }))}
+                    />
                 </div>
 
                 {/* Cuenta/Cliente Multi-select */}
@@ -262,31 +264,35 @@ export function CommissionRuleForm({ onSubmit, initialData, onCancel }: RuleForm
                 {/* Categoria */}
                 <div>
                     <label className="block text-xs font-semibold text-slate-600 mb-1">Categoria <span className="text-slate-400">(+2 prioridad)</span></label>
-                    <select
-                        value={form.categoria_id}
-                        onChange={e => setForm(f => ({ ...f, categoria_id: e.target.value }))}
-                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                    >
-                        <option value="">Todas las categorias</option>
-                        {categorias.map(c => (
-                            <option key={c.id} value={c.id}>{c.prefijo} - {c.nombre}</option>
-                        ))}
-                    </select>
+                    <SearchableSelect
+                        value={String(form.categoria_id || '')}
+                        onChange={(val) => setForm(f => ({ ...f, categoria_id: val }))}
+                        placeholder="Todas las categorias"
+                        searchPlaceholder="Buscar categoría o prefijo..."
+                        triggerClassName="border-slate-200 rounded-xl"
+                        options={categorias.map(c => ({
+                            value: String(c.id),
+                            label: `${c.prefijo} - ${c.nombre}`,
+                            searchValue: `${c.prefijo} ${c.nombre}`,
+                        }))}
+                    />
                 </div>
 
                 {/* Canal */}
                 <div>
                     <label className="block text-xs font-semibold text-slate-600 mb-1">Canal <span className="text-slate-400">(+1 prioridad)</span></label>
-                    <select
+                    <SearchableSelect
                         value={form.canal_id}
-                        onChange={e => setForm(f => ({ ...f, canal_id: e.target.value }))}
-                        className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm"
-                    >
-                        <option value="">Todos los canales</option>
-                        {canales.map(c => (
-                            <option key={c.id} value={c.id}>{c.nombre}</option>
-                        ))}
-                    </select>
+                        onChange={(val) => setForm(f => ({ ...f, canal_id: val }))}
+                        placeholder="Todos los canales"
+                        searchPlaceholder="Buscar canal..."
+                        triggerClassName="border-slate-200 rounded-xl"
+                        options={canales.map(c => ({
+                            value: c.id,
+                            label: c.nombre,
+                            searchValue: c.id,
+                        }))}
+                    />
                 </div>
 
                 {/* Porcentaje */}

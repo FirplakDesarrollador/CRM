@@ -16,9 +16,10 @@ interface SendQuoteModalProps {
     opportunity?: LocalOportunidad;
     quoteItems: LocalQuoteItem[];
     advisorName?: string;
+    advisorEmail?: string;
 }
 
-export function SendQuoteModal({ isOpen, onClose, quote, account, opportunity, quoteItems, advisorName }: SendQuoteModalProps) {
+export function SendQuoteModal({ isOpen, onClose, quote, account, opportunity, quoteItems, advisorName, advisorEmail }: SendQuoteModalProps) {
     const { contacts } = useContacts(account?.id);
     const { createActivity } = useActivities();
     
@@ -64,7 +65,7 @@ export function SendQuoteModal({ isOpen, onClose, quote, account, opportunity, q
         try {
             // 1. Generate PDF in base64
             const { generateQuotePdf } = await import("@/lib/pdfGenerator");
-            const base64Pdf = await generateQuotePdf(quote, quoteItems, account, opportunity, false, advisorName);
+            const base64Pdf = await generateQuotePdf(quote, quoteItems, account, opportunity, false, advisorName, advisorEmail);
 
             if (!base64Pdf) {
                 throw new Error("No se pudo generar el PDF de la cotización.");

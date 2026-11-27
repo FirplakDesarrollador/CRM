@@ -6,9 +6,10 @@ import { TopBar } from "./TopBar";
 import { NetworkStatusLine } from "./NetworkStatusLine";
 import { OfflineBanner } from "./OfflineBanner";
 import { useSyncStore } from "@/lib/stores/useSyncStore";
-import { useEffect, useState, useCallback } from "react";
-import { syncEngine } from "@/lib/sync";
-import { deactivateLocalDatabase } from "@/lib/db";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { Loader2 } from "lucide-react";
+import { activateLocalDatabase, deactivateLocalDatabase } from "@/lib/db";
+import { hydrateReferenceCatalogsFromSupabase } from "@/lib/supabaseDirect";
 import { usePathname } from "next/navigation";
 
 import { supabase } from "@/lib/supabase";
@@ -21,17 +22,36 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     const isOtherPublic = pathname === '/auth/callback' || pathname === '/update-password' || pathname === '/offline';
     const isPublicPage = isLoginPage || isE2EPage || isOtherPublic;
     const [isLocalDataReady, setIsLocalDataReady] = useState(isPublicPage);
+    // Usuario cuya base local ya está lista. Evita desmontar la página cuando
+    // supabase-js re-emite SIGNED_IN al volver a la pestaña (visibilitychange).
+    const preparedUserIdRef = useRef<string | null>(null);
 
     // Auth state listener - Redirect to login when signed out (critical for mobile)
     useEffect(() => {
-        if (isPublicPage) return;
+        if (isPublicPage) {
+            // En páginas públicas (login, etc.) se descarta el estado: al volver a
+            // entrar se prepara la base local de nuevo.
+            preparedUserIdRef.current = null;
+            return;
+        }
 
         let cancelled = false;
 
         const prepareLocalData = async (userId: string) => {
+            // Mismo usuario ya preparado (p. ej. SIGNED_IN re-emitido al volver a la
+            // pestaña): no se desmonta la página ni se muestra el loader.
+            if (preparedUserIdRef.current === userId) {
+                if (!cancelled) setIsLocalDataReady(true);
+                return;
+            }
             setIsLocalDataReady(false);
-            await syncEngine.initializeForUser(userId);
-            if (!cancelled) setIsLocalDataReady(true);
+            await activateLocalDatabase(userId);
+            void hydrateReferenceCatalogsFromSupabase();
+            useSyncStore.getState().setLastSyncTime(new Date());
+            if (!cancelled) {
+                preparedUserIdRef.current = userId;
+                setIsLocalDataReady(true);
+            }
         };
 
         // Check initial session
@@ -54,6 +74,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
 
             if (event === 'SIGNED_OUT') {
+                preparedUserIdRef.current = null;
                 setIsLocalDataReady(false);
                 void deactivateLocalDatabase();
                 // Clear any cached data
@@ -71,6 +92,32 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         return () => {
             cancelled = true;
             subscription.unsubscribe();
+        };
+    }, [isPublicPage]);
+
+    // Móvil: al contestar una llamada o cambiar de app no siempre se dispara el blur del
+    // campo que se estaba editando, y muchos campos (comentarios, valores de la oportunidad,
+    // cotización...) guardan en onBlur. Si el sistema descarta la pestaña, el texto se perdía.
+    // Al pasar a segundo plano se fuerza el blur para que esos campos guarden de inmediato.
+    useEffect(() => {
+        if (isPublicPage) return;
+        const commitFocusedField = (event: Event) => {
+            if (event.type === 'visibilitychange' && document.visibilityState !== 'hidden') return;
+            const active = document.activeElement;
+            if (
+                active instanceof HTMLInputElement ||
+                active instanceof HTMLTextAreaElement ||
+                active instanceof HTMLSelectElement ||
+                (active instanceof HTMLElement && active.isContentEditable)
+            ) {
+                active.blur();
+            }
+        };
+        document.addEventListener('visibilitychange', commitFocusedField);
+        window.addEventListener('pagehide', commitFocusedField);
+        return () => {
+            document.removeEventListener('visibilitychange', commitFocusedField);
+            window.removeEventListener('pagehide', commitFocusedField);
         };
     }, [isPublicPage]);
 
@@ -97,37 +144,6 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
     // Navigation feedback is now handled by app/loading.tsx (Suspense boundary)
     // which renders a lightweight progress bar instead.
 
-    // Sync: initial + periodic (5 min) + visibility change (user returns to tab)
-    useEffect(() => {
-        if (isPublicPage || !isLocalDataReady) return;
-
-        // 1. Initial sync on mount
-        const timeoutId = setTimeout(() => {
-            syncEngine.triggerSync('app-mount');
-        }, 50);
-
-        // 2. Periodic sync every 5 minutes
-        const intervalId = setInterval(() => {
-            if (navigator.onLine) {
-                syncEngine.triggerSync('periodic-5m');
-            }
-        }, 5 * 60 * 1000);
-
-        // 3. Sync when user returns to tab
-        const handleVisibilityChange = () => {
-            if (document.visibilityState === 'visible' && navigator.onLine) {
-                syncEngine.triggerSync('visibility');
-            }
-        };
-        document.addEventListener('visibilitychange', handleVisibilityChange);
-
-        return () => {
-            clearTimeout(timeoutId);
-            clearInterval(intervalId);
-            document.removeEventListener('visibilitychange', handleVisibilityChange);
-        };
-    }, [isPublicPage, isLocalDataReady]);
-
     const [isCollapsed, setIsCollapsed] = useState(false);
 
     // PERF FIX: Stable callback reference prevents Sidebar (React.memo) from re-rendering
@@ -150,7 +166,16 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 <NetworkStatusLine />
 
                 <main id="main-content" className="flex-1 overflow-y-auto p-4 md:p-6 pb-20 md:pb-6 scroll-smooth">
-                    {children}
+                    {isLocalDataReady ? (
+                        children
+                    ) : (
+                        <div className="flex h-full min-h-[300px] items-center justify-center p-8">
+                            <div className="flex flex-col items-center gap-3 text-slate-400">
+                                <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+                                <span className="text-sm font-semibold text-slate-500">Cargando datos locales...</span>
+                            </div>
+                        </div>
+                    )}
                 </main>
             </div>
 

@@ -19,7 +19,7 @@ export default function DebugCommissionPage() {
             const { data: opp, error: oppError } = await supabase
                 .from('CRM_Oportunidades')
                 .select(`
-                    id, amount, account_id, owner_user_id, status:estado_id,
+                    id, amount, account_id, owner_user_id, fase_id,
                     account:CRM_Cuentas!account_id (id, nombre, canal_id),
                     owner:profiles!owner_user_id (email)
                 `)

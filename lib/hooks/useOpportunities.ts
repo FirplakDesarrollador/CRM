@@ -1,11 +1,20 @@
 import { useLiveQuery } from "dexie-react-hooks";
+import { estadoIdForPhaseName, ESTADO_ID_ABIERTA } from '@/lib/opportunityPhase';
+import { canViewAllAccountsContactsOpportunities, sellerCanSeeOpportunity } from '@/lib/sellerVisibility';
+import { isTiendaUser } from '@/lib/tiendaVisibility';
 import { db, LocalOportunidad, LocalOpportunityCollaborator, LocalQuote, LocalQuoteItem } from "@/lib/db";
-import { syncEngine } from "@/lib/sync";
-import { useState } from "react";
+import { executeDirectMutations, fetchRecordDirect } from "@/lib/supabaseDirect";
+import { useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { v4 as uuidv4 } from 'uuid';
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { registrarEliminacionFallida } from "@/lib/eliminaciones";
 import { sendOpportunityDeletionEmail } from "@/lib/services/notifications";
+import { shouldUpdateOpportunityAmount, getOpportunityAmountFromQuote, resolveActiveQuote } from "@/lib/opportunityQuoteSync";
+import { sanitizeQuoteItemUpdates } from "@/lib/quotePricing";
+import { shouldKeepDiscountOnQtyChange } from "@/lib/discountExceptions";
+import { toInputDate } from "@/lib/date-utils";
+import { B2C_CHANNEL_ID } from "@/lib/b2c";
 
 // Helper to fetch pricing from server
 async function fetchPricing(productId: string, channelId: string, qty: number) {
@@ -45,6 +54,34 @@ async function fetchPricing(productId: string, channelId: string, qty: number) {
 }
 
 // Helper to sanitize opportunity data before syncing
+/**
+ * estado_id que se guarda por dentro para una fase (1 Abierta / 2 Ganada / 3 Perdida, por el nombre de la fase).
+ * Si la fase no está en caché local, se consulta el servidor; sin conexión se deja el respaldo.
+ */
+async function backgroundEstadoIdForPhase(faseId: number | string | null | undefined, fallback: number): Promise<number> {
+    if (faseId === null || faseId === undefined || faseId === '') return fallback;
+    try {
+        const phase = await db.phaseLabels.get(Number(faseId)) ?? await db.phases.get(Number(faseId));
+        if (phase) return estadoIdForPhaseName(phase.nombre);
+    } catch {
+        // Sin caché de fases: se consulta el servidor.
+    }
+    // La fase no está en la caché local: sin esto la oportunidad creada como ganada quedaba con estado_id=1.
+    try {
+        if (typeof navigator === 'undefined' || navigator.onLine) {
+            const { data } = await supabase
+                .from('CRM_FasesOportunidad')
+                .select('nombre')
+                .eq('id', Number(faseId))
+                .maybeSingle();
+            if (data?.nombre) return estadoIdForPhaseName(data.nombre);
+        }
+    } catch {
+        // Sin conexión: se deja el respaldo.
+    }
+    return fallback;
+}
+
 export function sanitizeOpportunityForSync(opp: any) {
     const {
         ciudad, // Text representation of city from UI
@@ -75,33 +112,35 @@ export function sanitizeOpportunityForSync(opp: any) {
 export function useOpportunities(filters?: { advisor_id?: string | null }) {
     const { user, isVendedor, isAdmin, isCoordinador } = useCurrentUser();
     const userId = user?.id;
+    const seesAllPortfolio = canViewAllAccountsContactsOpportunities(user);
 
     const opportunities = useLiveQuery(
         async () => {
-            // Priority 1: Specific advisor filter from Dashboard
-            if (filters?.advisor_id) {
-                return db.opportunities.where('owner_user_id').equals(filters.advisor_id).toArray();
+            // Priority 0: tienda solo ve oportunidades que posee, aunque el rol sea coordinador.
+            if (isTiendaUser(user) && userId) {
+                return db.opportunities.where('owner_user_id').equals(userId).toArray();
             }
 
-            // Priority 2: Vendedor role restriction
-            if (isVendedor && userId) {
+            // Priority 1: Vendedor role restriction (siempre gana, incluso con filtro de asesor del dashboard)
+            if (isVendedor && userId && !seesAllPortfolio) {
                 // Get IDs of opportunities where user is a collaborator
                 const collaborators = await db.opportunityCollaborators
                     .where('usuario_id')
                     .equals(userId)
                     .toArray();
-                const collaboratedIds = new Set(collaborators.map(c => c.oportunidad_id));
+                const collaboratedIds = new Set(collaborators.filter(c => !c.is_deleted).map(c => c.oportunidad_id));
 
-                return db.opportunities.filter(o => 
-                    o.owner_user_id === userId || 
-                    o.created_by === userId ||
-                    collaboratedIds.has(o.id)
-                ).toArray();
+                return db.opportunities.filter(o => sellerCanSeeOpportunity(o, userId, collaboratedIds)).toArray();
+            }
+
+            // Priority 2: Specific advisor filter from Dashboard
+            if (filters?.advisor_id) {
+                return db.opportunities.where('owner_user_id').equals(filters.advisor_id).toArray();
             }
 
             return db.opportunities.toArray();
         },
-        [isVendedor, userId, filters?.advisor_id]
+        [isVendedor, userId, user, user?.email, user?.es_tienda, seesAllPortfolio, filters?.advisor_id]
     );
 
     const createOpportunity = async (data: any) => {
@@ -109,7 +148,7 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
         const { items, collaborators, ...oppData } = data;
 
         // Fetch current user for ownership
-        const { data: { user } } = await syncEngine.getCurrentUser();
+        const { data: { user } } = await supabase.auth.getUser();
 
         const newOpp = {
             ...oppData,
@@ -117,7 +156,8 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
             id,
             owner_user_id: oppData.owner_user_id || user?.id,
             account_id: oppData.account_id,
-            estado_id: oppData.estado_id || 1,
+            // estado_id ya no se muestra: se guarda por dentro según la fase (1/2/3) para comisiones e integraciones.
+            estado_id: await backgroundEstadoIdForPhase(oppData.fase_id || 1, ESTADO_ID_ABIERTA),
             fase_id: oppData.fase_id || 1,
             segmento_id: oppData.segmento_id ? Number(oppData.segmento_id) : null,
             departamento_id: oppData.departamento_id ? Number(oppData.departamento_id) : null,
@@ -156,18 +196,12 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
                 updated_at: new Date().toISOString()
             };
 
-            const account = await db.accounts.get(oppData.account_id);
+            const account = (await db.accounts.get(oppData.account_id)) || (await fetchRecordDirect<any>('CRM_Cuentas', oppData.account_id));
             const channelId = account?.canal_id || 'DIST_NAC';
 
             quoteItems = await Promise.all(items.map(async (item: any) => {
-                // We rely on the Wizard to have picked the correct base price (item.precio) based on channel
-                // We ONLY call fetchPricing to retrieve the VOLUME LIMIT (max_discount_pct) if available.
-                // We ignore the RPC's base_price to avoid overwriting the specific column logic.
                 const pricing = await fetchPricing(item.product_id, channelId, item.cantidad);
 
-                // Pricing Logic:
-                // unitPrice = Trusted from Wizard (item.precio)
-                // maxDiscount = From RPC (volume limit)
                 const unitPrice = item.precio || (pricing ? pricing.base_price : 0);
                 const maxDiscount = pricing ? pricing.discount_pct : 0;
 
@@ -190,21 +224,19 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
 
         }
 
-        await syncEngine.commitLocalChanges([
-            db.opportunities, db.opportunityCollaborators, db.quotes, db.quoteItems
-        ], async () => {
-            await db.opportunities.add(newOpp);
-            if (collabEntries.length > 0) await db.opportunityCollaborators.bulkAdd(collabEntries);
-            if (newQuote) await db.quotes.add(newQuote);
-            if (quoteItems.length > 0) await db.quoteItems.bulkAdd(quoteItems);
+        await executeDirectMutations(async () => {
+            await db.opportunities.put(newOpp);
+            if (collabEntries.length > 0) await db.opportunityCollaborators.bulkPut(collabEntries);
+            if (newQuote) await db.quotes.put(newQuote);
+            if (quoteItems.length > 0) await db.quoteItems.bulkPut(quoteItems);
 
             return [
-                { entityTable: 'CRM_Oportunidades', entityId: id, changes: sanitizeOpportunityForSync(newOpp), options: { isSnapshot: true } },
-                ...collabEntries.map(col => ({ entityTable: 'CRM_Oportunidades_Colaboradores', entityId: col.id, changes: col })),
-                ...(newQuote ? [{ entityTable: 'CRM_Cotizaciones', entityId: newQuote.id, changes: newQuote, options: { isSnapshot: true } }] : []),
+                { entityTable: 'CRM_Oportunidades', entityId: id, changes: sanitizeOpportunityForSync(newOpp) },
+                ...collabEntries.map(col => ({ entityTable: 'CRM_Oportunidades_Colaboradores' as const, entityId: col.id, changes: col as unknown as Record<string, unknown> })),
+                ...(newQuote ? [{ entityTable: 'CRM_Cotizaciones' as const, entityId: newQuote.id, changes: newQuote as unknown as Record<string, unknown> }] : []),
                 ...quoteItems.map(qi => {
                     const { subtotal, ...qiData } = qi;
-                    return { entityTable: 'CRM_CotizacionItems', entityId: qi.id, changes: qiData, options: { isSnapshot: true } };
+                    return { entityTable: 'CRM_CotizacionItems' as const, entityId: qi.id, changes: qiData as unknown as Record<string, unknown> };
                 })
             ];
         });
@@ -213,7 +245,7 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
     };
 
     const generateMockData = async () => {
-        const { data: { user } } = await syncEngine.getCurrentUser();
+        const { data: { user } } = await supabase.auth.getUser();
         const userId = user?.id || uuidv4();
 
         const mocks = [
@@ -246,8 +278,10 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
     };
 
     const deleteOpportunity = async (id: string) => {
-        const current = await db.opportunities.get(id);
+        const current = (await db.opportunities.get(id)) || (await fetchRecordDirect<LocalOportunidad>('CRM_Oportunidades', id));
         if (!current) return;
+
+        try {
 
         // 1. Permission Check
         const isOwner = current.owner_user_id === userId || current.created_by === userId;
@@ -265,6 +299,10 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
         const collaborators = await db.opportunityCollaborators.where('oportunidad_id').equals(id).toArray();
         const activities = await db.activities.where('opportunity_id').equals(id).toArray();
         const pedidos = await db.pedidos.where('opportunity_id').equals(id).toArray();
+        // Un asesor solo borra "basura": si ya hay pedidos generados, debe hacerlo un administrador.
+        if (!isAdmin && !isCoordinador && pedidos.some(p => !(p as { is_deleted?: boolean }).is_deleted)) {
+            throw new Error("Esta oportunidad ya tiene pedidos. Solo un administrador o coordinador puede eliminarla.");
+        }
         const pedidoUuids = pedidos.map(p => p.uuid_generado);
         const pedidoItemsAll = pedidoUuids.length > 0
             ? await db.pedidoItems.where('pedido_uuid').anyOf(pedidoUuids).toArray()
@@ -279,15 +317,7 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
             pedidoItems: pedidoItemsAll.length
         });
 
-        await syncEngine.commitLocalChanges([
-            db.opportunities,
-            db.quotes,
-            db.quoteItems,
-            db.opportunityCollaborators,
-            db.activities,
-            db.pedidos,
-            db.pedidoItems
-        ], async () => {
+        await executeDirectMutations(async () => {
             await db.opportunities.delete(id);
             if (quoteIds.length > 0) {
                 await db.quotes.where('opportunity_id').equals(id).delete();
@@ -301,18 +331,22 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
             }
 
             return [
-                { entityTable: 'CRM_Oportunidades', entityId: id, changes: sanitizeOpportunityForSync({ ...current, is_deleted: true }), options: { isSnapshot: true } },
-                ...collaborators.map(col => ({ entityTable: 'CRM_Oportunidades_Colaboradores', entityId: col.id, changes: { ...col, is_deleted: true }, options: { isSnapshot: true } })),
-                ...quotes.map(quote => ({ entityTable: 'CRM_Cotizaciones', entityId: quote.id, changes: { ...quote, is_deleted: true }, options: { isSnapshot: true } })),
+                { entityTable: 'CRM_Oportunidades', entityId: id, changes: sanitizeOpportunityForSync({ ...current, is_deleted: true }) },
+                ...collaborators.map(col => ({ entityTable: 'CRM_Oportunidades_Colaboradores' as const, entityId: col.id, changes: { ...col, is_deleted: true } as unknown as Record<string, unknown> })),
+                ...quotes.map(quote => ({ entityTable: 'CRM_Cotizaciones' as const, entityId: quote.id, changes: { ...quote, is_deleted: true } as unknown as Record<string, unknown> })),
                 ...quoteItemsAll.map(item => {
                     const { subtotal, ...itemData } = item;
-                    return { entityTable: 'CRM_CotizacionItems', entityId: item.id, changes: { ...itemData, is_deleted: true }, options: { isSnapshot: true } };
+                    return { entityTable: 'CRM_CotizacionItems' as const, entityId: item.id, changes: { ...itemData, is_deleted: true } as unknown as Record<string, unknown> };
                 }),
-                ...activities.map(activity => ({ entityTable: 'CRM_Actividades', entityId: activity.id, changes: { ...activity, is_deleted: true }, options: { isSnapshot: true } })),
-                ...pedidos.map(pedido => ({ entityTable: 'CRM_Pedidos', entityId: pedido.uuid_generado, changes: { ...pedido, is_deleted: true }, options: { isSnapshot: true } })),
-                ...pedidoItemsAll.map(pItem => ({ entityTable: 'CRM_PedidoItems', entityId: pItem.id, changes: { ...pItem, is_deleted: true }, options: { isSnapshot: true } }))
+                ...activities.map(activity => ({ entityTable: 'CRM_Actividades' as const, entityId: activity.id, changes: { ...activity, is_deleted: true } as unknown as Record<string, unknown> })),
+                ...pedidos.map(pedido => ({ entityTable: 'CRM_Pedidos' as const, entityId: pedido.uuid_generado, changes: { ...pedido, is_deleted: true } as unknown as Record<string, unknown> })),
+                ...pedidoItemsAll.map(pItem => ({ entityTable: 'CRM_PedidoItems' as const, entityId: pItem.id, changes: { ...pItem, is_deleted: true } as unknown as Record<string, unknown> }))
             ];
         });
+        } catch (err) {
+            await registrarEliminacionFallida('CRM_Oportunidades', id, err);
+            throw err;
+        }
 
         // 5. Send deletion notification (Fire and forget)
         sendOpportunityDeletionEmail(current).catch(err => {
@@ -321,7 +355,7 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
     };
 
     const updateOpportunity = async (id: string, updates: any) => {
-        const current = await db.opportunities.get(id);
+        const current = (await db.opportunities.get(id)) || (await fetchRecordDirect<LocalOportunidad>('CRM_Oportunidades', id));
         if (!current) return;
 
         // Defensive conversion for numeric fields
@@ -335,20 +369,42 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
             comentarios_perdida: updates.comentarios_perdida !== undefined ? (updates.comentarios_perdida || null) : undefined,
             clientes_atendidos: updates.clientes_atendidos !== undefined ? (updates.clientes_atendidos !== null && updates.clientes_atendidos !== "" ? Number(updates.clientes_atendidos) : 0) : undefined,
             contactos_ids: updates.contactos_ids !== undefined ? (Array.isArray(updates.contactos_ids) ? updates.contactos_ids : []) : undefined,
+            setter: updates.setter !== undefined ? (updates.setter || null) : undefined,
         };
+
+        if (sanitizedUpdates.fase_id !== undefined && sanitizedUpdates.fase_id !== null && updates.estado_id === undefined) {
+            sanitizedUpdates.estado_id = await backgroundEstadoIdForPhase(sanitizedUpdates.fase_id, current.estado_id ?? ESTADO_ID_ABIERTA);
+        }
 
         // Remove undefined fields to avoid overwriting with undefined
         Object.keys(sanitizedUpdates).forEach(key => (sanitizedUpdates as any)[key] === undefined && delete (sanitizedUpdates as any)[key]);
+
+        // Auto-complete fecha_cierre_estimada for B2C on close (won/lost) if not provided
+        if ((sanitizedUpdates.estado_id === 2 || sanitizedUpdates.estado_id === 3) && updates.fecha_cierre_estimada === undefined) {
+            let isB2C = (current as any).canal_id === B2C_CHANNEL_ID;
+            if (!isB2C && current.account_id) {
+                const acc = (await db.accounts.get(current.account_id)) || (await fetchRecordDirect<any>('CRM_Cuentas', current.account_id));
+                if (acc?.canal_id === B2C_CHANNEL_ID) isB2C = true;
+            }
+            if (!isB2C && Array.isArray(user?.canales) && user.canales.includes(B2C_CHANNEL_ID)) {
+                isB2C = true;
+            }
+            if (isB2C) {
+                sanitizedUpdates.fecha_cierre_estimada = toInputDate(new Date());
+            }
+        }
 
         const updated = {
             ...current,
             ...sanitizedUpdates,
             updated_at: new Date().toISOString(),
-            // Sanitize critical dates (Postgres dislikes empty strings for DATE type)
-            fecha_cierre_estimada: (updates.fecha_cierre_estimada === "" ? null : (updates.fecha_cierre_estimada ?? current.fecha_cierre_estimada))
+            fecha_cierre_estimada: (sanitizedUpdates.fecha_cierre_estimada !== undefined
+                ? (sanitizedUpdates.fecha_cierre_estimada === "" ? null : sanitizedUpdates.fecha_cierre_estimada)
+                : (updates.fecha_cierre_estimada === "" ? null : (updates.fecha_cierre_estimada ?? current.fecha_cierre_estimada))),
+            fecha_entrega: (updates.fecha_entrega === "" ? null : (updates.fecha_entrega ?? current.fecha_entrega))
         };
-        // Double check if the merged result is still "" (from current)
         if (updated.fecha_cierre_estimada === "") updated.fecha_cierre_estimada = null;
+        if (updated.fecha_entrega === "") updated.fecha_entrega = null;
 
         const quoteUpdates: LocalQuote[] = [];
         if (updates.segmento_id !== undefined) {
@@ -360,12 +416,12 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
             }
         }
 
-        await syncEngine.commitLocalChanges([db.opportunities, db.quotes], async () => {
+        await executeDirectMutations(async () => {
             await db.opportunities.put(updated);
             if (quoteUpdates.length > 0) await db.quotes.bulkPut(quoteUpdates);
             return [
-                { entityTable: 'CRM_Oportunidades', entityId: id, changes: sanitizeOpportunityForSync(updated), options: { isSnapshot: true } },
-                ...quoteUpdates.map(quote => ({ entityTable: 'CRM_Cotizaciones', entityId: quote.id, changes: quote, options: { isSnapshot: true } }))
+                { entityTable: 'CRM_Oportunidades', entityId: id, changes: sanitizeOpportunityForSync(updated) },
+                ...quoteUpdates.map(quote => ({ entityTable: 'CRM_Cotizaciones' as const, entityId: quote.id, changes: quote as unknown as Record<string, unknown> }))
             ];
         });
     };
@@ -375,15 +431,16 @@ export function useOpportunities(filters?: { advisor_id?: string | null }) {
 
 // Internal version to be used by other hooks without hook dependency issues
 async function performOpportunityUpdate(id: string, updates: any) {
-    const current = await db.opportunities.get(id);
+    const current = (await db.opportunities.get(id)) || (await fetchRecordDirect<LocalOportunidad>('CRM_Oportunidades', id));
     if (!current) return;
 
     const updated = { ...current, ...updates, updated_at: new Date().toISOString() };
-    await syncEngine.commitLocalChanges([db.opportunities], async () => {
+    await executeDirectMutations(async () => {
         await db.opportunities.put(updated);
         return [{
-            entityTable: 'CRM_Oportunidades', entityId: id,
-            changes: sanitizeOpportunityForSync(updated), options: { isSnapshot: true }
+            entityTable: 'CRM_Oportunidades',
+            entityId: id,
+            changes: sanitizeOpportunityForSync(updated),
         }];
     });
 }
@@ -392,6 +449,32 @@ async function performOpportunityUpdate(id: string, updates: any) {
 export function useQuotes(opportunityId?: string) {
     const { user, isVendedor } = useCurrentUser();
     const userId = user?.id;
+
+    // Direct Supabase fetch for quotes of this opportunity
+    useEffect(() => {
+        if (!opportunityId || typeof window === 'undefined' || !navigator.onLine) return;
+        if (process.env.NODE_ENV !== 'production' && window.location?.pathname?.startsWith('/e2e/')) return;
+
+        let cancelled = false;
+        const loadQuotes = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('CRM_Cotizaciones')
+                    .select('*')
+                    .eq('opportunity_id', opportunityId)
+                    .eq('is_deleted', false);
+                if (!cancelled && !error && Array.isArray(data) && data.length > 0) {
+                    await db.quotes.bulkPut(data as LocalQuote[]);
+                }
+            } catch (err) {
+                console.warn('[useQuotes] Direct Supabase load warning:', err);
+            }
+        };
+        void loadQuotes();
+        return () => {
+            cancelled = true;
+        };
+    }, [opportunityId]);
 
     const quotes = useLiveQuery(
         async () => {
@@ -423,12 +506,12 @@ export function useQuotes(opportunityId?: string) {
         )[0];
 
         // Or inherit from opportunity itself
-        const opportunity = await db.opportunities.get(oppId);
+        const opportunity = (await db.opportunities.get(oppId)) || (await fetchRecordDirect<LocalOportunidad>('CRM_Oportunidades', oppId));
 
         // Check Account Channel for Strict Currency
         let forcedCurrency = latestQuote?.currency_id || opportunity?.currency_id || 'COP';
         if (opportunity?.account_id) {
-            const acc = await db.accounts.get(opportunity.account_id);
+            const acc = (await db.accounts.get(opportunity.account_id)) || (await fetchRecordDirect<any>('CRM_Cuentas', opportunity.account_id));
             if (acc && (acc.canal_id === 'OBRAS_INT' || acc.canal_id === 'DIST_INT')) {
                 forcedCurrency = 'USD';
             }
@@ -438,7 +521,7 @@ export function useQuotes(opportunityId?: string) {
             ? await db.quoteItems.where('cotizacion_id').equals(latestQuote.id).toArray()
             : (opportunity?.items || []);
 
-        const { data: { user } } = await syncEngine.getCurrentUser();
+        const { data: { user } } = await supabase.auth.getUser();
 
         const newQuote: LocalQuote = {
             id,
@@ -475,15 +558,39 @@ export function useQuotes(opportunityId?: string) {
             }))
             : [];
 
-        await syncEngine.commitLocalChanges([db.quotes, db.quoteItems], async () => {
-            await db.quotes.add(newQuote);
-            if (newItems.length > 0) await db.quoteItems.bulkAdd(newItems);
+        let updatedOpp: LocalOportunidad | null = null;
+        if (oppId) {
+            const opp = opportunity || (await db.opportunities.get(oppId));
+            if (opp) {
+                const existingQuotesList = await db.quotes.where('opportunity_id').equals(oppId).toArray();
+                if (shouldUpdateOpportunityAmount(newQuote, {}, existingQuotesList)) {
+                    const nextAmount = getOpportunityAmountFromQuote(newQuote);
+                    if (opp.amount !== nextAmount) {
+                        updatedOpp = {
+                            ...opp,
+                            amount: nextAmount,
+                            updated_at: new Date().toISOString()
+                        };
+                    }
+                }
+            }
+        }
+
+        await executeDirectMutations(async () => {
+            await db.quotes.put(newQuote);
+            if (newItems.length > 0) await db.quoteItems.bulkPut(newItems);
+            if (updatedOpp) await db.opportunities.put(updatedOpp);
             return [
-                { entityTable: 'CRM_Cotizaciones', entityId: id, changes: newQuote, options: { isSnapshot: true } },
+                { entityTable: 'CRM_Cotizaciones', entityId: id, changes: newQuote as unknown as Record<string, unknown> },
                 ...newItems.map(item => {
                     const { subtotal, ...itemData } = item;
-                    return { entityTable: 'CRM_CotizacionItems', entityId: item.id, changes: itemData, options: { isSnapshot: true } };
-                })
+                    return { entityTable: 'CRM_CotizacionItems' as const, entityId: item.id, changes: itemData as unknown as Record<string, unknown> };
+                }),
+                ...(updatedOpp ? [{
+                    entityTable: 'CRM_Oportunidades' as const,
+                    entityId: updatedOpp.id,
+                    changes: sanitizeOpportunityForSync(updatedOpp),
+                }] : [])
             ];
         });
 
@@ -491,30 +598,51 @@ export function useQuotes(opportunityId?: string) {
     };
 
     const updateQuote = async (id: string, updates: Partial<LocalQuote>) => {
-        // Get the current quote to ensure we have the opportunity_id
-        const currentQuote = await db.quotes.get(id);
+        const currentQuote = (await db.quotes.get(id)) || (await fetchRecordDirect<LocalQuote>('CRM_Cotizaciones', id));
         if (!currentQuote) {
             console.warn('[updateQuote] Quote not found:', id);
             return;
         }
 
-        const updatedQuote = { ...currentQuote, ...updates, updated_at: new Date().toISOString() };
+        const updatedQuote = { ...currentQuote, ...updates, updated_at: updates.updated_at || new Date().toISOString() };
         let updatedOpp: LocalOportunidad | null = null;
-        if (updates.segmento_id !== undefined && currentQuote.opportunity_id) {
-            const opp = await db.opportunities.get(currentQuote.opportunity_id);
-            if (opp && opp.segmento_id !== updates.segmento_id) {
-                updatedOpp = { ...opp, segmento_id: updates.segmento_id, updated_at: new Date().toISOString() };
+        if (currentQuote.opportunity_id) {
+            const opp = (await db.opportunities.get(currentQuote.opportunity_id)) || (await fetchRecordDirect<LocalOportunidad>('CRM_Oportunidades', currentQuote.opportunity_id));
+            if (opp) {
+                let needsOppUpdate = false;
+                const oppChanges: Partial<LocalOportunidad> = {};
+
+                if (updates.segmento_id !== undefined && opp.segmento_id !== updates.segmento_id) {
+                    oppChanges.segmento_id = updates.segmento_id;
+                    needsOppUpdate = true;
+                }
+
+                if (updates.total_amount !== undefined) {
+                    const allQuotes = await db.quotes.where('opportunity_id').equals(currentQuote.opportunity_id).toArray();
+                    if (shouldUpdateOpportunityAmount(currentQuote, updates, allQuotes)) {
+                        const nextAmount = getOpportunityAmountFromQuote(currentQuote, updates);
+                        if (opp.amount !== nextAmount) {
+                            oppChanges.amount = nextAmount;
+                            needsOppUpdate = true;
+                        }
+                    }
+                }
+
+                if (needsOppUpdate) {
+                    updatedOpp = { ...opp, ...oppChanges, updated_at: new Date().toISOString() };
+                }
             }
         }
 
-        await syncEngine.commitLocalChanges([db.quotes, db.opportunities], async () => {
+        await executeDirectMutations(async () => {
             await db.quotes.put(updatedQuote);
             if (updatedOpp) await db.opportunities.put(updatedOpp);
             return [
-                { entityTable: 'CRM_Cotizaciones', entityId: id, changes: updatedQuote, options: { isSnapshot: true } },
+                { entityTable: 'CRM_Cotizaciones', entityId: id, changes: updatedQuote as unknown as Record<string, unknown> },
                 ...(updatedOpp ? [{
-                    entityTable: 'CRM_Oportunidades', entityId: updatedOpp.id,
-                    changes: sanitizeOpportunityForSync(updatedOpp), options: { isSnapshot: true }
+                    entityTable: 'CRM_Oportunidades' as const,
+                    entityId: updatedOpp.id,
+                    changes: sanitizeOpportunityForSync(updatedOpp),
                 }] : [])
             ];
         });
@@ -527,7 +655,7 @@ export function useQuotes(opportunityId?: string) {
     };
 
     const markAsWinner = async (quoteId: string) => {
-        const quote = await db.quotes.get(quoteId);
+        const quote = (await db.quotes.get(quoteId)) || (await fetchRecordDirect<LocalQuote>('CRM_Cotizaciones', quoteId));
         if (!quote) throw new Error("Cotización no encontrada");
 
         // 1. Mark this as WINNER
@@ -546,35 +674,59 @@ export function useQuotes(opportunityId?: string) {
         // 3. Update parent opportunity amount to match winner quote
         await performOpportunityUpdate(quote.opportunity_id, { amount: quote.total_amount });
 
-        // 4. Queue for SAP Integration
+        // 4. Queue for SAP Integration directly in Supabase
         const sapQueueId = uuidv4();
         const sapEntry = {
             id: sapQueueId,
             entity_type: 'CRM_Cotizaciones',
             entity_id: quoteId,
-            payload: quote, // Send full quote data
+            payload: quote,
             status: 'PENDING',
             created_at: new Date().toISOString()
         };
 
-        // We queue this mutation to syncing engine so it reaches the server
-        await syncEngine.queueMutation('CRM_SapIntegrationQueue', sapQueueId, sapEntry);
+        await executeDirectMutations(async () => [{
+            entityTable: 'CRM_SapIntegrationQueue',
+            entityId: sapQueueId,
+            changes: sapEntry as unknown as Record<string, unknown>,
+        }]);
     };
 
     const deleteQuote = async (id: string) => {
-        const quote = await db.quotes.get(id);
+        const quote = (await db.quotes.get(id)) || (await fetchRecordDirect<LocalQuote>('CRM_Cotizaciones', id));
         if (!quote) return;
 
         const items = await db.quoteItems.where('cotizacion_id').equals(id).toArray();
-        await syncEngine.commitLocalChanges([db.quotes, db.quoteItems], async () => {
+        let updatedOpp: LocalOportunidad | null = null;
+
+        if (quote.opportunity_id) {
+            const opp = (await db.opportunities.get(quote.opportunity_id)) || (await fetchRecordDirect<LocalOportunidad>('CRM_Oportunidades', quote.opportunity_id));
+            if (opp) {
+                const remainingQuotes = (await db.quotes.where('opportunity_id').equals(quote.opportunity_id).toArray())
+                    .filter(q => q.id !== id && !q.is_deleted);
+                const nextActiveQuote = resolveActiveQuote(remainingQuotes);
+                const nextAmount = nextActiveQuote ? (nextActiveQuote.total_amount || 0) : 0;
+                if (opp.amount !== nextAmount) {
+                    updatedOpp = { ...opp, amount: nextAmount, updated_at: new Date().toISOString() };
+                }
+            }
+        }
+
+        await executeDirectMutations(async () => {
             if (items.length > 0) await db.quoteItems.bulkDelete(items.map(item => item.id));
             await db.quotes.delete(id);
+            if (updatedOpp) await db.opportunities.put(updatedOpp);
             return [
                 ...items.map(item => {
                     const { subtotal, ...itemData } = item;
-                    return { entityTable: 'CRM_CotizacionItems', entityId: item.id, changes: { ...itemData, is_deleted: true }, options: { isSnapshot: true } };
+                    return { entityTable: 'CRM_CotizacionItems' as const, entityId: item.id, changes: { ...itemData, is_deleted: true } as unknown as Record<string, unknown> };
                 }),
-                { entityTable: 'CRM_Cotizaciones', entityId: id, changes: { ...quote, is_deleted: true }, options: { isSnapshot: true } }
+                { entityTable: 'CRM_Cotizaciones', entityId: id, changes: { ...quote, is_deleted: true } as unknown as Record<string, unknown> },
+                ...(updatedOpp ? [{
+                    entityTable: 'CRM_Oportunidades' as const,
+                    entityId: updatedOpp.id,
+                    changes: sanitizeOpportunityForSync(updatedOpp),
+                }] : [])
             ];
         });
     };
@@ -582,7 +734,34 @@ export function useQuotes(opportunityId?: string) {
     return { quotes, createQuote, updateQuote, updateQuoteTotal, markAsWinner, deleteQuote };
 }
 
+
 export function useQuoteItems(quoteId?: string) {
+    // Direct Supabase fetch for quote items of this quote
+    useEffect(() => {
+        if (!quoteId || typeof window === 'undefined' || !navigator.onLine) return;
+        if (process.env.NODE_ENV !== 'production' && window.location?.pathname?.startsWith('/e2e/')) return;
+
+        let cancelled = false;
+        const loadItems = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('CRM_CotizacionItems')
+                    .select('*')
+                    .eq('cotizacion_id', quoteId)
+                    .eq('is_deleted', false);
+                if (!cancelled && !error && Array.isArray(data) && data.length > 0) {
+                    await db.quoteItems.bulkPut(data as LocalQuoteItem[]);
+                }
+            } catch (err) {
+                console.warn('[useQuoteItems] Direct Supabase load warning:', err);
+            }
+        };
+        void loadItems();
+        return () => {
+            cancelled = true;
+        };
+    }, [quoteId]);
+
     const items = useLiveQuery(
         () => quoteId
             ? db.quoteItems.where('cotizacion_id').equals(quoteId).toArray()
@@ -597,16 +776,14 @@ export function useQuoteItems(quoteId?: string) {
         let maxDiscount = 0;
 
         try {
-            const parentQuote = await db.quotes.get(quoteId);
+            const parentQuote = (await db.quotes.get(quoteId)) || (await fetchRecordDirect<LocalQuote>('CRM_Cotizaciones', quoteId));
             if (parentQuote) {
-                const opp = await db.opportunities.get(parentQuote.opportunity_id);
+                const opp = (await db.opportunities.get(parentQuote.opportunity_id)) || (await fetchRecordDirect<LocalOportunidad>('CRM_Oportunidades', parentQuote.opportunity_id));
                 if (opp && opp.account_id) {
-                    const acc = await db.accounts.get(opp.account_id);
+                    const acc = (await db.accounts.get(opp.account_id)) || (await fetchRecordDirect<any>('CRM_Cuentas', opp.account_id));
                     if (acc) {
                         const channelId = acc.canal_id || 'DIST_NAC';
 
-                        // 1. Fetch Full Product Data (Prices columns) + RPC for volume discount
-                        // Import dynamically to avoid circular deps if needed, or just use global supabase
                         const { data: prodData } = await supabase
                             .from('CRM_ListaDePrecios')
                             .select('id, numero_articulo, lista_base_cop, lista_base_exportaciones, lista_base_obras, distribuidor_pvp_iva, pvp_sin_iva')
@@ -614,7 +791,6 @@ export function useQuoteItems(quoteId?: string) {
                             .single();
 
                         if (prodData) {
-                            // Apply Strict Logic — Number() needed because Supabase returns numeric(x,y) as strings
                             switch (channelId) {
                                 case 'OBRAS_NAC':
                                     unitPrice = Number(prodData.lista_base_obras) || 0;
@@ -624,16 +800,14 @@ export function useQuoteItems(quoteId?: string) {
                                     unitPrice = Number(prodData.lista_base_exportaciones) || 0;
                                     break;
                                 case 'PROPIO':
-                                    unitPrice = Number(prodData.distribuidor_pvp_iva) || 0;
+                                    unitPrice = Number(prodData.pvp_sin_iva) || 0;
                                     break;
                                 case 'DIST_NAC':
                                 default:
                                     unitPrice = Number(prodData.lista_base_cop) || 0;
                             }
-                            // Fallback robusto: lista_base_cop → pvp_sin_iva
                             if (unitPrice === 0) unitPrice = Number(prodData.lista_base_cop) || Number(prodData.pvp_sin_iva) || 0;
 
-                            // 2. Fetch Volume Discount Limit via RPC
                             const { data: pricing } = await supabase.rpc('get_recommended_pricing', {
                                 p_numero_articulo: prodData.numero_articulo,
                                 p_canal_id: channelId,
@@ -664,40 +838,46 @@ export function useQuoteItems(quoteId?: string) {
         };
         const { subtotal, ...itemData } = newItem;
         
-        // Defensive check: Ensure required fields are not null for server constraints
         if (!itemData.cotizacion_id || itemData.cotizacion_id === "null") {
             throw new Error('No se puede guardar un ítem sin cotización asociada.');
         }
 
-        const parentQuote = await db.quotes.get(quoteId);
+        const parentQuote = (await db.quotes.get(quoteId)) || (await fetchRecordDirect<LocalQuote>('CRM_Cotizaciones', quoteId));
         const quoteUpdate = parentQuote ? { ...parentQuote, updated_at: new Date().toISOString() } : null;
-        await syncEngine.commitLocalChanges([db.quoteItems, db.quotes], async () => {
-            await db.quoteItems.add(newItem);
+        await executeDirectMutations(async () => {
+            await db.quoteItems.put(newItem);
             if (quoteUpdate) await db.quotes.put(quoteUpdate);
             return [
-                { entityTable: 'CRM_CotizacionItems', entityId: id, changes: itemData, options: { isSnapshot: true } },
-                ...(quoteUpdate ? [{ entityTable: 'CRM_Cotizaciones', entityId: quoteId, changes: quoteUpdate, options: { isSnapshot: true } }] : [])
+                { entityTable: 'CRM_CotizacionItems', entityId: id, changes: itemData as unknown as Record<string, unknown> },
+                ...(quoteUpdate ? [{ entityTable: 'CRM_Cotizaciones' as const, entityId: quoteId, changes: quoteUpdate as unknown as Record<string, unknown> }] : [])
             ];
         });
     };
 
     const updateItem = async (itemId: string, updates: Partial<LocalQuoteItem>) => {
-        const current = await db.quoteItems.get(itemId);
+        const current = (await db.quoteItems.get(itemId)) || (await fetchRecordDirect<LocalQuoteItem>('CRM_CotizacionItems', itemId));
         if (!current) return;
 
-        const updated = { ...current, ...updates };
+        const safeUpdates = sanitizeQuoteItemUpdates(current, updates);
+        const updated = { ...current, ...safeUpdates };
 
-        // If quantity changed, re-calculate pricing ONLY for linked products
-        if (updates.cantidad !== undefined && updates.cantidad !== current.cantidad && current.producto_id) {
+        if (safeUpdates.cantidad !== undefined && safeUpdates.cantidad !== current.cantidad && current.producto_id) {
             let pricing = null;
+            let keepDiscount = false;
             try {
-                const parentQuote = await db.quotes.get(current.cotizacion_id);
+                const parentQuote = (await db.quotes.get(current.cotizacion_id)) || (await fetchRecordDirect<LocalQuote>('CRM_Cotizaciones', current.cotizacion_id));
                 if (parentQuote) {
-                    const opp = await db.opportunities.get(parentQuote.opportunity_id);
+                    const opp = (await db.opportunities.get(parentQuote.opportunity_id)) || (await fetchRecordDirect<LocalOportunidad>('CRM_Oportunidades', parentQuote.opportunity_id));
                     if (opp && opp.account_id) {
-                        const acc = await db.accounts.get(opp.account_id);
+                        const acc = (await db.accounts.get(opp.account_id)) || (await fetchRecordDirect<any>('CRM_Cuentas', opp.account_id));
                         if (acc) {
                             pricing = await fetchPricing(current.producto_id, acc.canal_id, updated.cantidad);
+                            keepDiscount = shouldKeepDiscountOnQtyChange({
+                                channel: acc.canal_id,
+                                ignorarLimites: !!acc.ignorar_limites_descuento,
+                                currentDiscountPct: current.discount_pct,
+                                previousMaxPct: current.max_discount_pct
+                            });
                         }
                     }
                 }
@@ -706,54 +886,48 @@ export function useQuoteItems(quoteId?: string) {
             }
 
             if (pricing && pricing.base_price > 0) {
-                // ONLY update base price if we got a valid non-zero price
                 updated.precio_unitario = pricing.base_price;
                 updated.max_discount_pct = pricing.discount_pct;
 
-                // Cap existing manual discount if it now exceeds the new maximum allowed
                 const manualDiscount = updated.discount_pct !== undefined ? updated.discount_pct : (current.discount_pct || 0);
-                if (manualDiscount > pricing.discount_pct) {
+                if (!keepDiscount && manualDiscount > pricing.discount_pct) {
                     updated.discount_pct = pricing.discount_pct;
                 }
             }
         }
 
-        // Recalc subtotal if anything changed
-        // Ensure we rely on updated fields or fallbacks from current/record
         const currentPrice = updated.precio_unitario !== undefined ? updated.precio_unitario : (current.precio_unitario || 0);
         const currentDiscount = updated.discount_pct !== undefined ? updated.discount_pct : (current.discount_pct || 0);
 
-        // ALWAYS recalculate final unit price to ensure consistency
-        // Use toFixed(10) to eliminate IEEE 754 floating point noise (e.g., 7589.400000000001)
         updated.final_unit_price = parseFloat((currentPrice * (1 - currentDiscount / 100)).toFixed(10));
         updated.subtotal = parseFloat((updated.cantidad * updated.final_unit_price).toFixed(10));
 
         const { subtotal, ...updateData } = updated;
-        const parentQuote = await db.quotes.get(current.cotizacion_id);
+        const parentQuote = (await db.quotes.get(current.cotizacion_id)) || (await fetchRecordDirect<LocalQuote>('CRM_Cotizaciones', current.cotizacion_id));
         const quoteUpdate = parentQuote ? { ...parentQuote, updated_at: new Date().toISOString() } : null;
-        await syncEngine.commitLocalChanges([db.quoteItems, db.quotes], async () => {
+        await executeDirectMutations(async () => {
             await db.quoteItems.put(updated);
             if (quoteUpdate) await db.quotes.put(quoteUpdate);
             return [
-                { entityTable: 'CRM_CotizacionItems', entityId: itemId, changes: updateData, options: { isSnapshot: true } },
-                ...(quoteUpdate ? [{ entityTable: 'CRM_Cotizaciones', entityId: current.cotizacion_id, changes: quoteUpdate, options: { isSnapshot: true } }] : [])
+                { entityTable: 'CRM_CotizacionItems', entityId: itemId, changes: updateData as unknown as Record<string, unknown> },
+                ...(quoteUpdate ? [{ entityTable: 'CRM_Cotizaciones' as const, entityId: current.cotizacion_id, changes: quoteUpdate as unknown as Record<string, unknown> }] : [])
             ];
         });
     };
 
     const removeItem = async (itemId: string) => {
-        const current = await db.quoteItems.get(itemId);
+        const current = (await db.quoteItems.get(itemId)) || (await fetchRecordDirect<LocalQuoteItem>('CRM_CotizacionItems', itemId));
         if (!current) return;
 
         const { subtotal, ...itemData } = current;
-        const parentQuote = await db.quotes.get(current.cotizacion_id);
+        const parentQuote = (await db.quotes.get(current.cotizacion_id)) || (await fetchRecordDirect<LocalQuote>('CRM_Cotizaciones', current.cotizacion_id));
         const quoteUpdate = parentQuote ? { ...parentQuote, updated_at: new Date().toISOString() } : null;
-        await syncEngine.commitLocalChanges([db.quoteItems, db.quotes], async () => {
+        await executeDirectMutations(async () => {
             await db.quoteItems.delete(itemId);
             if (quoteUpdate) await db.quotes.put(quoteUpdate);
             return [
-                { entityTable: 'CRM_CotizacionItems', entityId: itemId, changes: { ...itemData, is_deleted: true }, options: { isSnapshot: true } },
-                ...(quoteUpdate ? [{ entityTable: 'CRM_Cotizaciones', entityId: current.cotizacion_id, changes: quoteUpdate, options: { isSnapshot: true } }] : [])
+                { entityTable: 'CRM_CotizacionItems', entityId: itemId, changes: { ...itemData, is_deleted: true } as unknown as Record<string, unknown> },
+                ...(quoteUpdate ? [{ entityTable: 'CRM_Cotizaciones' as const, entityId: current.cotizacion_id, changes: quoteUpdate as unknown as Record<string, unknown> }] : [])
             ];
         });
     };

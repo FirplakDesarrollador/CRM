@@ -7,20 +7,21 @@ export async function GET(request: NextRequest) {
     const next = searchParams.get('next') ?? '/'
 
     if (code) {
-        const cookieStore = request.cookies
+        const response = NextResponse.redirect(new URL(next, origin))
+
         const supabase = createServerClient(
             process.env.NEXT_PUBLIC_SUPABASE_URL!,
             process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
             {
                 cookies: {
                     getAll() {
-                        return cookieStore.getAll()
+                        return request.cookies.getAll()
                     },
                     setAll(cookiesToSet) {
-                        // We can't set cookies on the request object. 
-                        // To properly set cookies in a route handler, we would need to create a response first.
-                        // But for now, we'll try to just let middleware handle it or use the response object if possible.
-                        // Actually, in Route Handler, we should create a response object and copy cookies.
+                        cookiesToSet.forEach(({ name, value, options }) => {
+                            request.cookies.set(name, value)
+                            response.cookies.set(name, value, options)
+                        })
                     },
                 },
             }
@@ -28,22 +29,13 @@ export async function GET(request: NextRequest) {
         const { error } = await supabase.auth.exchangeCodeForSession(code)
 
         if (!error) {
-            // Create the response object
-            const response = NextResponse.redirect(`${origin}${next}`)
-
-            // Apply the new session to the response
-            const { data: { session } } = await supabase.auth.getSession()
-            if (session) {
-                // We need a fresh client to set cookies on response? 
-                // Or manually set them.
-                // Simplest fix for now: create a client that knows how to set on a response object?
-                // The issue is exchangeCodeForSession sets cookies on the *client*.
-            }
-
             return response
         }
+        console.error('Exchange code error in auth callback:', error)
+        const errorMsg = encodeURIComponent(error?.message || 'Unknown error');
+        return NextResponse.redirect(new URL(`/login?error=auth-code-error&details=${errorMsg}`, origin))
     }
 
     // Return the user to an error page with instructions
-    return NextResponse.redirect(`${origin}/login?error=auth-code-error`)
+    return NextResponse.redirect(new URL('/login?error=auth-code-error', origin))
 }

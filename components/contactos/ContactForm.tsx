@@ -1,16 +1,17 @@
 import { useContacts } from "@/lib/hooks/useContacts";
-import { db, LocalContact } from "@/lib/db";
+import type { LocalAccount, LocalContact } from "@/lib/db";
 import { useForm } from "react-hook-form";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useFormDraft } from "@/lib/hooks/useFormDraft";
 import { ContactImportButton } from "./ContactImportButton";
 import { ParsedContact } from "@/lib/vcard";
 import { AccountSelector } from "./AccountSelector";
-import { Building, Trash2 } from "lucide-react";
+import { Building, Trash2, History, User } from "lucide-react";
 import { useFormAutoSave } from "@/lib/hooks/useFormAutoSave";
 import { AutoSaveIndicator } from "@/components/ui/AutoSaveIndicator";
 import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
+import { EntityAuditHistoryTab } from "@/components/shared/EntityAuditHistoryTab";
 
 import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
 
@@ -24,9 +25,38 @@ interface ContactFormProps {
 
 export function ContactForm({ accountId, existingContact, onSuccess, onCancel, onDelete }: ContactFormProps) {
     const { createContact, updateContact, deleteContact, contacts } = useContacts(accountId);
-    const { isAdmin } = useCurrentUser();
+    const { isAdmin, isCoordinador, user: currentUser } = useCurrentUser();
+    const [contactAccount, setContactAccount] = useState<Pick<LocalAccount, 'id' | 'owner_user_id' | 'created_by'> | undefined>(undefined);
+
+    useEffect(() => {
+        if (!existingContact?.account_id) {
+            setContactAccount(undefined);
+            return;
+        }
+        let cancelled = false;
+        supabase
+            .from('CRM_Cuentas')
+            .select('id, owner_user_id, created_by')
+            .eq('id', existingContact.account_id)
+            .maybeSingle()
+            .then(({ data }) => {
+                if (!cancelled) {
+                    setContactAccount((data as Pick<LocalAccount, 'id' | 'owner_user_id' | 'created_by'>) || undefined);
+                }
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [existingContact?.account_id]);
+    // Eliminar: admin, coordinador, creador del contacto o dueño/creador de la cuenta
+    const canDeleteContact = isAdmin || isCoordinador || (!!currentUser?.id && (
+        (existingContact as { created_by?: string } | undefined)?.created_by === currentUser.id ||
+        contactAccount?.owner_user_id === currentUser.id ||
+        (contactAccount as { created_by?: string } | undefined)?.created_by === currentUser.id
+    ));
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
+    const [activeTab, setActiveTab] = useState<'info' | 'history'>('info');
 
     const defaultValues: Partial<LocalContact> = {
         nombre: existingContact?.nombre || "",
@@ -117,26 +147,7 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel, o
 
                 if (checks.length === 0) return null;
 
-                // 1. LOCAL CHECK (Dexie) - Crucial for offline or pending sync items
-                try {
-                    const localResults = await db.contacts.filter(c => {
-                        if (existingContact?.id && c.id === existingContact.id) return false;
-                        
-                        const matchName = data.nombre && c.nombre?.toLowerCase() === data.nombre.toLowerCase();
-                        const matchEmail = data.email && c.email?.toLowerCase() === data.email.toLowerCase();
-                        const matchPhone = data.telefono && c.telefono === data.telefono;
-                        
-                        return !!(matchName || matchEmail || matchPhone);
-                    }).toArray();
-
-                    if (localResults.length > 0) {
-                        return localResults.map(r => ({ ...r, source: 'local' }));
-                    }
-                } catch (e) {
-                    console.warn("[ContactForm] local duplicate check failed:", e);
-                }
-
-                // 2. SERVER CHECK (Supabase)
+                // SERVER CHECK (Supabase)
                 try {
                     const orFilters = [];
                     if (data.email) orFilters.push(`email.eq.${data.email}`);
@@ -157,8 +168,6 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel, o
                     return duplicates?.map(d => ({ ...d, source: 'server' })) || null;
                 } catch (error: any) {
                     console.error("Error checking contact duplicates on server:", error);
-                    // If server check fails, we already did local check. 
-                    // We might want to warn the user but local is ok for now.
                     return null;
                 }
             };
@@ -224,133 +233,183 @@ export function ContactForm({ accountId, existingContact, onSuccess, onCancel, o
                 {!existingContact && <ContactImportButton onContactImported={handleImport} />}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-3 md:col-span-2">
-                    <label className="text-sm font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mb-1">
-                        <Building size={14} className="text-[#254153]" />
-                        Cuenta Vinculada
-                    </label>
-                    <input type="hidden" {...register("account_id")} />
-                    <AccountSelector
-                        value={selectedAccountId || ""}
-                        initialAccountName={(existingContact as any)?.account_name}
-                        onChange={(val) => {
-                            console.log("[ContactForm] Changing account_id to:", val);
-                            setValue("account_id", val, { shouldDirty: true, shouldValidate: true });
-                        }}
-                    />
+            {existingContact && (
+                <div className="flex border-b border-slate-200 gap-2">
+                    <button
+                        type="button"
+                        onClick={() => setActiveTab('info')}
+                        className={`flex items-center gap-2 px-4 py-2.5 text-sm font-bold border-b-2 transition-colors ${
+                            activeTab === 'info'
+                                ? 'border-blue-600 text-blue-600'
+                                : 'border-transparent text-slate-500 hover:text-slate-700'
+                        }`}
+                    >
+                        <User size={16} />
+                        <span>Información</span>
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setActiveTab('history')}
+                        className={`flex items-center gap-2 px-4 py-2.5 text-sm font-bold border-b-2 transition-colors ${
+                            activeTab === 'history'
+                                ? 'border-blue-600 text-blue-600'
+                                : 'border-transparent text-slate-500 hover:text-slate-700'
+                        }`}
+                    >
+                        <History size={16} />
+                        <span>Historial de Cambios</span>
+                    </button>
                 </div>
+            )}
 
-                <div className="space-y-2">
-                    <label className="block text-xs font-black uppercase text-slate-500 tracking-widest ml-1">Nombre Completo *</label>
-                    <input
-                        {...register("nombre", { required: "El nombre es obligatorio" })}
-                        className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] transition-all outline-none font-bold text-slate-700"
-                        placeholder="Ej. Juan Pérez"
+            {activeTab === 'history' && existingContact ? (
+                <div className="space-y-4">
+                    <EntityAuditHistoryTab
+                        entityType="CONTACTO"
+                        entityId={existingContact.id}
+                        entityName={existingContact.nombre}
                     />
-                    {errors.nombre && <span className="text-red-500 font-bold text-[10px] uppercase ml-1 tracking-wider">{errors.nombre.message}</span>}
+                    <div className="flex justify-end pt-4 border-t border-slate-100">
+                        <button
+                            type="button"
+                            onClick={onCancel}
+                            className="px-6 py-2.5 text-sm font-bold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all"
+                        >
+                            Cerrar
+                        </button>
+                    </div>
                 </div>
+            ) : (
+                <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="space-y-3 md:col-span-2">
+                            <label className="text-sm font-black text-slate-500 uppercase tracking-widest flex items-center gap-2 mb-1">
+                                <Building size={14} className="text-[#254153]" />
+                                Cuenta Vinculada
+                            </label>
+                            <input type="hidden" {...register("account_id")} />
+                            <AccountSelector
+                                value={selectedAccountId || ""}
+                                initialAccountName={(existingContact as any)?.account_name}
+                                onChange={(val) => {
+                                    console.log("[ContactForm] Changing account_id to:", val);
+                                    setValue("account_id", val, { shouldDirty: true, shouldValidate: true });
+                                }}
+                            />
+                        </div>
 
-                <div className="space-y-2">
-                    <label className="block text-xs font-black uppercase text-slate-500 tracking-widest ml-1">Cargo / Posición</label>
-                    <input
-                        {...register("cargo")}
-                        className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] transition-all outline-none font-bold text-slate-700"
-                        placeholder="Ej. Gerente Comercial"
-                    />
-                </div>
+                        <div className="space-y-2">
+                            <label className="block text-xs font-black uppercase text-slate-500 tracking-widest ml-1">Nombre Completo *</label>
+                            <input
+                                {...register("nombre", { required: "El nombre es obligatorio" })}
+                                className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] transition-all outline-none font-bold text-slate-700"
+                                placeholder="Ej. Juan Pérez"
+                            />
+                            {errors.nombre && <span className="text-red-500 font-bold text-[10px] uppercase ml-1 tracking-wider">{errors.nombre.message}</span>}
+                        </div>
 
-                <div className="space-y-2">
-                    <label className="block text-xs font-black uppercase text-slate-500 tracking-widest ml-1">Correo Electrónico</label>
-                    <input
-                        type="email"
-                        {...register("email")}
-                        className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] transition-all outline-none font-bold text-slate-700"
-                        placeholder="ejemplo@correo.com"
-                    />
-                </div>
+                        <div className="space-y-2">
+                            <label className="block text-xs font-black uppercase text-slate-500 tracking-widest ml-1">Cargo / Posición</label>
+                            <input
+                                {...register("cargo")}
+                                className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] transition-all outline-none font-bold text-slate-700"
+                                placeholder="Ej. Gerente Comercial"
+                            />
+                        </div>
 
-                <div className="space-y-2">
-                    <label className="block text-xs font-black uppercase text-slate-500 tracking-widest ml-1">Teléfono Móvil</label>
-                    <input
-                        {...register("telefono")}
-                        className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] transition-all outline-none font-bold text-slate-700"
-                        placeholder="+57 300 123 4567"
-                    />
-                </div>
+                        <div className="space-y-2">
+                            <label className="block text-xs font-black uppercase text-slate-500 tracking-widest ml-1">Correo Electrónico</label>
+                            <input
+                                type="email"
+                                {...register("email")}
+                                className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] transition-all outline-none font-bold text-slate-700"
+                                placeholder="ejemplo@correo.com"
+                            />
+                        </div>
 
-                <div className="space-y-2 md:col-span-2">
-                    <label className="block text-xs font-black uppercase text-slate-500 tracking-widest ml-1">Comentarios</label>
-                    <textarea
-                        {...register("comentarios")}
-                        className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] transition-all outline-none font-bold text-slate-700 resize-none"
-                        placeholder="Información adicional sobre el contacto..."
-                        rows={3}
-                    />
-                </div>
-            </div>
+                        <div className="space-y-2">
+                            <label className="block text-xs font-black uppercase text-slate-500 tracking-widest ml-1">Teléfono Móvil</label>
+                            <input
+                                {...register("telefono")}
+                                className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] transition-all outline-none font-bold text-slate-700"
+                                placeholder="+57 300 123 4567"
+                            />
+                        </div>
 
-            <div className="flex items-center gap-3 p-4 bg-emerald-50/50 rounded-2xl border border-emerald-100">
-                <input
-                    type="checkbox"
-                    id="es_principal"
-                    {...register("es_principal")}
-                    className="h-5 w-5 rounded-lg border-slate-300 text-emerald-600 focus:ring-emerald-500 transition-all cursor-pointer"
-                />
-                <label htmlFor="es_principal" className="text-sm font-black text-emerald-800 cursor-pointer">
-                    Marcar como Contacto Principal de la cuenta
-                </label>
-            </div>
+                        <div className="space-y-2 md:col-span-2">
+                            <label className="block text-xs font-black uppercase text-slate-500 tracking-widest ml-1">Comentarios</label>
+                            <textarea
+                                {...register("comentarios")}
+                                className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-[#254153]/5 focus:border-[#254153] transition-all outline-none font-bold text-slate-700 resize-none"
+                                placeholder="Información adicional sobre el contacto..."
+                                rows={3}
+                            />
+                        </div>
+                    </div>
 
-            <div className="flex justify-between items-center gap-3 pt-6 border-t border-slate-100">
-                {existingContact ? (
-                    <>
-                        {isAdmin ? (
-                            <button
-                                type="button"
-                                onClick={() => setIsDeleteModalOpen(true)}
-                                className="px-4 py-2.5 text-sm font-bold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-xl flex items-center gap-2 transition-all active:scale-95"
-                                title="Eliminar este contacto"
-                            >
-                                <Trash2 size={16} />
-                                <span>Eliminar Contacto</span>
-                            </button>
+                    <div className="flex items-center gap-3 p-4 bg-emerald-50/50 rounded-2xl border border-emerald-100">
+                        <input
+                            type="checkbox"
+                            id="es_principal"
+                            {...register("es_principal")}
+                            className="h-5 w-5 rounded-lg border-slate-300 text-emerald-600 focus:ring-emerald-500 transition-all cursor-pointer"
+                        />
+                        <label htmlFor="es_principal" className="text-sm font-black text-emerald-800 cursor-pointer">
+                            Marcar como Contacto Principal de la cuenta
+                        </label>
+                    </div>
+
+                    <div className="flex justify-between items-center gap-3 pt-6 border-t border-slate-100">
+                        {existingContact ? (
+                            <>
+                                {canDeleteContact ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsDeleteModalOpen(true)}
+                                        className="px-4 py-2.5 text-sm font-bold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded-xl flex items-center gap-2 transition-all active:scale-95"
+                                        title="Eliminar este contacto"
+                                    >
+                                        <Trash2 size={16} />
+                                        <span>Eliminar Contacto</span>
+                                    </button>
+                                ) : (
+                                    <div />
+                                )}
+                                <div className="flex items-center gap-3">
+                                    <AutoSaveIndicator status={autoSaveStatus} errorMessage={autoSaveError} />
+                                    <button
+                                        type="button"
+                                        onClick={onCancel}
+                                        className="px-6 py-3 text-sm font-bold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all active:scale-95"
+                                    >
+                                        Cerrar
+                                    </button>
+                                </div>
+                            </>
                         ) : (
-                            <div />
+                            <>
+                                <div />
+                                <div className="flex items-center gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={onCancel}
+                                        className="px-6 py-3 text-sm font-bold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all active:scale-95"
+                                    >
+                                        Cancelar
+                                    </button>
+                                    <button
+                                        type="submit"
+                                        disabled={isSubmitting}
+                                        className="px-8 py-3 text-sm font-extrabold text-white bg-[#254153] border border-transparent rounded-xl hover:bg-[#1a2f3d] shadow-lg shadow-[#254153]/20 disabled:opacity-50 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                                    >
+                                        {isSubmitting ? 'Guardando...' : 'Guardar Contacto'}
+                                    </button>
+                                </div>
+                            </>
                         )}
-                        <div className="flex items-center gap-3">
-                            <AutoSaveIndicator status={autoSaveStatus} errorMessage={autoSaveError} />
-                            <button
-                                type="button"
-                                onClick={onCancel}
-                                className="px-6 py-3 text-sm font-bold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all active:scale-95"
-                            >
-                                Cerrar
-                            </button>
-                        </div>
-                    </>
-                ) : (
-                    <>
-                        <div />
-                        <div className="flex items-center gap-3">
-                            <button
-                                type="button"
-                                onClick={onCancel}
-                                className="px-6 py-3 text-sm font-bold text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all active:scale-95"
-                            >
-                                Cancelar
-                            </button>
-                            <button
-                                type="submit"
-                                disabled={isSubmitting}
-                                className="px-8 py-3 text-sm font-extrabold text-white bg-[#254153] border border-transparent rounded-xl hover:bg-[#1a2f3d] shadow-lg shadow-[#254153]/20 disabled:opacity-50 transition-all hover:scale-[1.02] active:scale-[0.98]"
-                            >
-                                {isSubmitting ? 'Guardando...' : 'Guardar Contacto'}
-                            </button>
-                        </div>
-                    </>
-                )}
-            </div>
+                    </div>
+                </>
+            )}
 
             {existingContact && (
                 <ConfirmationModal

@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { Filter, X, CircleDot, Medal } from "lucide-react";
 import { cn } from "@/components/ui/utils";
+import { SearchableSelect } from "@/components/ui/SearchableSelect";
 
 type Channel = {
     id: string;
@@ -96,8 +97,8 @@ export function AccountFilters({ onFilterChange, initialChannelId, initialSubcla
         return subclasses.filter(s => s.canal_id === selectedChannel);
     }, [selectedChannel, subclasses]);
 
-    const handleChannelChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        const val = e.target.value || null;
+    const handleChannelChange = (valRaw: string) => {
+        const val = valRaw || null;
         setSelectedChannel(val);
         setSelectedSubclass(null);
 
@@ -110,8 +111,8 @@ export function AccountFilters({ onFilterChange, initialChannelId, initialSubcla
         });
     };
 
-    const handleSubclassChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-        const val = e.target.value ? Number(e.target.value) : null;
+    const handleSubclassChange = (valRaw: string) => {
+        const val = valRaw ? Number(valRaw) : null;
         setSelectedSubclass(val);
 
         onFilterChange({
@@ -252,31 +253,38 @@ export function AccountFilters({ onFilterChange, initialChannelId, initialSubcla
                 <div className="space-y-1">
                     <span className="block px-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">Canal y tipo</span>
                     <div className="grid h-10 grid-cols-[1fr_1px_1fr] items-center rounded-lg bg-white px-2 shadow-sm ring-1 ring-slate-200">
-                        <div className="flex min-w-0 items-center gap-2 pr-2">
+                        <div className="flex min-w-0 items-center gap-1 pr-1">
                             <Filter className="h-4 w-4 shrink-0 text-slate-400" />
-                            <select
-                                className="min-w-0 flex-1 cursor-pointer border-none bg-transparent text-sm font-semibold text-slate-700 focus:ring-0"
+                            <SearchableSelect
+                                compact
                                 value={selectedChannel || ""}
                                 onChange={handleChannelChange}
-                            >
-                                <option value="">Todos los Canales</option>
-                                {channels.map(c => (
-                                    <option key={c.id} value={c.id}>{c.nombre}</option>
-                                ))}
-                            </select>
+                                placeholder="Todos los Canales"
+                                searchPlaceholder="Buscar canal..."
+                                triggerClassName="min-h-0 h-8 border-none bg-transparent px-1 py-0 text-sm font-semibold text-slate-700 focus:ring-0 shadow-none"
+                                options={channels.map(c => ({
+                                    value: c.id,
+                                    label: c.nombre || c.id,
+                                    searchValue: c.id,
+                                }))}
+                            />
                         </div>
                         <span className="h-6 bg-slate-200" />
-                        <select
-                            className="min-w-0 cursor-pointer border-none bg-transparent pl-2 text-sm font-medium text-slate-700 focus:ring-0 disabled:cursor-not-allowed disabled:text-slate-400"
-                            value={selectedSubclass || ""}
-                            onChange={handleSubclassChange}
-                            disabled={!selectedChannel}
-                        >
-                            <option value="">Todos los Tipos</option>
-                            {availableSubclasses.map(s => (
-                                <option key={s.id} value={s.id}>{s.nombre}</option>
-                            ))}
-                        </select>
+                        <div className="min-w-0 pl-1">
+                            <SearchableSelect
+                                compact
+                                value={selectedSubclass ? String(selectedSubclass) : ""}
+                                onChange={handleSubclassChange}
+                                disabled={!selectedChannel}
+                                placeholder="Todos los Tipos"
+                                searchPlaceholder="Buscar tipo..."
+                                triggerClassName="min-h-0 h-8 border-none bg-transparent px-1 py-0 text-sm font-medium text-slate-700 focus:ring-0 shadow-none disabled:bg-transparent"
+                                options={availableSubclasses.map(s => ({
+                                    value: String(s.id),
+                                    label: s.nombre,
+                                }))}
+                            />
+                        </div>
                     </div>
                 </div>
 

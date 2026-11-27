@@ -1,32 +1,21 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useUsers, User, CreateUserData, UpdateUserData } from '@/lib/hooks/useUsers';
+import { useZones } from '@/lib/hooks/useZones';
 import { X, Loader2 } from 'lucide-react';
 import { MultiSelect } from '@/components/ui/MultiSelect';
+import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { SALES_CHANNELS } from '@/lib/salesChannels';
+import { userSchema, UserFormData } from '@/lib/userValidation';
+import { supabase } from '@/lib/supabase';
+import type { LocalCountry, LocalDepartment } from '@/lib/db';
 
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '@/lib/db';
-
-const userSchema = z.object({
-    email: z.string().refine(val => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((val || "").trim()), { message: "Email inválido" }),
-    password: z.string().min(6, 'La contraseña debe tener al menos 6 caracteres').optional(),
-    full_name: z.string().min(2, 'El nombre debe tener al menos 2 caracteres'),
-    role: z.enum(['ADMIN', 'COORDINADOR', 'VENDEDOR']),
-    allowed_modules: z.array(z.string()).optional(),
-    coordinadores: z.array(z.string()).optional(),
-    pais: z.string().optional(),
-    departamento: z.string().optional(),
-    paises: z.array(z.string()).optional(),
-    departamentos: z.array(z.string()).optional(),
-    canales: z.array(z.string()).optional(),
-});
-
-type UserFormData = z.infer<typeof userSchema>;
+export { userSchema };
+export type { UserFormData };
 
 interface UserFormProps {
     user: User | null;
@@ -48,12 +37,28 @@ const AVAILABLE_MODULES = [
 ];
 
 export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
-    const { createUser, updateUser, users } = useUsers();
+    const { createUser, updateUser, updateUserPassword, users } = useUsers();
+    const { zones } = useZones(false);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    const countriesList = useLiveQuery(() => db.countries.toArray()) || [];
-    const departmentsList = useLiveQuery(() => db.departments.toArray()) || [];
+    const [countriesList, setCountriesList] = useState<LocalCountry[]>([]);
+    const [departmentsList, setDepartmentsList] = useState<LocalDepartment[]>([]);
+
+    useEffect(() => {
+        let cancelled = false;
+        Promise.all([
+            supabase.from('CRM_Paises').select('*').order('nombre'),
+            supabase.from('CRM_Departamentos').select('*').order('nombre'),
+        ]).then(([countriesRes, deptsRes]) => {
+            if (cancelled) return;
+            if (countriesRes.data) setCountriesList(countriesRes.data as LocalCountry[]);
+            if (deptsRes.data) setDepartmentsList(deptsRes.data as LocalDepartment[]);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     const countryOptions = countriesList.map(c => ({ label: c.nombre, value: String(c.id) }));
     const channelOptions = SALES_CHANNELS.map(c => ({ label: c.nombre, value: c.id }));
@@ -68,7 +73,9 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
         resolver: zodResolver(userSchema),
         defaultValues: user ? {
             email: user.email,
+            password: '',
             full_name: user.full_name || '',
+            telefono: user.telefono || '',
             role: user.role,
             allowed_modules: user.allowed_modules || [],
             coordinadores: user.coordinadores || [],
@@ -77,7 +84,11 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
             paises: user.paises || (user.pais ? [user.pais] : []),
             departamentos: user.departamentos || (user.departamento ? [user.departamento] : []),
             canales: user.canales || [],
+            zona_id: user.zona_id || '',
         } : {
+            password: '',
+            full_name: '',
+            telefono: '',
             role: 'VENDEDOR',
             allowed_modules: [],
             coordinadores: [],
@@ -86,6 +97,7 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
             paises: [],
             departamentos: [],
             canales: [],
+            zona_id: '',
         },
     });
 
@@ -116,6 +128,7 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
                 // Update existing user
                 const updates: UpdateUserData = {
                     full_name: data.full_name,
+                    telefono: data.telefono ? data.telefono.trim() : null,
                     role: data.role,
                     allowed_modules: data.allowed_modules,
                     coordinadores: data.coordinadores,
@@ -124,6 +137,7 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
                     paises: paisesArray,
                     departamentos: deptsArray,
                     canales: canalesArray,
+                    zona_id: data.zona_id ? data.zona_id : null,
                 };
 
                 const result = await updateUser(user.id, updates);
@@ -132,10 +146,19 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
                     setError(result.error || 'Error al actualizar usuario');
                     return;
                 }
+
+                // If password was provided, update it via API
+                if (data.password && data.password.trim() !== '') {
+                    const pwdResult = await updateUserPassword(user.id, data.password);
+                    if (!pwdResult.success) {
+                        setError(pwdResult.error || 'Error al actualizar la contraseña');
+                        return;
+                    }
+                }
             } else {
                 // Create new user
-                if (!data.password) {
-                    setError('La contraseña es requerida para crear un usuario');
+                if (!data.password || data.password.trim().length < 6) {
+                    setError('La contraseña es requerida para crear un nuevo usuario (mínimo 6 caracteres)');
                     return;
                 }
 
@@ -143,6 +166,7 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
                     email: data.email,
                     password: data.password,
                     full_name: data.full_name,
+                    telefono: data.telefono ? data.telefono.trim() : null,
                     role: data.role,
                     allowed_modules: data.allowed_modules,
                     coordinadores: data.coordinadores,
@@ -151,6 +175,7 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
                     paises: paisesArray,
                     departamentos: deptsArray,
                     canales: canalesArray,
+                    zona_id: data.zona_id ? data.zona_id : null,
                 };
 
                 const result = await createUser(createData);
@@ -210,23 +235,21 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
                         )}
                     </div>
 
-                    {/* Password (only for new users) */}
-                    {!user && (
-                        <div>
-                            <label className="block text-sm font-semibold text-slate-700 mb-2">
-                                Contraseña
-                            </label>
-                            <input
-                                type="password"
-                                {...register('password')}
-                                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#254153] focus:border-transparent"
-                                placeholder="Mínimo 6 caracteres"
-                            />
-                            {errors.password && (
-                                <p className="mt-1 text-sm text-red-600">{errors.password.message}</p>
-                            )}
-                        </div>
-                    )}
+                    {/* Password (for new users, or to update existing) */}
+                    <div>
+                        <label className="block text-sm font-semibold text-slate-700 mb-2">
+                            {user ? 'Nueva Contraseña (Opcional)' : 'Contraseña'}
+                        </label>
+                        <input
+                            type="password"
+                            {...register('password')}
+                            className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#254153] focus:border-transparent"
+                            placeholder={user ? "Dejar en blanco para no cambiar" : "Mínimo 6 caracteres"}
+                        />
+                        {errors.password && (
+                            <p className="mt-1 text-sm text-red-600">{errors.password.message}</p>
+                        )}
+                    </div>
 
                     {/* Full Name */}
                     <div>
@@ -244,24 +267,78 @@ export function UserForm({ user, onClose, onSuccess }: UserFormProps) {
                         )}
                     </div>
 
+                    {/* Número de Teléfono */}
+                    <div>
+                        <label className="block text-sm font-semibold text-slate-700 mb-2">
+                            Número de Teléfono
+                        </label>
+                        <input
+                            type="tel"
+                            {...register('telefono')}
+                            className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#254153] focus:border-transparent"
+                            placeholder="Ej: +57 300 123 4567"
+                        />
+                        {errors.telefono && (
+                            <p className="mt-1 text-sm text-red-600">{errors.telefono.message}</p>
+                        )}
+                    </div>
+
                     {/* Role */}
                     <div>
                         <label className="block text-sm font-semibold text-slate-700 mb-2">
                             Rol
                         </label>
-                        <select
-                            {...register('role')}
-                            className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#254153] focus:border-transparent"
-                        >
-                            <option value="VENDEDOR">Vendedor</option>
-                            <option value="COORDINADOR">Coordinador</option>
-                            <option value="ADMIN">Administrador</option>
-                        </select>
+                        <Controller
+                            control={control}
+                            name="role"
+                            render={({ field }) => (
+                                <SearchableSelect
+                                    value={field.value || 'VENDEDOR'}
+                                    allowClear={false}
+                                    onChange={(val) => {
+                                        if (val) field.onChange(val as 'ADMIN' | 'COORDINADOR' | 'VENDEDOR');
+                                    }}
+                                    placeholder="Seleccionar rol..."
+                                    searchPlaceholder="Buscar rol..."
+                                    options={[
+                                        { value: 'VENDEDOR', label: 'Vendedor' },
+                                        { value: 'COORDINADOR', label: 'Coordinador' },
+                                        { value: 'ADMIN', label: 'Administrador' },
+                                    ]}
+                                />
+                            )}
+                        />
                         {errors.role && (
                             <p className="mt-1 text-sm text-red-600">{errors.role.message}</p>
                         )}
                         <p className="mt-1 text-xs text-slate-500">
                             Define los permisos y accesos del usuario en el sistema
+                        </p>
+                    </div>
+
+                    {/* Zona Comercial */}
+                    <div>
+                        <label className="block text-sm font-semibold text-slate-700 mb-2">
+                            Zona Comercial
+                        </label>
+                        <Controller
+                            control={control}
+                            name="zona_id"
+                            render={({ field }) => (
+                                <SearchableSelect
+                                    value={field.value || ''}
+                                    onChange={(val) => field.onChange(val || '')}
+                                    placeholder="Sin zona asignada"
+                                    searchPlaceholder="Buscar zona comercial..."
+                                    options={zones.map(z => ({
+                                        value: z.id,
+                                        label: z.nombre,
+                                    }))}
+                                />
+                            )}
+                        />
+                        <p className="mt-1 text-xs text-slate-500">
+                            Se usa automáticamente al crear sucursales de cuentas existentes (ej. Nombre Matriz - Zona). Administrable en Configuración.
                         </p>
                     </div>
 

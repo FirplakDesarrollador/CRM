@@ -6,9 +6,11 @@ import { useState, useEffect } from "react";
 import { ContactForm } from "./ContactForm";
 import { CreateContactWizard } from "./CreateContactWizard";
 import { LocalContact } from "@/lib/db";
-import { Edit2, Trash2, Phone, Mail, User, Search } from "lucide-react";
+import Link from "next/link";
+import { Edit2, Trash2, Phone, Mail, User, Search, Briefcase, Plus } from "lucide-react";
+import { newOpportunityUrlForContact } from "./ContactOpportunities";
 import { ConfirmationModal } from "@/components/ui/ConfirmationModal";
-import { includesNormalized } from "@/lib/utils";
+import { includesNormalized, isPhoneLikeQuery, digitsOnly } from "@/lib/utils";
 
 interface ContactListProps {
     accountId: string;
@@ -75,7 +77,8 @@ export function ContactList({ accountId }: ContactListProps) {
             includesNormalized(contact.nombre, searchTerm) ||
             includesNormalized(contact.cargo, searchTerm) ||
             includesNormalized(contact.email, searchTerm) ||
-            includesNormalized(contact.telefono, searchTerm)
+            includesNormalized(contact.telefono, searchTerm) ||
+            (isPhoneLikeQuery(searchTerm) && digitsOnly(contact.telefono).includes(digitsOnly(searchTerm)))
         );
     });
 
@@ -109,7 +112,7 @@ export function ContactList({ accountId }: ContactListProps) {
                         <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
                         <input
                             className="w-full pl-9 pr-4 py-2 border rounded-lg text-sm bg-white border-slate-200"
-                            placeholder="Buscar contactos..."
+                            placeholder="Buscar contactos (nombre, correo o celular)..."
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                         />
@@ -196,6 +199,24 @@ export function ContactList({ accountId }: ContactListProps) {
                                             <span className="text-sm font-medium">{contact.telefono}</span>
                                         </a>
                                     )}
+                                    <div className="flex items-center gap-3 pt-1">
+                                        <Link
+                                            href={`/contactos?id=${contact.id}`}
+                                            className="flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-[#254153]"
+                                            title="Ver las oportunidades de este contacto"
+                                        >
+                                            <Briefcase size={12} />
+                                            Ver oportunidades
+                                        </Link>
+                                        <Link
+                                            href={newOpportunityUrlForContact(contact.account_id, contact.id)}
+                                            className="flex items-center gap-1.5 text-xs font-bold text-blue-600 hover:text-blue-700"
+                                            title="Crear una oportunidad con la cuenta y el contacto ya cargados"
+                                        >
+                                            <Plus size={12} />
+                                            Nueva oportunidad
+                                        </Link>
+                                    </div>
                                 </div>
                             </div>
                         </div>

@@ -5,6 +5,10 @@ import { Search, Loader2, FileText, Building2, User } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import { useOnClickOutside } from "@/lib/hooks/useOnClickOutside"; // Assuming this exists or I'll implement a simple ref check
+import { useCurrentUser } from "@/lib/hooks/useCurrentUser";
+import { db } from "@/lib/db";
+import { canViewAllAccountsContactsOpportunities, isSellerRole, sellerCanSeeAccount, sellerCanSeeOpportunity } from "@/lib/sellerVisibility";
+import { filterSearchResultsForTienda, isTiendaUser } from "@/lib/tiendaVisibility";
 
 type SearchResult = {
     entity_type: 'opportunity' | 'account' | 'contact';
@@ -14,7 +18,36 @@ type SearchResult = {
     metadata: any;
 };
 
+/** Asesor (VENDEDOR): deja solo resultados de sus cuentas/oportunidades (dueño o colaborador) y contactos de esas cuentas. */
+async function filterResultsForSeller(results: SearchResult[], userId: string): Promise<SearchResult[]> {
+    const collabs = await db.opportunityCollaborators.where('usuario_id').equals(userId).toArray();
+    const collabOppIds = new Set(collabs.filter(c => !c.is_deleted).map(c => c.oportunidad_id));
+    const collabOpps = collabOppIds.size > 0 ? await db.opportunities.where('id').anyOf(Array.from(collabOppIds)).toArray() : [];
+    const collabAccountIds = new Set(collabOpps.filter(o => !o.is_deleted && o.account_id).map(o => o.account_id as string));
+
+    const canSeeAccountId = async (accountId: string | null | undefined) => {
+        if (!accountId) return false;
+        const acc = await db.accounts.get(accountId);
+        return !!acc && sellerCanSeeAccount(acc, userId, collabAccountIds);
+    };
+
+    const visible: SearchResult[] = [];
+    for (const r of results) {
+        if (r.entity_type === 'opportunity') {
+            const opp = await db.opportunities.get(r.id);
+            if (opp && sellerCanSeeOpportunity(opp, userId, collabOppIds)) visible.push(r);
+        } else if (r.entity_type === 'account') {
+            if (await canSeeAccountId(r.id)) visible.push(r);
+        } else if (r.entity_type === 'contact') {
+            const contact = await db.contacts.get(r.id);
+            if (contact && await canSeeAccountId(contact.account_id)) visible.push(r);
+        }
+    }
+    return visible;
+}
+
 export function GlobalSearch() {
+    const { user: currentUser, role } = useCurrentUser();
     const [isOpen, setIsOpen] = useState(false);
     const [query, setQuery] = useState("");
     const [results, setResults] = useState<SearchResult[]>([]);
@@ -50,7 +83,24 @@ export function GlobalSearch() {
                 });
 
                 if (error) throw error;
-                setResults(data || []);
+                let rows = (data || []) as SearchResult[];
+                if (isTiendaUser(currentUser) && currentUser?.id) {
+                    const opportunityIds = rows.filter(row => row.entity_type === 'opportunity').map(row => row.id);
+                    let owned = new Set<string>();
+                    if (opportunityIds.length > 0) {
+                        const { data: ownedRows } = await supabase
+                            .from('CRM_Oportunidades')
+                            .select('id')
+                            .in('id', opportunityIds)
+                            .eq('owner_user_id', currentUser.id);
+                        owned = new Set((ownedRows || []).map(row => row.id as string));
+                    }
+                    // Cuentas y contactos se quedan completos. Solo se recortan oportunidades.
+                    setResults(filterSearchResultsForTienda(rows, currentUser, owned));
+                    return;
+                }
+                const restrictPortfolio = isSellerRole(role) && !!currentUser?.id && !canViewAllAccountsContactsOpportunities(currentUser);
+                setResults(restrictPortfolio && currentUser?.id ? await filterResultsForSeller(rows, currentUser.id) : rows);
             } catch (err) {
                 console.error("Global Search Error:", err);
             } finally {
@@ -59,7 +109,7 @@ export function GlobalSearch() {
         }, 300);
 
         return () => clearTimeout(timer);
-    }, [query]);
+    }, [query, role, currentUser]);
 
     const handleSelect = (result: SearchResult) => {
         setIsOpen(false);
