@@ -141,24 +141,24 @@ export function OpportunityCombobox({
                 </button>
             </PopoverTrigger>
             <PopoverContent
-                className="w-[var(--radix-popover-trigger-width)] min-w-[260px] p-0 z-[110]"
+                className="w-[var(--radix-popover-trigger-width)] min-w-[260px] max-w-[calc(100vw-2rem)] p-0 z-[80] bg-white shadow-xl border border-slate-200 rounded-xl overflow-hidden"
                 align="start"
-                side="bottom"
                 sideOffset={4}
-                avoidCollisions={false}
+                collisionPadding={12}
+                avoidCollisions={true}
             >
                 <Command shouldFilter={false}>
                     <div className="flex items-center border-b px-3">
                         <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
                         <input
-                            className="flex h-11 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                            className="flex h-11 w-full rounded-md bg-transparent py-3 text-base sm:text-sm outline-none placeholder:text-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
                             placeholder="Buscar oportunidad..."
                             value={search}
                             onChange={(e) => setSearch(e.target.value)}
                         />
                     </div>
                     <CommandList
-                        className="max-h-[300px] overflow-y-auto overflow-x-hidden p-1 overscroll-contain"
+                        className="max-h-[min(280px,calc(var(--radix-popover-content-available-height,280px)-56px))] overflow-y-auto overflow-x-hidden overscroll-contain p-1"
                         onWheel={(e) => e.stopPropagation()}
                         onTouchMove={(e) => e.stopPropagation()}
                     >

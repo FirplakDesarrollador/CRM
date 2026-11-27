@@ -329,6 +329,28 @@ export async function hydrateReferenceCatalogsFromSupabase(): Promise<void> {
             import('./opportunityPhaseCatalog'),
         ]);
 
+        // ── Cache de 24 horas en localStorage ──────────────────────────────────
+        // Si los catálogos ya se hidrataron en las últimas 24h y Dexie tiene datos,
+        // saltamos los 8 queries de Supabase para acelerar el arranque.
+        const CACHE_KEY = 'crm_catalogs_last_hydrated';
+        const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 horas
+        try {
+            const lastHydrated = typeof window !== 'undefined' ? window.localStorage.getItem(CACHE_KEY) : null;
+            if (lastHydrated) {
+                const elapsed = Date.now() - parseInt(lastHydrated, 10);
+                if (elapsed < CACHE_TTL_MS) {
+                    // Verificar que Dexie realmente tiene datos antes de saltarnos
+                    const phasesCount = await db.phases.count();
+                    if (phasesCount > 0) {
+                        return; // Catálogos frescos en caché local — saltar fetch remoto
+                    }
+                }
+            }
+        } catch {
+            // localStorage puede fallar en modo privado — continuar normalmente
+        }
+        // ───────────────────────────────────────────────────────────────────────
+
         const [
             phasesRes,
             phaseLabelsRes,
@@ -394,6 +416,15 @@ export async function hydrateReferenceCatalogsFromSupabase(): Promise<void> {
         }
 
         await hydrateActivityCatalogsFromSupabase();
+
+        // Marcar el tiempo de hidratación para el cache de 24h
+        try {
+            if (typeof window !== 'undefined') {
+                window.localStorage.setItem('crm_catalogs_last_hydrated', Date.now().toString());
+            }
+        } catch {
+            // Ignorar si localStorage no está disponible
+        }
     } catch (err) {
         console.warn('[supabaseDirect] Reference catalogs hydration warning:', err);
     }
@@ -430,18 +461,32 @@ export async function hydrateOpportunityDetailFromSupabase(
         ) {
             return { oppData: null, collaborators: [], forbidden: true };
         }
+
+        // ── Ola 2: cuenta, contactos e ítems en paralelo ─────────────────────
+        // Elimina el waterfall de 3 round-trips → 1 round-trip adicional.
+        const accountId = oppData ? (typeof oppData.account_id === 'string' ? oppData.account_id : '') : '';
+        const quoteIds = Array.isArray(quotesRes.data)
+            ? quotesRes.data.map((q: { id?: string }) => q.id).filter(Boolean) as string[]
+            : [];
+
+        const [accRes, contactsRes, itemsRes] = await Promise.all([
+            accountId
+                ? supabaseClient.from('CRM_Cuentas').select('*').eq('id', accountId).maybeSingle()
+                : Promise.resolve({ data: null, error: null }),
+            accountId
+                ? supabaseClient.from('CRM_Contactos').select('*').eq('account_id', accountId).eq('is_deleted', false)
+                : Promise.resolve({ data: [], error: null }),
+            quoteIds.length > 0
+                ? supabaseClient.from('CRM_CotizacionItems').select('*').in('cotizacion_id', quoteIds).eq('is_deleted', false)
+                : Promise.resolve({ data: [], error: null }),
+        ]);
+        // ─────────────────────────────────────────────────────────────────────
+
         if (oppData) {
             await db.opportunities.put(oppData as never);
-            const accountId = typeof oppData.account_id === 'string' ? oppData.account_id : '';
-            if (accountId) {
-                const [accRes, contactsRes] = await Promise.all([
-                    supabaseClient.from('CRM_Cuentas').select('*').eq('id', accountId).maybeSingle(),
-                    supabaseClient.from('CRM_Contactos').select('*').eq('account_id', accountId).eq('is_deleted', false),
-                ]);
-                if (accRes.data) await db.accounts.put(accRes.data as never);
-                if (Array.isArray(contactsRes.data) && contactsRes.data.length > 0) {
-                    await db.contacts.bulkPut(contactsRes.data as never);
-                }
+            if (accRes.data) await db.accounts.put(accRes.data as never);
+            if (Array.isArray(contactsRes.data) && contactsRes.data.length > 0) {
+                await db.contacts.bulkPut(contactsRes.data as never);
             }
         }
 
@@ -452,16 +497,8 @@ export async function hydrateOpportunityDetailFromSupabase(
 
         if (Array.isArray(quotesRes.data) && quotesRes.data.length > 0) {
             await db.quotes.bulkPut(quotesRes.data as never);
-            const quoteIds = quotesRes.data.map((q: { id?: string }) => q.id).filter(Boolean) as string[];
-            if (quoteIds.length > 0) {
-                const { data: itemsData } = await supabaseClient
-                    .from('CRM_CotizacionItems')
-                    .select('*')
-                    .in('cotizacion_id', quoteIds)
-                    .eq('is_deleted', false);
-                if (Array.isArray(itemsData) && itemsData.length > 0) {
-                    await db.quoteItems.bulkPut(itemsData as never);
-                }
+            if (Array.isArray(itemsRes.data) && itemsRes.data.length > 0) {
+                await db.quoteItems.bulkPut(itemsRes.data as never);
             }
         }
 

@@ -5,7 +5,7 @@ import { Search, Building, Check, ChevronDown, Loader2 } from "lucide-react";
 import { cn } from "@/components/ui/utils";
 import { useOnClickOutside } from "@/lib/hooks/useOnClickOutside";
 import { useAccountsServer } from "@/lib/hooks/useAccountsServer";
-import { db } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 
 interface AccountSelectorProps {
     value: string;
@@ -27,12 +27,12 @@ export function AccountSelector({
     const containerRef = useRef<HTMLDivElement>(null);
     const [currentAccountName, setCurrentAccountName] = useState(initialAccountName || "");
 
-    // Use server search logic (works local too)
+    // Consulta directa, liviana y aislada de los filtros de /cuentas
     const { 
         data: accounts, 
         loading, 
         setSearchTerm: setServerSearchTerm 
-    } = useAccountsServer({ pageSize: 50 }); // Load top 50 matches
+    } = useAccountsServer({ pageSize: 50, ignorePersistedFilters: true, lightweight: true });
 
     // @ts-ignore
     useOnClickOutside(containerRef, () => setIsOpen(false));
@@ -41,39 +41,41 @@ export function AccountSelector({
     useEffect(() => {
         const timer = setTimeout(() => {
             setServerSearchTerm(searchTerm);
-        }, 300);
+        }, 250);
         return () => clearTimeout(timer);
     }, [searchTerm, setServerSearchTerm]);
 
-    // Robust name resolution: initial, selected, or fallback from DB
+    // Robust name resolution: initial, selected, or direct lookup in Supabase
     useEffect(() => {
+        let cancelled = false;
         const resolve = async () => {
-            // Priority 1: initialAccountName if provided and no name set
             if (initialAccountName && !currentAccountName) {
                 setCurrentAccountName(initialAccountName);
                 return;
             }
 
-            // Priority 2: Value changes but we need the name
             if (value) {
-                // Try current results
                 const found = accounts.find(a => a.id === value);
                 if (found) {
                     setCurrentAccountName(found.nombre);
                     return;
                 }
-                
-                // Final fallback: fetch from local Dexie
-                const acc = await db.accounts.get(value);
-                if (acc) {
-                    setCurrentAccountName(acc.nombre);
+
+                const { data } = await supabase
+                    .from('CRM_Cuentas')
+                    .select('id, nombre')
+                    .eq('id', value)
+                    .maybeSingle();
+                if (!cancelled && data?.nombre) {
+                    setCurrentAccountName(data.nombre);
                 }
             } else {
                 setCurrentAccountName("");
             }
         };
         resolve();
-    }, [value, initialAccountName, accounts]);
+        return () => { cancelled = true; };
+    }, [value, initialAccountName, accounts, currentAccountName]);
 
     // Ensure current selection is in the options list even if not in search results
     const options = useMemo(() => {

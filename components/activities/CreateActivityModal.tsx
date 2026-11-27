@@ -1613,7 +1613,7 @@ export function CreateActivityModal({ onClose, onSubmit, opportunities, initialO
     });
 
     return (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
             <div className="bg-white rounded-2xl md:rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col max-h-[95vh] md:max-h-[90vh]">
                 <div className="p-6 border-b border-slate-100 flex justify-between items-center shrink-0">
                     <div>

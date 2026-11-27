@@ -7,8 +7,10 @@ import { buildPhaseOutcomeMap, getPhaseOutcome } from '@/lib/opportunityPhase';
 import { readFullPhaseCatalog } from '@/lib/phaseCatalogStore';
 import { useCurrentUser } from '@/lib/hooks/useCurrentUser';
 import { useSyncStore } from '@/lib/stores/useSyncStore';
-import { matchesSearchTokens, getSearchTokens, getPhoneIlikePatterns } from '@/lib/utils';
+import { matchesSearchTokens, getSearchTokens } from '@/lib/utils';
 import { getCellphoneSearchDigits, findPhoneMatchesServer, findPhoneMatchesLocal } from '@/lib/phoneSearch';
+import { buildAccountTokenOrFilter } from '@/lib/accountSearchHelpers';
+import { sameArrayValues } from '@/lib/listQueryHelpers';
 
 export type AccountServer = {
     id: string;
@@ -43,19 +45,28 @@ export type AccountServer = {
 
 type UseAccountsServerProps = {
     pageSize?: number;
+    /** Ignora filtros guardados en URL y sessionStorage; recomendado para comboboxes embebidos. */
+    ignorePersistedFilters?: boolean;
+    /** Consulta directa y liviana sobre CRM_Cuentas sin vistas pesadas ni conteo exacto. */
+    lightweight?: boolean;
 };
 
-export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}) {
+export function useAccountsServer({
+    pageSize = 20,
+    ignorePersistedFilters = false,
+    lightweight = false,
+}: UseAccountsServerProps = {}) {
     const [data, setData] = useState<AccountServer[]>([]);
     const [count, setCount] = useState<number>(0);
     const [loading, setLoading] = useState<boolean>(true);
     const [hasMore, setHasMore] = useState<boolean>(true);
 
     const pageRef = useRef(1);
+    const requestIdRef = useRef(0);
 
     // Helper to extract initial filter from URL or sessionStorage
     const getInitialParam = (key: string) => {
-        if (typeof window === 'undefined') return null;
+        if (typeof window === 'undefined' || ignorePersistedFilters) return null;
         const urlParams = new URLSearchParams(window.location.search);
         const fromUrl = urlParams.get(key);
         if (fromUrl) return fromUrl;
@@ -90,23 +101,38 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
     const scopeAccounts = shouldScopeAccountsByRole(user, userRole, seesAllPortfolio);
 
     const [subordinateIds, setSubordinateIds] = useState<string[]>([]);
+    const [subordinatesLoadedFor, setSubordinatesLoadedFor] = useState<string | null>(null);
+    // Solo importa cuando el filtro por rol usa el equipo; así el coordinador no ve primero una lista incompleta.
+    const subordinatesReady = !(scopeAccounts && userRole === 'COORDINADOR') || subordinatesLoadedFor === currentUserId;
 
     useEffect(() => {
         if (userRole === 'COORDINADOR' && currentUserId) {
+            let cancelled = false;
             supabase
                 .from('CRM_Usuarios')
                 .select('id')
                 .contains('coordinadores', [currentUserId])
                 .then(({ data, error }) => {
+                    if (cancelled) return;
                     if (!error && data) {
-                        setSubordinateIds(data.map(u => u.id));
+                        const ids = data.map(u => u.id);
+                        setSubordinateIds(prev => sameArrayValues(prev, ids) ? prev : ids);
                     }
+                    setSubordinatesLoadedFor(currentUserId);
+                }, () => {
+                    if (!cancelled) setSubordinatesLoadedFor(currentUserId);
                 });
+            return () => { cancelled = true; };
         }
     }, [userRole, currentUserId]);
 
     const fetchAccounts = useCallback(async (isLoadMore = false) => {
-        if (!currentUserId) return; // Prevent leak while user loads
+        if (!currentUserId) {
+            setLoading(false);
+            return; // Prevent leak while user loads
+        }
+        if (!subordinatesReady) return; // Coordinador: esperar a conocer su equipo
+        const requestId = ++requestIdRef.current;
         const setIsLoadingData = useSyncStore.getState().setIsLoadingData;
         setLoading(true);
         setIsLoadingData(true);
@@ -270,19 +296,40 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                 return;
             }
 
-            let query = supabase
-                .from('CRM_VistaCuentasConPotencial')
-                .select('*', { count: 'exact' })
-                .eq('is_deleted', false);
+            let query = lightweight
+                ? supabase
+                    .from('CRM_Cuentas')
+                    .select('id, nombre, nit, nit_base, id_cuenta_principal, canal_id, subclasificacion_id, es_premium, nivel_premium, telefono, email, direccion, ciudad, pais_id, departamento_id, ciudad_id, created_by, owner_user_id, updated_at, created_at')
+                    .eq('is_deleted', false)
+                : supabase
+                    .from('CRM_VistaCuentasConPotencial')
+                    .select('*', { count: 'exact' })
+                    .eq('is_deleted', false);
+
+            // PERF: consultas previas independientes en paralelo (antes: web → colaboraciones → celular en serie).
+            const needsRoleScope = Boolean(scopeAccounts && (isVendedor || userRole === 'COORDINADOR') && currentUserId);
+            const [webOppsRes, collabRes, phoneMatches] = await Promise.all([
+                webFilter
+                    ? supabase
+                        .from('CRM_Oportunidades')
+                        .select('account_id')
+                        .or('url_origen.not.is.null,origen_oportunidad.ilike.%web%,origen_oportunidad.ilike.%pagina%')
+                        .eq('is_deleted', false)
+                    : Promise.resolve(null),
+                needsRoleScope
+                    ? supabase
+                        .from('CRM_Oportunidades_Colaboradores')
+                        .select('CRM_Oportunidades!inner(account_id)')
+                        .eq('usuario_id', currentUserId)
+                        .eq('is_deleted', false)
+                    : Promise.resolve(null),
+                phoneDigits ? findPhoneMatchesServer(supabase, phoneDigits) : Promise.resolve(null),
+            ]);
+            if (requestId !== requestIdRef.current) return;
 
             if (webFilter) {
-                // Fetch account_ids from opportunities that came from web
-                const { data: webOpps } = await supabase
-                    .from('CRM_Oportunidades')
-                    .select('account_id')
-                    .or('url_origen.not.is.null,origen_oportunidad.ilike.%web%,origen_oportunidad.ilike.%pagina%')
-                    .eq('is_deleted', false);
-                
+                // account_ids from opportunities that came from web
+                const webOpps = webOppsRes?.data as Array<{ account_id: string | null }> | null | undefined;
                 const webAccountIds = [...new Set(webOpps?.map(o => o.account_id).filter(Boolean))];
                 if (webAccountIds.length > 0) {
                     query = query.in('id', webAccountIds);
@@ -292,14 +339,9 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
             }
 
             // Role filtering
-            if (scopeAccounts && (isVendedor || userRole === 'COORDINADOR') && currentUserId) {
-                // Fetch accounts where user is collaborator
-                const { data: collabData } = await supabase
-                    .from('CRM_Oportunidades_Colaboradores')
-                    .select('CRM_Oportunidades!inner(account_id)')
-                    .eq('usuario_id', currentUserId)
-                    .eq('is_deleted', false);
-                
+            if (needsRoleScope) {
+                // Accounts where user is collaborator
+                const collabData = collabRes?.data as unknown[] | null | undefined;
                 const collabAccountIds = collabData
                     ?.map(c => (c as any).CRM_Oportunidades?.account_id)
                     .filter(Boolean) || [];
@@ -325,30 +367,16 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                 }
             }
 
-            const phoneAccountIds = new Set<string>();
-            if (phoneDigits) {
-                const matches = await findPhoneMatchesServer(supabase, phoneDigits);
-                matches.accountIds.forEach(id => phoneAccountIds.add(id));
-            }
+            const phoneAccountIds = new Set<string>(phoneMatches?.accountIds ?? []);
 
             if (searchTerm && searchTerm.trim()) {
                 const tokens = phoneDigits ? [phoneDigits] : getSearchTokens(searchTerm);
-                // Cada palabra debe coincidir (AND entre palabras, OR entre campos).
-                // Antes se unían todas las palabras con OR y el filtro AND se hacía en el
-                // cliente sobre la primera página, por lo que cuentas válidas no aparecían.
+                const phoneIdsArray = Array.from(phoneAccountIds);
                 for (const token of tokens) {
-                    const orParts = [
-                        `nombre.ilike.%${token}%`,
-                        `nit_base.ilike.%${token}%`,
-                        `telefono.ilike.%${token}%`,
-                        `ciudad.ilike.%${token}%`,
-                        `email.ilike.%${token}%`,
-                        ...getPhoneIlikePatterns(token).map(pattern => `telefono.ilike.${pattern}`)
-                    ];
-                    if (phoneAccountIds.size > 0) {
-                        orParts.push(`id.in.(${Array.from(phoneAccountIds).join(',')})`);
+                    const orFilter = buildAccountTokenOrFilter(token, phoneIdsArray);
+                    if (orFilter) {
+                        query = query.or(orFilter);
                     }
-                    query = query.or(orParts.join(','));
                 }
             }
 
@@ -382,19 +410,29 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
             // Paging
             query = query.range(from, to);
 
-            const pendingChanges = await db.outbox
-                .where('entity_type').equals('CRM_Cuentas')
-                .and(item => item.status === 'PENDING' || item.status === 'SYNCING')
-                .toArray();
+            // Cambios locales pendientes y consulta al servidor en paralelo
+            const pendingChangesPromise = lightweight
+                ? Promise.resolve([])
+                : db.outbox
+                    .where('entity_type').equals('CRM_Cuentas')
+                    .and(item => item.status === 'PENDING' || item.status === 'SYNCING')
+                    .toArray()
+                    .catch(() => []);
 
-            const { data: result, error, count: totalCount } = await query;
+            const [{ data: result, error, count: totalCount }, pendingChanges] = await Promise.all([
+                query,
+                pendingChangesPromise,
+            ]);
 
             if (error) throw error;
+            if (requestId !== requestIdRef.current) return;
 
-            // Collect unique owner IDs to resolve names
-            const ownerIds = [...new Set(
-                (result as any[]).map(item => item.owner_user_id || item.created_by).filter(Boolean)
-            )];
+            // Collect unique owner IDs to resolve names (skip in lightweight mode)
+            const ownerIds = lightweight
+                ? []
+                : [...new Set(
+                    (result as any[]).map(item => item.owner_user_id || item.created_by).filter(Boolean)
+                )];
 
             let ownerMap: Record<string, string> = {};
             if (ownerIds.length > 0) {
@@ -402,6 +440,7 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                     .from('CRM_Usuarios')
                     .select('id, full_name')
                     .in('id', ownerIds);
+                if (requestId !== requestIdRef.current) return;
                 if (usuarios) {
                     ownerMap = Object.fromEntries(usuarios.map(u => [u.id, u.full_name || '']));
                 }
@@ -444,7 +483,7 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                 }));
             }
 
-            const flattenedResults = (result as any[]).map(item => {
+            const flattenedResults = ((result || []) as any[]).map(item => {
                 const pending = optimisticUpdates[item.id];
                 const finalItem = pending ? { ...item, ...pending, _hasPendingSync: true } : item;
                 
@@ -462,9 +501,11 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
             if (searchTerm && searchTerm.trim()) {
                 combinedResults = combinedResults.filter(a =>
                     phoneAccountIds.has(a.id) ||
-                    matchesSearchTokens([a.nombre, a.nit_base, a.ciudad, (a as any).pais, a.owner_name, a.email, a.telefono], searchTerm)
+                    matchesSearchTokens([a.nombre, a.nit_base, a.nit, a.ciudad, (a as any).pais, a.owner_name, a.email, a.telefono], searchTerm)
                 );
             }
+
+            if (requestId !== requestIdRef.current) return;
 
             if (isLoadMore) {
                 setData(prev => {
@@ -478,12 +519,15 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                 pageRef.current = 1;
             }
 
-            if (totalCount !== null) {
+            if (lightweight) {
+                setHasMore((result?.length || 0) >= pageSize);
+            } else if (totalCount !== null) {
                 setCount(totalCount);
                 setHasMore(from + (result?.length || 0) < totalCount);
             }
 
         } catch (err) {
+            if (requestId !== requestIdRef.current) return;
             console.error("Error fetching accounts from server, executing local Dexie fallback:", err);
             try {
                 await fetchOffline();
@@ -491,10 +535,12 @@ export function useAccountsServer({ pageSize = 20 }: UseAccountsServerProps = {}
                 console.error("Dexie fallback exception:", fallbackErr);
             }
         } finally {
-            setLoading(false);
-            useSyncStore.getState().setIsLoadingData(false);
+            if (requestId === requestIdRef.current) {
+                setLoading(false);
+                useSyncStore.getState().setIsLoadingData(false);
+            }
         }
-    }, [currentUserId, user?.email, user?.es_tienda, seesAllPortfolio, scopeAccounts, pageSize, searchTerm, assignedUserId, isVendedor, userRole, subordinateIds, channelFilter, subclassificationFilter, nivelPremiumFilter, startDate, endDate, sortField, sortAsc, webFilter]);
+    }, [currentUserId, user?.email, user?.es_tienda, seesAllPortfolio, scopeAccounts, subordinatesReady, pageSize, lightweight, searchTerm, assignedUserId, isVendedor, userRole, subordinateIds, channelFilter, subclassificationFilter, nivelPremiumFilter, startDate, endDate, sortField, sortAsc, webFilter]);
 
     // Initial Fetch & Filter Fetch
     useEffect(() => {
